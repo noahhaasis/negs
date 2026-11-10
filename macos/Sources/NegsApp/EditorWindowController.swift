@@ -17,15 +17,16 @@ import SwiftUI
     }
 }
 
-/// The editing window: a unified toolbar over the canvas and a trailing
-/// inspector column. The window, toolbar, and columns are AppKit; the canvas
-/// and inspector contents are SwiftUI. They follow the model through
-/// Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuDelegate, NSMenuItemValidation, NSPopoverDelegate {
+/// The editing window: the title band over the canvas and a trailing
+/// inspector column, with no toolbar (§3). The window, title band and
+/// columns are AppKit; the canvas and inspector contents are SwiftUI. They
+/// follow the model through Observation, like the views.
+@MainActor final class EditorWindowController: NSWindowController, NSMenuItemValidation, NSPopoverDelegate {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
     private let panel: NSHostingController<InspectorPanel>
-    private var items: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
+    /// The window's content: the title band over the columns.
+    let editorFrame: EditorFrame
     private var collapsing: NSKeyValueObservation?
     private var appearing: NSObjectProtocol?
     private var resigning: NSObjectProtocol?
@@ -43,7 +44,6 @@ import SwiftUI
     private var sheetShown = false
     /// The alert sheet's window and the dimming, made the first time one shows.
     private var alertPresenter: AlertPresenter?
-    private lazy var filterMenu = FilterMenu(model: model)
     /// The narrowest canvas, and the narrowest the content can be with the
     /// inspector shown beside it. The split view can't keep both columns at
     /// their minimums in a narrower window, so the window enforces the sum.
@@ -53,18 +53,8 @@ import SwiftUI
     /// The key held to show the original, so its release is found even if
     /// a modifier (⌥⇧ on some layouts) was let go first.
     private var originalKey: UInt16?
-    /// The mode the toolbar's items are laid out for.
-    private var toolbarMode = LibraryMode.photo
-    /// The batch export popover, and what the Export item shows now.
+    /// The batch export popover.
     private var batchPopover: NSPopover?
-    private var exportIcon = ""
-    private lazy var sizeSlider: NSSlider = {
-        let slider = NSSlider(value: SheetLayout.defaultSize, minValue: SheetLayout.sizes.lowerBound, maxValue: SheetLayout.sizes.upperBound,
-                              target: self, action: #selector(resizeGrid(_:)))
-        slider.controlSize = .small
-        slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
-        return slider
-    }()
 
     init(model: EditorModel) {
         self.model = model
@@ -72,15 +62,25 @@ import SwiftUI
         // contents for the window's size limits.
         let canvas = NSHostingController(rootView: EditorCanvas(model: model))
         canvas.sizingOptions = []
+        // The columns start under the title band; the title bar's last
+        // 2 pt over them isn't theirs to avoid.
+        canvas.safeAreaRegions = []
         // The adjustments take about a third of the time to the first frame,
         // so the column starts empty and fills in once the window is on screen.
         panel = NSHostingController(rootView: InspectorPanel(model: model, built: false))
         panel.sizingOptions = []
+        panel.safeAreaRegions = []
         panel.view.frame.size = NSSize(width: 340, height: 860)
         panel.view.identifier = InkKeyLoop.inspectorIdentifier
         let canvasItem = NSSplitViewItem(viewController: canvas)
-        canvasItem.minimumThickness = 680
-        inspector = NSSplitViewItem(inspectorWithViewController: panel)
+        // With the inspector at its narrowest, the smallest window is 980 wide (§7).
+        canvasItem.minimumThickness = 640
+        // A plain column, square and flush: an inspector item floats as a
+        // rounded card on macOS 26 once there's no toolbar above it.
+        inspector = NSSplitViewItem(viewController: panel)
+        inspector.canCollapse = true
+        // The canvas takes a window's resizing; the inspector keeps its width.
+        inspector.holdingPriority = .init(260)
         // The rows keep a usable slider track down to 340 (§2.3).
         inspector.minimumThickness = Theme.Size.inspectorSmallest
         inspector.maximumThickness = 440
@@ -97,30 +97,32 @@ import SwiftUI
         let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
         window.title = "Negs"
-        window.toolbarStyle = .unified
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        // An empty compact toolbar only sets the title bar's height, so the
+        // traffic lights sit in the middle of the 38 pt band (§3).
+        let toolbar = NSToolbar(identifier: "editor-title")
+        toolbar.allowsUserCustomization = false
+        if #available(macOS 15, *) { toolbar.allowsDisplayModeCustomization = false }
+        window.toolbar = toolbar
+        window.toolbarStyle = .unifiedCompact
+        window.backgroundColor = Theme.NS.bg
         window.isRestorable = false
         // Place the window before adding its content, so the first layout is at the final size.
         if !window.setFrameUsingName("editor") { window.center() }
         // A saved frame from before the minimum, or from a smaller screen,
         // grows to it.
         Self.fitMinimum(of: window, width: inspector.isCollapsed ? canvasMinimum : columnsMinimum)
-        split.view.frame = NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size)
-        window.contentViewController = split
+        editorFrame = EditorFrame(split: split, size: window.contentRect(forFrameRect: window.frame).size)
+        window.contentViewController = editorFrame
         window.setFrameAutosaveName("editor")
         super.init(window: window)
         shouldCascadeWindows = false
 
-        // Its own identifier: toolbars sharing one copy each other's inserts
-        // and removals, but the items follow this window's mode. One left
-        // behind without its delegate can't make them and throws.
-        let toolbar = NSToolbar(identifier: "editor-\(UUID().uuidString)")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.centeredItemIdentifiers = [.zoom, .edit, .gridSize]
-        window.toolbar = toolbar
         model.undoManager = window.undoManager
         model.presentBatch = { [weak self] view in self?.showBatchPopover(below: view) }
-        // Dragging the inspector closed hides the adjustments, like the toolbar button.
+        // Dragging the inspector closed hides the adjustments, like ⌥⌘I.
         collapsing = inspector.observe(\.isCollapsed) { [weak self] item, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -169,7 +171,7 @@ import SwiftUI
     /// Prevent window closure during data removal from restoring preferences.
     func prepareForAppDataRemoval() {
         window?.setFrameAutosaveName("")
-        (window?.contentViewController as? NSSplitViewController)?.splitView.autosaveName = nil
+        editorFrame.split.splitView.autosaveName = nil
         window?.orderOut(nil)
     }
 
@@ -300,58 +302,11 @@ import SwiftUI
 
     private func update() {
         guard let window else { return }
-        let photo = model.source != nil
         let grid = model.mode == .grid
-        if grid, let folder = model.library.directory ?? model.source?.deletingLastPathComponent() {
-            window.title = folder.lastPathComponent
-            let shown = model.shownPhotos.count, selected = model.ratingTargets.count
-            window.subtitle = selected > 1 ? "\(selected) of \(shown) selected" : shown == 1 ? "1 photograph" : "\(shown) photographs"
-        } else {
-            window.title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
-            // The film and paper are in the label under the photograph (§4.2).
-            window.subtitle = ""
-        }
-        showItems(for: model.mode)
-        if let item = items[.mode] as? NSToolbarItemGroup {
-            item.selectedIndex = grid ? 1 : 0
-            item.isEnabled = photo && !model.cropping
-            item.subitems.forEach { $0.isEnabled = photo && !model.cropping }
-        }
-        if sizeSlider.doubleValue != model.gridCellSize { sizeSlider.doubleValue = model.gridCellSize }
-        if let item = items[.filmstrip] {
-            item.toolTip = model.filmstripVisible ? "Hide film strip (⌥⌘F)" : "Show film strip (⌥⌘F)"
-            let icon = symbol("rectangle.bottomthird.inset.filled", "Film Strip")
-            item.image = model.filmstripVisible
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
-        }
-        if let item = items[.filter] {
-            // Filled while a filter is on, so a half-empty strip is never a mystery.
-            let on = model.library.filter.active
-            item.image = symbol(on ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle", "Filter")
-            item.toolTip = on ? "Filter: \(Self.describe(model.library.filter))" : "Filter photographs by rating and flag"
-            item.isEnabled = photo
-        }
-        setEnabled(.zoom, photo && !model.cropping)
-        if let edit = items[.edit] as? NSToolbarItemGroup {
-            edit.isEnabled = photo
-            edit.subitems[0].isEnabled = photo
-            edit.subitems[1].isEnabled = model.image != nil
-            let crop = edit.subitems[1]
-            crop.toolTip = model.cropping ? "Apply the crop (⌘K)" : "Crop the photograph (⌘K)"
-            // The accent color marks crop mode as on.
-            crop.image = model.cropping
-                ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor]))
-                : symbol("crop", "Crop")
-        }
-        setEnabled(.export, model.batch != nil || model.canExport)
-        updateExportItem()
-        // The accent color marks the panel the inspector column shows.
-        for (id, pane, name, label) in [(NSToolbarItem.Identifier.adjustments, InspectorPane.adjustments, "slider.horizontal.3", "Adjustments"),
-                                        (.presets, .presets, "square.stack", "Presets")] {
-            let icon = symbol(name, label)
-            items[id]?.image = model.inspectorVisible && model.inspectorPane == pane
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
-        }
+        // The file name, in the grid too; "Negs" with no photograph (§3).
+        let title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
+        if window.title != title { window.title = title }
+        editorFrame.band.title = title
         showSheet(grid)
         let alert = model.alert
         if alert != nil, alertPresenter == nil { alertPresenter = AlertPresenter(model: model, window: window, root: root) }
@@ -392,6 +347,7 @@ import SwiftUI
         container.isHidden = true
         let host = NSHostingView(rootView: GridSheet(model: model))
         host.sizingOptions = []
+        host.safeAreaRegions = []
         host.frame = container.bounds
         host.autoresizingMask = [.width, .height]
         container.addSubview(host)
@@ -421,182 +377,9 @@ import SwiftUI
         window.setFrame(frame, display: window.isVisible)
     }
 
-    private func setEnabled(_ id: NSToolbarItem.Identifier, _ enabled: Bool) {
-        guard let item = items[id] else { return }
-        item.isEnabled = enabled
-        (item as? NSToolbarItemGroup)?.subitems.forEach { $0.isEnabled = enabled }
-    }
+    // MARK: Batch
 
-    /// The edit view's tools leave the toolbar in the grid, and the size
-    /// slider takes their place. Open, the switch and Filter stay put.
-    private func showItems(for mode: LibraryMode) {
-        guard mode != toolbarMode, let toolbar = window?.toolbar else { return }
-        toolbarMode = mode
-        let ids = Self.itemIdentifiers(for: mode)
-        let kept = 3
-        while toolbar.items.count > kept { toolbar.removeItem(at: kept) }
-        for (index, id) in ids.enumerated().dropFirst(kept) { toolbar.insertItem(withItemIdentifier: id, at: index) }
-    }
-
-    static func itemIdentifiers(for mode: LibraryMode) -> [NSToolbarItem.Identifier] {
-        switch mode {
-        case .photo: [.open, .mode, .filter, .filmstrip, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator,
-                      .flexibleSpace, .export, .presets, .adjustments]
-        case .grid: [.open, .mode, .filter, .flexibleSpace, .gridSize, .flexibleSpace, .export]
-        }
-    }
-
-    // MARK: Toolbar
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Self.itemIdentifiers(for: .photo) }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.gridSize]
-    }
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let item: NSToolbarItem
-        switch id {
-        case .open:
-            item = button(id, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph))
-            item.isNavigational = true
-        case .mode:
-            // A segmented switch shows which mode the window is in.
-            let group = NSToolbarItemGroup(itemIdentifier: id, images: [symbol("photo", "Photo"), symbol("square.grid.2x2", "Grid")],
-                                           selectionMode: .selectOne, labels: ["Photo", "Grid"], target: self, action: #selector(switchMode(_:)))
-            group.label = "View"
-            group.subitems[0].toolTip = "Edit the photograph (E)"
-            group.subitems[1].toolTip = "Show all photographs in the folder (G)"
-            group.selectedIndex = model.mode == .grid ? 1 : 0
-            group.controlRepresentation = .expanded
-            item = group
-        case .gridSize:
-            item = NSToolbarItem(itemIdentifier: id)
-            sizeSlider.doubleValue = model.gridCellSize
-            item.view = sizeSlider; item.label = "Size"; item.toolTip = "Thumbnail size (⌘+, ⌘−)"
-        case .filmstrip:
-            item = button(id, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip))
-        case .filter:
-            let menuItem = NSMenuToolbarItem(itemIdentifier: id)
-            menuItem.label = "Filter"
-            menuItem.image = symbol("line.3.horizontal.decrease.circle", "Filter")
-            menuItem.showsIndicator = false
-            // Filled in when it opens, from the filter as it is then.
-            let menu = NSMenu(title: "Filter")
-            menu.delegate = self
-            menuItem.menu = menu
-            item = menuItem
-        case .zoom:
-            let group = NSToolbarItemGroup(itemIdentifier: id)
-            group.subitems = [button(.init("fit"), "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
-                              button(.init("actualSize"), "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize))]
-            group.label = "Zoom"
-            item = group
-        case .edit:
-            // Grouped items share one capsule, without the dividers of a segmented group.
-            let group = NSToolbarItemGroup(itemIdentifier: id)
-            group.subitems = [button(.init("rotate"), "Rotate", "rotate.right", "Crop and rotate clockwise (⌘R)", #selector(rotateClockwise)),
-                              button(.init("crop"), "Crop", "crop", "Crop the photograph (⌘K)", #selector(toggleCrop))]
-            group.label = "Edit"
-            item = group
-        case .export:
-            item = button(id, "Export", "square.and.arrow.down", "Export photograph (⇧⌘E)", #selector(export))
-        case .presets:
-            item = button(id, "Presets", "square.stack", "Show or hide presets (⌥⌘P)", #selector(togglePresets))
-        case .adjustments:
-            item = button(id, "Adjustments", "slider.horizontal.3", "Show or hide adjustments (⌥⌘I)", #selector(toggleAdjustments))
-        default:
-            return nil
-        }
-        // Enabled from the model's state in update(), not by validation.
-        item.autovalidates = false
-        (item as? NSToolbarItemGroup)?.subitems.forEach { $0.autovalidates = false }
-        items[id] = item
-        return item
-    }
-
-    private func button(_ id: NSToolbarItem.Identifier, _ label: String, _ symbolName: String, _ help: String, _ action: Selector) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: id)
-        item.label = label
-        item.image = symbol(symbolName, label)
-        item.toolTip = help
-        item.isBordered = true
-        item.target = self
-        item.action = action
-        return item
-    }
-
-    private func symbol(_ name: String, _ description: String) -> NSImage {
-        NSImage(systemSymbolName: name, accessibilityDescription: description) ?? NSImage()
-    }
-
-    // MARK: Filter
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        // A pull-down toolbar menu takes its first item as the button's title
-        // and doesn't list it.
-        menu.addItem(withTitle: "Filter", action: nil, keyEquivalent: "")
-        filterMenu.fill(menu)
-    }
-
-    static func describe(_ filter: LibraryFilter) -> String {
-        var parts: [String] = []
-        switch filter.rating {
-        case .any: break
-        case .atLeast(let stars): parts.append(stars == 5 ? "★★★★★" : "≥ " + String(repeating: "★", count: stars))
-        case .unrated: parts.append("unrated")
-        }
-        let names = FilterMenu.flagChoices.filter { filter.flags.contains($0.flag) }.map { $0.title.lowercased() }
-        if !names.isEmpty { parts.append(names.joined(separator: " or ")) }
-        if filter.editedOnly { parts.append("edited") }
-        return parts.joined(separator: ", ")
-    }
-
-    // MARK: Actions
-
-    @objc private func openPhotograph() { model.openPanel() }
-    @objc private func switchMode(_ sender: NSToolbarItemGroup) { sender.selectedIndex == 1 ? model.showGrid() : model.editCurrent() }
-    @objc private func resizeGrid(_ sender: NSSlider) { model.gridCellSize = sender.doubleValue.rounded() }
-    @objc private func fit() { model.zoom(fit: true) }
-    @objc private func actualSize() { model.zoom(fit: false) }
-    @objc private func rotateClockwise() { model.turn(clockwise: true) }
-    @objc private func toggleCrop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
-    @objc private func export() {
-        if let run = model.batch { return toggleBatchPopover(run) }
-        model.exportPanel()
-    }
-
-    /// A batch replaces the icon with its ring; one that ended with failures
-    /// shows a warning until its popover has been seen.
-    private func updateExportItem() {
-        guard let item = items[.export] else { return }
-        let icon: String, help: String
-        if let run = model.batch, run.running {
-            icon = "ring \(run.finished)/\(run.total)"
-            help = "\(run.title). Click for details."
-        } else if let run = model.batch, !run.failures.isEmpty {
-            icon = "failed"
-            help = "\(run.title), \(run.failures.count) failed. Click for details."
-        } else {
-            icon = "export"
-            help = model.exportTitle == "Export Photograph…" ? "Export photograph (⇧⌘E)" : "Export the selected photographs (⇧⌘E)"
-        }
-        item.toolTip = help
-        guard icon != exportIcon else { return }
-        exportIcon = icon
-        if let run = model.batch, run.running { item.image = BatchRing.image(run.fraction) }
-        else if icon == "failed" { item.image = symbol("exclamationmark.triangle", "Export finished with failures") }
-        else { item.image = symbol("square.and.arrow.down", "Export") }
-    }
-
-    private func toggleBatchPopover(_ run: BatchRun) {
-        if let batchPopover, batchPopover.isShown { return batchPopover.performClose(nil) }
-        guard let item = items[.export] else { return }
-        showBatchPopover(run) { $0.show(relativeTo: item) }
-    }
-
-    /// The batch's popover under a view: the status line's Show.
+    /// The batch's popover over a view: the status line's Show.
     private func showBatchPopover(below view: NSView) {
         guard let run = model.batch else { return }
         if let batchPopover, batchPopover.isShown { return batchPopover.performClose(nil) }
@@ -622,9 +405,6 @@ import SwiftUI
         model.batchPopoverShown = false
         model.clearBatch()
     }
-    @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
-    @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
-    @objc private func togglePresets() { model.togglePane(.presets) }
 
     // MARK: Selection
 
@@ -656,10 +436,4 @@ import SwiftUI
         default: true
         }
     }
-}
-
-extension NSToolbarItem.Identifier {
-    static let filmstrip = Self("filmstrip"), filter = Self("filter"), mode = Self("mode"), gridSize = Self("gridSize")
-    static let open = Self("open"), zoom = Self("zoom"), edit = Self("edit")
-    static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets")
 }

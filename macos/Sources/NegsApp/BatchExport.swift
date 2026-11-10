@@ -246,7 +246,7 @@ enum ExportRating {
     }
 }
 
-/// A batch as the toolbar's ring and its popover show it: running, or
+/// A batch as the status line and its popover show it: running, or
 /// finished with failures until they've been seen.
 @MainActor @Observable final class BatchRun {
     var journal: BatchJournal
@@ -350,40 +350,7 @@ enum ExportRating {
     func controlTextDidChange(_ notification: Notification) { sync() }
 }
 
-/// The toolbar's Export item while a batch runs: a ring filled as far as the
-/// batch has come, like Safari's downloads.
-enum BatchRing {
-    static func image(_ fraction: Double) -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
-            let ring = rect.insetBy(dx: 2, dy: 2)
-            let track = NSBezierPath(ovalIn: ring)
-            track.lineWidth = 2
-            NSColor.tertiaryLabelColor.setStroke()
-            track.stroke()
-            let center = NSPoint(x: rect.midX, y: rect.midY)
-            let arc = NSBezierPath()
-            arc.appendArc(withCenter: center, radius: ring.width / 2, startAngle: 90, endAngle: 90 - 360 * max(0.03, min(1, fraction)), clockwise: true)
-            arc.lineWidth = 2
-            arc.lineCapStyle = .round
-            NSColor.controlAccentColor.setStroke()
-            arc.stroke()
-            // The arrow of the Export icon, small, in the middle.
-            let arrow = NSBezierPath()
-            arrow.move(to: NSPoint(x: center.x, y: center.y + 3.5)); arrow.line(to: NSPoint(x: center.x, y: center.y - 3))
-            arrow.move(to: NSPoint(x: center.x - 2.5, y: center.y - 0.5)); arrow.line(to: NSPoint(x: center.x, y: center.y - 3))
-            arrow.line(to: NSPoint(x: center.x + 2.5, y: center.y - 0.5))
-            arrow.lineWidth = 1.5
-            arrow.lineCapStyle = .round; arrow.lineJoinStyle = .round
-            NSColor.labelColor.setStroke()
-            arrow.stroke()
-            return true
-        }
-        image.accessibilityDescription = "Exporting, \(Int((fraction * 100).rounded())) percent"
-        return image
-    }
-}
-
-/// The popover under the ring: how far the batch has come, what failed and
+/// The popover over the status line's Show: how far the batch has come, what failed and
 /// why, and Cancel, Retry Failed and Show in Finder.
 struct BatchProgressView: View {
     let run: BatchRun

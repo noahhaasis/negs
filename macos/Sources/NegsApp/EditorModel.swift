@@ -3600,7 +3600,7 @@ import UserNotifications
     private var exportsSingle: Bool {
         mode == .photo || (!sourceDeleted && sourceItem.map { exportTargets == [$0] } ?? false)
     }
-    /// The menu also needs no crop being drawn; the toolbar shows crop's own items then.
+    /// The menu also needs no crop being drawn; crop has its own Return and Esc then.
     var canExport: Bool {
         guard ready, !exporting, !saving, !batchRunning else { return false }
         return exportsSingle ? source != nil : !exportTargets.isEmpty && hasCatalog && engine != nil
@@ -3966,7 +3966,7 @@ import UserNotifications
     }
     // MARK: Presets
 
-    /// The toolbar's Adjustments and Presets buttons: show that panel, or
+    /// The pane header's Adjustments and Presets words, ⌥⌘I and ⌥⌘P: show that panel, or
     /// hide the column if it already shows it.
     func togglePane(_ pane: InspectorPane) {
         if inspectorVisible && inspectorPane == pane { inspectorVisible = false } else { inspectorPane = pane; inspectorVisible = true }

@@ -1077,7 +1077,7 @@ struct AdjustmentInspector: View {
 }
 
 /// Export, pinned to the foot of the Output tab: what an export makes, over
-/// the yellow button (§4.11). Progress shows where the toolbar shows it today.
+/// the yellow button (§4.11). A batch's progress is in the status line.
 struct ExportFoot: View {
     let model: EditorModel
 

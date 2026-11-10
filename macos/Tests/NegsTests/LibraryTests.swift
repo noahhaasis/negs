@@ -640,7 +640,7 @@ final class LibraryFormatTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         defer { window.orderOut(nil) }
         // The grid collapses the inspector; don't save that for later tests' windows.
-        let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+        let split = try XCTUnwrap((window.contentViewController as? EditorFrame)?.split)
         split.splitView.autosaveName = nil
         window.setFrameAutosaveName("")
         // After the controller, which gives the model the window's.

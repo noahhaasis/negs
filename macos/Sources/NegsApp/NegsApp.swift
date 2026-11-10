@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// AppKit runs the application, menus, window, and toolbar; the canvas and
-/// inspector inside the window are SwiftUI. A SwiftUI scene with the same
+/// AppKit runs the application, menus, window, and title bar; the canvas and
+/// inspector inside the window are SwiftUI. A SwiftUI scene with the old
 /// toolbar and inspector took about twice as long to show the window
 /// (docs/native-macos-ui.md, Startup).
 @main enum NegsMain {

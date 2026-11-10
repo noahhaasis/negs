@@ -127,16 +127,6 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(SheetWords.count(shown: 1, total: 1, selected: 0, filtered: false), "1 photograph")
     }
 
-    /// The edit view's tools leave the toolbar in the grid; Open, the
-    /// switch and Filter lead in both, so only the rest is replaced.
-    @MainActor func testToolbarItemsPerMode() {
-        let photo = EditorWindowController.itemIdentifiers(for: .photo), grid = EditorWindowController.itemIdentifiers(for: .grid)
-        XCTAssertEqual(Array(photo.prefix(3)), Array(grid.prefix(3)))
-        XCTAssertEqual(Array(photo.prefix(4)), [.open, .mode, .filter, .filmstrip])
-        XCTAssertTrue(grid.contains(.gridSize) && grid.contains(.export))
-        for id in [NSToolbarItem.Identifier.filmstrip, .zoom, .edit, .presets, .adjustments] { XCTAssertFalse(grid.contains(id)) }
-    }
-
     /// Copy Edits' groups: the standard ones leave crop, rotation and how
     /// the file was read; a group not chosen leaves the target as it was.
     func testCopyGroupsMerge() {

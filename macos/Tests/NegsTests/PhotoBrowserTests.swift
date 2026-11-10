@@ -210,11 +210,8 @@ final class PhotoBrowserTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         for (name, appearance, visible) in [("light", NSAppearance.Name.aqua, true), ("dark", .darkAqua, true), ("hidden", .aqua, false)] {
             window.appearance = NSAppearance(named: appearance)
-            if model.filmstripVisible != visible {
-                let toggle = try XCTUnwrap(window.toolbar?.items.first { $0.itemIdentifier.rawValue == "filmstrip" })
-                XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(toggle.action), to: toggle.target, from: toggle))
-                XCTAssertEqual(model.filmstripVisible, visible)
-            }
+            // View › Hide Film Strip (⌥⌘F) toggles this.
+            model.filmstripVisible = visible
             try await Task.sleep(nanoseconds: 800_000_000)
             let view = try XCTUnwrap(window.contentView)
             view.layoutSubtreeIfNeeded()
@@ -229,7 +226,7 @@ final class PhotoBrowserTests: XCTestCase {
                 try await Task.sleep(nanoseconds: 700_000_000)
                 XCTAssertEqual(model.source?.lastPathComponent, "Photo18.png")
                 // The selected thumbnail is centered; click its right neighbour.
-                let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+                let split = try XCTUnwrap((window.contentViewController as? EditorFrame)?.split)
                 let canvas = try XCTUnwrap(split.splitView.subviews.first)
                 let point = NSPoint(x: canvas.frame.width / 2 + 104, y: 80)
                 for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {

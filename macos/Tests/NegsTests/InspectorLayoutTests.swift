@@ -55,7 +55,7 @@ import XCTest
         let controller = EditorWindowController(model: model)
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1100, height: 860))
-        let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+        let split = try XCTUnwrap((window.contentViewController as? EditorFrame)?.split)
         let panel = try XCTUnwrap(split.splitViewItems[1].viewController as? NSHostingController<InspectorPanel>)
         // Populate the inspector even when the test window is occluded.
         panel.rootView = InspectorPanel(model: model)

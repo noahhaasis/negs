@@ -280,7 +280,7 @@ final class AlertPanel: NSPanel {
 @MainActor final class AlertPresenter {
     private let model: EditorModel
     private weak var window: NSWindow?
-    /// The view the cover lies over: the whole window.
+    /// The view the cover lies over: the columns, under the title band.
     private let root: NSView
     private var cover: AlertCover?
     private var host: NSHostingView<AlertSheet>?
@@ -324,6 +324,8 @@ final class AlertPanel: NSPanel {
         let cover = self.cover ?? {
             let cover = AlertCover(frame: root.bounds)
             cover.autoresizingMask = [.width, .height]
+            // The sheet slides out from under the title band, not over it.
+            cover.clipsToBounds = true
             self.cover = cover
             return cover
         }()
@@ -334,7 +336,8 @@ final class AlertPanel: NSPanel {
             root.addSubview(cover, positioned: .above, relativeTo: nil)
             returnFocus = window.firstResponder
         }
-        let below = cover.convert(window.contentLayoutRect, from: nil)
+        // The cover is the columns' container, which starts under the title band.
+        let below = cover.bounds
         cover.dim.frame = below
         cover.dim.autoresizingMask = [.width, .height]
         if host.superview !== cover { cover.addSubview(host) }

@@ -216,8 +216,11 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         defer { model.shutdown() }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                               styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
-        window.contentView = content
+        // The columns' container, under the 38 pt title band, as in the editor.
+        let frame = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        window.contentView = frame
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800 - Theme.Size.titleBar))
+        frame.addSubview(content)
         let before = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
         content.addSubview(before)
         window.orderFront(nil)
@@ -230,8 +233,9 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         presenter.show(model.alert)
         XCTAssertTrue(presenter.onWindow)
         let cover = try XCTUnwrap(content.subviews.last as? AlertCover)
-        let below = content.convert(window.contentLayoutRect, from: nil)
+        let below = content.bounds
         XCTAssertEqual(cover.dim.frame, below, "dimmed below the title bar")
+        XCTAssertTrue(cover.clipsToBounds, "it slides out from under the title bar, not over it")
         let sheet = try XCTUnwrap(cover.subviews.last)
         try await Task.sleep(for: .milliseconds(400))
         XCTAssertEqual(sheet.frame.maxY, below.maxY, accuracy: 0.5, "flush under the title bar")
