@@ -359,18 +359,21 @@ struct ReadoutRow: View {
     }
 }
 
-/// A hint under a row: italic 13 `dim`; warnings and errors in `warn`, in words.
+/// A hint under a row: italic 13 `dim`; warnings and errors in `warn`, in
+/// words; why a control can't be used now in `label`.
 struct HintText: View {
     let text: String
     var warning = false
+    var reason = false
 
-    init(_ text: String, warning: Bool = false) {
+    init(_ text: String, warning: Bool = false, reason: Bool = false) {
         self.text = text
         self.warning = warning
+        self.reason = reason
     }
 
     var body: some View {
-        Text(text).font(Theme.serif(13, italic: true)).foregroundStyle(warning ? Theme.warn : Theme.dim)
+        Text(text).font(Theme.serif(13, italic: true)).foregroundStyle(warning ? Theme.warn : reason ? Theme.label : Theme.dim)
             .lineSpacing(13 * 0.25 - 3)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

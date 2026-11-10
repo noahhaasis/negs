@@ -23,6 +23,9 @@
   aspect ratios, orientation and size are in the panel.
 - **Presets as tiles.** Click a tile to apply it, drag to sort, drop files
   on the pane to import them.
+- **Settings in three tabs.** Photographs (what a new photograph starts
+  with), Speed and Upkeep, each a short page in the inspector's style, so
+  the window fits a small screen. A slide film's paper is struck through.
 - **Questions in the window.** Alerts are drawn in the app's own style,
   under the title bar, with the Return button marked ↩. The status line
   says in words what the app is doing, and the export's progress is drawn
