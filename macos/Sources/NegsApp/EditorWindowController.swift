@@ -207,11 +207,13 @@ import SwiftUI
     /// stocks rather than the photographs (§5.1, §5.2). Typing keeps its keys.
     private func trayKeys(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, event.window === window, model.tray != nil else { return false }
-        // ⌘Z keeps the stock being tried first, so it undoes the whole visit.
-        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "z",
-           !(window?.firstResponder is NSText) {
+        // A command keeps the stock being tried first, then runs in an event
+        // of its own, so it's an undo step of its own (and ⌘Z undoes the
+        // whole visit).
+        if event.modifierFlags.contains(.command), !(window?.firstResponder is NSText) {
             model.endTray(keep: true)
-            return false
+            NSApp.postEvent(event, atStart: true)
+            return true
         }
         guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
               !(window?.firstResponder is NSText) else { return false }
