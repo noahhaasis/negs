@@ -544,8 +544,20 @@ struct InspectorReveal: Equatable {
     static func sectionKey(_ section: InspectorSection) -> String { "section:" + section.rawValue }
     /// The default's new value once `key`'s "N more" is clicked.
     func revealing(_ key: String) -> String { revealed.union([key]).sorted().joined(separator: ",") }
+    /// The default's new value once `key`'s "Hide" is clicked: it folds back.
+    func concealing(_ key: String) -> String { revealed.subtracting([key]).sorted().joined(separator: ",") }
 
     func shows(section: InspectorSection) -> Bool { all || revealed.contains(Self.sectionKey(section)) }
+    /// Whether a section's "N more" was clicked, so its end offers to hide
+    /// them again. Not under Show All Controls: the menu item undoes that.
+    func folds(section: InspectorSection) -> Bool { !all && revealed.contains(Self.sectionKey(section)) }
+    /// How many of a module's controls its "Hide" line would fold away:
+    /// those past the basics that are at their defaults, once it was revealed.
+    func foldable(_ group: AdjustmentGroup, visible: [Adjustment], isModified: (Adjustment) -> Bool) -> Int {
+        guard !all, revealed.contains(group.title) else { return 0 }
+        let basics = Set(group.controls.prefix(group.basic).map(\.id))
+        return visible.filter { !basics.contains($0.id) && !isModified($0) }.count
+    }
     /// A module shows when it has basics, its section's extras are revealed, or something in it changed.
     func shows(_ group: AdjustmentGroup, edits: Int) -> Bool { group.basic > 0 || shows(section: group.section) || edits > 0 }
     /// A module's controls: its basics, then the rest once revealed, or any changed.
@@ -556,6 +568,11 @@ struct InspectorReveal: Equatable {
     /// "2 more: Scanner, Color Management", or nil when nothing is kept back.
     static func moreText(_ hidden: [String]) -> String? {
         hidden.isEmpty ? nil : "\(hidden.count) more: \(hidden.joined(separator: ", "))"
+    }
+    /// "Hide Scanner, Color Management", the same line folded back; nil when
+    /// everything it opened has changed and so shows anyway.
+    static func hideText(_ shown: [String]) -> String? {
+        shown.isEmpty ? nil : "Hide \(shown.joined(separator: ", "))"
     }
 }
 
@@ -726,6 +743,9 @@ struct TabWord: View {
     let choose: () -> Void
     @State private var hovered = false
 
+    /// The space between one word's marks and the next word.
+    static let gap: CGFloat = 10
+
     var body: some View {
         Button(action: choose) {
             HStack(alignment: .top, spacing: 0) {
@@ -771,9 +791,6 @@ struct AdjustmentInspector: View {
     /// The modules and sections whose "N more" were opened.
     @AppStorage(Self.moreKey) private var moreShown = ""
     static let allControlsKey = "labAllControls", moreKey = "moreAdjustments"
-
-    /// The space between one word's marks and the next word.
-    static let gap: CGFloat = 10
 
     var body: some View {
         // The histogram, film and paper, and the tabs stay put above the
@@ -878,13 +895,23 @@ struct AdjustmentInspector: View {
 
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
+        // Show All Controls is a menu item, and the Lab's old Advanced
+        // controls switch set the same default: say so where it shows,
+        // with the way back.
+        if allControls {
+            MoreLine(text: "Showing all controls. Show fewer", ellipsis: false,
+                     help: "Turns off View › Show All Controls: each module shows the few controls most photographs need, and any that you or a preset changed.") {
+                allControls = false
+            }
+            .padding(.top, 10)
+        }
         InkSection(title: "Camera", edited: InspectorEdits.count(.camera, model) > 0) {
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             FilmFormatPicker(model: model)
             let lensBlur = shows("camera.lens_blur_um", section: .camera)
             if lensBlur { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
             modules(.camera, ruledFirst: true)
-            moreLine(.camera, loose: lensBlur ? [] : ["Lens blur"])
+            moreLine(.camera, loose: model.isModified("camera.lens_blur_um") ? [] : ["Lens blur"])
         }
         let filmStock = model.films.first { $0.id == model.film }
         InkSection(title: "Film", edited: InspectorEdits.count(.film, model) > 0) {
@@ -906,7 +933,7 @@ struct AdjustmentInspector: View {
             }
             if scanning { HintText("Printing and the paper are skipped while scanning film directly.") }
             modules(.print, ruledFirst: scanSwitch || printTime, skipped: scanning)
-            if !scanning { moreLine(.print, loose: scanSwitch ? [] : ["Scan film directly"]) }
+            if !scanning { moreLine(.print, loose: ["Scan film directly"]) }
         }
         let outputChanged = InspectorEdits.outputCount(model) > 0
         let outputShown = outputChanged || shows(section: .scan)
@@ -923,7 +950,7 @@ struct AdjustmentInspector: View {
                             changed: model.isModified("io.output_cctf_encoding"), help: "Off writes linear values, for further processing.")
                 }
             }
-            moreLine(.scan, loose: outputShown ? [] : ["Output"])
+            moreLine(.scan, loose: outputChanged ? [] : ["Output"])
         }
     }
 
@@ -931,6 +958,7 @@ struct AdjustmentInspector: View {
 
     private var reveal: InspectorReveal { InspectorReveal(all: allControls, stored: moreShown) }
     private func revealMore(_ key: String) { moreShown = reveal.revealing(key) }
+    private func hideMore(_ key: String) { moreShown = reveal.concealing(key) }
     /// Whether a section's extra controls (the expert modules, loose rows) show.
     private func shows(section: InspectorSection) -> Bool { reveal.shows(section: section) }
     /// Whether a section's loose control shows: it's revealed, or changed.
@@ -939,16 +967,28 @@ struct AdjustmentInspector: View {
     private func shownControls(_ group: AdjustmentGroup) -> [Adjustment] {
         reveal.controls(group) { InspectorEdits.isModified($0, model) }
     }
-    private func visibleCount(_ group: AdjustmentGroup) -> Int {
-        group.controls.filter { if case .stockSlider(_, _, _, _, _, let bw) = $0 { return !model.filmIsBW || bw != nil }; return true }.count
+    /// Whether a control draws: a B&W film has one grain lane, not three.
+    private func isVisible(_ adjustment: Adjustment) -> Bool {
+        if case .stockSlider(_, _, _, _, _, let bw) = adjustment { return !model.filmIsBW || bw != nil }
+        return true
     }
+    private func visibleCount(_ group: AdjustmentGroup) -> Int { group.controls.filter(isVisible).count }
 
     /// "2 more: Scanner, Color Management…" at a section's end, for the
-    /// modules and rows it keeps back (round 11, B).
+    /// modules and rows it keeps back (round 11, B). Once clicked, the same
+    /// place reads "Hide Scanner, Color Management" to fold them back.
+    /// `loose` names the section's rows that hide when folded (unchanged).
     @ViewBuilder private func moreLine(_ section: InspectorSection, loose: [String] = []) -> some View {
-        let hidden = adjustmentGroups.filter { $0.section == section && !shows($0) }.map(\.title) + loose
+        let key = InspectorReveal.sectionKey(section)
+        let modules = adjustmentGroups.filter { $0.section == section }
+        let hidden = modules.filter { !shows($0) }.map(\.title) + loose
+        // What folding would hide: the expert modules nobody changed.
+        let foldable = modules.filter { $0.basic == 0 && InspectorEdits.count($0, model) == 0 }.map(\.title) + loose
         if !shows(section: section), let text = InspectorReveal.moreText(hidden) {
-            MoreLine(text: text) { revealMore(InspectorReveal.sectionKey(section)) }
+            MoreLine(text: text) { revealMore(key) }
+                .padding(.top, 6)
+        } else if reveal.folds(section: section), let text = InspectorReveal.hideText(foldable) {
+            MoreLine(text: text, ellipsis: false, help: MoreLine.hideHelp) { hideMore(key) }
                 .padding(.top, 6)
         }
     }
@@ -960,9 +1000,11 @@ struct AdjustmentInspector: View {
         ForEach(Array(groups.enumerated()), id: \.element.id) { offset, group in
             let shown = shownControls(group)
             let enabled = group.enable.map { model.toggle($0) }
+            let fewer = reveal.foldable(group, visible: shown.filter(isVisible)) { InspectorEdits.isModified($0, model) }
             module(group.title, help: ControlHelp.group(group.title), enabled: enabled, summary: summary(group),
                    edited: InspectorEdits.count(group, model) > 0, skipped: skipped, ruled: offset > 0 || ruledFirst,
-                   more: visibleCount(group) - shown.count, showMore: { revealMore(group.title) }) {
+                   more: visibleCount(group) - shown.count, showMore: { revealMore(group.title) },
+                   fewer: fewer, showFewer: { hideMore(group.title) }) {
                 if group.title == "Print Curves" { ToneGraphView(model: model).padding(.horizontal, Theme.Size.gutter).padding(.vertical, 6) }
                 ForEach(shown) { control($0) }
             }
@@ -971,6 +1013,7 @@ struct AdjustmentInspector: View {
 
     private func module<Content: View>(_ title: String, help: String?, enabled: Binding<Bool>? = nil, summary: String?, edited: Bool,
                                        skipped: Bool = false, ruled: Bool = true, more: Int = 0, showMore: @escaping () -> Void = {},
+                                       fewer: Int = 0, showFewer: @escaping () -> Void = {},
                                        @ViewBuilder content: @escaping () -> Content) -> some View {
         let open = Binding(
             get: { expanded.split(separator: ",").contains(Substring(title)) },
@@ -980,7 +1023,7 @@ struct AdjustmentInspector: View {
                 expanded = titles.joined(separator: ",")
             })
         return InkModule(title: title, help: help, enabled: enabled, summary: summary, edited: edited, skipped: skipped, ruled: ruled,
-                         open: open, more: more, showMore: showMore, content: content)
+                         open: open, more: more, showMore: showMore, fewer: fewer, showFewer: showFewer, content: content)
     }
 
     /// A folded module's summary: its first slider's value.

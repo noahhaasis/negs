@@ -550,6 +550,9 @@ struct InkModule<Content: View>: View {
     /// "N more controls…", and what showing them does.
     var more = 0
     var showMore: () -> Void = {}
+    /// "Hide N controls", once "N more" was clicked, and what folding them does.
+    var fewer = 0
+    var showFewer: () -> Void = {}
     @ViewBuilder let content: Content
     @State private var hovered = false
 
@@ -610,6 +613,9 @@ struct InkModule<Content: View>: View {
                 VStack(alignment: .leading, spacing: 0) {
                     content.inkDisabled(off)
                     if more > 0 { MoreLine(text: "\(more) more control\(more == 1 ? "" : "s")", action: showMore) }
+                    if fewer > 0 {
+                        MoreLine(text: "Hide \(fewer) control\(fewer == 1 ? "" : "s")", ellipsis: false, help: MoreLine.hideHelp, action: showFewer)
+                    }
                 }
                 .padding(.bottom, 4)
             }
@@ -617,15 +623,20 @@ struct InkModule<Content: View>: View {
     }
 }
 
-/// "N more controls…" in italic `dim`; a click shows them in place.
+/// "N more controls…" in italic `dim`; a click shows them in place. Once
+/// shown, "Hide N controls" in the same type folds them back.
 struct MoreLine: View {
     let text: String
+    /// "…" for a line that shows more; a line that hides them goes without.
+    var ellipsis = true
+    var help = "Shows them here. View › Show All Controls shows every control."
     let action: () -> Void
+    static let hideHelp = "Folds them away again. A setting that you or a preset changed always shows."
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            Text(text + "…").font(Theme.serif(13, italic: true)).foregroundStyle(hovered ? Theme.label : Theme.dim)
+            Text(ellipsis ? text + "…" : text).font(Theme.serif(13, italic: true)).foregroundStyle(hovered ? Theme.label : Theme.dim)
         }
         .buttonStyle(InkPressStyle())
         .onHover { hovered = $0 }
@@ -633,6 +644,6 @@ struct MoreLine: View {
         .padding(.horizontal, Theme.Size.gutter)
         .padding(.bottom, 8)
         .padding(.top, 2)
-        .help("Shows them here. View › Show All Controls shows every control.")
+        .help(help)
     }
 }
