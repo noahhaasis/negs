@@ -12,8 +12,9 @@
 - **The strip and the grid.** The strip keeps each photograph's
   proportions. The grid grows out of it (G) and folds back into it, in
   packed rows under a sentence that says what it shows. Picks are boxed in
-  grease pencil, rejects crossed out, each by hand and a little differently
-  on every photograph; ratings are stars and edited photographs have a dot.
+  grease pencil, rejects crossed out and ratings starred with quick
+  asterisks, each by hand and a little differently on every photograph;
+  edited photographs have a dot.
   In the grid, the current photograph and each one selected are boxed again
   in yellow.
 - **The inspector.** Prep, Lab and Output as tabs, their settings as
