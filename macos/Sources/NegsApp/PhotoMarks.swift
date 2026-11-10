@@ -1,21 +1,21 @@
 import SwiftUI
 
 /// A thumbnail's marks in the strip and the grid (§4.4, round 7): stars at
-/// the bottom left, a pick's small tick at the bottom right, a reject's big
-/// pencil X from corner to corner, and the yellow dot of an edited
+/// the bottom left, a pick's small tick at the bottom right, a reject's
+/// hand-drawn X from corner to corner (`CrossMark`), and the yellow dot of an edited
 /// photograph at the top right. Each is its own shape, never only a colour,
 /// in cream with a dark halo so it reads on a bright sky. Unrated,
 /// unflagged, unedited photographs show none. Lay it over the picture.
 struct PhotoMarks: View {
     let summary: LibrarySummary
+    /// The file's name: it seeds the reject's cross, so each one is drawn
+    /// a little differently, and the same way every time.
+    let name: String
 
     var body: some View {
         ZStack {
             if summary.flag == .reject {
-                CrossMark()
-                    .stroke(Theme.paper, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
-                    .opacity(0.85)
-                    .padding(7)
+                CrossMark(name: name)
             }
             if summary.flag == .pick {
                 TickMark()
@@ -88,17 +88,3 @@ struct TickMark: Shape {
     }
 }
 
-/// A reject: `M3 4 C35 35 65 65 97 96 M96 3 C65 36 35 66 4 97` in a
-/// 100 × 100 box stretched to the picture (`--m-x`).
-struct CrossMark: Shape {
-    func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 100, sy = rect.height / 100
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * sx, y: rect.minY + y * sy) }
-        var path = Path()
-        path.move(to: p(3, 4))
-        path.addCurve(to: p(97, 96), control1: p(35, 35), control2: p(65, 65))
-        path.move(to: p(96, 3))
-        path.addCurve(to: p(4, 97), control1: p(65, 36), control2: p(35, 66))
-        return path
-    }
-}

@@ -384,7 +384,7 @@ private struct SheetCell: View {
         .frame(width: size.width, height: size.height)
         .clipped()
         .opacity(summary.flag == .reject ? PhotoMarks.rejectOpacity(inStrip: false, current: current) : 1)
-        .overlay { PhotoMarks(summary: summary) }
+        .overlay { PhotoMarks(summary: summary, name: file.name) }
         .overlay {
             if ringed {
                 PencilRing()
