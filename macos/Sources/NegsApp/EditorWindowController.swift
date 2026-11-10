@@ -392,12 +392,28 @@ import SwiftUI
         content.sizingOptions = .preferredContentSize
         let popover = NSPopover()
         popover.behavior = .transient
+        popover.appearance = NSAppearance(named: .darkAqua)
         popover.contentViewController = content
         popover.delegate = self
         batchPopover = popover
         model.batchPopoverShown = true
         show(popover)
+        Self.paint(popover)
     }
+
+    /// Fills a popover's frame, its arrow too, with the panel's colour in
+    /// place of the system's frosted glass (round 16).
+    static func paint(_ popover: NSPopover) {
+        guard let frame = popover.contentViewController?.view.window?.contentView?.superview,
+              !frame.subviews.contains(where: { $0.identifier == panelFill }) else { return }
+        let fill = NSView(frame: frame.bounds)
+        fill.identifier = panelFill
+        fill.wantsLayer = true
+        fill.layer?.backgroundColor = Theme.NS.panel.cgColor
+        fill.autoresizingMask = [.width, .height]
+        frame.addSubview(fill, positioned: .below, relativeTo: nil)
+    }
+    static let panelFill = NSUserInterfaceItemIdentifier("negs.popover.panel")
 
     func popoverDidClose(_ notification: Notification) {
         guard (notification.object as? NSPopover) === batchPopover else { return }
