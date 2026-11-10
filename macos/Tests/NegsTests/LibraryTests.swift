@@ -842,6 +842,12 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.thumbnailLook(for: b), model.uneditedLook)
         try await waitUntil { made(b) }
         model.sidecarsEnabled = true
+
+        // Emptied: the folder's developed again.
+        try await waitUntil { made(b) }
+        await model.emptyThumbnailCache()
+        XCTAssertFalse(made(b) || made(c))
+        try await waitUntil { made(b) && made(c) }
         await model.flushSidecars()
     }
 

@@ -1732,6 +1732,8 @@ import UserNotifications
     @ObservationIgnored private var thumbnailIdle: Task<Void, Never>?
     @ObservationIgnored private var thumbnailGeneration = 0
     @ObservationIgnored private var readingThumbnailStamp = false
+    /// Moves when the cache is emptied: a scan from before finds nothing.
+    @ObservationIgnored private var thumbnailsEmptied = 0
 
     /// The look that names `item`'s developed thumbnail: its stored edits',
     /// or `uneditedLook` for one without edits once its sidecar has been read
@@ -1796,6 +1798,22 @@ import UserNotifications
         }
     }
 
+    /// The bytes the thumbnails take on disk, for Settings.
+    func thumbnailCacheSize() async -> Int {
+        let store = editedThumbnails
+        return await Task.detached(priority: .utility) { store.size() }.value
+    }
+
+    /// Removes every thumbnail; the open folder's are developed again.
+    /// Those on screen stay until each is made again.
+    func emptyThumbnailCache() async {
+        let store = editedThumbnails
+        await Task.detached(priority: .userInitiated) { store.removeAll() }.value
+        thumbnailsEmptied += 1
+        thumbnailsChecked = [:]
+        pumpThumbnails()
+    }
+
     private func thumbnailMade(_ item: URL, look: String) {
         thumbnailsChecked[item] = (look, true)
         thumbnailVersions[item, default: 0] += 1
@@ -1846,7 +1864,7 @@ import UserNotifications
             // Copies (the dictionaries copy on write): a folder of thousands
             // is scanned for every thumbnail, which must stay off the main actor.
             let items = self.library.items, open = self.sourceItem, onScreen = self.thumbnailsOnScreen, looks = self.thumbnailLooks
-            let failures = self.thumbnailFailures, checked = self.thumbnailsChecked
+            let failures = self.thumbnailFailures, checked = self.thumbnailsChecked, emptied = self.thumbnailsEmptied
             self.thumbnailsPumpAgain = false
             // Each item but the open one, whose thumbnail comes from its
             // preview, on screen first: the first without a thumbnail on
@@ -1866,6 +1884,10 @@ import UserNotifications
                 return (present, nil)
             }.value
             guard !self.closing else { return }
+            guard emptied == self.thumbnailsEmptied else {
+                self.thumbnailTask = nil
+                return self.pumpThumbnails()
+            }
             for (item, look) in found.present { self.thumbnailsChecked[item] = (look, true) }
             if let (file, look) = found.next {
                 self.thumbnailIdle?.cancel(); self.thumbnailIdle = nil

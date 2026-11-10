@@ -127,6 +127,8 @@ struct UpdateSettings: View {
     var removeAppData: () -> Void
     @AppStorage(ViewerBackground.customKey) private var customBackground = false
     @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
+    @State private var thumbnailBytes: Int?
+    @State private var emptyingThumbnails = false
 
     var body: some View {
         Form {
@@ -209,6 +211,19 @@ struct UpdateSettings: View {
                 .padding(.top, 8)
             Text("Develops the grain one colour at a time. Same result, less memory, longer export.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 8)
+            Button("Empty Thumbnail Cache") {
+                Task {
+                    emptyingThumbnails = true
+                    await model.emptyThumbnailCache()
+                    thumbnailBytes = await model.thumbnailCacheSize()
+                    emptyingThumbnails = false
+                }
+            }
+            .disabled(emptyingThumbnails || thumbnailBytes == 0)
+            Text("The strip and grid show each photograph as developed. Their thumbnails use \(thumbnailBytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "…"), at most 1 GB; the least recently shown are removed first. Emptied, the open folder’s are developed again in the background.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .task { thumbnailBytes = await model.thumbnailCacheSize() }
             Divider().padding(.vertical, 8)
             Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
                 .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)

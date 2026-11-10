@@ -266,6 +266,14 @@ final class SelectionTests: XCTestCase {
         store.prune(limit: size * 16 / 3 + 4)
         for key in ["old-film-1", "old-film-2"] { XCTAssertFalse(store.contains(key), key) }
         for key in ["edited-1", "edited-2", "new-film-1", "new-film-2"] { XCTAssertTrue(store.contains(key), key) }
+
+        // Emptied, but for one being written.
+        let writing = dir.appendingPathComponent(".new-film-3-temporary.jpg")
+        try Data([1]).write(to: writing)
+        XCTAssertEqual(store.size(), size * 4)
+        store.removeAll()
+        XCTAssertEqual(store.size(), 0)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), [writing.lastPathComponent])
     }
 
     /// A match solved in the background lands only on the edits it was solved for.

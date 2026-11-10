@@ -43,7 +43,8 @@ need, except to solve a match that's stored: about half a second each for a
 photographs on or off, develops the unedited photographs again; edited ones stay.
 Until a thumbnail is ready the camera's preview shows. Thumbnails are kept in
 `~/Library/Caches` (up to 1 GB, the least recently used go first) and are safe to
-delete. They're about 48 KB each (Z 6 NEFs with the default film, grain and
+delete: Settings › Empty Thumbnail Cache shows their size and removes them, and
+the open folder's are developed again in the background. They're about 48 KB each (Z 6 NEFs with the default film, grain and
 halation: 17–92 KB, 72 KB for nine in ten), so 1 GB holds about 21,000 and a
 folder of 1,000 takes about 50 MB. Past the limit the cache is cut to three
 quarters, about 16,000. After a new default film the old unedited thumbnails are

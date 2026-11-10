@@ -106,18 +106,31 @@ final class EditedThumbnailStore: @unchecked Sendable {
     /// Removes the least recently used thumbnails while there are more than
     /// `limit` bytes, down to three quarters of it.
     func prune(limit: Int = EditedThumbnailStore.limit) {
-        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return }
-        var entries = files.compactMap { file -> (url: URL, size: Int, date: Date)? in
-            guard let values = try? file.resourceValues(forKeys: Set(keys)) else { return nil }
-            return (file, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
-        }
+        var entries = entries()
         var total = entries.reduce(0) { $0 + $1.size }
         guard total > limit else { return }
         entries.sort { $0.date < $1.date }
         for entry in entries where total > limit * 3 / 4 {
             try? FileManager.default.removeItem(at: entry.url)
             total -= entry.size
+        }
+    }
+
+    /// The bytes the thumbnails take.
+    func size() -> Int { entries().reduce(0) { $0 + $1.size } }
+
+    /// Removes every thumbnail. One being written (a hidden temporary file)
+    /// is kept, so its save still succeeds.
+    func removeAll() {
+        for entry in entries() { try? FileManager.default.removeItem(at: entry.url) }
+    }
+
+    private func entries() -> [(url: URL, size: Int, date: Date)] {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return [] }
+        return files.compactMap { file in
+            guard let values = try? file.resourceValues(forKeys: Set(keys)) else { return nil }
+            return (file, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
         }
     }
 }
