@@ -18,6 +18,8 @@ struct PreviewCanvas: NSViewRepresentable {
     var scale: CanvasScale?
     /// Where the print is on screen, for the caption and label (§4.1, §4.2).
     var geometry: CanvasGeometry?
+    /// T is held: the print on screen turns half a turn (`PhotographView.turned`).
+    var upsideDown = false
     /// A double-click on the photograph; true if it's zoomed from fitting.
     var doubleClick: ((_ zoomed: Bool) -> Void)?
 
@@ -30,7 +32,7 @@ struct PreviewCanvas: NSViewRepresentable {
         scroll.allowsMagnification = true; scroll.minMagnification = 0.005; scroll.maxMagnification = 16
         scroll.documentView = PhotographView()
         scroll.setAccessibilityLabel("Photograph preview")
-        scroll.setAccessibilityHelp("Pinch to zoom, scroll or drag to pan, double-click to fit or, when fitted, to show the grid.")
+        scroll.setAccessibilityHelp("Pinch to zoom, scroll or drag to pan, double-click to fit or, when fitted, to show the grid. Hold T to turn it upside down.")
         return scroll
     }
 
@@ -51,6 +53,7 @@ struct PreviewCanvas: NSViewRepresentable {
         let recropped = photo.crop != crop && oldSize.width != 0
         if recropped { scroll.fitting = true }
         photo.show(image, size: size, rotation: rotation, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
+        photo.turned = upsideDown
         if oldSize != documentSize {
             if commanded || scroll.fitting || oldSize.width == 0 {
                 photo.setFrameSize(documentSize)
@@ -208,6 +211,10 @@ final class ImageScrollView: NSScrollView {
 }
 
 final class PhotographView: NSView {
+    /// The print, with its border: turned half a turn about the middle of
+    /// what's on screen while T is held. Only the layers turn; the
+    /// photograph, its layout and the caption and label over it don't change.
+    private let turn = CALayer()
     /// The crop: it clips the photograph and takes the quarter turns.
     private let clip = CALayer()
     /// The whole photograph, straightened inside the crop.
@@ -220,6 +227,8 @@ final class PhotographView: NSView {
     private var border: BorderSettings?
     private var filmTexture: CGImage?
     private var filmStrip: FilmStrip?
+    /// Upside down, while T is held.
+    var turned = false { didSet { if turned != oldValue { placeTurn() } } }
     /// The photograph's size on the canvas, after cropping and rotation.
     var displaySize: CGSize {
         let cropped = crop.size(of: size)
@@ -237,11 +246,12 @@ final class PhotographView: NSView {
         photo.magnificationFilter = .linear
         photo.isOpaque = true
         let none = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull()]
-        photo.actions = none; clip.actions = none
+        photo.actions = none; clip.actions = none; turn.actions = none
         clip.masksToBounds = true
         clip.addSublayer(photo)
-        layer?.addSublayer(clip)
-        borderLayers = BorderLayers(in: layer!, around: clip)
+        turn.addSublayer(clip)
+        layer?.addSublayer(turn)
+        borderLayers = BorderLayers(in: turn, around: clip)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -257,9 +267,30 @@ final class PhotographView: NSView {
     override func layout() {
         super.layout()
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        turn.bounds = CGRect(origin: .zero, size: bounds.size)
+        placeTurn()
         Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, center: CGPoint(x: bounds.midX, y: bounds.midY))
-        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
+        borderLayers.layout(border, photo: displaySize, host: turn, texture: filmTexture, filmStrip: filmStrip)
         CATransaction.commit()
+    }
+
+    /// Turns the print about the middle of the part on screen, so zoomed in
+    /// the same place stays in view, upside down. At once, as the original shows.
+    private func placeTurn() {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        let clipView = enclosingScrollView?.contentView
+        let visible = clipView.map { convert($0.bounds, from: $0) }
+        let centre = Self.turnCentre(visible: visible, bounds: CGRect(origin: .zero, size: bounds.size))
+        turn.anchorPoint = bounds.width > 0 && bounds.height > 0 ? CGPoint(x: centre.x / bounds.width, y: centre.y / bounds.height) : CGPoint(x: 0.5, y: 0.5)
+        turn.position = centre
+        turn.setAffineTransform(turned ? CGAffineTransform(rotationAngle: .pi) : .identity)
+        CATransaction.commit()
+    }
+    /// The middle of the photograph's part on screen: all of it when fitted.
+    static func turnCentre(visible: CGRect?, bounds: CGRect) -> CGPoint {
+        let shown = visible.map { $0.intersection(bounds) } ?? bounds
+        let area = shown.isNull || shown.isEmpty ? bounds : shown
+        return CGPoint(x: area.midX, y: area.midY)
     }
 
     /// Places a photograph of `size` in `clip`, cropped, straightened and

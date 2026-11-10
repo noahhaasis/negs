@@ -53,6 +53,8 @@ import SwiftUI
     /// The key held to show the original, so its release is found even if
     /// a modifier (⌥⇧ on some layouts) was let go first.
     private var originalKey: UInt16?
+    /// The key held to turn the photograph upside down, likewise.
+    private var turnKey: UInt16?
     /// The batch export popover.
     private var batchPopover: NSPopover?
 
@@ -130,8 +132,11 @@ import SwiftUI
                 if let window = self.window {
                     Self.fitMinimum(of: window, width: item.isCollapsed ? self.canvasMinimum : self.columnsMinimum)
                 }
-                // The grid collapses it without hiding the adjustments.
-                guard self.model.mode == .photo, self.model.inspectorVisible == item.isCollapsed else { return }
+                // The grid collapses it without hiding the adjustments, and
+                // Image Only without changing them.
+                guard self.model.mode == .photo, self.model.inspectorShown == item.isCollapsed else { return }
+                // Dragged open in Image Only, which ends it.
+                if !item.isCollapsed { self.model.leaveImageOnly() }
                 self.model.inspectorVisible = !item.isCollapsed
             }
         }
@@ -139,9 +144,7 @@ import SwiftUI
             MainActor.assumeIsolated { self?.windowChangedOcclusion() }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            MainActor.assumeIsolated {
-                self?.alertKeys(event) == true || self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.cropKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true || self?.arrowsToStep(event) == true
-            } ? nil : event
+            MainActor.assumeIsolated { self?.handleKey(event) == true } ? nil : event
         }
         // A click outside the tray keeps the stock being tried (§5.1); so
         // does opening a menu, so Edit › Undo undoes the whole visit.
@@ -153,10 +156,7 @@ import SwiftUI
             return event
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.originalKey != nil else { return }
-                self.originalKey = nil; self.model.holdOriginal(false)
-            }
+            MainActor.assumeIsolated { self?.releaseHeldKeys() }
         }
         // File events on network shares get lost, so the folder is listed
         // again whenever the window comes back.
@@ -199,6 +199,20 @@ import SwiftUI
         }
     }
 
+    /// The window's own keys, before the menus and the views see them. True
+    /// if the event was handled.
+    func handleKey(_ event: NSEvent) -> Bool {
+        alertKeys(event) || holdOriginal(event) || holdUpsideDown(event) || trayKeys(event) || cropKeys(event)
+            || enterInspector(event) || escapeToGrid(event) || arrowsToStep(event)
+    }
+
+    /// A key let go in another window never reaches this one, so held keys
+    /// end when it stops being the key window.
+    func releaseHeldKeys() {
+        if originalKey != nil { originalKey = nil; model.holdOriginal(false) }
+        if turnKey != nil { turnKey = nil; model.holdUpsideDown(false) }
+    }
+
     /// Holding \ shows the original, as in Lightroom, unless text is being
     /// typed. True if the event was handled.
     private func holdOriginal(_ event: NSEvent) -> Bool {
@@ -214,9 +228,23 @@ import SwiftUI
         return true
     }
 
-    /// Esc shows the grid, as in Lightroom, unless text is being typed or a
-    /// crop drawn (whose Cancel takes it). The canvas's hosting view claims
-    /// Escape before the menu would see it, so it's caught here.
+    /// Holding T turns the photograph upside down, and letting go turns it
+    /// back, like holding \ for the original: only the canvas turns. Not
+    /// while text is typed or a crop drawn.
+    private func holdUpsideDown(_ event: NSEvent) -> Bool {
+        if event.type == .keyUp {
+            guard event.keyCode == turnKey else { return false }
+            turnKey = nil; model.holdUpsideDown(false)
+            return true
+        }
+        guard event.window === window, model.mode == .photo, model.source != nil, !model.cropping,
+              event.charactersIgnoringModifiers?.lowercased() == "t",
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              !(window?.firstResponder is NSText) else { return false }
+        if !event.isARepeat { turnKey = event.keyCode; model.holdUpsideDown(true) }
+        return true
+    }
+
     /// Tab from outside the inspector (nothing, the canvas, the strip) moves
     /// to its first control, ⇧Tab to its last; inside it the controls step
     /// through themselves (`InkKeyLoop`). Text fields keep Tab.
@@ -275,13 +303,15 @@ import SwiftUI
         model.endTray(keep: true)
     }
 
-    /// Esc in the photograph view opens the grid; in the grid it folds it
-    /// back (§5.2).
+    /// Esc in the photograph view leaves Image Only, then opens the grid; in
+    /// the grid it folds it back (§5.2). Not while text is being typed or a
+    /// crop drawn (whose Cancel takes it). The canvas's hosting view claims
+    /// Escape before the menu would see it, so it's caught here.
     private func escapeToGrid(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, event.keyCode == 53, event.window === window,
               event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
               model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
-        if model.mode == .grid { model.editCurrent() } else { model.showGrid() }
+        if model.mode == .grid { model.editCurrent() } else if model.imageOnly { model.leaveImageOnly() } else { model.showGrid() }
         return true
     }
 
@@ -325,8 +355,9 @@ import SwiftUI
         let alert = model.alert
         if alert != nil, alertPresenter == nil { alertPresenter = AlertPresenter(model: model, window: window, root: root) }
         alertPresenter?.show(alert)
-        // The grid's sheet covers the inspector, which stays as it was under it.
-        let inspectorShown = model.inspectorVisible
+        // The grid's sheet covers the inspector, which stays as it was under
+        // it; Image Only hides it.
+        let inspectorShown = model.inspectorShown
         if inspector.isCollapsed == inspectorShown {
             // Make room before the inspector slides in, so neither column is
             // squeezed below its minimum.
@@ -445,7 +476,7 @@ import SwiftUI
 
     /// The photographs are selected where they're shown: the grid, or the strip.
     private var selecting: Bool {
-        model.source != nil && !model.cropping && (model.mode == .grid || model.filmstripVisible)
+        model.source != nil && !model.cropping && (model.mode == .grid || model.stripShown)
     }
 
     // MARK: Edits

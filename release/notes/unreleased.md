@@ -22,6 +22,12 @@
   drag the corners or edges, straighten with the dial under the photograph,
   and turn it a quarter with the arrows at the dial's ends (⌘R, ⌥⌘R). The
   aspect ratios, orientation and size are in the panel.
+- **Image Only.** F hides the strip, the status line and the panel, and
+  leaves the photograph with its caption and the film and paper under it.
+  F or Esc brings back what was showing.
+- **Upside down.** Hold T to see the photograph upside down and judge its
+  composition alone; let go to turn it back. Nothing about the photograph
+  changes.
 - **Presets as tiles.** Click a tile to apply it, drag to sort, drop files
   on the pane to import them.
 - **Settings in three tabs.** Photographs (what a new photograph starts

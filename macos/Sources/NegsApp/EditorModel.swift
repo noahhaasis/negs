@@ -164,6 +164,18 @@ import UserNotifications
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
     }
+    /// View › Image Only (F): the photograph with its caption and label,
+    /// and the strip, status line and inspector hidden (§11). Their own
+    /// settings stay as they were, so leaving it brings back what showed.
+    /// Only in the photograph view, and not remembered across launches.
+    private(set) var imageOnly = false
+    /// The strip and the inspector as shown now: as set, unless Image Only hides them.
+    var stripShown: Bool { filmstripVisible && !imageOnly }
+    var inspectorShown: Bool { inspectorVisible && !imageOnly }
+    /// T is held: the photograph on the canvas is turned upside down, to
+    /// judge its composition alone, as Cartier-Bresson read his contact
+    /// sheets. Display only: nothing renders, saves or exports differently.
+    private(set) var upsideDown = false
     /// Photo › Advance After Rating: a rating or flag key moves on to the
     /// next photograph, as in Lightroom. Off until chosen.
     var advanceAfterRating = UserDefaults.standard.bool(forKey: "advanceAfterRating") {
@@ -473,6 +485,7 @@ import UserNotifications
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
         interactionStart = nil; cropSession = nil
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
+        imageOnly = false; upsideDown = false
         undoManager?.removeAllActions(withTarget: self)
     }
 
@@ -954,6 +967,9 @@ import UserNotifications
     func beginCrop() {
         guard !cropping, image != nil, imageSize != .zero else { return }
         holdOriginal(false)
+        holdUpsideDown(false)
+        // Its tools are in the inspector and the status line.
+        leaveImageOnly()
         // The straighten dial takes the label's place.
         endTray(keep: true)
         cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
@@ -1707,6 +1723,9 @@ import UserNotifications
     func showGrid() {
         guard let source = sourceItem, !cropping, mode != .grid else { return }
         holdOriginal(false)
+        holdUpsideDown(false)
+        // The sheet grows out of the strip, and folds back into the view as set.
+        leaveImageOnly()
         endTray(keep: true)
         // The grid shows the open photograph as edited.
         flushSidecar()
@@ -1758,7 +1777,7 @@ import UserNotifications
     /// What Paste Edits, Reset Edits and Duplicate act on: the selection in
     /// the grid, or in the film strip while it shows; else the open photograph.
     var editTargets: [URL] {
-        guard mode == .grid || filmstripVisible else { return sourceItem.map { [$0] } ?? [] }
+        guard mode == .grid || stripShown else { return sourceItem.map { [$0] } ?? [] }
         return selection.ordered(shownPhotos.map(\.url))
     }
 
@@ -2105,7 +2124,7 @@ import UserNotifications
     /// off the main actor: a folder can hold thousands.
     private func prefetchTargets() async -> [(PhotoFile, PhotoThumbnails.Size, EditedThumbnail?)] {
         let grid = mode == .grid
-        guard grid || (filmstripVisible && source != nil), !library.filtering else { return [] }
+        guard grid || (stripShown && source != nil), !library.filtering else { return [] }
         let size = grid ? gridThumbnailSize : .strip
         let shown = shownPhotos, onScreen = thumbnailsOnScreen, current = grid ? selection.current : sourceItem
         let near = await Task.detached(priority: .utility) { () -> [PhotoFile] in
@@ -4002,10 +4021,37 @@ import UserNotifications
 
     /// The pane header's Adjustments and Presets words, ⌥⌘I and ⌥⌘P: show that panel, or
     /// hide the column if it already shows it.
+    /// In Image Only they end it and show that panel.
     func togglePane(_ pane: InspectorPane) {
-        if inspectorVisible && inspectorPane == pane { inspectorVisible = false } else { inspectorPane = pane; inspectorVisible = true }
+        if inspectorShown && inspectorPane == pane { inspectorVisible = false } else { showPane(pane) }
     }
-    func showPane(_ pane: InspectorPane) { inspectorPane = pane; inspectorVisible = true }
+    func showPane(_ pane: InspectorPane) { leaveImageOnly(); inspectorPane = pane; inspectorVisible = true }
+
+    // MARK: Image Only and upside down
+
+    /// F: Image Only on or off. From the grid it opens the current
+    /// photograph in Image Only. Not while cropping, whose tools are in the
+    /// inspector and the status line.
+    func toggleImageOnly() {
+        if imageOnly { return leaveImageOnly() }
+        guard !cropping else { return }
+        if mode == .grid {
+            guard selection.current != nil else { return }
+            editCurrent()
+        }
+        guard mode == .photo, source != nil else { return }
+        imageOnly = true
+    }
+    func leaveImageOnly() { if imageOnly { imageOnly = false } }
+    /// ⌥⌘F: in Image Only it ends it and shows the strip.
+    func toggleFilmstrip() {
+        if imageOnly { leaveImageOnly(); filmstripVisible = true } else { filmstripVisible.toggle() }
+    }
+    /// Holding T. Only the photograph view's canvas turns, not while cropping.
+    func holdUpsideDown(_ held: Bool) {
+        let turned = held && mode == .photo && source != nil && !cropping
+        if turned != upsideDown { upsideDown = turned }
+    }
     var canChangePresets: Bool { hasCatalog && !cropping && engine != nil }
 
     /// Lists the folder again, so files copied in by hand appear, and asks

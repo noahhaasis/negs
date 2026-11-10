@@ -78,7 +78,7 @@ struct PlaceReport: ViewModifier {
 
     /// The strip's band in the root's coordinates.
     private var band: CGRect {
-        let height = (model.filmstripVisible ? Theme.Size.strip : 0) + Theme.Size.statusLine
+        let height = (model.stripShown ? Theme.Size.strip : 0) + Theme.Size.statusLine
         let canvasRect = root.convert(canvas.bounds, from: canvas)
         return CGRect(x: canvasRect.minX, y: root.isFlipped ? canvasRect.maxY - height : canvasRect.minY,
                       width: canvasRect.width, height: height)
