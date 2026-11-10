@@ -252,10 +252,12 @@ struct EditorCanvas: View {
                     }
                 }
                 // The leader rises from the strip's right end, or from the
-                // status line's top edge with the strip hidden (§11).
+                // status line's top edge with the strip hidden (§11). It
+                // stands on that edge, over the canvas: an `alignmentGuide`
+                // to its bottom was ignored and left it covering the frame.
                 .overlay(alignment: .topTrailing) {
                     if model.source != nil, !grid, !model.cropping {
-                        StripLeader(model: model).alignmentGuide(.top) { $0[.bottom] }
+                        StripLeader(model: model).offset(y: -StripLeader.raised)
                     }
                 }
             }
