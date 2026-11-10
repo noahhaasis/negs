@@ -240,6 +240,34 @@ final class SelectionTests: XCTestCase {
         XCTAssertNotEqual(PhotoSidecar.look(of: edits, defaultsVersion: 1), PhotoSidecar.look(of: edits, defaultsVersion: 2))
     }
 
+    /// Past the limit the least recently shown go first: after the default
+    /// film changes, the unedited thumbnails developed with the old one.
+    func testThumbnailsPrunedLeastRecentlyShownFirst() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("negs-thumbs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = EditedThumbnailStore(directory: dir)
+        let context = try XCTUnwrap(CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(red: 0.8, green: 0.3, blue: 0.1, alpha: 1); context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        let image = try XCTUnwrap(context.makeImage())
+        let before = Date(timeIntervalSinceNow: -3 * 86_400)
+        // Before the default changed: two unedited and two edited photographs.
+        for key in ["old-film-1", "old-film-2", "edited-1", "edited-2"] {
+            try store.save(image, as: key)
+            try FileManager.default.setAttributes([.modificationDate: before], ofItemAtPath: store.url(for: key).path)
+        }
+        // Since: the unedited ones developed again, and the edited ones shown.
+        for key in ["new-film-1", "new-film-2"] { try store.save(image, as: key) }
+        for key in ["edited-1", "edited-2"] { XCTAssertNotNil(store.image(key, maxPixels: 64)) }
+        let size = try XCTUnwrap(store.url(for: "edited-1").resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        store.prune(limit: size * 6 + 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).count, 6, "nothing under the limit")
+        // Just under six: down to three quarters, which two make room for.
+        store.prune(limit: size * 16 / 3 + 4)
+        for key in ["old-film-1", "old-film-2"] { XCTAssertFalse(store.contains(key), key) }
+        for key in ["edited-1", "edited-2", "new-film-1", "new-film-2"] { XCTAssertTrue(store.contains(key), key) }
+    }
+
     /// A match solved in the background lands only on the edits it was solved for.
     func testPatchOnlyIfEdits() throws {
         let raw = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "a", "edits": {"film": "x"}}]}"#.utf8))
