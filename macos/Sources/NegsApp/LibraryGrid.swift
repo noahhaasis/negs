@@ -10,6 +10,8 @@ struct LibraryGrid: View {
     /// The rubber band, in the grid's coordinates, and the selection it adds to.
     @State private var band: CGRect?
     @State private var bandBase: Set<URL> = []
+    /// From appearing until the columns have held still for a second.
+    @State private var arriving = false
     @FocusState private var focused: Bool
     @Environment(\.displayScale) private var displayScale
 
@@ -70,9 +72,20 @@ struct LibraryGrid: View {
                 .onAppear {
                     model.gridColumns = metrics.columns
                     // Opens on the current photograph.
+                    arriving = true
                     if let row = currentRow(shown, metrics) { proxy.scrollTo(row, anchor: .center) }
                 }
-                .onChange(of: metrics.columns) { _, columns in model.gridColumns = columns }
+                .onChange(of: metrics.columns) { _, columns in
+                    model.gridColumns = columns
+                    // The grid opens while the inspector slides away, so it
+                    // gains columns and its rows move; the current photograph
+                    // stays in the middle until they settle.
+                    if arriving, let row = currentRow(shown, metrics) { proxy.scrollTo(row, anchor: .center) }
+                }
+                .task(id: metrics.columns) {
+                    try? await Task.sleep(for: .seconds(1))
+                    if !Task.isCancelled { arriving = false }
+                }
                 .onChange(of: selection.current) { _, _ in
                     guard band == nil, let row = currentRow(shown, metrics) else { return }
                     proxy.scrollTo(row)

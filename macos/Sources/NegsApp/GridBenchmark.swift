@@ -19,7 +19,12 @@ import QuartzCore
 /// times the background helper developing the folder's thumbnails: until
 /// the cells first on screen have theirs, each tenth of the folder, and the
 /// whole, with the app's memory. Quits once every photograph has one, or
-/// after a minute without a new one. Compiled only with -DSPEKTRAFILM_BENCHMARK.
+/// after a minute without a new one.
+///
+/// SPEKTRAFILM_BENCHMARK_GRID_POSITION: leaves the session's photograph for
+/// the grid as a double-click does, while the inspector slides away, and
+/// reports whether the photograph is on screen. Compiled only with
+/// -DSPEKTRAFILM_BENCHMARK.
 @MainActor final class GridBenchmark: NSObject {
     private let model: EditorModel
     private let segments: [(speed: Double, seconds: Double)]
@@ -38,6 +43,7 @@ import QuartzCore
         guard !LaunchBenchmark.enabled else { return }
         if environment["SPEKTRAFILM_BENCHMARK_GRID_FILL"] != nil { return fill(model) }
         if environment["SPEKTRAFILM_BENCHMARK_THUMBNAILS"] != nil { return thumbnails(model) }
+        if environment["SPEKTRAFILM_BENCHMARK_GRID_POSITION"] != nil { return position(model) }
         guard let spec = environment["SPEKTRAFILM_BENCHMARK_GRID"] else { return }
         let segments = spec.split(separator: ",").compactMap { part -> (Double, Double)? in
             let values = part.split(separator: ":").compactMap { Double($0) }
@@ -177,6 +183,16 @@ import QuartzCore
     }
 
     /// The tallest scroll view in the editor window: the grid's.
+    private static func scrollViews() -> [NSScrollView] {
+        guard let root = NSApp.windows.first(where: { $0.isVisible && $0.contentViewController != nil })?.contentView else { return [] }
+        var found: [NSScrollView] = [], stack: [NSView] = [root]
+        while let view = stack.popLast() {
+            if let scroll = view as? NSScrollView { found.append(scroll) }
+            stack.append(contentsOf: view.subviews)
+        }
+        return found
+    }
+
     private static func gridScrollView() -> NSScrollView? {
         guard let root = NSApp.windows.first(where: { $0.isVisible && $0.contentViewController != nil })?.contentView else { return nil }
         var best: NSScrollView?, stack: [NSView] = [root]
@@ -186,6 +202,48 @@ import QuartzCore
             stack.append(contentsOf: view.subviews)
         }
         return best
+    }
+
+    /// SPEKTRAFILM_BENCHMARK_GRID_POSITION: leaves the session's photograph
+    /// for the grid as a double-click on it does, and reports whether the
+    /// photograph is on screen a moment later and once settled.
+    private static func position(_ model: EditorModel) {
+        var phase = 0, shown = Date()
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                let library = model.library
+                switch phase {
+                case 0 where model.ready && library.summariesLoaded && (model.previewCurrent || model.renderFailed):
+                    if let window = NSApp.windows.first(where: { $0.isVisible && $0.contentViewController != nil }) {
+                        window.setFrame(NSRect(x: 40, y: 40, width: 1400, height: 900), display: true)
+                    }
+                    shown = Date(); phase = -1
+                case -1 where Date().timeIntervalSince(shown) > 1:
+                    // Settled in the photo view, as a user double-clicking is.
+                    model.doubleClickPhotograph(zoomed: false)
+                    shown = Date(); phase = 1
+                case 1 where Date().timeIntervalSince(shown) > 0.3, 2 where Date().timeIntervalSince(shown) > 2:
+                    let shownPhotos = model.shownPhotos
+                    // The grid's own scroll view: its document is as tall as the grid's metrics say.
+                    let grid = scrollViews().first { scroll in
+                        let height = GridMetrics(width: scroll.contentView.bounds.width, cell: model.gridCellSize).height(shownPhotos.count)
+                        return abs((scroll.documentView?.frame.height ?? 0) - max(height, scroll.contentView.bounds.height)) < 2
+                    }
+                    guard let scroll = grid, let current = model.selection.current,
+                          let index = shownPhotos.firstIndex(where: { $0.url == current }) else {
+                        report("no grid or no current photograph"); timer.invalidate(); return NSApp.terminate(nil)
+                    }
+                    let visible = scroll.contentView.bounds
+                    let metrics = GridMetrics(width: visible.width, cell: model.gridCellSize)
+                    let cell = metrics.frame(index)
+                    report("grid position after \(phase == 1 ? "0.3" : "2") s: photograph \(index + 1) of \(shownPhotos.count), \(metrics.columns) columns, cell y \(Int(cell.minY))–\(Int(cell.maxY)), visible y \(Int(visible.minY))–\(Int(visible.maxY)) of \(Int(scroll.documentView?.frame.height ?? 0)): \(visible.contains(cell) ? "on screen" : "OFF SCREEN")")
+                    if phase == 2 { timer.invalidate(); NSApp.terminate(nil) }
+                    phase += 1
+                default: break
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private static func fill(_ model: EditorModel) {
