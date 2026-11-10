@@ -71,7 +71,9 @@ final class EditedThumbnailStore: @unchecked Sendable {
     /// The thumbnail at most `maxPixels` on its long side; nil if there's none.
     func image(_ key: String, maxPixels: Int) -> CGImage? {
         let file = url(for: key)
-        guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+        // Every cell asks before its thumbnail is made; ImageIO would log each miss.
+        guard FileManager.default.fileExists(atPath: file.path),
+              let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceThumbnailMaxPixelSize: maxPixels,

@@ -1,6 +1,7 @@
 import Accelerate
 import AppKit
 import CoreVideo
+import CryptoKit
 import ImageIO
 import IOSurface
 import Observation
@@ -106,7 +107,10 @@ import UserNotifications
     /// Settings › Match new photographs to camera brightness: whether a new
     /// photograph starts with Prep › Match camera brightness on.
     var autoPlaceNewImages = UserDefaults.standard.object(forKey: "autoPlaceNewImages") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages") }
+        didSet {
+            UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages")
+            refreshUneditedLook()
+        }
     }
     static let newPhotoFilmKey = "newPhotoFilm"
     static let newPhotoPaperKey = "newPhotoPaper"
@@ -121,6 +125,8 @@ import UserNotifications
             UserDefaults.standard.set(sidecarsEnabled, forKey: "sidecars")
             sidecarWrite?.cancel(); sidecarWrite = nil
             library.store = sidecarsEnabled ? sidecars : nil
+            // Off, every photograph develops as new; on, once read.
+            pumpThumbnails()
             // The photograph shown is saved from its next edit on.
             if sidecarsEnabled, let source, let restore = readSidecar(source, variant: sourceVariant) {
                 photoSidecar = sidecarContext(for: source, restore: restore)
@@ -486,6 +492,31 @@ import UserNotifications
         state = next
         previews.update(stocks: stocks)
         scheduleToneCurve()
+        refreshUneditedLook()
+    }
+
+    /// The look of every item without edits: what a new photograph opens
+    /// with, so a new default film or paper, match setting or engine defaults
+    /// make their thumbnails stale. Nil before the catalog.
+    private(set) var uneditedLook: String?
+
+    private func refreshUneditedLook() {
+        let look = hasCatalog ? Self.uneditedLook(of: plainState) : nil
+        guard look != uneditedLook else { return }
+        uneditedLook = look
+        pumpThumbnails()
+    }
+
+    /// A hash of `state` as an unedited photograph's thumbnail develops it.
+    /// Image Size and the output colour, which follow the previous
+    /// photograph, don't change a thumbnail and are left out.
+    nonisolated static func uneditedLook(of state: EditState) -> String? {
+        var plain = userEdits(state)
+        for path in [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"] { plain.params[path] = .null }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(["unedited": plain]) else { return nil }
+        return SHA256.hash(data: data).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
@@ -1010,6 +1041,7 @@ import UserNotifications
         UserDefaults.standard.set(film, forKey: Self.newPhotoFilmKey)
         UserDefaults.standard.set(paper, forKey: Self.newPhotoPaperKey)
         if before != (newPhotoFilm, newPhotoPaper) { followNewPhotoStocks() }
+        refreshUneditedLook()
     }
 
     /// The open photograph takes a new default film and paper while it has no
@@ -1679,7 +1711,10 @@ import UserNotifications
     // MARK: Edited thumbnails
 
     /// Where edited thumbnails are kept; tests use their own.
-    @ObservationIgnored var editedThumbnails = EditedThumbnailStore.shared
+    @ObservationIgnored var editedThumbnails = EditedThumbnailStore.shared {
+        // Read already: the new store names its thumbnails with it too.
+        didSet { if let thumbnailStamp { editedThumbnails.engineStamp = thumbnailStamp } }
+    }
     /// The engine's identity, once read: until then only embedded previews show.
     private(set) var thumbnailStamp: String?
     /// Moves when an item's edited thumbnail is made, so its cells read it.
@@ -1697,8 +1732,20 @@ import UserNotifications
     @ObservationIgnored private var thumbnailGeneration = 0
     @ObservationIgnored private var readingThumbnailStamp = false
 
+    /// The look that names `item`'s developed thumbnail: its stored edits',
+    /// or `uneditedLook` for one without edits once its sidecar has been read
+    /// (with sidecars off, every photograph opens with the defaults). Nil
+    /// while that isn't known, or when its sidecar can't be read.
+    func thumbnailLook(for item: URL) -> String? {
+        if let look = library.looks[item] { return look }
+        guard let unedited = uneditedLook else { return nil }
+        if library.store == nil { return unedited }
+        guard let summary = library.summaries[item], summary.problem == nil else { return nil }
+        return unedited
+    }
+
     func editedThumbnail(for item: URL) -> EditedThumbnail? {
-        guard let stamp = thumbnailStamp, let look = library.looks[item] else { return nil }
+        guard let stamp = thumbnailStamp, let look = thumbnailLook(for: item) else { return nil }
         return EditedThumbnail(look: look, version: thumbnailVersions[item] ?? 0, stamp: stamp, store: editedThumbnails)
     }
 
@@ -1706,7 +1753,7 @@ import UserNotifications
     func thumbnailShown(_ file: PhotoFile, _ visible: Bool) {
         guard visible else { thumbnailsOnScreen.remove(file.url); return }
         thumbnailsOnScreen.insert(file.url)
-        if library.looks[file.url] != nil { pumpThumbnails() }
+        if thumbnailLook(for: file.url) != nil { pumpThumbnails() }
     }
 
     /// Reads the engine's identity once, off the main actor, after launch.
@@ -1724,6 +1771,8 @@ import UserNotifications
             }.value
             guard let self, !self.closing else { return }
             self.thumbnailStamp = stamp
+            // The store may have been replaced while it was read.
+            self.editedThumbnails.engineStamp = stamp
             self.pumpThumbnails()
         }
     }
@@ -1733,12 +1782,14 @@ import UserNotifications
         thumbnailVersions[item, default: 0] += 1
     }
 
-    /// The open photograph's edited thumbnail, made from the preview on
+    /// The open photograph's developed thumbnail, made from the preview on
     /// screen, so it costs no render: on leaving it for another photograph
-    /// or the grid.
+    /// or the grid. One without edits only while it shows what a new
+    /// photograph opens with (it may predate a new default).
     private func saveOpenThumbnail() {
         guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
-              !brightnessMatchPending, let look = library.looks[item], thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
+              !brightnessMatchPending, let look = thumbnailLook(for: item), thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
+              library.looks[item] != nil || Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
         let size = imageSize, crop = crop, rotation = imageRotation, border = state.border, texture = filmTexture, strip = filmStrip
         let store = editedThumbnails
@@ -1759,20 +1810,20 @@ import UserNotifications
             && (mode == .grid || source == nil || previewCurrent || renderFailed)
     }
 
-    /// Develops the next edited item without a current thumbnail in a helper
-    /// of its own, at utility priority: those on screen first, then the
-    /// folder in order. One at a time, waiting while the open photograph is
-    /// edited or developed. The helper quits when there's nothing left.
+    /// Develops the next item without a current thumbnail, edited or not, in
+    /// a helper of its own, at utility priority: those on screen first, then
+    /// the folder in order. One at a time, waiting while the open photograph
+    /// is edited or developed. The helper quits when there's nothing left.
     func pumpThumbnails() {
-        guard thumbnailTask == nil, !closing, hasCatalog, let paths = engine?.paths, let lookup = sidecarLookup else { return }
+        guard thumbnailTask == nil, !closing, hasCatalog, let paths = engine?.paths else { return }
         if thumbnailStamp == nil { return readThumbnailStamp() }
-        let store = editedThumbnails
-        let items = library.items, looks = library.looks, open = sourceItem
+        let store = editedThumbnails, lookup = sidecarLookup
+        let items = library.items, open = sourceItem
         let onScreen = thumbnailsOnScreen
-        // Each edited item but the open one, whose thumbnail comes from its preview.
+        // Each item but the open one, whose thumbnail comes from its preview.
         var wanted: [(file: PhotoFile, look: String)] = []
         for file in items where file.url != open {
-            guard let look = looks[file.url], thumbnailFailures[file.url] != look else { continue }
+            guard let look = thumbnailLook(for: file.url), thumbnailFailures[file.url] != look else { continue }
             if let checked = thumbnailsChecked[file.url], checked.look == look, checked.present { continue }
             wanted.append((file, look))
         }
@@ -1820,17 +1871,29 @@ import UserNotifications
         return !closing
     }
 
-    /// Develops `file`'s thumbnail with its stored edits, as opening it
-    /// would. A match not yet solved for them is solved first and stored,
-    /// unless its edits changed meanwhile. False when it can't be made.
-    private func developThumbnail(_ file: PhotoFile, look: String, lookup: SidecarLookup, paths: EnginePaths) async -> Bool {
+    /// Develops `file`'s thumbnail as opening it would: with its stored
+    /// edits, or, without edits (`uneditedLook`), as a new photograph. A
+    /// match not yet solved for stored edits is solved on the whole decode
+    /// and stored, unless its edits changed meanwhile; an unedited one's is
+    /// solved on the reduced decode for the thumbnail only. Everything else
+    /// reads only as much of a RAW as the thumbnail needs. False when it
+    /// can't be made.
+    private func developThumbnail(_ file: PhotoFile, look: String, lookup: SidecarLookup?, paths: EnginePaths) async -> Bool {
         let item = file.url, photo = item.photoFile
-        guard let sidecar = try? lookup.store.read(photo: photo),
-              let variant = item.variantID.map({ id in sidecar.variants.first { $0.id == id } }) ?? sidecar.variants.first,
-              let stored = variant.edits, PhotoSidecar.look(of: stored, defaultsVersion: sidecar.defaultsVersion) == look,
-              let table = try? SidecarDefaults.load(version: sidecar.defaultsVersion, data: lookup.data),
-              let saved = try? PhotoSidecar.decodeEdits(stored, table: table) else { return false }
-        var state = restoredState(saved.state, legacy: false, matchSolved: saved.matchSolved)
+        var state: EditState, matchSolved: Bool
+        /// Stores a solved match with the stored edits: their new look, or nil.
+        var storeMatch: ((EditState) -> String?)?
+        if look == uneditedLook, library.looks[item] == nil {
+            state = plainState; matchSolved = false
+        } else {
+            guard let lookup, let sidecar = try? lookup.store.read(photo: photo),
+                  let variant = item.variantID.map({ id in sidecar.variants.first { $0.id == id } }) ?? sidecar.variants.first,
+                  let stored = variant.edits, PhotoSidecar.look(of: stored, defaultsVersion: sidecar.defaultsVersion) == look,
+                  let table = try? SidecarDefaults.load(version: sidecar.defaultsVersion, data: lookup.data),
+                  let saved = try? PhotoSidecar.decodeEdits(stored, table: table) else { return false }
+            state = restoredState(saved.state, legacy: false, matchSolved: saved.matchSolved); matchSolved = saved.matchSolved
+            storeMatch = { [weak self] in self?.storeSolvedMatch($0, item: item, variant: variant.id, stored: stored, sidecar: sidecar, table: table) }
+        }
         let raw = Self.rawExtensions.contains(photo.pathExtension.lowercased())
         let engine: EngineClient
         do {
@@ -1842,6 +1905,7 @@ import UserNotifications
         let generation = thumbnailGeneration, space = previewSpace
         let buffer = engine.directory.appendingPathComponent("library-thumbnail.rgba")
         defer { try? FileManager.default.removeItem(at: buffer) }
+        let longSide = Int(EditedThumbnailStore.longSide)
         func command(_ state: EditState, longSide: Int) -> [String: JSONValue] {
             var params = state.params
             params["io.output_color_space"] = .string(space)
@@ -1849,6 +1913,8 @@ import UserNotifications
                 "command": .string("thumbnail"), "input": .string(photo.path), "source_generation": .number(Double(generation)),
                 "film": .string(state.film), "paper": .string(state.paper), "params": params,
                 "long_side": .number(Double(longSide)), "preview_path": .string(buffer.path),
+                // A whole decode the helper already holds serves this too.
+                "reduced_decode": .bool(true),
             ]
             if let crop = Self.cropJSON(state.crop) { command["crop"] = crop }
             return command
@@ -1856,10 +1922,14 @@ import UserNotifications
         var finalLook = look
         do {
             let matchable = raw || state.params["io.input_interpretation.mode"].string == "auto"
-            if state.brightnessMatch != nil, !saved.matchSolved, matchable {
-                // The decode first, which the match is solved on.
+            if state.brightnessMatch != nil, !matchSolved, matchable {
+                // The decode first, which the match is solved on: the whole
+                // photograph for a match that's stored, so opening it finds
+                // the same value; else the thumbnail's own reduced read.
                 guard await waitForThumbnailTurn() else { return false }
-                let (_, decoded) = try await engine.request(command(state, longSide: 16))
+                var decode = command(state, longSide: storeMatch == nil ? longSide : 16)
+                if storeMatch != nil { decode["reduced_decode"] = .bool(false) }
+                let (_, decoded) = try await engine.request(decode)
                 let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
                 guard await waitForThumbnailTurn() else { return false }
                 let reference = engine.directory.appendingPathComponent("library-brightness.png")
@@ -1868,11 +1938,11 @@ import UserNotifications
                                                                     request: matchSolveState(state), reference: reference),
                    let matched = Self.matching(state, ev: solved.exposure, limited: solved.limited, inputs: matchInputs(state)) {
                     state = matched
-                    finalLook = storeSolvedMatch(state, item: item, variant: variant.id, stored: stored, sidecar: sidecar, table: table) ?? look
+                    if let storeMatch { finalLook = storeMatch(state) ?? look }
                 }
             }
             guard await waitForThumbnailTurn() else { return false }
-            let (_, result) = try await engine.request(command(state, longSide: Int(EditedThumbnailStore.longSide)))
+            let (_, result) = try await engine.request(command(state, longSide: longSide))
             let (width, height) = (Int(result["width"].double), Int(result["height"].double))
             let display = result["display_color_space"].string
             let size = CGSize(width: result["source_width"].double, height: result["source_height"].double)

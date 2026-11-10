@@ -791,6 +791,91 @@ final class LibraryFormatTests: XCTestCase {
         await model.flushSidecars()
     }
 
+    /// Photographs without edits get thumbnails developed as they'd open:
+    /// the default film and paper, their match solved for the thumbnail
+    /// only, nothing written beside them. A new default film redevelops
+    /// them and leaves edited ones alone. With sidecars off every photograph
+    /// develops as new.
+    func testUneditedPhotographsAreDevelopedWithTheDefaults() async throws {
+        let dir = try folder(), thumbnails = try folder()
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: thumbnails) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}}}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.autoPlaceNewImages = true
+        let edited = EditedThumbnailStore(directory: thumbnails)
+        model.editedThumbnails = edited
+        func made(_ url: URL) -> Bool {
+            guard let file = model.library.items.first(where: { $0.url == url }), let look = model.thumbnailLook(for: url),
+                  let key = edited.key(for: file, look: look) else { return false }
+            return edited.contains(key)
+        }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 && model.previewCurrent && !model.brightnessMatchPending }
+        let unedited = try XCTUnwrap(model.uneditedLook)
+        XCTAssertNil(model.library.looks[c])
+        XCTAssertEqual(model.thumbnailLook(for: c), unedited)
+        XCTAssertEqual(model.thumbnailLook(for: b), model.library.looks[b])
+        XCTAssertNotEqual(model.thumbnailLook(for: b), unedited)
+        // The open, unedited photograph shows what a new one opens with.
+        XCTAssertEqual(EditorModel.uneditedLook(of: model.state), unedited)
+
+        try await waitUntil { made(b) && made(c) }
+        XCTAssertNotNil(model.editedThumbnail(for: c))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: c).path), "nothing written beside an unedited photograph")
+        let bVersion = model.thumbnailVersions[b]
+
+        // A new default film: c again, b as it was.
+        let film = try XCTUnwrap(model.films.first { $0.id != model.newPhotoFilm && !$0.positive }?.id)
+        model.setNewPhotoFilm(film)
+        XCTAssertNotEqual(model.uneditedLook, unedited)
+        XCTAssertEqual(model.film, film, "a, open and unedited, follows")
+        try await waitUntil { made(c) }
+        XCTAssertEqual(model.thumbnailVersions[b], bVersion)
+        XCTAssertTrue(made(b))
+
+        // Sidecars off: b develops as new too.
+        model.sidecarsEnabled = false
+        XCTAssertEqual(model.thumbnailLook(for: b), model.uneditedLook)
+        try await waitUntil { made(b) }
+        model.sidecarsEnabled = true
+        await model.flushSidecars()
+    }
+
+    /// The match an unedited photograph's thumbnail solves on the reduced
+    /// decode is the one the editor solves on the whole photograph, to within
+    /// what a re-solve ignores. Needs a camera RAW.
+    func testAMatchSolvedOnTheReducedDecodeIsTheWholeOnes() async throws {
+        guard let path = ProcessInfo.processInfo.environment["SPEKTRAFILM_RAW_TEST_FILE"] else {
+            throw XCTSkip("Set SPEKTRAFILM_RAW_TEST_FILE to a camera RAW")
+        }
+        let raw = URL(fileURLWithPath: path)
+        let model = try await model(store: SidecarStore())
+        model.autoPlaceNewImages = true
+        model.open(raw)
+        try await waitUntil { model.error != nil || model.previewCurrent && !model.brightnessMatchPending && !model.matchingBrightness }
+        XCTAssertNil(model.error)
+        let whole = try XCTUnwrap(model.state.brightnessMatch?.ev)
+        let engine = try EngineClient(paths: paths, quality: .utility)
+        defer { engine.stop() }
+        let buffer = engine.directory.appendingPathComponent("reduced.rgba"), reference = engine.directory.appendingPathComponent("reduced.png")
+        let request = model.matchSolveState(model.state)
+        let (_, decoded) = try await engine.request([
+            "command": .string("thumbnail"), "input": .string(raw.path), "source_generation": .number(1),
+            "film": .string(request.film), "paper": .string(request.paper), "params": request.params,
+            "long_side": .number(Double(EditedThumbnailStore.longSide)), "preview_path": .string(buffer.path), "reduced_decode": .bool(true),
+        ])
+        XCTAssertEqual(decoded["reduced_decode"], .bool(true))
+        let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
+        let reduced = try await EditorModel.solveBrightnessMatch(engine: engine, source: raw, generation: 1, size: size, raw: true,
+                                                                 request: request, reference: reference).exposure
+        print("match on the whole decode \(whole) EV, on the reduced one \(reduced) EV")
+        XCTAssertEqual(reduced, whole, accuracy: 0.05)
+    }
+
     func testBatchExportsEachPhotographWithItsOwnEdits() async throws {
         let dir = try folder(), out = try folder(), alone = try folder()
         defer { for url in [dir, out, alone] { try? FileManager.default.removeItem(at: url) } }

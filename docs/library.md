@@ -28,15 +28,22 @@ Photo › Advance After Rating moves on to the next photograph after each key.
 Thumbnails show the stars at the bottom, a flag or ✕ at the top left, and a
 sliders mark at the top right once a photograph has edits. Rejects are greyed.
 
-A photograph you've edited shows as developed: cropped, turned and inside its
-border, as in the edit view. Its thumbnail is made from the preview on screen
-when you leave it for another photograph or the grid, so it costs no extra
-render. Other edited photographs, such as after a paste or with edits from
-another Mac, are developed in the background one at a time, and Negs waits
-while you edit. A pasted Match camera brightness is solved then too, as
-opening the photograph would. Until a thumbnail is ready the camera's preview
-shows. Thumbnails are kept in `~/Library/Caches` (up to about 500 MB, the
-least recently used go first) and are safe to delete.
+Every photograph shows as developed, as Lightroom shows its own renders: an
+edited one with its edits (cropped, turned and inside its border, as in the edit
+view), one you haven't edited as opening it would, with the film and paper of
+Settings › New photographs. The open photograph's thumbnail is made from the
+preview on screen when you leave it for another photograph or the grid, so it
+costs no extra render. The rest of the folder is developed in the background one
+at a time, those on screen first, and Negs waits while you edit. A pasted Match
+camera brightness is solved then too, from the whole photograph, and stored, as
+opening it would. An unedited photograph's match is solved on the small read the
+thumbnail needs and stored nowhere. Thumbnails read only as much of a RAW as they
+need (about 240 ms each for a 24 MP NEF on an M1 Pro), except to solve a match
+that's stored. A new default film or paper, or turning the match for new
+photographs on or off, develops the unedited photographs again; edited ones stay.
+Until a thumbnail is ready the camera's preview shows. Thumbnails are kept in
+`~/Library/Caches` (up to about 500 MB, the least recently used go first) and are
+safe to delete.
 
 ## Edits per photograph
 
