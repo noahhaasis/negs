@@ -256,6 +256,14 @@ import UserNotifications
     /// shown only if the match leaves the render as it is, so the canvas
     /// goes from the previous frame straight to the matched one.
     @ObservationIgnored private var heldPreview: (revision: Int, generation: Int, show: () -> Void)?
+    /// The open photograph's camera preview for its brightness match, read
+    /// once while the helper first decodes it: the colour space the RAW
+    /// declares for it (nil until asked; null when it declares none) and the
+    /// preview itself. The file is the same for the whole generation.
+    @ObservationIgnored private var matchReference: (generation: Int, declared: JSONValue?, prepared: Task<CameraBrightnessReference.Prepared, Never>?)?
+    /// The edit whose decode for a brightness match failed: it renders
+    /// without the match, which then reports the error as a render would.
+    @ObservationIgnored private var matchDecodeFailed: FrameID?
     /// A discrete edit renders a canvas-size frame first, then the export-size
     /// one (`RenderStep.quick`). This is the edit whose quick frame is done
     /// (shown, held for the brightness match, or failed): its next render
@@ -2982,6 +2990,13 @@ import UserNotifications
         // which at exposure 0 is no new edit): the old exposure never renders
         // at export size. The solve's end settles it (`settleQuickFrame`).
         if quickStep == frame, !previewCurrent, !interacting, matchTask != nil || heldPreview != nil { return }
+        // A pending brightness match is solved first, on a decode alone, so
+        // the old exposure is never rendered (ticket 39). The solve's end
+        // renders the matched edit (`renderAfterMatch`).
+        if !interacting, !cropping, brightnessMatchPending, matchDecodeFailed != frame {
+            reconcileBrightnessMatch()
+            if matchTask != nil { return }
+        }
         let buffer = engine.directory.appendingPathComponent("preview.rgba")
         var command: [String: JSONValue] = [
             "command": .string("render"), "input": .string(source.path),
@@ -3013,8 +3028,8 @@ import UserNotifications
             }
             if step.isDrag, !interacting, !closing { scheduleRender() }
             if revision != currentRevision, !closing { scheduleRender() }
-            // The settled preview of the current settings is shown: the helper
-            // holds their decode, so a stale brightness match can be solved.
+            // A match that went stale while this rendered (a drag's release,
+            // matching turned on) is solved now, before the next render.
             reconcileBrightnessMatch()
             settleQuickFrame()
         }
@@ -3082,8 +3097,9 @@ import UserNotifications
             // A settled or quick frame with a stale match would show the old
             // exposure for as long as the solve and the next render take: keep
             // the previous frame and the activity badge up until the match is
-            // in. The match can run once the quick frame is held (the helper
-            // then holds the decode), before the export-size render.
+            // in. A stale match is solved before rendering, so this is only a
+            // match that went stale while the frame rendered (turned on at
+            // exposure 0, which is no new edit).
             if !step.isDrag, revision == currentRevision, !interacting, !cropping, brightnessMatchPending {
                 heldPreview = (currentRevision, generation, show)
             } else {
@@ -3420,21 +3436,38 @@ import UserNotifications
         matchTask?.cancel(); matchTask = nil; matchRequest = nil; matchingBrightness = false
     }
 
-    /// Solves the match when it's on and stale, once the preview of the
-    /// current settings is shown (the helper then holds their decode). One
-    /// solve at a time; its completion looks again, so edits made meanwhile
-    /// coalesce. A result is applied only if the inputs it was solved for
-    /// are still current, without an undo step of its own: Undo restores a
-    /// state together with the match solved for it, and a restored state
-    /// whose match is stale is solved again.
+    /// Solves the match when it's on and stale, before the edit renders
+    /// (ticket 39): a decode alone first, which the helper keeps for the
+    /// render (nearly free when it holds the photograph already), then the
+    /// solve on it. One solve at a time; its completion looks again, so
+    /// edits made meanwhile coalesce, then renders. A result is applied only
+    /// if the inputs it was solved for are still current, without an undo
+    /// step of its own: Undo restores a state together with the match solved
+    /// for it, and a restored state whose match is stale is solved again.
     func reconcileBrightnessMatch() {
         // Cheap checks first: this runs on every edit, drag frames included.
-        guard matchTask == nil, !interacting, previewCurrent || heldPreview != nil || showsQuickFrame, !rendering, ready, !cropping, !closing,
-              let engine, let source, brightnessMatchPending else { return }
+        guard matchTask == nil, !interacting, !rendering, ready, !cropping, !closing,
+              let engine, let source, brightnessMatchPending,
+              matchDecodeFailed != FrameID(revision: revision, generation: sourceGeneration) else { return }
         let inputs = matchInputs(state)
-        let id = UUID(), generation = sourceGeneration, size = sourceSize, raw = isRaw
+        let id = UUID(), generation = sourceGeneration, frame = FrameID(revision: revision, generation: sourceGeneration)
         let request = matchSolveState(renderState)
         let reference = engine.directory.appendingPathComponent("camera-brightness-\(id.uuidString).png")
+        // The camera preview is read once a photograph, while the helper
+        // decodes; a RAW by its extension (the decode says for sure).
+        if matchReference?.generation != generation {
+            let raw = Self.rawExtensions.contains(source.pathExtension.lowercased())
+            matchReference = (generation, nil, raw ? Task.detached(priority: .userInitiated) { CameraBrightnessReference.Prepared(from: source) } : nil)
+        }
+        let askDeclared = matchReference?.declared == nil && matchReference?.prepared != nil
+        let prepared = matchReference?.prepared
+        var decode: [String: JSONValue] = [
+            "command": .string("thumbnail"), "input": .string(source.path), "source_generation": .number(Double(generation)),
+            "film": .string(request.film), "paper": .string(request.paper), "params": request.params,
+            "long_side": .number(16), "preview_path": .string(engine.directory.appendingPathComponent("match-decode.rgba").path),
+            "reduced_decode": .bool(false), "decode_only": .bool(true)
+        ]
+        if askDeclared { decode["preview_colour_space"] = .bool(true) }
         matchRequest = id; matchingBrightness = true
         matchTask = Task { [weak self] in
             defer {
@@ -3442,14 +3475,34 @@ import UserNotifications
                 if let self, self.matchRequest == id {
                     self.matchTask = nil; self.matchRequest = nil; self.matchingBrightness = false
                     self.reconcileBrightnessMatch()
-                    if self.matchTask == nil { self.showHeldPreview(); self.settleQuickFrame() }
+                    if self.matchTask == nil { self.showHeldPreview(); self.settleQuickFrame(); self.renderAfterMatch() }
                 }
             }
+            @MainActor func stillWanted() throws {
+                guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { throw CancellationError() }
+            }
             do {
-                let solved = try await Self.solveBrightnessMatch(engine: engine, source: source, generation: generation, size: size, raw: raw,
-                                                                 request: request, reference: reference) {
-                    guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { throw CancellationError() }
+                // The whole photograph, as a render decodes it, with the
+                // pipeline the solve and the render use.
+                let decoded: JSONValue
+                do {
+                    decoded = try await engine.request(decode).1
+                } catch {
+                    try stillWanted()
+                    // The render reports why, as it would without the match.
+                    self?.matchDecodeFailed = frame
+                    return
                 }
+                try stillWanted()
+                let raw = decoded["raw"].bool
+                let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
+                if askDeclared, let self, self.matchReference?.generation == generation {
+                    self.matchReference?.declared = decoded["preview_colour_space"]
+                }
+                let declared: JSONValue? = raw ? (self?.matchReference).flatMap { $0.generation == generation ? $0.declared : nil } : nil
+                let solved = try await Self.solveBrightnessMatch(engine: engine, source: source, generation: generation, size: size, raw: raw,
+                                                                 request: request, reference: reference, declared: declared,
+                                                                 prepared: raw ? prepared : nil, stillWanted: stillWanted)
                 guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
                 self.applyBrightnessMatch(solved.exposure, limited: solved.limited, inputs: inputs)
             } catch is CancellationError {
@@ -3532,8 +3585,14 @@ import UserNotifications
     /// at canvas size (a slider's or a discrete edit's quick frame). It
     /// changes only with `image`, which the canvas observes.
     var showsSettledFrame: Bool { showingCachedPreview || (!showingInteractiveFrame && quickFrame == nil) }
-    /// The quick frame of the current edit is shown: the helper holds its decode.
-    private var showsQuickFrame: Bool { quickFrame == FrameID(revision: revision, generation: sourceGeneration) }
+    /// The solve is over and the edit it waited for is still unrendered:
+    /// a match that moved the exposure rendered already (a new edit), so
+    /// this is one it left as it was, or a failed one.
+    private func renderAfterMatch() {
+        guard ready, source != nil, !closing, !previewCurrent, !renderFailed, !rendering, pendingRender == nil,
+              !interacting, heldPreview == nil else { return }
+        scheduleRender()
+    }
 
     /// Moves the total with the match, keeping the user's exposure above it.
     /// A change under 0.05 EV keeps the values and only marks them current.

@@ -322,23 +322,61 @@ final class QuickFrameStepTests: XCTestCase {
         model.choosePaper("kodak_2302")
         try await settled(model)
         let log = steps(model, after: start)
-        XCTAssertEqual(log.first, .quick(0.25), "\(log)")
-        XCTAssertEqual(log.filter { $0 == .settled }.count, 1, "\(log)")
-        XCTAssertEqual(log.last, .settled)
+        // Ticket 39: the solve comes first, so the quick frame too is of the
+        // matched exposure, and none is rendered and dropped.
+        XCTAssertEqual(log, [.quick(0.25), .settled])
         XCTAssertEqual(model.state.brightnessMatch?.inputs, model.matchInputs(model.state))
     }
 
-    /// Turning the match off while a frame waits for it shows that frame
-    /// once the solve in flight ends, and settles.
-    func testTurningTheMatchOffReleasesAHeldFrame() async throws {
+    /// Turning the match off while the edit waits for its solve (ticket 39:
+    /// nothing renders before it) renders the edit once the solve in flight
+    /// ends, unmatched, and settles.
+    func testTurningTheMatchOffWhileItSolvesRendersTheEdit() async throws {
         let model = try await openModel(scale: 0.25, match: true)
         guard model.brightnessMatchActive else { throw XCTSkip("The test photo can't be matched") }
+        let start = model.renderLog.count, exposure = model.value("prep.exposure_ev")
         model.choosePaper("kodak_2302")
-        try await waitUntil(timeout: 20) { model.holdingFrameForMatch || model.previewCurrent }
-        guard model.holdingFrameForMatch else { throw XCTSkip("The match finished before the held frame was seen") }
+        try await waitUntil(timeout: 20) { model.matchingBrightness || model.previewCurrent }
+        guard model.matchingBrightness else { throw XCTSkip("The match finished before it was seen") }
+        XCTAssertEqual(steps(model, after: start), [], "Nothing renders before the solve")
         model.setMatchesBrightness(false)
         try await waitUntil(timeout: 30) { model.previewCurrent }
         XCTAssertTrue(model.previewCurrent)
+        XCTAssertEqual(model.value("prep.exposure_ev"), exposure)
+        XCTAssertEqual(steps(model, after: start).last, .settled)
+        XCTAssertFalse(model.holdingFrameForMatch)
+    }
+
+    /// Ticket 39: a new photograph's pending match is solved on a decode
+    /// alone, before anything renders: every render is of the matched
+    /// exposure, and one is at export size.
+    func testANewPhotographsMatchIsSolvedBeforeItsFirstRender() async throws {
+        let model = EditorModel()
+        models.append(model)
+        let defaults = UserDefaults.standard
+        let saved = ["autoPlaceNewImages"].map { ($0, defaults.object(forKey: $0)) }
+        restoreDefaults.append { for (key, value) in saved { defaults.set(value, forKey: key) } }
+        model.autoPlaceNewImages = true
+        model.canvasScale.fixed = 0.25
+        // Each render call: whether the match was pending, and the renders so far.
+        var calls: [(pending: Bool, rendered: Int)] = []
+        model.willRender = { [unowned model] in calls.append((model.brightnessMatchPending, model.renderLog.count)) }
+        await model.start(paths: paths(), restoration: Task { nil })
+        model.open(try testPhoto())
+        try await settled(model)
+        guard model.brightnessMatchActive else { throw XCTSkip("The test photo can't be matched: \(model.brightnessMatchNote ?? "")") }
+        XCTAssertEqual(model.state.brightnessMatch?.inputs, model.matchInputs(model.state))
+        XCTAssertNotNil(model.state.brightnessMatch?.ev)
+        XCTAssertEqual(model.renderLog.filter { $0 == .settled }.count, 1, "\(model.renderLog)")
+        XCTAssertEqual(model.renderLog.last, .settled)
+        // A render call that found the match pending started the solve
+        // instead: no render went to the helper before the next call.
+        let after = calls.dropFirst().map(\.rendered) + [model.renderLog.count]
+        XCTAssertTrue(calls.contains { $0.pending }, "\(calls)")
+        for (call, next) in zip(calls, after) where call.pending {
+            XCTAssertEqual(next, call.rendered, "\(calls) \(model.renderLog)")
+        }
+        XCTAssertFalse(model.holdingFrameForMatch)
     }
 
     /// Matching turned on while a quick frame shows, before its settled
