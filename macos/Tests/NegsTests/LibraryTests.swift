@@ -389,11 +389,75 @@ final class LibraryFormatTests: XCTestCase {
         model.library.filter = LibraryFilter(rating: .unrated)
         model.setRating(2)
         XCTAssertEqual(model.source, c, "b is rated, so the unrated strip skips it")
-        XCTAssertEqual(model.library.shown(current: c).map(\.name), ["c.png"], "a, rated now, is gone once left")
+        XCTAssertEqual(model.library.shown(current: c).map(\.name), ["c.png"], "a, rated now, is gone")
         model.step(by: -1)
         XCTAssertEqual(model.source, c)
         await model.flushSidecars()
         XCTAssertEqual(try store.read(photo: a)?.summary.rating, 2)
+    }
+
+    /// A flag or rating that leaves a photograph out of the filter takes it
+    /// out of the strip and the grid at once, even the current one: the
+    /// next one shown becomes current (in the edit view it opens), or the
+    /// one before at the end. ← → step only what the filter shows.
+    func testRelabellingOutOfTheFilterMovesOn() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var photos: [URL] = []
+        for name in ["a", "b", "c", "d", "e"] {
+            let photo = try fixture(in: dir, name + ".png")
+            if name != "c" { try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "1", "flag": "pick"}]}"#, sidecarOf: photo) }
+            photos.append(photo)
+        }
+        let (a, b, c, d, e) = (photos[0], photos[1], photos[2], photos[3], photos[4])
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 5 }
+        model.advanceAfterRating = false
+        model.library.filter = LibraryFilter(flags: [.pick])
+
+        // The edit view: ← → pass over c, which isn't a pick.
+        model.move(by: 1, extending: false)
+        XCTAssertEqual(model.source, b)
+        model.move(by: 1, extending: false)
+        XCTAssertEqual(model.source, d, "c isn't a pick")
+        model.move(by: -1, extending: false)
+        XCTAssertEqual(model.source, b)
+        // Unflagged, b goes and d opens.
+        model.setFlag(nil)
+        XCTAssertEqual(model.source, d)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [a, d, e])
+        // At the end, the one before.
+        model.move(by: 1, extending: false)
+        model.setFlag(.reject)
+        XCTAssertEqual(model.source, d)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [a, d])
+        // A flag the filter still shows changes nothing.
+        model.setRating(3)
+        XCTAssertEqual(model.source, d)
+
+        // The grid: the current photograph moves on.
+        model.showGrid()
+        model.click(a)
+        model.setFlag(nil)
+        XCTAssertEqual(model.selection.current, d)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [d])
+        // Several at once; with nothing else left the current one stays.
+        model.library.filter = LibraryFilter(flags: [.unflagged])
+        model.click(a)
+        model.click(c, shift: true)
+        XCTAssertEqual(model.ratingTargets, [a, b, c])
+        model.setFlag(.pick, targets: [b])
+        XCTAssertEqual(model.selection.current, a, "the current one still shows")
+        XCTAssertEqual(model.selection.selected, [a, c], "b left the selection with the grid")
+        XCTAssertEqual(model.shownPhotos.map(\.url), [a, c])
+        model.setFlag(.reject)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [a])
+        XCTAssertEqual(model.selection.current, a)
+        await model.flushSidecars()
     }
 
     /// In the grid clicks and keys move the current photograph without
@@ -463,13 +527,13 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try store.read(photo: c)?.summary.rating, 4, "a new file")
         XCTAssertNil(try store.read(photo: a), "the open photograph wasn't selected")
 
-        // Rated out of the filter, they stay until the selection moves.
+        // Rated out of the filter, they go at once; with nothing else
+        // left, the current one stays.
         model.library.filter = LibraryFilter(rating: .atLeast(4))
         XCTAssertEqual(model.selection.selected, [b, c])
         model.setRating(0)
-        XCTAssertEqual(model.shownPhotos.map(\.url), [b, c])
-        model.click(b)
         XCTAssertEqual(model.shownPhotos.map(\.url), [b])
+        XCTAssertEqual(model.selection.selected, [b])
         model.library.filter = LibraryFilter()
 
         // Arrows: two to a row here (as the sheet lays them out); up and

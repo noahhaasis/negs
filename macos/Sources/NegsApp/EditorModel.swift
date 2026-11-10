@@ -1600,6 +1600,7 @@ import UserNotifications
     private func changeLibrary(many: String? = nil, targets: [URL]? = nil, _ change: (inout LibrarySummary) -> Void, note: (LibrarySummary) -> String) {
         let targets = targets ?? ratingTargets
         guard !targets.isEmpty, !closing else { return }
+        let order = shownPhotos.map(\.url)
         var unsaved: String?, last = LibrarySummary(), queued = false
         for photo in targets {
             let before = library.summary(for: photo)
@@ -1617,10 +1618,21 @@ import UserNotifications
                 for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
             }
         }
-        // They stay shown until the selection moves, whatever the filter.
-        selection.keep(targets)
         let text = targets.count == 1 ? note(last) : many ?? note(last)
         libraryNote = LibraryNote(text: text, detail: unsaved, count: targets.count, serial: (libraryNote?.serial ?? 0) + 1)
+        // Those the filter now leaves out go from the strip and the grid at
+        // once, the current photograph too: the next one shown becomes
+        // current (in the edit view it opens), or the one before at the end.
+        // With nothing else left it stays, as the current one always does.
+        let dropped = library.filter.active ? Set(targets.filter { !library.filter.includes(library.summary(for: $0)) }) : []
+        if !dropped.isEmpty {
+            let current = mode == .photo ? sourceItem : selection.current
+            if let current, dropped.contains(current), let next = Self.next(after: current, in: order, skipping: dropped) {
+                if mode == .photo { open(next) } else { selection.select(next) }
+                return
+            }
+            selection.prune(to: Set(shownPhotos.map(\.url)))
+        }
         guard advanceAfterRating else { return }
         if mode == .photo { step(by: 1) } else if targets.count == 1 { move(by: 1, extending: false) }
     }
@@ -1666,8 +1678,8 @@ import UserNotifications
     // MARK: Selection and grid
 
     /// The photographs the strip and grid show: those the filter lets
-    /// through, the current one, and those just rated.
-    var shownPhotos: [PhotoFile] { library.shown(keeping: selection.visible) }
+    /// through, and the current one.
+    var shownPhotos: [PhotoFile] { library.shown(current: selection.current) }
 
     /// A click on a photograph in the strip or the grid. ⌘ adds or removes
     /// it and ⇧ selects a range, changing only the selection; a plain click

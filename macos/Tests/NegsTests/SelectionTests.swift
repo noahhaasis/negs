@@ -55,16 +55,12 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(selection.selected, [photos[0], photos[1], photos[4]])
     }
 
-    /// Photographs a rating changed stay shown until the selection moves;
-    /// a filter change drops the hidden ones from the selection.
-    func testKeptAndPruned() {
+    /// A filter change drops the hidden ones from the selection.
+    func testPruned() {
         var selection = LibrarySelection()
         selection.select(photos[0])
         selection.extend(to: photos[2], in: photos)
-        selection.keep([photos[1], photos[2]])
-        XCTAssertEqual(selection.visible, Set([0, 1, 2].map { photos[$0] }))
         selection.toggle(photos[5])
-        XCTAssertEqual(selection.visible, [photos[0]], "kept until the selection changes")
         selection.prune(to: [photos[2]])
         XCTAssertEqual(selection.selected, [photos[0], photos[2]], "the current photograph is never pruned")
         XCTAssertEqual(selection.current, photos[0])
