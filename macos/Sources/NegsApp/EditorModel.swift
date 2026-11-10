@@ -1838,13 +1838,16 @@ import UserNotifications
         // Its scan reads what it was started with: once more after, for what changed.
         guard thumbnailTask == nil else { thumbnailsPumpAgain = true; return }
         if thumbnailStamp == nil { return readThumbnailStamp() }
-        let store = editedThumbnails, lookup = sidecarLookup
-        // Copies (the dictionaries copy on write): a folder of thousands is
-        // scanned for every thumbnail, which must stay off the main actor.
-        let items = library.items, open = sourceItem, onScreen = thumbnailsOnScreen, looks = thumbnailLooks
-        let failures = thumbnailFailures, checked = thumbnailsChecked
-        thumbnailsPumpAgain = false
         thumbnailTask = Task { [weak self] in
+            // None is developed before then, so the folder isn't scanned
+            // while the open photograph loads or is edited.
+            guard let self, await self.waitForThumbnailTurn() else { return }
+            let store = self.editedThumbnails, lookup = self.sidecarLookup
+            // Copies (the dictionaries copy on write): a folder of thousands
+            // is scanned for every thumbnail, which must stay off the main actor.
+            let items = self.library.items, open = self.sourceItem, onScreen = self.thumbnailsOnScreen, looks = self.thumbnailLooks
+            let failures = self.thumbnailFailures, checked = self.thumbnailsChecked
+            self.thumbnailsPumpAgain = false
             // Each item but the open one, whose thumbnail comes from its
             // preview, on screen first: the first without a thumbnail on
             // disk. Those with one are noted.
@@ -1862,7 +1865,7 @@ import UserNotifications
                 }
                 return (present, nil)
             }.value
-            guard let self, !self.closing else { return }
+            guard !self.closing else { return }
             for (item, look) in found.present { self.thumbnailsChecked[item] = (look, true) }
             if let (file, look) = found.next {
                 self.thumbnailIdle?.cancel(); self.thumbnailIdle = nil
