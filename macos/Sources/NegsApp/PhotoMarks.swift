@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A thumbnail's marks in the strip and the grid (§4.4, round 7): stars at
-/// the bottom left, a reject's hand-drawn X from corner to corner
+/// A thumbnail's marks in the strip and the grid (§4.4, round 7): stars drawn
+/// by hand at the bottom left (`HandStar`, round 22), a reject's hand-drawn X from corner to corner
 /// (`CrossMark`), and the yellow dot of an edited photograph at the top
 /// right. Each is its own shape, never only a colour, in cream with a dark
 /// halo so it reads on a bright sky. Unrated, unflagged, unedited
@@ -10,8 +10,8 @@ import SwiftUI
 /// above the thumbnails (`BoxInk`).
 struct PhotoMarks: View {
     let summary: LibrarySummary
-    /// The file's name: it seeds the reject's cross, so each one is drawn
-    /// a little differently, and the same way every time.
+    /// The file's name: it seeds the reject's cross and the stars, so
+    /// each is drawn a little differently, and the same way every time.
     let name: String
 
     var body: some View {
@@ -20,13 +20,11 @@ struct PhotoMarks: View {
                 CrossMark(name: name)
             }
             if summary.rating > 0 {
-                HStack(spacing: 1.5) {
-                    ForEach(0..<min(summary.rating, 5), id: \.self) { _ in
-                        StarShape()
+                HStack(spacing: HandStar.gap) {
+                    ForEach(0..<min(summary.rating, 5), id: \.self) { index in
+                        HandStarShape(name: name, index: index)
                             .fill(Theme.paper)
-                            .overlay(StarShape().stroke(Theme.paper, style: StrokeStyle(lineWidth: 1.4 * 11 / 20, lineJoin: .round)))
-                            .padding(11 * 2.6 / 20)
-                            .frame(width: 11, height: 11)
+                            .frame(width: HandStar.size, height: HandStar.size)
                     }
                 }
                 .padding([.leading, .bottom], 10)
