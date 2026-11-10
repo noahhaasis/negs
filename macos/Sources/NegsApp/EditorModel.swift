@@ -782,13 +782,16 @@ import UserNotifications
         if tile.shown == wanted { trialImage = image }
     }
 
-    /// ← →: the previous or next stock, in the tray's order (the
-    /// favourites' copies aside), among the matches while searching.
+    /// ← →: the previous or next stock, in the tray's order, through the
+    /// favourites and on into the groups; among the matches while searching.
     func stepTray(by offset: Int) {
         guard let tray else { return }
-        let order = StockTrayRules.order(StockGroup.matching(tray.query, in: tray.paper ? paperGroups : filmGroups))
-        guard let id = StockTrayRules.step(from: tray.paper ? paper : film, by: offset, in: order) else { return }
-        tryStock(id)
+        let sections = StockTrayRules.sections(tray.paper ? paperGroups : filmGroups,
+                                               favorites: previews.favorites(in: tray.paper ? papers : films, paper: tray.paper), query: tray.query)
+        guard let place = StockTrayRules.step(from: tray.paper ? paper : film, inFavourites: tray.inFavourites, by: offset,
+                                              in: StockTrayRules.places(sections)) else { return }
+        tray.inFavourites = place.favourite
+        tryStock(place.stock)
     }
 
     /// Return, Done or a click outside keeps the stock being tried, as one
