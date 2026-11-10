@@ -13,8 +13,9 @@ struct GridSheet: View {
     let model: EditorModel
 
     var body: some View {
-        // Built only while it shows, so the photograph view pays nothing for it.
-        if model.mode == .grid {
+        // Built only while it shows, so the photograph view pays nothing for
+        // it; it stays while it folds back into the strip.
+        if model.mode == .grid || model.sheetFolding {
             VStack(spacing: 0) {
                 SheetSentence(model: model)
                 SheetGrid(model: model)
@@ -303,12 +304,15 @@ private struct SheetGrid: View {
             ForEach(row.range.map { (index: $0, file: shown[$0]) }, id: \.file.url) { cell in
                 let url = cell.file.url
                 SheetCell(file: cell.file, size: layout.frames[cell.index].size, thumbnail: size,
+                          waiting: model.sheetWaiting.contains(url),
                           ringed: url == selection.current || selection.selected.contains(url),
                           current: url == selection.current, summary: library.summary(for: url),
                           readOnly: library.readOnly, edited: model.editedThumbnail(for: url)) { visible in
                     model.thumbnailShown(cell.file, visible)
                 } loaded: { image in
                     model.aspects.note(url, image: image)
+                } placed: { place in
+                    model.places.sheet[url] = place
                 } click: {
                     focused = true
                     let modifiers = NSEvent.modifierFlags
@@ -352,6 +356,8 @@ private struct SheetCell: View {
     let file: PhotoFile
     let size: CGSize
     let thumbnail: PhotoThumbnails.Size
+    /// Hidden while the grid opens or folds (`SheetFlight`).
+    let waiting: Bool
     let ringed: Bool
     let current: Bool
     let summary: LibrarySummary
@@ -360,6 +366,7 @@ private struct SheetCell: View {
     /// On and off screen: what's shown is developed first.
     let shown: (Bool) -> Void
     let loaded: (CGImage) -> Void
+    let placed: (ThumbnailPlaces.Place?) -> Void
     let click: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
@@ -388,6 +395,9 @@ private struct SheetCell: View {
                     .allowsHitTesting(false)
             }
         }
+        .modifier(PlaceReport(image: image, placed: placed))
+        .opacity(waiting ? 0 : 1)
+        .offset(y: waiting ? 14 : 0)
         .contentShape(Rectangle())
         .onTapGesture(perform: click)
         .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))

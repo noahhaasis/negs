@@ -37,8 +37,12 @@ import SwiftUI
     private var menuTracking: NSObjectProtocol?
     /// The split view's container, which the grid's sheet covers.
     private let root: NSView
-    /// The grid's sheet, made the first time the grid opens (§4.6).
-    private var sheet: NSHostingView<GridSheet>?
+    /// The canvas column's hosting view.
+    private let canvasView: NSView
+    /// The grid's sheet, its container and its flight, made the first time
+    /// the grid opens (§4.6).
+    private var sheet: (host: NSHostingView<GridSheet>, container: SheetContainer, flight: SheetFlight)?
+    private var sheetShown = false
     private lazy var filterMenu = FilterMenu(model: model)
     /// The narrowest canvas, and the narrowest the content can be with the
     /// inspector shown beside it. The split view can't keep both columns at
@@ -86,6 +90,7 @@ import SwiftUI
         split.addSplitViewItem(inspector)
         split.splitView.autosaveName = "editor"
         root = split.view
+        canvasView = canvas.view
         canvasMinimum = canvasItem.minimumThickness
         columnsMinimum = canvasItem.minimumThickness + inspector.minimumThickness + split.splitView.dividerThickness
 
@@ -335,24 +340,38 @@ import SwiftUI
     }
 
     /// The sheet over the whole window below the title bar, with the
-    /// canvas and the inspector under it. Keys go to it while it shows.
-    private func showSheet(_ shown: Bool) {
-        guard shown || sheet != nil else { return }
-        let sheet = self.sheet ?? {
-            let sheet = NSHostingView(rootView: GridSheet(model: model))
-            sheet.sizingOptions = []
-            sheet.frame = root.bounds
-            sheet.autoresizingMask = [.width, .height]
-            root.addSubview(sheet, positioned: .above, relativeTo: nil)
-            self.sheet = sheet
-            return sheet
-        }()
-        guard sheet.isHidden == shown else { return }
-        sheet.isHidden = !shown
-        if shown { window?.makeFirstResponder(sheet) }
-        else if window?.firstResponder === sheet || (window?.firstResponder as? NSView)?.isDescendant(of: sheet) == true {
-            window?.makeFirstResponder(nil)
+    /// canvas and the inspector under it; it grows out of the strip and
+    /// folds back into it (`SheetFlight`). Keys go to it while it shows.
+    private func showSheet(_ grid: Bool) {
+        guard grid != sheetShown else { return }
+        sheetShown = grid
+        guard let sheet = grid ? makeSheet() : self.sheet else { model.sheetFolding = false; return }
+        if grid {
+            sheet.flight.open()
+            window?.makeFirstResponder(sheet.host)
+        } else {
+            if let responder = window?.firstResponder as? NSView, responder.isDescendant(of: sheet.container) {
+                window?.makeFirstResponder(nil)
+            }
+            sheet.flight.fold()
         }
+    }
+
+    private func makeSheet() -> (host: NSHostingView<GridSheet>, container: SheetContainer, flight: SheetFlight) {
+        if let sheet { return sheet }
+        let container = SheetContainer(frame: root.bounds)
+        container.autoresizingMask = [.width, .height]
+        container.wantsLayer = true
+        container.isHidden = true
+        let host = NSHostingView(rootView: GridSheet(model: model))
+        host.sizingOptions = []
+        host.frame = container.bounds
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        root.addSubview(container, positioned: .above, relativeTo: nil)
+        let flight = SheetFlight(model: model, root: root, canvas: canvasView, container: container, sheet: host)
+        sheet = (host, container, flight)
+        return (host, container, flight)
     }
 
     /// Sets the window's minimum content size and grows the window to it when

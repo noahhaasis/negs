@@ -189,6 +189,8 @@ struct PhotoBrowser: View {
                         model.thumbnailShown(file, visible)
                     } loaded: { image in
                         aspects.note(file.url, image: image)
+                    } placed: { place in
+                        model.places.strip[file.url] = place
                     } open: {
                         let modifiers = NSEvent.modifierFlags
                         focused = true
@@ -251,6 +253,8 @@ private struct StripFrame: View {
     /// On and off screen: what's shown is developed first.
     let shown: (Bool) -> Void
     let loaded: (CGImage) -> Void
+    /// Where its picture is drawn, for the grid's flight; nil once gone.
+    let placed: (ThumbnailPlaces.Place?) -> Void
     let open: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
@@ -262,6 +266,7 @@ private struct StripFrame: View {
             VStack(spacing: 0) {
                 StripPicture(image: image, width: width, current: current, selected: selected, rejected: summary.flag == .reject)
                     .overlay { PhotoMarks(summary: summary) }
+                    .modifier(PlaceReport(image: image, placed: placed))
                 ZStack(alignment: .top) {
                     if current {
                         PencilStroke().pencil().frame(height: Theme.pencilHeight).padding(.top, 1)

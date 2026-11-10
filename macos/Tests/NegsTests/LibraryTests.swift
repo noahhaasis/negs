@@ -499,9 +499,12 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.ratingTargets, [c])
 
         // Leaving opens the current photograph and keeps the selection.
+        XCTAssertFalse(model.sheetFolding)
         model.click(b, command: true)
         model.editCurrent()
         XCTAssertEqual(model.mode, .photo)
+        XCTAssertTrue(model.sheetFolding, "the sheet stays drawn until the window has folded it into the strip")
+        model.sheetFolding = false
         XCTAssertEqual(model.source, c)
         XCTAssertEqual(model.selection.selected, [b, c])
         // In the edit view a rating is the open photograph's alone.

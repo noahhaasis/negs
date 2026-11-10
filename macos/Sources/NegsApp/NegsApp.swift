@@ -225,8 +225,8 @@ struct EditorCanvas: View {
                 StockTray(model: model, visit: tray)
             } else {
                 VStack(spacing: 0) {
-                    // The grid takes the strip's place; it comes back as it was.
-                    if model.filmstripVisible, model.source != nil, !grid {
+                    // It stays under the grid's sheet, which folds back into it.
+                    if model.filmstripVisible, model.source != nil {
                         PhotoBrowser(model: model)
                     }
                     if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {

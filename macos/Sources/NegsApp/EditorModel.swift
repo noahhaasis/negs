@@ -163,7 +163,19 @@ import UserNotifications
     /// The brief note over the canvas after a rating or flag key.
     private(set) var libraryNote: LibraryNote?
     /// The edit view or the grid. Every launch starts in the edit view.
-    private(set) var mode = LibraryMode.photo
+    private(set) var mode = LibraryMode.photo {
+        // The sheet stays drawn while it folds back into the strip; the
+        // window clears this once it has (`SheetFlight`).
+        didSet { if oldValue == .grid, mode == .photo { sheetFolding = true } }
+    }
+    /// The grid is folding back into the strip (§4.6).
+    var sheetFolding = false
+    /// Grid thumbnails waiting while the grid opens or folds: a flyer is
+    /// carrying them, or they fade in after.
+    var sheetWaiting: Set<URL> = []
+    /// Where the strip's frames and the grid's thumbnails are drawn, for
+    /// the flight between them.
+    @ObservationIgnored let places = ThumbnailPlaces()
     /// Each photograph's shape, for the strip's frames and the grid's rows.
     @ObservationIgnored let aspects = PhotoAspects()
     /// The selected photographs and the current one, which in the edit view
