@@ -169,6 +169,11 @@ struct PhotoBrowser: View {
     /// A click takes the keys, so ← and → move on from there.
     @FocusState private var focused: Bool
 
+    /// The pencil under the current frame: as heavy as the grid's yellow
+    /// box, so it still reads under a pick's box (round 21). It sits 3 pt
+    /// into the rebate, clear of the box's bottom side.
+    static let pencilWidth: CGFloat = 4
+
     /// The picture's height: the strip less its top padding and rebate.
     static let pictureHeight = Theme.Size.strip - Theme.Size.stripTopPadding - Theme.Size.stripRebate
 
@@ -288,7 +293,7 @@ private struct StripFrame: View {
                     .modifier(PlaceReport(image: image, placed: placed))
                 ZStack(alignment: .top) {
                     if current {
-                        PencilStroke().pencil().frame(height: Theme.pencilHeight).padding(.top, 1)
+                        PencilStroke().pencil(width: PhotoBrowser.pencilWidth).frame(height: Theme.pencilHeight).padding(.top, 3)
                     } else if selected {
                         Rectangle().fill(Theme.label).frame(height: 1.5).padding(.top, 3)
                     }
