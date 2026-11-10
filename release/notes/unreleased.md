@@ -29,3 +29,5 @@
   in ink.
 - **VoiceOver.** The marks, modules, crop controls and alerts are labelled,
   and the grid reads in its own order.
+- **Low Power Mode.** The grid develops only the thumbnails on screen, one
+  at a time, and the rest of the folder once Low Power Mode is off.

@@ -893,6 +893,37 @@ final class LibraryFormatTests: XCTestCase {
         await model.flushSidecars()
     }
 
+    /// In Low Power Mode only the thumbnails on screen are developed; the
+    /// rest of the folder follows once it's off.
+    func testLowPowerModeDevelopsOnlyThoseOnScreen() async throws {
+        let dir = try folder(), thumbnails = try folder()
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: thumbnails) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        let model = try await model(store: SidecarStore())
+        model.lowPowerMode = true
+        let edited = EditedThumbnailStore(directory: thumbnails)
+        model.editedThumbnails = edited
+        model.renderArchive = EditedThumbnailStore(directory: thumbnails.appendingPathComponent("renders", isDirectory: true), limit: 1 << 30)
+        func made(_ url: URL) -> Bool {
+            guard let file = model.library.items.first(where: { $0.url == url }), let look = model.thumbnailLook(for: url),
+                  let key = edited.key(for: file, look: look) else { return false }
+            return edited.contains(key)
+        }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 && model.previewCurrent && !model.brightnessMatchPending }
+        let fileB = try XCTUnwrap(model.library.items.first { $0.url == b })
+        model.thumbnailShown(fileB, true)
+        try await waitUntil { made(b) }
+        try await Task.sleep(for: .seconds(1.5))
+        XCTAssertFalse(made(c), "off screen, not developed in Low Power Mode")
+
+        model.lowPowerMode = false
+        try await waitUntil { made(c) }
+        await model.flushSidecars()
+    }
+
     /// The match an unedited photograph's thumbnail solves on the reduced
     /// decode is the one the editor solves on the whole photograph, to within
     /// what a re-solve ignores. Needs a camera RAW.
