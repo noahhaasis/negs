@@ -712,33 +712,35 @@ struct InspectorTabs: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Inspector tabs")
     }
+}
 
-    private struct TabWord: View {
-        let title: String
-        let chosen: Bool
-        let count: Int
-        let choose: () -> Void
-        @State private var hovered = false
+/// A tab in type: Newsreader 21, the chosen one 700 in `paper` and
+/// underlined in pencil, with the dot and count of its edits (§4.8).
+struct TabWord: View {
+    let title: String
+    let chosen: Bool
+    var count = 0
+    let choose: () -> Void
+    @State private var hovered = false
 
-        var body: some View {
-            Button(action: choose) {
-                HStack(alignment: .top, spacing: 0) {
-                    Text(title).font(Theme.serif(21, weight: chosen ? 700 : 500))
-                        .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
-                        .padding(.bottom, 5)
-                        .pencilUnderline(chosen, height: 6, offset: 0)
-                    if count > 0 {
-                        EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
-                        Text("\(count)").font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
-                    }
+    var body: some View {
+        Button(action: choose) {
+            HStack(alignment: .top, spacing: 0) {
+                Text(title).font(Theme.serif(21, weight: chosen ? 700 : 500))
+                    .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
+                    .padding(.bottom, 5)
+                    .pencilUnderline(chosen, height: 6, offset: 0)
+                if count > 0 {
+                    EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
+                    Text("\(count)").font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
                 }
             }
-            .buttonStyle(InkPressStyle())
-            .onHover { hovered = $0 }
-            .inkFocus(activate: choose)
-            .accessibilityLabel(count > 0 ? "\(title), \(count) \(count == 1 ? "edit" : "edits")" : title)
-            .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
         }
+        .buttonStyle(InkPressStyle())
+        .onHover { hovered = $0 }
+        .inkFocus(activate: choose)
+        .accessibilityLabel(count > 0 ? "\(title), \(count) \(count == 1 ? "edit" : "edits")" : title)
+        .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
     }
 }
 

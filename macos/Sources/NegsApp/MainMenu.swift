@@ -10,7 +10,7 @@ import SwiftUI
     private let updates: UpdateController
     private let removeAppData: () -> Void
     private let recent = NSMenu(title: "Open Recent")
-    private var settings: NSWindow?
+    private var settings: SettingsWindowController?
     private var removingAppData = false
 
     init(model: EditorModel, updates: UpdateController, removeAppData: @escaping () -> Void) {
@@ -170,16 +170,11 @@ import SwiftUI
     @objc private func checkForUpdates() { updates.check() }
     @objc private func showSettings() {
         if settings == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: UpdateSettings(updates: updates, model: model, removeAppData: removeAppData)))
-            window.title = "Settings"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            settings = window
+            settings = SettingsWindowController(updates: updates, model: model, removeAppData: removeAppData)
         }
-        settings?.makeKeyAndOrderFront(nil)
+        settings?.window?.makeKeyAndOrderFront(nil)
     }
-    func prepareForAppDataRemoval() { removingAppData = true; settings?.orderOut(nil) }
+    func prepareForAppDataRemoval() { removingAppData = true; settings?.window?.orderOut(nil) }
     @objc private func openPhotograph() { model.openPanel() }
     @objc private func showRecent() {}
     @objc private func openRecent(_ item: NSMenuItem) { if let url = item.representedObject as? URL { model.open(url) } }
