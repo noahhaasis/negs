@@ -240,4 +240,12 @@ final class PhotoBrowserTests: XCTestCase {
             }
         }
     }
+
+    /// The strip's row is as wide as its frames and the gaps between them,
+    /// so its width doesn't change as the lazy stack brings frames into view.
+    func testStripRowWidthIsTheFramesAndGaps() {
+        XCTAssertEqual(PhotoBrowser.rowWidth([]), 0)
+        XCTAssertEqual(PhotoBrowser.rowWidth([210]), 210)
+        XCTAssertEqual(PhotoBrowser.rowWidth([210, 105, 158]), 473 + 2 * Theme.Size.stripGap)
+    }
 }

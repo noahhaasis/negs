@@ -165,7 +165,6 @@ actor PhotoThumbnails {
 /// the ratings.
 struct PhotoBrowser: View {
     let model: EditorModel
-    @State private var scrollTarget: URL?
     /// A click takes the keys, so ← and → move on from there.
     @FocusState private var focused: Bool
 
@@ -177,6 +176,15 @@ struct PhotoBrowser: View {
     /// The picture's height: the strip less its top padding and rebate.
     static let pictureHeight = Theme.Size.strip - Theme.Size.stripTopPadding - Theme.Size.stripRebate
 
+    private static func centre(_ item: URL?, _ scroller: ScrollViewProxy) {
+        if let item { scroller.scrollTo(item, anchor: .center) }
+    }
+
+    /// The row of frames `widths` wide, edge to edge but for the gaps.
+    static func rowWidth(_ widths: [CGFloat]) -> CGFloat {
+        widths.reduce(0, +) + CGFloat(max(widths.count - 1, 0)) * Theme.Size.stripGap
+    }
+
     var body: some View {
         let library = model.library
         let shown = library.filtering ? [] : model.shownPhotos
@@ -185,54 +193,64 @@ struct PhotoBrowser: View {
         // Read here, so a shape learnt redraws the strip.
         let ratios = aspects.ratios
         let width = { (file: PhotoFile) -> CGFloat in (Self.pictureHeight * (ratios[file.url] ?? PhotoAspects.fallback)).rounded() }
-        ScrollView(.horizontal) {
-            ZStack(alignment: .topLeading) {
-                LazyHStack(spacing: Theme.Size.stripGap) {
-                    ForEach(shown, id: \.url) { file in
-                        StripFrame(file: file, width: width(file),
-                                   current: file.url == model.sourceItem, selected: selected.contains(file.url),
-                                   summary: library.summary(for: file.url), readOnly: library.readOnly,
-                                   edited: model.editedThumbnail(for: file.url)) { visible in
-                            model.thumbnailShown(file, visible)
-                        } loaded: { image in
-                            aspects.note(file.url, image: image)
-                        } placed: { place in
-                            model.places.strip[file.url] = place
-                        } open: {
-                            let modifiers = NSEvent.modifierFlags
-                            focused = true
-                            model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
-                        }
-                        .contextMenu { LibraryContextMenu(model: model, item: file.url) }
-                        .id(file.url)
-                    }
-                }
-                .scrollTargetLayout()
-                // A pick's box reaches past its frame, over the gap and the
-                // frames beside it, so the boxes are drawn above every frame,
-                // laid out as the frames are (as the grid draws its own).
-                LazyHStack(alignment: .top, spacing: Theme.Size.stripGap) {
-                    ForEach(shown, id: \.url) { file in
-                        ZStack {
-                            if library.summary(for: file.url).flag == .pick {
-                                BoxInk(name: file.name, picked: true, inStrip: true)
+        ScrollViewReader { scroller in
+            ScrollView(.horizontal) {
+                ZStack(alignment: .topLeading) {
+                    LazyHStack(spacing: Theme.Size.stripGap) {
+                        ForEach(shown, id: \.url) { file in
+                            StripFrame(file: file, width: width(file),
+                                       current: file.url == model.sourceItem, selected: selected.contains(file.url),
+                                       summary: library.summary(for: file.url), readOnly: library.readOnly,
+                                       edited: model.editedThumbnail(for: file.url)) { visible in
+                                model.thumbnailShown(file, visible)
+                            } loaded: { image in
+                                aspects.note(file.url, image: image)
+                            } placed: { place in
+                                model.places.strip[file.url] = place
+                            } open: {
+                                let modifiers = NSEvent.modifierFlags
+                                focused = true
+                                model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
                             }
+                            .contextMenu { LibraryContextMenu(model: model, item: file.url) }
+                            .id(file.url)
                         }
-                        .frame(width: width(file), height: Self.pictureHeight)
                     }
+                    // A pick's box reaches past its frame, over the gap and the
+                    // frames beside it, so the boxes are drawn above every frame,
+                    // laid out as the frames are (as the grid draws its own).
+                    LazyHStack(alignment: .top, spacing: Theme.Size.stripGap) {
+                        ForEach(shown, id: \.url) { file in
+                            ZStack {
+                                if library.summary(for: file.url).flag == .pick {
+                                    BoxInk(name: file.name, picked: true, inStrip: true)
+                                }
+                            }
+                            .frame(width: width(file), height: Self.pictureHeight)
+                        }
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+                // The row's exact width, from the frames' own. Left to the lazy
+                // stacks it's an estimate that changes as frames come into view:
+                // a wider window (full screen) made it shrink and grow again,
+                // and the row jumped back and forth as it was clamped to each.
+                .frame(width: Self.rowWidth(shown.map(width)), alignment: .topLeading)
+                // Inside the scroll view, so the boxes' tops show in it.
+                .padding(.top, Theme.Size.stripTopPadding)
             }
-            // Inside the scroll view, so the boxes' tops show in it.
-            .padding(.top, Theme.Size.stripTopPadding)
+            .scrollIndicators(.never)
+            // Centred when it changes, not held there: a scroll position held
+            // on the current frame was found again on every resize, from the
+            // lazy stack's guesses at the frames out of view, so entering and
+            // leaving full screen moved the row two or three times. A resize
+            // now keeps the row where it is.
+            .onChange(of: model.sourceItem) { _, source in Self.centre(source, scroller) }
+            .onChange(of: library.loading) { _, loading in if !loading { Self.centre(model.sourceItem, scroller) } }
+            .onChange(of: library.filtering) { _, filtering in if !filtering { Self.centre(model.sourceItem, scroller) } }
+            .onAppear { Self.centre(model.sourceItem, scroller) }
         }
-        .scrollIndicators(.never)
-        .scrollPosition(id: $scrollTarget, anchor: .center)
-        .onChange(of: model.sourceItem) { _, source in scrollTarget = source }
-        .onChange(of: library.loading) { _, loading in if !loading { scrollTarget = model.sourceItem } }
-        .onChange(of: library.filtering) { _, filtering in if !filtering { scrollTarget = model.sourceItem } }
-        .onAppear { scrollTarget = model.sourceItem }
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
