@@ -82,6 +82,10 @@ text, as everywhere. A plain Copy Edits takes the film and paper, Prep, Lab,
 the border, Image Size and output colour; not the crop and rotation, nor lens
 correction and input interpretation, which belong to each file. Match camera brightness is
 solved again for each photograph it's pasted onto, when that photograph opens.
+Edits copied from an unedited photograph are none: pasted onto an unedited
+photograph they leave it unedited, and onto an edited one they take away its
+edits in what was copied, so it's unedited again unless it keeps others, such
+as a crop.
 
 In the grid these act on every selected photograph, and so do they in the edit
 view while the film strip shows; with the strip hidden, on the open photograph.

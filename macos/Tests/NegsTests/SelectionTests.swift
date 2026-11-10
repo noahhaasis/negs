@@ -55,19 +55,35 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(selection.selected, [photos[0], photos[1], photos[4]])
     }
 
-    /// Photographs a rating changed stay shown until the selection moves;
-    /// a filter change drops the hidden ones from the selection.
-    func testKeptAndPruned() {
+    /// A filter change drops the hidden ones from the selection.
+    func testPruned() {
         var selection = LibrarySelection()
         selection.select(photos[0])
         selection.extend(to: photos[2], in: photos)
-        selection.keep([photos[1], photos[2]])
-        XCTAssertEqual(selection.visible, Set([0, 1, 2].map { photos[$0] }))
         selection.toggle(photos[5])
-        XCTAssertEqual(selection.visible, [photos[0]], "kept until the selection changes")
         selection.prune(to: [photos[2]])
         XCTAssertEqual(selection.selected, [photos[0], photos[2]], "the current photograph is never pruned")
         XCTAssertEqual(selection.current, photos[0])
+    }
+
+    /// What scrolls into view for the current photograph is its yellow box
+    /// with room round it, which reaches past the picture and its row; a
+    /// pinch holds the photograph under it, or the nearest.
+    func testTheSelectionBoxAndTheNearestPhotograph() {
+        let layout = SheetLayout(ratios: [1.5, 1.5, 1.5, 1.5, 0.75], width: 1000, target: 176)
+        for index in layout.frames.indices {
+            let frame = layout.frames[index], box = layout.selectionBox(index, name: "IMG_\(index).CR3")
+            // The box is drawn 8 pt out in a 4 pt line, so at least 10 pt past the picture, and a margin more.
+            XCTAssertLessThanOrEqual(box.minY, frame.minY - 10 - SheetLayout.boxMargin)
+            XCTAssertGreaterThanOrEqual(box.maxY, frame.maxY + 10 + SheetLayout.boxMargin)
+            XCTAssertLessThanOrEqual(box.minX, frame.minX - 10 - SheetLayout.boxMargin)
+            XCTAssertLessThan(box.height, frame.height + 2 * (PickBox.reach + SheetLayout.boxMargin), "within what the layer draws")
+        }
+        XCTAssertEqual(layout.nearest(to: CGPoint(x: layout.frames[2].midX, y: layout.frames[2].midY)), 2, "the one under it")
+        XCTAssertEqual(layout.nearest(to: CGPoint(x: layout.frames[1].maxX + 2, y: layout.frames[1].midY)), 1, "in the gap, the nearer")
+        XCTAssertEqual(layout.nearest(to: CGPoint(x: 900, y: layout.height + 50)), 4, "below the last row, its nearest")
+        XCTAssertEqual(layout.nearest(to: CGPoint(x: 0, y: 0)), 0)
+        XCTAssertNil(SheetLayout(ratios: [], width: 1000, target: 176).nearest(to: .zero))
     }
 
     /// The sheet packs photographs in rows at their own proportions (§4.6).

@@ -782,13 +782,16 @@ import UserNotifications
         if tile.shown == wanted { trialImage = image }
     }
 
-    /// ← →: the previous or next stock, in the tray's order (the
-    /// favourites' copies aside), among the matches while searching.
+    /// ← →: the previous or next stock, in the tray's order, through the
+    /// favourites and on into the groups; among the matches while searching.
     func stepTray(by offset: Int) {
         guard let tray else { return }
-        let order = StockTrayRules.order(StockGroup.matching(tray.query, in: tray.paper ? paperGroups : filmGroups))
-        guard let id = StockTrayRules.step(from: tray.paper ? paper : film, by: offset, in: order) else { return }
-        tryStock(id)
+        let sections = StockTrayRules.sections(tray.paper ? paperGroups : filmGroups,
+                                               favorites: previews.favorites(in: tray.paper ? papers : films, paper: tray.paper), query: tray.query)
+        guard let place = StockTrayRules.step(from: tray.paper ? paper : film, inFavourites: tray.inFavourites, by: offset,
+                                              in: StockTrayRules.places(sections)) else { return }
+        tray.inFavourites = place.favourite
+        tryStock(place.stock)
     }
 
     /// Return, Done or a click outside keeps the stock being tried, as one
@@ -1577,15 +1580,15 @@ import UserNotifications
 
     /// Rates what rating commands act on, 0 (none) to 5 stars.
     func setRating(_ stars: Int, targets: [URL]? = nil) {
-        changeLibrary(targets: targets) { $0.rating = max(0, min(5, stars)) } note: { Self.ratingText($0.rating) }
+        changeLibrary(action: "Rating", targets: targets) { $0.rating = max(0, min(5, stars)) } note: { Self.ratingText($0.rating) }
     }
     func changeRating(by offset: Int) {
-        changeLibrary(many: offset > 0 ? "Rating Raised" : "Rating Lowered") {
+        changeLibrary(action: "Rating", many: offset > 0 ? "Rating Raised" : "Rating Lowered") {
             $0.rating = max(0, min(5, $0.rating + offset))
         } note: { Self.ratingText($0.rating) }
     }
     func setFlag(_ flag: PhotoSidecar.Flag?, targets: [URL]? = nil) {
-        changeLibrary(targets: targets) { $0.flag = flag } note: { Self.flagText($0.flag) }
+        changeLibrary(action: "Flag", targets: targets) { $0.flag = flag } note: { Self.flagText($0.flag) }
     }
 
     func hideLibraryNote(_ serial: Int) { if libraryNote?.serial == serial { libraryNote = nil } }
@@ -1597,32 +1600,113 @@ import UserNotifications
 
     /// `many` is the note for several photographs, when `note` would differ
     /// between them.
-    private func changeLibrary(many: String? = nil, targets: [URL]? = nil, _ change: (inout LibrarySummary) -> Void, note: (LibrarySummary) -> String) {
+    private func changeLibrary(action: String, many: String? = nil, targets: [URL]? = nil, _ change: (inout LibrarySummary) -> Void,
+                               note: (LibrarySummary) -> String) {
         let targets = targets ?? ratingTargets
         guard !targets.isEmpty, !closing else { return }
-        var unsaved: String?, last = LibrarySummary(), queued = false
+        let order = shownPhotos.map(\.url), view = libraryView
+        var unsaved: String?, last = LibrarySummary(), queued = false, befores: [URL: LibrarySummary] = [:]
         for photo in targets {
             let before = library.summary(for: photo)
             var after = before
             change(&after)
             last = after
             guard after != before else { continue }
+            befores[photo] = before
             let reason = saveLibraryChange(from: before, to: after, photo: photo)
             if reason == nil { queued = true } else if unsaved == nil { unsaved = reason }
             library.set(after, for: photo)
         }
-        if queued, let sidecars {
-            Task { [weak self] in
-                let failures = await sidecars.flush()
-                for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
-            }
-        }
-        // They stay shown until the selection moves, whatever the filter.
-        selection.keep(targets)
+        if queued { flushLibraryChanges() }
         let text = targets.count == 1 ? note(last) : many ?? note(last)
         libraryNote = LibraryNote(text: text, detail: unsaved, count: targets.count, serial: (libraryNote?.serial ?? 0) + 1)
+        moveOn(after: targets, order: order)
+        registerLibraryUndo(befores, from: libraryView, to: view, action: action)
+    }
+
+    /// After rating or flagging `targets`: those the filter now leaves out
+    /// go from the strip and the grid at once, the current photograph too.
+    /// The next one shown becomes current (in the edit view it opens), or
+    /// the one before at the end. With none left the grid shows that
+    /// nothing matches, as it does for a filter nothing passes.
+    private func moveOn(after targets: [URL], order: [URL]) {
+        let dropped = library.filter.active ? Set(targets.filter { !library.filter.includes(library.summary(for: $0)) }) : []
+        if !dropped.isEmpty {
+            let current = mode == .photo ? sourceItem : selection.current
+            if let current, dropped.contains(current) {
+                if let next = Self.next(after: current, in: order, skipping: dropped) {
+                    if mode == .photo { open(next) } else { selection.select(next) }
+                } else {
+                    // The edit view has nothing to show, so the grid opens
+                    // on its empty sheet; the open photograph stays loaded
+                    // behind it for Undo or another filter to bring back.
+                    if mode == .photo { showGrid() }
+                    if mode == .grid { selection = LibrarySelection() }
+                }
+                return
+            }
+            selection.prune(to: Set(shownPhotos.map(\.url)))
+        }
         guard advanceAfterRating else { return }
         if mode == .photo { step(by: 1) } else if targets.count == 1 { move(by: 1, extending: false) }
+    }
+
+    private func flushLibraryChanges() {
+        guard let sidecars else { return }
+        Task { [weak self] in
+            let failures = await sidecars.flush()
+            for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+        }
+    }
+
+    /// Where the library stood: the view, its selection and the open photograph.
+    private struct LibraryView: Equatable {
+        var mode: LibraryMode
+        var selection: LibrarySelection
+        var open: URL?
+    }
+
+    private var libraryView: LibraryView { LibraryView(mode: mode, selection: selection, open: sourceItem) }
+
+    /// One undo step puts the ratings and flags in `summaries` back. If
+    /// nothing has moved since (`now`), the view goes back to `then` too, so
+    /// a photograph the filter dropped comes back as the current one.
+    private func registerLibraryUndo(_ summaries: [URL: LibrarySummary], from now: LibraryView, to then: LibraryView, action: String) {
+        guard !summaries.isEmpty else { return }
+        undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restoreLibrary(summaries, from: now, to: then, action: action) }
+        }
+        undoManager?.setActionName(action)
+    }
+
+    /// Undo and redo of a rating or flag change.
+    private func restoreLibrary(_ summaries: [URL: LibrarySummary], from now: LibraryView, to then: LibraryView, action: String) {
+        guard !closing else { return }
+        let view = libraryView, items = Set(library.items.map(\.url))
+        var befores: [URL: LibrarySummary] = [:], queued = false
+        for (photo, summary) in summaries where items.contains(photo) {
+            let before = library.summary(for: photo)
+            var after = before
+            after.rating = summary.rating; after.flag = summary.flag
+            guard after != before else { continue }
+            befores[photo] = before
+            if saveLibraryChange(from: before, to: after, photo: photo) == nil { queued = true }
+            library.set(after, for: photo)
+        }
+        if queued { flushLibraryChanges() }
+        if view == now, !cropping {
+            if then.mode == .photo, let open = then.open, items.contains(open) {
+                if open == sourceItem, !sourceDeleted { selection.select(open); mode = .photo } else { self.open(open) }
+            } else if then.mode == .grid {
+                if mode == .photo { showGrid() }
+                if mode == .grid { selection = then.selection }
+                selection.prune(to: Set(shownPhotos.map(\.url)))
+            }
+        } else {
+            selection.prune(to: Set(shownPhotos.map(\.url)))
+        }
+        // Redo takes it back to where it is now, and changes them again.
+        registerLibraryUndo(befores, from: libraryView, to: view, action: action)
     }
 
     /// Queues a rating or flag change to `photo`'s sidecar; why it can't, if
@@ -1666,8 +1750,8 @@ import UserNotifications
     // MARK: Selection and grid
 
     /// The photographs the strip and grid show: those the filter lets
-    /// through, the current one, and those just rated.
-    var shownPhotos: [PhotoFile] { library.shown(keeping: selection.visible) }
+    /// through, and the current one.
+    var shownPhotos: [PhotoFile] { library.shown(current: selection.current) }
 
     /// A click on a photograph in the strip or the grid. ⌘ adds or removes
     /// it and ⇧ selects a range, changing only the selection; a plain click
@@ -1735,16 +1819,21 @@ import UserNotifications
         mode = .grid
     }
 
-    /// Back to the edit view, on the grid's current photograph.
+    /// Back to the edit view, on the grid's current photograph. With none,
+    /// as when a rating left nothing the filter passes, there's nothing to edit.
     func editCurrent() {
-        guard mode == .grid else { return }
-        if let current = selection.current, current != sourceItem || sourceDeleted { open(current) } else { mode = .photo }
+        guard mode == .grid, let current = selection.current else { return }
+        if current != sourceItem || sourceDeleted { open(current) } else { mode = .photo }
     }
 
     func changeGridCellSize(larger: Bool) { gridCellSize += larger ? 40 : -40 }
 
     private func filterChanged() {
         guard !library.filtering else { return }
+        // A grid left empty by a rating finds the open photograph again
+        // once a filter shows it.
+        if mode == .grid, selection.current == nil, let open = sourceItem, !sourceDeleted,
+           library.shown(current: nil).contains(where: { $0.url == open }) { selection.select(open) }
         selection.prune(to: Set(library.shown(current: selection.current).map(\.url)))
     }
 
@@ -1754,6 +1843,9 @@ import UserNotifications
         /// The user's edits (`userEdits`), without a solved brightness match.
         var state: EditState
         var groups: Set<EditGroup>
+        /// The photograph had edits of its own. One without them pastes
+        /// none: what it lands on is left without edits in `groups`.
+        var edited = true
     }
 
     /// Copy Edits…'s choice, remembered for the next time.
@@ -1805,17 +1897,19 @@ import UserNotifications
 
     func copyEdits(from item: URL? = nil, groups: Set<EditGroup> = EditGroup.standard) {
         guard canChangeEdits, let item = item ?? copySource else { return }
-        guard let edits = userEdits(of: item) else {
+        guard let (edits, edited) = userEdits(of: item) else {
             libraryNote = LibraryNote(text: "Edits Not Copied", detail: "Its .negs file can’t be read", serial: (libraryNote?.serial ?? 0) + 1)
             return
         }
-        copiedEdits = CopiedEdits(state: edits, groups: groups)
+        copiedEdits = CopiedEdits(state: edits, groups: groups, edited: edited)
         libraryNote = LibraryNote(text: "Edits Copied", serial: (libraryNote?.serial ?? 0) + 1)
     }
 
     func pasteEdits(onto items: [URL]? = nil) {
         guard let copied = copiedEdits else { return }
-        changeEdits(items ?? editTargets, action: "Paste Edits", note: "Edits Pasted") { EditGroup.merge(copied.groups, from: copied.state, into: $0) }
+        changeEdits(items ?? editTargets, action: "Paste Edits", note: "Edits Pasted", fromUnedited: copied.edited ? nil : copied.groups) {
+            EditGroup.merge(copied.groups, from: copied.state, into: $0)
+        }
     }
 
     /// Applies the last photograph left with edits, no copy step.
@@ -1834,17 +1928,38 @@ import UserNotifications
         changeEdits(items ?? editTargets, action: "Reset Edits", note: "Edits Reset", reset: true) { $0 }
     }
 
-    /// `item`'s edits as `userEdits` gives them; nil if its sidecar can't be read.
-    private func userEdits(of item: URL) -> EditState? {
-        if item == sourceItem { return Self.userEdits(state) }
-        guard let lookup = sidecarLookup else { return Self.userEdits(plainState) }
+    /// `item`'s edits as `userEdits` gives them, and whether it has any of
+    /// its own; nil if its sidecar can't be read.
+    private func userEdits(of item: URL) -> (state: EditState, edited: Bool)? {
+        if item == sourceItem { return (Self.userEdits(state), openPhotographEdited) }
+        guard let lookup = sidecarLookup else { return (Self.userEdits(plainState), false) }
         let restore = SidecarRestore.read(photo: item.photoFile, variant: item.variantID, store: lookup.store, data: lookup.data)
         guard restore.problem == nil else { return nil }
-        return Self.userEdits(restore.edits.map { restoredState($0.state, legacy: false) } ?? plainState)
+        guard let saved = restore.edits else { return (Self.userEdits(plainState), false) }
+        return (Self.userEdits(restoredState(saved.state, legacy: false)), true)
+    }
+
+    /// The open photograph has edits its sidecar keeps: saved before, or
+    /// made since it opened. Without a sidecar there's no telling, and its
+    /// settings count as edits.
+    private var openPhotographEdited: Bool {
+        guard let context = photoSidecar, context.photo == source else { return true }
+        return context.editedAtOpen || Self.userEdits(state) != context.opened
     }
 
     /// A photograph without edits, not following any other.
     private var plainState: EditState { newPhotoState(after: EditState()) }
+
+    /// After pasting `groups` from a photograph without edits: `pasted` has
+    /// none either when everything else is as a photograph without edits
+    /// has it. The film and paper must be among `groups`, since a film kept
+    /// in a sidecar is an edit, whichever it is. What the pasted groups hold
+    /// doesn't count, such as the film the copied photograph showed by
+    /// following the one before it.
+    private func holdsNoEdits(_ pasted: EditState, pasting groups: Set<EditGroup>) -> Bool {
+        guard groups.contains(.filmAndPaper) else { return false }
+        return Self.userEdits(pasted) == Self.userEdits(EditGroup.merge(groups, from: pasted, into: plainState))
+    }
 
     /// What a photograph's edits are stored against: `params` with the
     /// engine's defaults too, so values from a newer version stay.
@@ -1854,8 +1969,11 @@ import UserNotifications
 
     /// Changes the edits of `items` as one undo step: the open one in place,
     /// the others in their sidecars. Each sidecar is kept as it was first, so
-    /// undo can put it back.
-    private func changeEdits(_ items: [URL], action: String, note: String, reset: Bool = false, _ transform: (EditState) -> EditState) {
+    /// undo can put it back. `fromUnedited`: the groups pasted from a
+    /// photograph without edits, which leave one without edits as it is,
+    /// and one whose edits were all in them without any.
+    private func changeEdits(_ items: [URL], action: String, note: String, reset: Bool = false, fromUnedited: Set<EditGroup>? = nil,
+                             _ transform: (EditState) -> EditState) {
         guard canChangeEdits, !items.isEmpty else { return }
         let open = sourceItem
         guard sidecarsEnabled, let sidecars, sidecars.writes, let lookup = sidecarLookup else {
@@ -1877,10 +1995,14 @@ import UserNotifications
                     guard var context = photoSidecar, context.photo == photo, context.blocked == nil, !context.awaitingCatalog else {
                         unsaved = unsaved ?? "Not saved: its .negs file can’t be changed"; continue
                     }
+                    // Nothing pasted onto nothing.
+                    if fromUnedited != nil, !openPhotographEdited { continue }
+                    let pasted = transform(state)
+                    let cleared = fromUnedited.map { holdsNoEdits(pasted, pasting: $0) } ?? false
                     if before[photo] == nil { before[photo] = .some(raw) }
                     openChanged = true
-                    if reset {
-                        replaceState(newPhotoState(after: state))
+                    if reset || cleared {
+                        replaceState(reset ? newPhotoState(after: state) : pasted)
                         // Unedited from here on: a later edit is measured from this.
                         sidecarWrite?.cancel(); sidecarWrite = nil
                         sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, edits: .some(nil),
@@ -1888,7 +2010,7 @@ import UserNotifications
                         context.written = nil; context.editedAtOpen = false; context.opened = Self.userEdits(state)
                         photoSidecar = context
                     } else {
-                        replaceState(transform(state))
+                        replaceState(pasted)
                         flushSidecar()
                     }
                     continue
@@ -1897,6 +2019,8 @@ import UserNotifications
                 let variant = item.variantID.map { id in sidecar?.variants.first { $0.id == id } } ?? sidecar?.variants.first
                 // A duplicate removed meanwhile.
                 if item.variantID != nil, variant == nil { continue }
+                // Nothing pasted onto nothing.
+                if fromUnedited != nil, variant?.edits == nil { continue }
                 if before[photo] == nil { before[photo] = .some(raw) }
                 let version = sidecar?.defaultsVersion ?? SidecarDefaults.latest
                 let table = try SidecarDefaults.load(version: version, data: lookup.data)
@@ -1904,8 +2028,11 @@ import UserNotifications
                 if !reset {
                     let saved = try variant?.edits.map { try PhotoSidecar.decodeEdits($0, table: table) }
                     let base = saved.map { restoredState($0.state, legacy: false) } ?? plainState
+                    let pasted = transform(base)
                     // Its match, if on, is solved again when it opens: the edits it was solved for changed.
-                    edits = PhotoSidecar.encodeEdits(transform(base), matchSolved: false, table: table)
+                    if !(fromUnedited.map { holdsNoEdits(pasted, pasting: $0) } ?? false) {
+                        edits = PhotoSidecar.encodeEdits(pasted, matchSolved: false, table: table)
+                    }
                 }
                 sidecars.enqueue(SidecarPatch(variant: variant?.id ?? SidecarRestore.newVariantID(), primary: item.variantID == nil,
                                               edits: .some(edits), known: known(table), defaultsVersion: version, app: Self.appVersion), for: photo)

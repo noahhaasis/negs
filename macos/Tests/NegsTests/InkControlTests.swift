@@ -208,6 +208,37 @@ import XCTest
         XCTAssertTrue(InspectorReveal(all: true).shows(section: .print))
     }
 
+    func testHideFoldsWhatMoreRevealed() throws {
+        let grain = try group("Grain")
+        let none = InspectorReveal(all: false)
+        let every = grain.controls
+        XCTAssertEqual(none.foldable(grain, visible: every) { _ in false }, 0, "Nothing to hide before N more is clicked")
+
+        let opened = InspectorReveal(all: false, stored: none.revealing("Grain"))
+        XCTAssertEqual(opened.foldable(grain, visible: every) { _ in false }, grain.controls.count - grain.basic)
+        // A changed control past the basics stays when folded, so Hide doesn't count it.
+        let changed = grain.controls[grain.basic]
+        XCTAssertEqual(opened.foldable(grain, visible: every) { $0.id == changed.id }, grain.controls.count - grain.basic - 1)
+        XCTAssertEqual(InspectorReveal(all: true, revealed: ["Grain"]).foldable(grain, visible: every) { _ in false }, 0,
+                       "Under Show All Controls the menu item, not Hide, folds them")
+
+        let key = InspectorReveal.sectionKey(.scan)
+        let both = InspectorReveal(all: false, stored: opened.revealing(key))
+        XCTAssertTrue(both.folds(section: .scan))
+        XCTAssertFalse(both.folds(section: .print))
+        XCTAssertFalse(InspectorReveal(all: true, revealed: [key]).folds(section: .scan))
+        // Hiding one leaves the other revealed, and the stored value round-trips.
+        let folded = InspectorReveal(all: false, stored: both.concealing(key))
+        XCTAssertEqual(folded.revealed, ["Grain"])
+        XCTAssertFalse(folded.shows(section: .scan))
+        XCTAssertEqual(folded.concealing("Grain"), "")
+    }
+
+    func testHideLineText() {
+        XCTAssertNil(InspectorReveal.hideText([]))
+        XCTAssertEqual(InspectorReveal.hideText(["Scanner", "Color Management"]), "Hide Scanner, Color Management")
+    }
+
     func testMoreLineText() {
         XCTAssertNil(InspectorReveal.moreText([]))
         XCTAssertEqual(InspectorReveal.moreText(["Lens blur"]), "1 more: Lens blur")

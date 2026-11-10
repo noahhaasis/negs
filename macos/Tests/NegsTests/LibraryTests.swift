@@ -389,11 +389,150 @@ final class LibraryFormatTests: XCTestCase {
         model.library.filter = LibraryFilter(rating: .unrated)
         model.setRating(2)
         XCTAssertEqual(model.source, c, "b is rated, so the unrated strip skips it")
-        XCTAssertEqual(model.library.shown(current: c).map(\.name), ["c.png"], "a, rated now, is gone once left")
+        XCTAssertEqual(model.library.shown(current: c).map(\.name), ["c.png"], "a, rated now, is gone")
         model.step(by: -1)
         XCTAssertEqual(model.source, c)
         await model.flushSidecars()
         XCTAssertEqual(try store.read(photo: a)?.summary.rating, 2)
+    }
+
+    /// A flag or rating that leaves a photograph out of the filter takes it
+    /// out of the strip and the grid at once, even the current one: the
+    /// next one shown becomes current (in the edit view it opens), or the
+    /// one before at the end. ← → step only what the filter shows.
+    func testRelabellingOutOfTheFilterMovesOn() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var photos: [URL] = []
+        for name in ["a", "b", "c", "d", "e"] {
+            let photo = try fixture(in: dir, name + ".png")
+            if name != "c" { try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "1", "flag": "pick"}]}"#, sidecarOf: photo) }
+            photos.append(photo)
+        }
+        let (a, b, c, d, e) = (photos[0], photos[1], photos[2], photos[3], photos[4])
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 5 }
+        model.advanceAfterRating = false
+        model.library.filter = LibraryFilter(flags: [.pick])
+
+        // The edit view: ← → pass over c, which isn't a pick.
+        model.move(by: 1, extending: false)
+        XCTAssertEqual(model.source, b)
+        model.move(by: 1, extending: false)
+        XCTAssertEqual(model.source, d, "c isn't a pick")
+        model.move(by: -1, extending: false)
+        XCTAssertEqual(model.source, b)
+        // Unflagged, b goes and d opens.
+        model.setFlag(nil)
+        XCTAssertEqual(model.source, d)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [a, d, e])
+        // At the end, the one before.
+        model.move(by: 1, extending: false)
+        model.setFlag(.reject)
+        XCTAssertEqual(model.source, d)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [a, d])
+        // A flag the filter still shows changes nothing.
+        model.setRating(3)
+        XCTAssertEqual(model.source, d)
+
+        // The grid: the current photograph moves on.
+        model.showGrid()
+        model.click(a)
+        model.setFlag(nil)
+        XCTAssertEqual(model.selection.current, d)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [d])
+        // Several at once.
+        model.library.filter = LibraryFilter(flags: [.unflagged])
+        model.click(a)
+        model.click(c, shift: true)
+        XCTAssertEqual(model.ratingTargets, [a, b, c])
+        model.setFlag(.pick, targets: [b])
+        XCTAssertEqual(model.selection.current, a, "the current one still shows")
+        XCTAssertEqual(model.selection.selected, [a, c], "b left the selection with the grid")
+        XCTAssertEqual(model.shownPhotos.map(\.url), [a, c])
+        model.setFlag(.reject)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [], "none left, the grid is empty")
+        XCTAssertNil(model.selection.current)
+        await model.flushSidecars()
+    }
+
+    /// The last photograph a rating takes out of the filter goes too: the
+    /// grid is left empty, from the edit view as well, with nothing to act
+    /// on. Undo brings it back as it was, and so does another filter.
+    func testRelabellingTheLastOutEmptiesTheView() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var photos: [URL] = []
+        for name in ["a", "b", "c"] {
+            let photo = try fixture(in: dir, name + ".png")
+            if name != "c" { try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "1", "flag": "pick"}]}"#, sidecarOf: photo) }
+            photos.append(photo)
+        }
+        let (a, b) = (photos[0], photos[1])
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step(_ body: () -> Void) { undo.beginUndoGrouping(); body(); undo.endUndoGrouping() }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+        model.advanceAfterRating = false
+        model.library.filter = LibraryFilter(flags: [.pick])
+
+        // The edit view: a goes and b opens; b goes and the grid opens, empty.
+        step { model.setFlag(nil) }
+        XCTAssertEqual(model.source, b)
+        step { model.setFlag(nil) }
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertNil(model.selection.current)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [])
+        // Nothing to rate, edit, copy, paste, export or step to.
+        XCTAssertEqual(model.ratingTargets, [])
+        XCTAssertEqual(model.editTargets, [])
+        XCTAssertNil(model.copySource)
+        XCTAssertFalse(model.canExport)
+        model.setRating(5)
+        model.move(by: 1, extending: false)
+        model.moveRow(by: 1, extending: false)
+        model.selectAll()
+        model.editCurrent()
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertNil(model.selection.current)
+        XCTAssertEqual(model.library.summary(for: b).rating, 0)
+
+        // Undo: b is a pick again, open in the edit view.
+        undo.undo()
+        XCTAssertEqual(model.library.summary(for: b).flag, .pick)
+        XCTAssertEqual(model.mode, .photo)
+        XCTAssertEqual(model.source, b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [b])
+        // Redo empties it again; another filter finds b.
+        undo.redo()
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertNil(model.selection.current)
+        model.library.filter = LibraryFilter(flags: [.unflagged])
+        XCTAssertEqual(model.selection.current, b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), photos)
+
+        // The grid: b, the last pick again, goes; undo puts it back current.
+        model.library.filter = LibraryFilter(flags: [.pick])
+        undo.undo()
+        XCTAssertEqual(model.library.summary(for: b).flag, .pick)
+        model.showGrid()
+        model.click(b)
+        step { model.setFlag(.reject) }
+        XCTAssertNil(model.selection.current)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [])
+        undo.undo()
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertEqual(model.selection.current, b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [b])
+        await model.flushSidecars()
     }
 
     /// In the grid clicks and keys move the current photograph without
@@ -463,14 +602,15 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try store.read(photo: c)?.summary.rating, 4, "a new file")
         XCTAssertNil(try store.read(photo: a), "the open photograph wasn't selected")
 
-        // Rated out of the filter, they stay until the selection moves.
+        // Rated out of the filter, they go at once; with nothing else
+        // left, the grid is empty until another filter shows the open one.
         model.library.filter = LibraryFilter(rating: .atLeast(4))
         XCTAssertEqual(model.selection.selected, [b, c])
         model.setRating(0)
-        XCTAssertEqual(model.shownPhotos.map(\.url), [b, c])
-        model.click(b)
-        XCTAssertEqual(model.shownPhotos.map(\.url), [b])
+        XCTAssertEqual(model.shownPhotos.map(\.url), [])
+        XCTAssertEqual(model.selection.selected, [])
         model.library.filter = LibraryFilter()
+        XCTAssertEqual(model.selection.current, a)
 
         // Arrows: two to a row here (as the sheet lays them out); up and
         // down land on the nearest across, onto a short row too.
@@ -576,7 +716,7 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.library.summary(for: b), LibrarySummary(rating: 2))
 
         // A duplicate is a second variant with the same edits, rating and flag, listed and selected after its photograph.
-        model.setFlag(.pick, targets: [c])
+        step { model.setFlag(.pick, targets: [c]) }
         step { model.duplicate([c]) }
         await model.flushSidecars()
         let copy = try XCTUnwrap(model.selection.current)
@@ -586,7 +726,7 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try variants(c)[1].edits, try variants(c)[0].edits)
         XCTAssertEqual(try variants(c).map(\.flag), [.pick, .pick])
         XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "c.png", "c.png (2)"])
-        model.setRating(4)
+        step { model.setRating(4) }
         await model.flushSidecars()
         XCTAssertEqual(try variants(c).map(\.rating), [0, 4], "only the duplicate is rated")
 
@@ -601,11 +741,13 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try variants(c).map { $0.edits?["params.prep.lift"] }, [.number(30), .number(-10)])
         XCTAssertEqual(model.previousEdits?.params["prep.lift"], .number(-10), "the last photograph left with edits")
 
-        // Paste from Previous onto the open photograph, then undo it and the duplicate.
+        // Paste from Previous onto the open photograph, then undo it, the duplicate's rating and the duplicate.
         step { model.pasteFromPrevious() }
         XCTAssertEqual(model.value("prep.lift"), .number(-10))
         undo.undo()
         XCTAssertEqual(model.value("prep.lift"), .number(30))
+        XCTAssertEqual(undo.undoActionName, "Rating")
+        undo.undo()
         undo.undo()
         await model.flushSidecars()
         XCTAssertEqual(try variants(c).count, 1, "the duplicate is gone")
@@ -617,6 +759,114 @@ final class LibraryFormatTests: XCTestCase {
         await model.flushSidecars()
         XCTAssertEqual(model.value("prep.lift"), .number(0))
         XCTAssertNil(try variants(a).first?.edits)
+    }
+
+    /// Edits copied from a photograph without any paste none: a photograph
+    /// without edits stays so, and one whose edits were all in what's
+    /// pasted loses them, as Reset Edits would. Its crop, never pasted by
+    /// Copy Edits, stays. One undo step puts them back.
+    func testPastingAnUneditedPhotographsEditsLeavesNoEdits() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png"), d = try fixture(in: dir, "d.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 2, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}}}]}"#, sidecarOf: b)
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "d1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "crop": {"angle": 2.5}}}]}"#, sidecarOf: d)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let strip = UserDefaults.standard.object(forKey: "filmstripVisible")
+        addTeardownBlock { UserDefaults.standard.set(strip, forKey: "filmstripVisible") }
+        model.filmstripVisible = true
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step(_ body: () -> Void) { undo.beginUndoGrouping(); body(); undo.endUndoGrouping() }
+        func edits(_ photo: URL) throws -> JSONValue? { try store.read(photo: photo)?.variants.first?.edits }
+        func exists(_ photo: URL) -> Bool { FileManager.default.fileExists(atPath: PhotoSidecar.url(for: photo).path) }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 4 }
+
+        // From the open photograph, unedited, onto three in the grid.
+        model.copyEdits()
+        model.showGrid()
+        model.click(b); model.click(d, shift: true)
+        step { model.pasteEdits() }
+        await model.flushSidecars()
+        XCTAssertFalse(exists(c), "a photograph without edits gets no .negs file")
+        XCTAssertFalse(model.library.summary(for: c).edited)
+        XCTAssertNil(try edits(b), "its edits were all pasted over")
+        XCTAssertEqual(model.library.summary(for: b), LibrarySummary(rating: 2), "the rating stays")
+        XCTAssertTrue(model.library.summary(for: d).edited, "its crop stays")
+        XCTAssertEqual(try edits(d)?["crop.angle"], .number(2.5))
+        XCTAssertEqual(try edits(d)?["params.prep.lift"], .null, "its lift was pasted over")
+        undo.undo()
+        await model.flushSidecars()
+        XCTAssertEqual(try edits(b)?["params.prep.lift"], .number(5))
+        XCTAssertEqual(try edits(d)?["params.prep.lift"], .number(5))
+        XCTAssertFalse(exists(c))
+
+        // From one in the grid, unedited, onto the open photograph in the edit view.
+        model.click(c)
+        model.copyEdits()
+        model.click(b)
+        model.editCurrent()
+        XCTAssertEqual(model.source, b)
+        XCTAssertEqual(model.value("prep.lift"), .number(5))
+        step { model.pasteEdits() }
+        XCTAssertEqual(model.value("prep.lift"), .number(0))
+        await model.flushSidecars()
+        XCTAssertNil(try edits(b))
+        XCTAssertFalse(model.library.summary(for: b).edited)
+        undo.undo()
+        await model.flushSidecars()
+        XCTAssertEqual(model.value("prep.lift"), .number(5))
+        XCTAssertEqual(try edits(b)?["params.prep.lift"], .number(5))
+
+        // Onto an open photograph without edits: nothing to save.
+        model.open(c)
+        step { model.pasteEdits() }
+        await model.flushSidecars()
+        XCTAssertFalse(exists(c))
+        XCTAssertFalse(model.library.summary(for: c).edited)
+    }
+
+    /// With Match camera brightness on for new photographs, each one's own
+    /// solved exposure is no edit: pasting from one without edits still
+    /// leaves none. Choosing groups without the film keeps a saved film.
+    func testPastingAnUneditedPhotographsEditsIgnoresItsBrightnessMatch() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "brightnessMatch": {"ev": 0.7, "highlightLimited": true}}}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.autoPlaceNewImages = true
+        func edits(_ photo: URL) throws -> JSONValue? { try store.read(photo: photo)?.variants.first?.edits }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+        XCTAssertTrue(model.matchesBrightness)
+        try await waitUntil { model.error != nil || model.state.brightnessMatch?.ev != nil }
+        XCTAssertNotNil(model.state.brightnessMatch?.ev, "a's own exposure is solved")
+
+        // Lab alone: b keeps its film, so it stays edited.
+        model.copyEdits(groups: [.lab])
+        model.showGrid()
+        model.click(b); model.click(c, shift: true)
+        model.pasteEdits()
+        await model.flushSidecars()
+        XCTAssertEqual(try edits(b)?["film"], .string("kodak_portra_400"))
+        XCTAssertEqual(try edits(b)?["params.prep.lift"], .number(5))
+        XCTAssertNil(try store.read(photo: c))
+
+        model.click(a)
+        model.copyEdits()
+        model.click(b); model.click(c, shift: true)
+        model.pasteEdits()
+        await model.flushSidecars()
+        XCTAssertNil(try edits(b), "its match was on, as a new photograph's is")
+        XCTAssertFalse(model.library.summary(for: b).edited)
+        XCTAssertNil(try store.read(photo: c))
     }
 
     /// ⌘C and ⌘V reach the window controller at the end of the responder

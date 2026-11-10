@@ -18,17 +18,9 @@ struct LibrarySelection: Equatable, Sendable {
     private(set) var lead: URL?
     /// The selection a range is added to: as it was when the anchor was set.
     private var base: Set<URL> = []
-    /// Photographs a rating or flag just changed: they stay shown, even if
-    /// the filter now leaves them out, until the selection changes. Rating a
-    /// run of photographs never makes the selection jump.
-    private(set) var kept: Set<URL> = []
-
-    /// The photographs a filter must still show.
-    var visible: Set<URL> { current.map { kept.union([$0]) } ?? kept }
-
     /// Plain click: only `photo`, and it's current.
     mutating func select(_ photo: URL) {
-        current = photo; selected = [photo]; anchor = photo; lead = photo; base = [photo]; kept = []
+        current = photo; selected = [photo]; anchor = photo; lead = photo; base = [photo]
     }
 
     /// `photos` alone, the first current: new duplicates.
@@ -43,7 +35,7 @@ struct LibrarySelection: Equatable, Sendable {
         guard current != nil else { return select(photo) }
         guard photo != current else { return }
         if selected.contains(photo) { selected.remove(photo) } else { selected.insert(photo) }
-        anchor = photo; lead = photo; base = selected; kept = []
+        anchor = photo; lead = photo; base = selected
     }
 
     /// ⇧-click or ⇧-arrow: the photographs from the anchor to `photo`, in
@@ -53,7 +45,7 @@ struct LibrarySelection: Equatable, Sendable {
         let start = anchor.flatMap { order.firstIndex(of: $0) } ?? order.firstIndex(of: current)
         guard let start, let end = order.firstIndex(of: photo) else { return }
         selected = base.union(order[min(start, end)...max(start, end)]).union([current])
-        lead = photo; kept = []
+        lead = photo
     }
 
     /// ⇧-arrow: moves the range's end `offset` places on in `order`.
@@ -66,7 +58,7 @@ struct LibrarySelection: Equatable, Sendable {
     /// ⌘A: everything shown.
     mutating func selectAll(_ shown: [URL]) {
         guard let current else { return }
-        selected = Set(shown).union([current]); anchor = current; lead = current; base = selected; kept = []
+        selected = Set(shown).union([current]); anchor = current; lead = current; base = selected
     }
 
     /// ⌥⌘A: all but the current photograph.
@@ -78,20 +70,16 @@ struct LibrarySelection: Equatable, Sendable {
     /// Rubber band: `base` and the photographs inside the band.
     mutating func band(_ photos: some Sequence<URL>, adding base: Set<URL>) {
         guard let current else { return }
-        selected = base.union(photos).union([current]); lead = current; self.base = selected; kept = []
+        selected = base.union(photos).union([current]); lead = current; self.base = selected
     }
 
     /// Keeps only the photographs in `shown`, such as after the filter changed.
     mutating func prune(to shown: Set<URL>) {
         let pruned = selected.filter { shown.contains($0) || $0 == current }
         if pruned != selected { selected = pruned; base = base.intersection(pruned) }
-        kept = kept.intersection(shown)
         if let anchor, !selected.contains(anchor) { self.anchor = current }
         if let lead, !selected.contains(lead) { self.lead = current }
     }
-
-    /// Keeps `photos` shown until the selection changes.
-    mutating func keep(_ photos: some Sequence<URL>) { kept.formUnion(photos) }
 
     /// The selected photographs in `order`.
     func ordered(_ order: [URL]) -> [URL] { order.filter { selected.contains($0) } }

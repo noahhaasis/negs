@@ -206,6 +206,7 @@ private struct SheetGrid: View {
     /// The rubber band, in the grid's coordinates, and the selection it adds to.
     @State private var band: CGRect?
     @State private var bandBase: Set<URL> = []
+    @State private var scroller = SheetScroller()
     @FocusState private var focused: Bool
     @Environment(\.displayScale) private var displayScale
 
@@ -246,10 +247,13 @@ private struct SheetGrid: View {
 
     private func grid(layout: SheetLayout, shown: [PhotoFile], size: PhotoThumbnails.Size, viewport: CGSize) -> some View {
         let selection = model.selection
-        let currentRow = selection.current.flatMap { current in shown.firstIndex { $0.url == current } }.flatMap(layout.row(of:))
+        let currentIndex = selection.current.flatMap { current in shown.firstIndex { $0.url == current } }
+        let currentRow = currentIndex.flatMap(layout.row(of:))
         return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 ZStack(alignment: .topLeading) {
+                    SheetScrollHook(scroller: scroller)
+                        .frame(width: viewport.width, height: max(layout.height, viewport.height))
                     // Empty space: a click selects only the current
                     // photograph, a drag draws a rubber band.
                     Color.clear
@@ -298,14 +302,22 @@ private struct SheetGrid: View {
             .onAppear {
                 model.gridLayout = layout
                 model.gridThumbnailSize = size
+                scroller.layout = layout
+                scroller.magnify = { phase, magnification, point in magnify(phase, magnification, at: point) }
                 // Opens on the current photograph.
                 if let currentRow { proxy.scrollTo(currentRow, anchor: .center) }
             }
-            .onChange(of: layout) { _, layout in model.gridLayout = layout }
+            .onChange(of: layout) { _, layout in
+                model.gridLayout = layout
+                scroller.layout = layout
+                scroller.keepAnchor()
+            }
             .onChange(of: size) { _, size in model.gridThumbnailSize = size; model.prefetchThumbnails() }
             .onChange(of: selection.current) { _, _ in
-                guard band == nil, let currentRow else { return }
-                proxy.scrollTo(currentRow)
+                guard band == nil, let currentIndex, let currentRow else { return }
+                // Far enough that its whole yellow box shows, which reaches
+                // past the picture and its row; else as near as the row.
+                if !scroller.reveal(layout.selectionBox(currentIndex, name: shown[currentIndex].name)) { proxy.scrollTo(currentRow) }
             }
             .onChange(of: model.library.filtering) { _, filtering in
                 if !filtering, let currentRow { proxy.scrollTo(currentRow, anchor: .center) }
@@ -365,6 +377,20 @@ private struct SheetGrid: View {
         .frame(height: row.height)
     }
 
+    /// A pinch over the grid sizes its rows, as the foot's Size does, and
+    /// keeps the photograph under the fingers where it was. False outside
+    /// the grid (while it folds), so the photograph's own zoom gets it.
+    private func magnify(_ phase: NSEvent.Phase, _ magnification: CGFloat, at point: CGPoint) -> Bool {
+        guard model.mode == .grid else { return false }
+        if !phase.isDisjoint(with: [.ended, .cancelled]) {
+            scroller.endPinch()
+            return true
+        }
+        if phase.contains(.began) || !scroller.pinching { scroller.beginPinch(at: point, size: model.gridCellSize) }
+        if let size = scroller.pinch(by: magnification), size != model.gridCellSize { model.gridCellSize = size }
+        return true
+    }
+
     /// A drag from empty space selects the photographs it touches; with ⌘
     /// or ⇧ they're added to the selection.
     private func bandGesture(_ layout: SheetLayout, _ shown: [PhotoFile]) -> some Gesture {
@@ -381,6 +407,158 @@ private struct SheetGrid: View {
             }
             .onEnded { _ in band = nil; bandBase = [] }
     }
+}
+
+extension SheetLayout {
+    /// The room left round a box scrolled into view, past its ink and halo.
+    static let boxMargin: CGFloat = 10
+
+    /// Where the `index`th photograph's yellow box is drawn, in the grid's
+    /// coordinates, with `boxMargin` round it: what scrolls into view.
+    func selectionBox(_ index: Int, name: String) -> CGRect {
+        let frame = frames[index]
+        let box = PickBox.selection(in: frame.size, name: name).path(in: frame.size).boundingRect
+        return box.offsetBy(dx: frame.minX, dy: frame.minY).insetBy(dx: -Self.boxMargin, dy: -Self.boxMargin)
+    }
+
+    /// The photograph at `point`, or else the nearest one: in the row
+    /// nearest it, the one nearest across. Nil without photographs.
+    func nearest(to point: CGPoint) -> Int? {
+        func distance(_ low: CGFloat, _ high: CGFloat, _ value: CGFloat) -> CGFloat { max(low - value, value - high, 0) }
+        guard let row = rows.min(by: { distance($0.y, $0.y + $0.height, point.y) < distance($1.y, $1.y + $1.height, point.y) }) else { return nil }
+        return row.range.min { distance(frames[$0].minX, frames[$0].maxX, point.x) < distance(frames[$1].minX, frames[$1].maxX, point.x) }
+    }
+}
+
+/// The grid's way into the AppKit scroll view under its SwiftUI one, which
+/// on macOS 14 can only scroll a view into view whole: to scroll exactly as
+/// far as a cell's box, which reaches past its row, and to keep the
+/// photograph under a pinch in place while the rows resize. Works in the
+/// grid's coordinates, through a view as big as the grid (`SheetScrollHook`).
+@MainActor final class SheetScroller {
+    fileprivate weak var view: SheetScrollView?
+    /// The grid as laid out now.
+    var layout: SheetLayout?
+    /// Told of each pinch over the grid: its phase, how much it scaled, and
+    /// where, in the grid's coordinates. True if it was taken.
+    var magnify: ((NSEvent.Phase, CGFloat, CGPoint) -> Bool)?
+    /// The pinch under way: the Size it started from, and how much it has scaled.
+    private var pinch: (start: Double, scale: Double)?
+    /// Ends a pinch whose end never came.
+    private var pinchTimeout: DispatchWorkItem?
+    /// The photograph held under a pinch: how far down its picture, and how
+    /// far from the top of the view, the fingers were.
+    private var anchor: (index: Int, down: CGFloat, fromTop: CGFloat)?
+
+    /// Scrolls up or down as little as shows `rect` whole. False before the
+    /// grid is on screen.
+    func reveal(_ rect: CGRect) -> Bool {
+        guard let view, view.window != nil else { return false }
+        // Up and down only: the rows fit across.
+        view.scrollToVisible(NSRect(x: view.visibleRect.minX, y: rect.minY, width: 1, height: rect.height))
+        return true
+    }
+
+    var pinching: Bool { pinch != nil }
+
+    /// A pinch starts at `point`, the rows `size` high: the photograph under
+    /// it is held there.
+    func beginPinch(at point: CGPoint, size: Double) {
+        pinch = (size, 1)
+        guard let view, let layout, let index = layout.nearest(to: point) else { anchor = nil; return }
+        let frame = layout.frames[index]
+        anchor = (index, (point.y - frame.minY) / max(frame.height, 1), point.y - view.visibleRect.minY)
+    }
+
+    /// The rows' height after the pinch scaled by `magnification` more.
+    func pinch(by magnification: CGFloat) -> Double? {
+        guard var pinch else { return nil }
+        let sizes = SheetLayout.sizes
+        // Held at the ends, so turning back resizes at once.
+        pinch.scale = min(max(pinch.scale * (1 + magnification), sizes.lowerBound / pinch.start), sizes.upperBound / pinch.start)
+        self.pinch = pinch
+        // Should its end go astray, the pinch ends once the fingers have
+        // been still a moment, so the photograph isn't held after it.
+        pinchTimeout?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in self?.endPinch() }
+        pinchTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: timeout)
+        return (pinch.start * pinch.scale).rounded()
+    }
+
+    /// Scrolls so the held photograph is where it was under the fingers:
+    /// for each new layout, and again once the grid's height has followed.
+    func keepAnchor() {
+        guard let anchor, let view, let layout, layout.frames.indices.contains(anchor.index) else { return }
+        let frame = layout.frames[anchor.index]
+        let top = frame.minY + anchor.down * frame.height - anchor.fromTop
+        let visible = view.visibleRect
+        guard abs(visible.minY - top) >= 0.5 else { return }
+        view.scrollToVisible(NSRect(x: visible.minX, y: max(top, 0), width: visible.width, height: visible.height))
+    }
+
+    /// The pinch is over: once its last size is laid out, nothing is held.
+    func endPinch() {
+        pinch = nil
+        pinchTimeout?.cancel(); pinchTimeout = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.keepAnchor()
+            self?.anchor = nil
+        }
+    }
+}
+
+/// An empty view as big as the grid, under it in the scroll view, through
+/// which `SheetScroller` reads and moves the scroll position and hears
+/// pinches. It never takes a click.
+private struct SheetScrollHook: NSViewRepresentable {
+    let scroller: SheetScroller
+
+    func makeNSView(context: Context) -> SheetScrollView {
+        let view = SheetScrollView()
+        view.scroller = scroller
+        scroller.view = view
+        return view
+    }
+
+    func updateNSView(_ view: SheetScrollView, context: Context) {
+        view.scroller = scroller
+        scroller.view = view
+    }
+}
+
+private final class SheetScrollView: NSView {
+    weak var scroller: SheetScroller?
+    private var monitor: Any?
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func setFrameSize(_ size: NSSize) {
+        let changed = size != frame.size
+        super.setFrameSize(size)
+        if changed { scroller?.keepAnchor() }
+    }
+
+    // A pinch goes to the view under it, and SwiftUI's keep it, so it's
+    // heard on its way into the window instead.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [weak self] event in
+            MainActor.assumeIsolated { self?.pinched(event) == true } ? nil : event
+        }
+    }
+
+    /// True if the pinch was over the grid and it took it.
+    private func pinched(_ event: NSEvent) -> Bool {
+        guard event.window === window, let scroll = enclosingScrollView,
+              scroll.bounds.contains(scroll.convert(event.locationInWindow, from: nil)), let magnify = scroller?.magnify else { return false }
+        return magnify(event.phase, event.magnification, convert(event.locationInWindow, from: nil))
+    }
+
+    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 }
 
 private struct SheetNote: View {

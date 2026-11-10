@@ -11,6 +11,10 @@ import SwiftUI
     let before: EditState
     /// Films only, as today.
     var query = ""
+    /// The stock being tried is its copy among the favourites (where the
+    /// tray opens on a favourite, or the copy last clicked or stepped to),
+    /// so ← → go on from there rather than from its group.
+    @ObservationIgnored var inFavourites = true
 
     init(paper: Bool, before: EditState) {
         self.paper = paper
@@ -55,15 +59,34 @@ import SwiftUI
         return [Section(title: favouritesTitle, stocks: favorites, favorites: true)] + matching
     }
 
-    /// The order ← → step through: each stock once, in its group.
-    static func order(_ groups: [StockGroup]) -> [String] { groups.flatMap { $0.stocks.map(\.id) } }
+    /// A tile in the row: its stock, and whether it's the favourites' copy.
+    struct Place: Equatable {
+        let stock: String
+        let favourite: Bool
+    }
 
-    /// The stock `offset` along from `current`, held at either end; from a
-    /// stock not in the list, the first.
-    static func step(from current: String, by offset: Int, in order: [String]) -> String? {
-        guard !order.isEmpty else { return nil }
-        guard let index = order.firstIndex(of: current) else { return order.first }
-        return order[min(max(index + offset, 0), order.count - 1)]
+    /// The order ← → step through: the tiles as shown, the favourites first.
+    static func places(_ sections: [Section]) -> [Place] {
+        sections.flatMap { section in section.stocks.map { Place(stock: $0.id, favourite: section.favorites) } }
+    }
+
+    /// The tile `offset` along from `current` (its favourites' copy if
+    /// `inFavourites` and it has one), held at either end; from a stock not
+    /// in the row, the first. A copy of the same stock next to it, the last
+    /// favourite's own in the first group, is passed over, so every step
+    /// tries another stock.
+    static func step(from current: String, inFavourites: Bool, by offset: Int, in places: [Place]) -> Place? {
+        guard !places.isEmpty else { return nil }
+        guard var index = places.firstIndex(of: Place(stock: current, favourite: inFavourites)) ?? places.firstIndex(where: { $0.stock == current })
+        else { return places.first }
+        let direction = offset < 0 ? -1 : 1
+        for _ in 0..<abs(offset) {
+            var next = index + direction
+            while places.indices.contains(next), places[next].stock == places[index].stock { next += direction }
+            guard places.indices.contains(next) else { break }
+            index = next
+        }
+        return places[index]
     }
 
     static func width(of section: Section) -> CGFloat {
@@ -89,7 +112,8 @@ import SwiftUI
         guard sections.indices.contains(section), let index = sections[section].stocks.firstIndex(where: { $0.id == stock }) else { return nil }
         return starts(sections)[section] + title + titleGap + CGFloat(index) * (tile + tileGap)
     }
-    /// The section the tray opens on, or shows a stepped-to stock in: the
+    /// The section a stock's tile is shown in: with `favoritesFirst` (as the
+    /// tray opens, or once stepped or clicked to among the favourites) the
     /// favourites' copy of a favourite, else its group.
     static func section(of stock: String, in sections: [Section], favoritesFirst: Bool = true) -> Int? {
         let has = { (section: Section) in section.stocks.contains { $0.id == stock } }
@@ -257,21 +281,16 @@ private struct TrayRow: NSViewRepresentable {
             }
         }
 
-        /// Shows the current stock's tile: centred, or only if no copy of it is in view.
+        /// Shows the current stock's tile, the copy the arrows go on from:
+        /// centred, or only if it's out of view.
         func reveal(centring: Bool, animated: Bool) {
             guard let row else { return }
             let sections = row.sections, scroll = row.scroll
             let current = row.visit.paper ? row.model.paper : row.model.film
             let content = StockTrayRules.contentWidth(sections), visible = scroll.visible
-            if !centring {
-                let shown = sections.indices.contains { index in
-                    guard let x = StockTrayRules.tileX(current, in: index, of: sections) else { return false }
-                    return x >= scroll.offset && x + StockTrayRules.tile <= scroll.offset + visible
-                }
-                if shown { return }
-            }
-            guard let section = StockTrayRules.section(of: current, in: sections, favoritesFirst: centring),
+            guard let section = StockTrayRules.section(of: current, in: sections, favoritesFirst: row.visit.inFavourites),
                   let x = StockTrayRules.tileX(current, in: section, of: sections) else { return }
+            if !centring, x >= scroll.offset, x + StockTrayRules.tile <= scroll.offset + visible { return }
             scroll.scroll(to: StockTrayRules.centring(x, visible: visible, content: content), animated: animated)
         }
 
@@ -323,7 +342,7 @@ private struct TrayTiles: View {
                                 TrayTile(stock: stock, tile: tile, selected: stock.id == current, before: tried && stock.id == visit.beforeID,
                                          favorite: previews.isFavorite(stock.id, paper: paper),
                                          toggleFavorite: { previews.toggleFavorite(stock.id, paper: paper) },
-                                         choose: { model.tryStock(stock.id) })
+                                         choose: { visit.inFavourites = section.favorites; model.tryStock(stock.id) })
                             }
                         }
                     }
@@ -510,7 +529,7 @@ private struct TrayFoot: View {
     /// Return in Search tries the first match; with nothing typed it keeps.
     private func submit() {
         guard !visit.query.trimmingCharacters(in: .whitespaces).isEmpty else { return model.endTray(keep: true) }
-        if let first = StockTrayRules.order(StockGroup.matching(visit.query, in: model.filmGroups)).first { model.tryStock(first) }
+        if let first = StockGroup.matching(visit.query, in: model.filmGroups).first?.stocks.first { model.tryStock(first.id) }
     }
     /// Esc in Search clears it; in an empty Search it goes back, as anywhere in the tray.
     private func cancel() {

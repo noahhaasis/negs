@@ -39,16 +39,36 @@ import XCTest
         XCTAssertTrue(StockTrayRules.starHelp(favourite: true).contains(StockTrayRules.favouritesTitle.lowercased()))
     }
 
-    func testArrowsStepEachStockOnceAndHoldAtTheEnds() {
+    func testArrowsStepEachTileAndHoldAtTheEnds() {
         let groups = [StockGroup(title: "A", stocks: [stock("a1", "A1"), stock("a2", "A2")]), StockGroup(title: "B", stocks: [stock("b1", "B1")])]
-        let order = StockTrayRules.order(groups)
-        XCTAssertEqual(order, ["a1", "a2", "b1"])
-        XCTAssertEqual(StockTrayRules.step(from: "a2", by: 1, in: order), "b1", "Across groups")
-        XCTAssertEqual(StockTrayRules.step(from: "a2", by: -1, in: order), "a1")
-        XCTAssertEqual(StockTrayRules.step(from: "b1", by: 1, in: order), "b1", "Held at the end")
-        XCTAssertEqual(StockTrayRules.step(from: "a1", by: -1, in: order), "a1", "Held at the start")
-        XCTAssertEqual(StockTrayRules.step(from: "gone", by: 1, in: order), "a1", "From a stock not listed (search), the first")
-        XCTAssertNil(StockTrayRules.step(from: "a1", by: 1, in: []))
+        let places = StockTrayRules.places(StockTrayRules.sections(groups, favorites: [], query: ""))
+        XCTAssertEqual(places.map(\.stock), ["a1", "a2", "b1"])
+        func step(_ from: String, _ by: Int) -> String? { StockTrayRules.step(from: from, inFavourites: true, by: by, in: places)?.stock }
+        XCTAssertEqual(step("a2", 1), "b1", "Across groups")
+        XCTAssertEqual(step("a2", -1), "a1")
+        XCTAssertEqual(step("b1", 1), "b1", "Held at the end")
+        XCTAssertEqual(step("a1", -1), "a1", "Held at the start")
+        XCTAssertEqual(step("gone", 1), "a1", "From a stock not listed (search), the first")
+        XCTAssertNil(StockTrayRules.step(from: "a1", inFavourites: true, by: 1, in: []))
+    }
+
+    /// ← → go through the favourites too, then on into the groups, from
+    /// whichever copy of a favourite was opened on, clicked or stepped to.
+    func testArrowsStepThroughTheFavourites() {
+        let a1 = stock("a1", "A1"), a2 = stock("a2", "A2"), b1 = stock("b1", "B1")
+        let groups = [StockGroup(title: "A", stocks: [a1, a2]), StockGroup(title: "B", stocks: [b1])]
+        let places = StockTrayRules.places(StockTrayRules.sections(groups, favorites: [b1, a1], query: ""))
+        typealias Place = StockTrayRules.Place
+        XCTAssertEqual(places, [Place(stock: "b1", favourite: true), Place(stock: "a1", favourite: true),
+                                Place(stock: "a1", favourite: false), Place(stock: "a2", favourite: false), Place(stock: "b1", favourite: false)])
+        func step(_ from: String, inFavourites: Bool, _ by: Int) -> Place? { StockTrayRules.step(from: from, inFavourites: inFavourites, by: by, in: places) }
+        XCTAssertEqual(step("b1", inFavourites: true, 1), Place(stock: "a1", favourite: true), "From the favourites' copy, the next favourite")
+        XCTAssertEqual(step("a1", inFavourites: true, 1), Place(stock: "a2", favourite: false),
+                       "On into the groups, past the last favourite's own copy next to it")
+        XCTAssertEqual(step("a2", inFavourites: false, -1), Place(stock: "a1", favourite: false))
+        XCTAssertEqual(step("b1", inFavourites: false, -1), Place(stock: "a2", favourite: false), "From a group's copy, its neighbour")
+        XCTAssertEqual(step("b1", inFavourites: true, -1), Place(stock: "b1", favourite: true), "Held at the first favourite")
+        XCTAssertEqual(step("a2", inFavourites: true, -1), Place(stock: "a1", favourite: false), "Not a favourite: its group's copy")
     }
 
     func testRowGeometry() {
@@ -182,32 +202,34 @@ import XCTest
         let (model, undo, fixture) = try await opened()
         defer { model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
         let before = model.film
-        let order = StockTrayRules.order(model.filmGroups)
-        let index = try XCTUnwrap(order.firstIndex(of: before))
+        let places = StockTrayRules.places(StockTrayRules.sections(model.filmGroups, favorites: model.previews.favorites(in: model.films, paper: false), query: ""))
+        // It opens on a favourite's copy among the favourites, and steps on from there.
+        let next = try XCTUnwrap(StockTrayRules.step(from: before, inFavourites: true, by: 1, in: places)).stock
+        XCTAssertNotEqual(next, before)
         model.openTray(paper: false)
         model.stepTray(by: 1)
-        XCTAssertEqual(model.film, order[index + 1])
+        XCTAssertEqual(model.film, next)
         model.stepTray(by: 1)
         model.stepTray(by: -1)
-        XCTAssertEqual(model.film, order[index + 1])
+        XCTAssertEqual(model.film, next)
 
         // Searching narrows what the arrows step through.
         model.tray?.query = "velvia"
-        let velvias = StockTrayRules.order(StockGroup.matching("velvia", in: model.filmGroups))
+        let velvias = StockTrayRules.places(StockTrayRules.sections(model.filmGroups, favorites: [], query: "velvia")).map(\.stock)
         model.stepTray(by: 1)
         XCTAssertEqual(model.film, velvias.first, "From a stock not among the matches, the first match")
         model.tray?.query = ""
 
         // The paper's name opens its tray and keeps the film being tried.
-        model.tryStock(order[index + 1])
+        model.tryStock(next)
         grouped(undo) { model.openTray(paper: true) }
         XCTAssertEqual(model.tray?.paper, true)
-        XCTAssertEqual(model.film, order[index + 1])
+        XCTAssertEqual(model.film, next)
         // Any other edit keeps it too, and closes the tray.
         grouped(undo) { model.rotate() }
         XCTAssertNil(model.tray)
         undo.undo()
-        XCTAssertEqual(model.film, order[index + 1], "The rotation was its own step")
+        XCTAssertEqual(model.film, next, "The rotation was its own step")
         undo.undo()
         XCTAssertEqual(model.film, before)
     }

@@ -260,16 +260,14 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         refreshNow()
     }
 
-    /// The photographs the strip shows: those the filter lets through, and
-    /// always `current`, which never vanishes under the cursor.
-    func shown(current: URL?) -> [PhotoFile] { shown(keeping: current.map { [$0] } ?? []) }
-
     /// The photographs the strip and grid show: those the filter lets
-    /// through, and always `kept` (the current photograph, those just rated).
-    func shown(keeping kept: Set<URL>) -> [PhotoFile] {
+    /// through, and always `current`, so a filter chosen while it's open
+    /// never hides it. A rating or flag that leaves it out moves on to the
+    /// next instead (`EditorModel.changeLibrary`).
+    func shown(current: URL?) -> [PhotoFile] {
         let items = items
         guard filter.active else { return items }
-        return items.filter { kept.contains($0.url) || filter.includes(summary(for: $0.url)) }
+        return items.filter { $0.url == current || filter.includes(summary(for: $0.url)) }
     }
 
     /// An active filter is waiting for sidecars still being read.
