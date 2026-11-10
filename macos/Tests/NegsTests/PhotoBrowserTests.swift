@@ -248,4 +248,15 @@ final class PhotoBrowserTests: XCTestCase {
         XCTAssertEqual(PhotoBrowser.rowWidth([210]), 210)
         XCTAssertEqual(PhotoBrowser.rowWidth([210, 105, 158]), 473 + 2 * Theme.Size.stripGap)
     }
+
+    /// After a resize the current frame glides to the middle, as far as the
+    /// row's ends allow.
+    @MainActor func testStripSettlesTheCurrentFrameInTheMiddleWithinTheRow() {
+        XCTAssertEqual(StripSettling.target(middle: 750, visible: 1171, content: 1598), 164.5)
+        // Near the start or the end it stops at the row's edge.
+        XCTAssertEqual(StripSettling.target(middle: 100, visible: 950, content: 1598), 0)
+        XCTAssertEqual(StripSettling.target(middle: 1500, visible: 950, content: 1598), 648)
+        // A row narrower than the strip doesn't scroll.
+        XCTAssertEqual(StripSettling.target(middle: 300, visible: 950, content: 600), 0)
+    }
 }

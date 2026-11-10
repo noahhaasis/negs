@@ -167,6 +167,9 @@ struct PhotoBrowser: View {
     let model: EditorModel
     /// A click takes the keys, so ← and → move on from there.
     @FocusState private var focused: Bool
+    /// Brings the current frame back to the middle once the window has
+    /// stopped changing size.
+    @State private var settling = StripSettling()
 
     /// The pencil under the current frame: as heavy as the grid's yellow
     /// box, so it still reads under a pick's box (round 21). It sits 3 pt
@@ -178,6 +181,37 @@ struct PhotoBrowser: View {
 
     private static func centre(_ item: URL?, _ scroller: ScrollViewProxy) {
         if let item { scroller.scrollTo(item, anchor: .center) }
+    }
+
+    /// A frame's width: the picture's height at its photograph's proportions.
+    static func frameWidth(_ file: PhotoFile, ratios: [URL: CGFloat]) -> CGFloat {
+        (pictureHeight * (ratios[file.url] ?? PhotoAspects.fallback)).rounded()
+    }
+
+    /// After a resize: the current frame glides back to the middle, in one
+    /// movement, unless it's there already (or as near as the row's ends
+    /// let it). Not while the grid covers the strip or folds back into it.
+    private static func recentre(model: EditorModel, in settling: StripSettling) {
+        let scrollView = settling.scrollView
+        guard let item = model.sourceItem, model.mode == .photo, !model.sheetFolding, !model.library.filtering,
+              let scrollView, let document = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let offset = clip.bounds.origin.x
+        let middle: CGFloat
+        if let place = model.places.strip[item] {
+            // Where it's drawn now, from the strip's left edge.
+            middle = offset + place.rect.midX
+        } else {
+            // Out of view: where the row lays it.
+            let shown = model.shownPhotos
+            guard let index = shown.firstIndex(where: { $0.url == item }) else { return }
+            let ratios = model.aspects.ratios
+            let before = shown[..<index].map { frameWidth($0, ratios: ratios) }
+            middle = rowWidth(before) + (before.isEmpty ? 0 : Theme.Size.stripGap) + frameWidth(shown[index], ratios: ratios) / 2
+        }
+        let target = StripSettling.target(middle: middle, visible: clip.bounds.width, content: document.frame.width)
+        guard abs(target - offset) >= 1 else { return }
+        settling.glide(to: target)
     }
 
     /// The row of frames `widths` wide, edge to edge but for the gaps.
@@ -192,7 +226,7 @@ struct PhotoBrowser: View {
         let aspects = model.aspects
         // Read here, so a shape learnt redraws the strip.
         let ratios = aspects.ratios
-        let width = { (file: PhotoFile) -> CGFloat in (Self.pictureHeight * (ratios[file.url] ?? PhotoAspects.fallback)).rounded() }
+        let width = { (file: PhotoFile) -> CGFloat in Self.frameWidth(file, ratios: ratios) }
         ScrollViewReader { scroller in
             ScrollView(.horizontal) {
                 ZStack(alignment: .topLeading) {
@@ -239,17 +273,23 @@ struct PhotoBrowser: View {
                 .frame(width: Self.rowWidth(shown.map(width)), alignment: .topLeading)
                 // Inside the scroll view, so the boxes' tops show in it.
                 .padding(.top, Theme.Size.stripTopPadding)
+                .background(EnclosingScrollView { settling.scrollView = $0 })
             }
             .scrollIndicators(.never)
             // Centred when it changes, not held there: a scroll position held
             // on the current frame was found again on every resize, from the
             // lazy stack's guesses at the frames out of view, so entering and
             // leaving full screen moved the row two or three times. A resize
-            // now keeps the row where it is.
+            // keeps the row where it is; once it's over, the current frame
+            // glides back to the middle (`StripSettling`).
             .onChange(of: model.sourceItem) { _, source in Self.centre(source, scroller) }
             .onChange(of: library.loading) { _, loading in if !loading { Self.centre(model.sourceItem, scroller) } }
             .onChange(of: library.filtering) { _, filtering in if !filtering { Self.centre(model.sourceItem, scroller) } }
-            .onAppear { Self.centre(model.sourceItem, scroller) }
+            .onAppear {
+                Self.centre(model.sourceItem, scroller)
+                settling.settle = { [model, settling] in Self.recentre(model: model, in: settling) }
+            }
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { settling.widthChanged($0) }
         }
         .focusable()
         .focusEffectDisabled()
@@ -272,6 +312,158 @@ struct PhotoBrowser: View {
         }
         .disabled(model.cropping)
         .accessibilityLabel("Film Strip")
+    }
+}
+
+/// Tells the strip when the window has stopped changing size: at the end
+/// of a live resize or of the full-screen animation, or a moment after the
+/// last change of the strip's width otherwise (zoom, tiling, the inspector
+/// sliding in or out). Nothing moves during the change itself.
+@MainActor final class StripSettling {
+    /// The re-centring's length.
+    static let duration: TimeInterval = 0.35
+    /// How long the width stays put before a change made without a live
+    /// resize counts as over.
+    static let quiet: TimeInterval = 0.25
+
+    /// Called once the size has settled.
+    var settle: (() -> Void)?
+    /// The strip's scroll view, under SwiftUI's.
+    weak var scrollView: NSScrollView?
+    private var width: CGFloat?
+    /// Between the start and the end of the full-screen animation.
+    private var transitioning = false
+    private var pending: DispatchWorkItem?
+    private var observers: [NSObjectProtocol] = []
+    private var glider: Glider?
+
+    init() {
+        let centre = NotificationCenter.default
+        let observe = { (name: Notification.Name, action: @escaping @MainActor (StripSettling) -> Void) in
+            self.observers.append(centre.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                // The editing window's own, not Settings'.
+                guard note.object is EditorWindow else { return }
+                MainActor.assumeIsolated { if let self { action(self) } }
+            })
+        }
+        for name in [NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification] {
+            observe(name) { $0.transitioning = true; $0.pending?.cancel() }
+        }
+        for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+            observe(name) { $0.transitioning = false; $0.settled() }
+        }
+        // Full screen resizes the window as a live resize too, ended at
+        // once, while its animation still has a while to run.
+        observe(NSWindow.didEndLiveResizeNotification) { if !$0.transitioning { $0.settled() } }
+    }
+
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+    func widthChanged(_ width: CGFloat) {
+        let first = self.width == nil
+        self.width = width
+        pending?.cancel()
+        // The first width is the strip appearing, already centred; a live
+        // resize and the full-screen animation say when they end.
+        guard !first, !transitioning, !NSApp.windows.contains(where: { $0 is EditorWindow && $0.inLiveResize }) else { return }
+        settle(after: Self.quiet)
+    }
+
+    private func settle(after delay: TimeInterval) {
+        pending?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.settled() }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func settled() {
+        pending?.cancel()
+        pending = nil
+        settle?()
+    }
+
+    /// Scrolls the strip to `x` over `duration`, easing in and out; at once
+    /// with Reduce Motion. Moved frame by frame: SwiftUI's animated
+    /// `scrollTo` takes its own quick curve whatever the animation asks,
+    /// in steps of 40 pt, and to the lazy stack's idea of the middle.
+    func glide(to x: CGFloat) {
+        guard let scrollView else { return }
+        glider?.stop()
+        guard !SheetFlight.reduceMotion else { return Glider.place(scrollView, at: x) }
+        let glider = Glider(scrollView: scrollView, to: x, duration: Self.duration)
+        self.glider = glider
+        glider.start()
+    }
+
+    /// The scroll offset that puts `middle` (in the row) in the middle of a
+    /// strip `visible` wide, as far as a row `content` wide goes.
+    static func target(middle: CGFloat, visible: CGFloat, content: CGFloat) -> CGFloat {
+        min(max(middle - visible / 2, 0), max(content - visible, 0))
+    }
+}
+
+/// One glide of the strip's clip view, a step each display frame.
+@MainActor private final class Glider: NSObject {
+    private weak var scrollView: NSScrollView?
+    private let from: CGFloat, to: CGFloat, duration: TimeInterval
+    private var link: CADisplayLink?
+    private var began: CFTimeInterval?
+
+    init(scrollView: NSScrollView, to: CGFloat, duration: TimeInterval) {
+        self.scrollView = scrollView
+        self.from = scrollView.contentView.bounds.origin.x
+        self.to = to
+        self.duration = duration
+    }
+
+    func start() {
+        guard let scrollView else { return }
+        let link = scrollView.displayLink(target: self, selector: #selector(tick(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        guard let scrollView else { return stop() }
+        let began = self.began ?? link.timestamp
+        self.began = began
+        let t = min((link.targetTimestamp - began) / duration, 1)
+        // Ease in and out (smoothstep).
+        let eased = t * t * (3 - 2 * t)
+        Self.place(scrollView, at: from + (to - from) * eased)
+        if t >= 1 { stop() }
+    }
+
+    static func place(_ scrollView: NSScrollView, at x: CGFloat) {
+        let clip = scrollView.contentView
+        clip.setBoundsOrigin(NSPoint(x: x, y: clip.bounds.origin.y))
+        scrollView.reflectScrolledClipView(clip)
+    }
+}
+
+/// Hands over the AppKit scroll view a SwiftUI one is drawn in.
+private struct EnclosingScrollView: NSViewRepresentable {
+    let found: (NSScrollView?) -> Void
+    func makeNSView(context: Context) -> Probe { Probe(found: found) }
+    func updateNSView(_ view: Probe, context: Context) { view.found = found }
+
+    final class Probe: NSView {
+        var found: (NSScrollView?) -> Void
+        init(found: @escaping (NSScrollView?) -> Void) {
+            self.found = found
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            found(enclosingScrollView)
+        }
     }
 }
 
