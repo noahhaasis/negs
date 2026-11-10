@@ -108,8 +108,10 @@ import UserNotifications
     private(set) var previewCurrent = false
     /// The shown preview is out of date, and the update is slow enough to mention.
     private(set) var showsActivity = false
-    /// The latest edit couldn't be developed; the last good preview stays.
-    private(set) var renderFailed = false
+    /// Why the latest edit couldn't be developed, said on the canvas over
+    /// the last good preview (§4.14); nil when it could.
+    private(set) var developFailure: String?
+    var renderFailed: Bool { developFailure != nil }
     private(set) var saving = false
     private(set) var exporting = false
     private(set) var exportStarted = Date()
@@ -449,7 +451,7 @@ import UserNotifications
         photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
         photoFacts = nil
-        source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
+        source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
         interactionStart = nil; cropSession = nil
@@ -963,10 +965,7 @@ import UserNotifications
     nonisolated static let rawExtensions = ["dng", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "ptx", "srw", "x3f", "iiq", "3fr", "ari", "bay", "crw", "dcr", "drf", "erf", "fff", "k25", "kdc", "mef", "mos", "mrw", "rwl"]
 
     func openPanel() {
-        let panel = NSOpenPanel()
-        panel.title = "Open Photograph"
-        panel.allowedContentTypes = [.png, .tiff, .jpeg, .rawImage] + Self.rawExtensions.compactMap { UTType(filenameExtension: $0) }
-        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        let panel = Self.makeOpenPanel()
         if let source {
             // A file URL reveals and selects the file; a parent URL only opens its folder.
             panel.directoryURL = source
@@ -976,7 +975,32 @@ import UserNotifications
         }
     }
 
+    /// ⌘O's panel: a photograph, or a folder of them (§6.1).
+    static func makeOpenPanel() -> NSOpenPanel {
+        let panel = NSOpenPanel()
+        panel.title = "Open"
+        panel.allowedContentTypes = [.png, .tiff, .jpeg, .rawImage] + Self.rawExtensions.compactMap { UTType(filenameExtension: $0) }
+        panel.canChooseFiles = true; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
+        return panel
+    }
+
+    /// A folder's first photograph in name order, or nil if it has none
+    /// (or isn't a folder Negs can read).
+    nonisolated static func firstPhotograph(in folder: URL) -> URL? {
+        (try? PhotoFolder.images(in: folder))?.first
+    }
+
     func open(_ url: URL) {
+        // A folder opens on its first photograph, in the grid.
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            guard let first = Self.firstPhotograph(in: url) else {
+                error = "“\(url.lastPathComponent)” has no photographs Negs can open."
+                return
+            }
+            open(first)
+            if source == first { showGrid() }
+            return
+        }
         explicitOpenRequested = true
         mode = .photo
         // During launch it undoes a restore at launch; later it supersedes it.
@@ -1007,7 +1031,7 @@ import UserNotifications
         let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         sourceDeleted = false
-        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
+        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -2674,12 +2698,18 @@ import UserNotifications
         changed()
     }
 
+    /// Try Again, after a develop failed: the same edit, developed again.
+    func retryDevelop() {
+        guard renderFailed else { return }
+        changed(invalidateCache: false)
+    }
+
     private func changed(invalidateCache: Bool = true) {
         heldPreview = nil
         scheduleToneCurve()
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
-        if renderFailed { renderFailed = false }
+        if developFailure != nil { developFailure = nil }
         // Dims the thumbnails now, or blanks them for a new photograph.
         pumpPreviews()
         guard ready, source != nil, !closing else { return }
@@ -2856,7 +2886,8 @@ import UserNotifications
             // A failed quick frame leaves the error to the export-size render that follows.
             if step.isQuick { return }
             if currentRevision == revision, generation == sourceGeneration, !closing {
-                renderFailed = true; hideActivity(); report(error)
+                // Said on the canvas and in the status line, not in an alert (§6.10).
+                developFailure = error.localizedDescription; hideActivity()
             }
         }
     }

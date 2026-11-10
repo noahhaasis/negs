@@ -273,8 +273,9 @@ final class QuickFrameStepTests: XCTestCase {
         try await waitUntil { model.renderFailed }
         try await Task.sleep(for: .milliseconds(1500))
         XCTAssertEqual(steps(model, after: start), [.quick(0.25), .settled])
-        XCTAssertNotNil(model.error)
-        model.error = nil
+        // Said on the canvas with its reason, not in an alert (§6.10).
+        XCTAssertNotNil(model.developFailure)
+        XCTAssertNil(model.error)
     }
 
     /// A slider grabbed right after a quick frame: letting go goes straight

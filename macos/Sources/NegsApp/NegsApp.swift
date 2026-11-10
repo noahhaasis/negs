@@ -211,24 +211,18 @@ struct EditorCanvas: View {
         VStack(spacing: 0) {
             // The grid's sheet covers it (`GridSheet`), so coming back to
             // the same photograph is instant and keeps its zoom.
-            CanvasArea(model: model, marksHidden: dropTargeted)
-                .dropDestination(for: URL.self) { urls, _ in
-                    guard let url = urls.first, url.isFileURL else { return false }
-                    model.open(url); return true
-                } isTargeted: { dropTargeted = $0 }
-                .overlay {
-                    if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
-                }
+            CanvasArea(model: model, dropping: dropTargeted)
             // The tray takes the strip's and the status line's place (§4.5).
             if let tray = model.tray, !grid {
                 StockTray(model: model, visit: tray)
-            } else {
+            } else if !dropTargeted {
                 VStack(spacing: 0) {
                     // It stays under the grid's sheet, which folds back into it.
                     if model.filmstripVisible, model.source != nil {
                         PhotoBrowser(model: model)
                     }
-                    if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
+                    // None in the empty window (§4.14).
+                    if model.source != nil || model.exporting || model.batch != nil {
                         // No rule: strip and status line are 186 pt, the
                         // tray's height, so the photograph doesn't move (§2.3).
                         StatusBar(model: model)
@@ -243,6 +237,11 @@ struct EditorCanvas: View {
                 }
             }
         }
+        // A photograph or a folder dropped anywhere on the column opens.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first, url.isFileURL else { return false }
+            model.open(url); return true
+        } isTargeted: { dropTargeted = $0 }
         // Under the grid's sheet, hidden from VoiceOver too.
         .accessibilityHidden(grid)
         .modifier(LibraryNoteTimer(model: model))
@@ -303,8 +302,9 @@ struct InspectorEmptyLine: View {
 /// Reads only the preview state, so edits don't re-evaluate the canvas.
 struct CanvasArea: View {
     let model: EditorModel
-    /// While a file is dragged over the window, the caption and label step aside.
-    var marksHidden = false
+    /// While a file is dragged over the window, the photograph, caption and
+    /// label step aside for a line round the print's place (§4.14).
+    var dropping = false
     @State private var geometry = CanvasGeometry()
 
     /// Above the photograph, for the caption; below it, for the label's two rows (§2.3).
@@ -317,21 +317,57 @@ struct CanvasArea: View {
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)
             } else if model.source == nil, model.image == nil, model.standIn == nil, model.placeholder == nil {
-                EmptyState(model: model)
+                EmptyCanvas(model: model, dropping: dropping)
             } else {
+                let failure = model.developFailure
                 VStack(spacing: 0) {
                     Color.clear.frame(height: Self.captionBand)
+                    // Couldn't develop: the last develop, faded and greyed.
                     photograph
+                        .grayscale(failure == nil ? 0 : 1)
+                        .opacity(dropping ? 0 : failure == nil ? 1 : 0.12)
                     Color.clear.frame(height: Self.labelBand)
                 }
                 .overlay(alignment: .topLeading) {
-                    if !marksHidden, model.image != nil || model.standIn != nil || model.placeholder != nil {
+                    if !dropping, model.image != nil || model.standIn != nil || model.placeholder != nil {
                         GeometryReader { proxy in marks(in: proxy.size) }
                     }
                 }
+                if dropping {
+                    EmptyCanvas(model: model, dropping: true, print: shownPrint)
+                } else if let failure {
+                    DevelopFailure(name: model.sourceItem.map { model.library.name(of: $0) } ?? "The photograph",
+                                   reason: failure, retry: model.retryDevelop)
+                        .padding(.top, Self.captionBand).padding(.bottom, Self.labelBand)
+                }
             }
         }
-        .overlay(alignment: .top) { ActivityBadge(model: model) }
+        .overlay(alignment: .topLeading) { developTag }
+    }
+
+    /// The print's place on the canvas, once it's laid out.
+    private var shownPrint: CGRect? {
+        geometry.print.width > 0 ? geometry.print.offsetBy(dx: 0, dy: Self.captionBand) : nil
+    }
+
+    /// Developing or Updating, at the top centre of the photograph's visible part.
+    @ViewBuilder private var developTag: some View {
+        let title = DevelopTagTitle.title(source: model.source != nil, failed: model.renderFailed,
+                                          developed: model.image != nil, slow: model.showsActivity)
+        ZStack {
+            if let title, !dropping, !model.cropping {
+                GeometryReader { proxy in
+                    let canvas = CGRect(origin: .zero, size: proxy.size)
+                    let visible = shownPrint.map { $0.intersection(canvas) } ?? CGRect(x: 0, y: Self.captionBand, width: proxy.size.width, height: 0)
+                    DevelopTag(title: title)
+                        .frame(width: max(visible.width, 1))
+                        .offset(x: visible.minX, y: visible.minY + 16)
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: title)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder private var photograph: some View {
@@ -386,61 +422,5 @@ struct CanvasArea: View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale, geometry: geometry,
                       doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
-    }
-}
-
-struct ActivityBadge: View {
-    let model: EditorModel
-
-    private var title: String? {
-        if model.original != nil { return "Original" }
-        if model.holdingOriginal { return "Loading Original" }
-        guard model.source != nil, !model.renderFailed else { return nil }
-        if model.image == nil { return "Developing" }
-        return model.showsActivity ? "Updating" : nil
-    }
-
-    var body: some View {
-        ZStack {
-            if let title {
-                let shown = model.original != nil
-                Label(title, systemImage: model.holdingOriginal ? "square.split.diagonal.fill" : "camera.aperture")
-                    .symbolEffect(.pulse, options: .repeating, isActive: !shown)
-                    .font(.callout.weight(.medium))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.separator))
-                    .padding(.top, 12)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .accessibilityAddTraits(.updatesFrequently)
-            }
-        }
-        .animation(.easeInOut(duration: 0.18), value: title)
-        .allowsHitTesting(false)
-    }
-}
-
-struct EmptyState: View {
-    let model: EditorModel
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "photo.on.rectangle.angled").font(.system(size: 54, weight: .light)).foregroundStyle(.secondary)
-            Text("Open a Photograph").font(.title2.weight(.semibold))
-            Text("Explore film stocks, shape the print, and make it your own.").foregroundStyle(.secondary)
-            Button("Open Photograph…", action: model.openPanel).buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 4)
-            Text("Or drop a RAW, TIFF, PNG, or JPEG file here").font(.caption).foregroundStyle(.tertiary)
-            if !model.recentFiles.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Recent").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(model.recentFiles.prefix(5), id: \.self) { url in
-                        Button { model.open(url) } label: { Label(url.lastPathComponent, systemImage: "photo") }
-                            .buttonStyle(.link).help(url.path)
-                    }
-                }.padding(.top, 18)
-            }
-        }
-        .multilineTextAlignment(.center)
-        .padding(30)
     }
 }

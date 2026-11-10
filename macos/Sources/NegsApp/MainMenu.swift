@@ -37,7 +37,7 @@ import SwiftUI
         app.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let file = submenu("File")
-        command(file, "Open Photograph…", #selector(openPhotograph), "o")
+        command(file, "Open…", #selector(openPhotograph), "o")
         // The action only lets validation disable the submenu while it's empty.
         let recentItem = file.addItem(withTitle: "Open Recent", action: #selector(showRecent), keyEquivalent: "")
         recentItem.target = self

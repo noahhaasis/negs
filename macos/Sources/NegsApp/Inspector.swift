@@ -281,6 +281,8 @@ struct FilmFormatPicker: View {
 /// with a yellow segment crossing it every 1.1 s (§4.14).
 struct RunningLine: View {
     @State private var phase = false
+    /// With Reduce Motion the segment stands still, a third of the way along.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
@@ -288,12 +290,12 @@ struct RunningLine: View {
             ZStack(alignment: .leading) {
                 Rectangle().fill(Theme.track).frame(height: 1)
                 Rectangle().fill(Theme.accent).frame(width: width * 0.3, height: 1)
-                    .offset(x: phase ? width : -width * 0.3)
+                    .offset(x: reduceMotion ? width * 0.3 : phase ? width : -width * 0.3)
             }
             .clipped()
         }
         .frame(height: 1)
-        .onAppear { withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { phase = true } }
+        .onAppear { if !reduceMotion { withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { phase = true } } }
         .accessibilityHidden(true)
     }
 }

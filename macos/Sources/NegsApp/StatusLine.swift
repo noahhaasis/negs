@@ -51,6 +51,13 @@ private struct StatusWords: View {
                 .foregroundStyle(Theme.label)
         } else if let session = model.cropSession {
             Text(StatusText.cropping(session.aspect.title, size: session.exportedSize(working: model.workingSize)))
+        } else if model.renderFailed {
+            HStack(spacing: 5) {
+                Text("Couldn’t develop").fontWeight(.semibold).foregroundStyle(Theme.paper)
+                Text(model.sourceItem.map { model.library.name(of: $0) } ?? "the photograph")
+            }
+            .foregroundStyle(Theme.label)
+            .accessibilityElement(children: .combine)
         } else {
             Text(model.status).textSelection(.enabled)
         }
@@ -190,6 +197,8 @@ private struct StatusTools: View {
 
     var body: some View {
         let cropping = model.cropping
+        // Nothing to compare or zoom when the photograph couldn't be developed.
+        let failed = model.renderFailed
         HStack(spacing: 14) {
             OriginalWord(model: model)
             Rectangle().fill(Theme.track).frame(width: 1, height: 10)
@@ -197,9 +206,11 @@ private struct StatusTools: View {
                 ZoomWord(title: "Fit", help: "Fit photograph (⌘0)", on: model.fitImage) { model.zoom(fit: true) }
                 ZoomWord(title: "100%", help: "Actual size (⌘1)", on: !model.fitImage) { model.zoom(fit: false) }
             }
-            .opacity(cropping ? 0.38 : 1)
+            .opacity(cropping && !failed ? 0.38 : 1)
             .disabled(cropping)
         }
+        .opacity(failed ? 0.38 : 1)
+        .disabled(failed)
     }
 }
 
@@ -233,7 +244,7 @@ private struct OriginalWord: View {
 
     var body: some View {
         let enabled = model.canShowOriginal
-        let on = model.original != nil
+        let on = model.holdingOriginal
         Text("Original")
             .foregroundStyle(on ? Theme.paper : hovered && enabled ? Theme.label : Theme.dim)
             .overlay(alignment: .bottom) {
