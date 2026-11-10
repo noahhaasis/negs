@@ -113,18 +113,12 @@ final class SelectionTests: XCTestCase {
     }
 
     /// The sentence over the grid and its foot (§4.6), in the app's words.
-    func testRowsWithARingAreRaised() {
-        // Three rows of two: a ringed photograph's row is drawn over the
-        // rows round it, so its ring isn't covered.
-        let layout = SheetLayout(ratios: Array(repeating: 1.5, count: 6), width: 2 * SheetLayout.side + 2 * 150 + SheetLayout.gap, target: 100)
-        XCTAssertEqual(layout.rows.map(\.range), [0..<2, 2..<4, 4..<6])
+    func testTheCurrentAndTheSelectedAreRinged() {
         var selection = LibrarySelection()
+        XCTAssertFalse(photos.contains { SheetLayout.ringed($0, selection: selection) })
         selection.select(photos[3])
-        XCTAssertEqual(layout.rows.indices.map { layout.raised($0, order: photos, selection: selection) }, [false, true, false])
         selection.toggle(photos[4])
-        XCTAssertEqual(layout.rows.indices.map { layout.raised($0, order: photos, selection: selection) }, [false, true, true])
-        XCTAssertFalse(layout.raised(7, order: photos, selection: selection))
-        XCTAssertFalse(layout.raised(2, order: Array(photos.prefix(4)), selection: selection), "a filter's shorter order")
+        XCTAssertEqual(photos.indices.filter { SheetLayout.ringed(photos[$0], selection: selection) }, [3, 4])
     }
 
     func testTheSheetSaysWhatItShows() {

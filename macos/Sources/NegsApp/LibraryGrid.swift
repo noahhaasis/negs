@@ -245,7 +245,6 @@ private struct SheetGrid: View {
     private func grid(layout: SheetLayout, shown: [PhotoFile], size: PhotoThumbnails.Size, viewport: CGSize) -> some View {
         let selection = model.selection
         let currentRow = selection.current.flatMap { current in shown.firstIndex { $0.url == current } }.flatMap(layout.row(of:))
-        let order = shown.map(\.url)
         return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 ZStack(alignment: .topLeading) {
@@ -262,14 +261,26 @@ private struct SheetGrid: View {
                     LazyVStack(alignment: .leading, spacing: SheetLayout.gap) {
                         ForEach(layout.rows.indices, id: \.self) { index in
                             row(layout.rows[index], layout: layout, shown: shown, size: size)
-                                // A ring reaches into the gaps round its row.
-                                .zIndex(layout.raised(index, order: order, selection: selection) ? 1 : 0)
                                 .id(index)
                         }
                     }
                     .padding(.leading, SheetLayout.side)
                     .padding(.top, SheetLayout.top)
                     .padding(.bottom, SheetLayout.bottom)
+                    // The rings reach 7 pt past their pictures, over the
+                    // 6 pt gaps, so they're drawn above every thumbnail, laid
+                    // out as the rows are. Not by raising the ringed cells:
+                    // that would move them to the end for VoiceOver.
+                    LazyVStack(alignment: .leading, spacing: SheetLayout.gap) {
+                        ForEach(layout.rows.indices, id: \.self) { index in
+                            rings(layout.rows[index], layout: layout, shown: shown)
+                        }
+                    }
+                    .padding(.leading, SheetLayout.side)
+                    .padding(.top, SheetLayout.top)
+                    .padding(.bottom, SheetLayout.bottom)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                     if let band {
                         Rectangle()
                             .fill(Theme.paper.opacity(0.06))
@@ -306,7 +317,7 @@ private struct SheetGrid: View {
                 let url = cell.file.url
                 SheetCell(file: cell.file, size: layout.frames[cell.index].size, thumbnail: size,
                           waiting: model.sheetWaiting.contains(url),
-                          ringed: url == selection.current || selection.selected.contains(url),
+                          ringed: SheetLayout.ringed(url, selection: selection),
                           current: url == selection.current, summary: library.summary(for: url),
                           readOnly: library.readOnly, edited: model.editedThumbnail(for: url)) { visible in
                     model.thumbnailShown(cell.file, visible)
@@ -323,8 +334,29 @@ private struct SheetGrid: View {
                     if !command && !shift { model.editCurrent() }
                 }
                 .contextMenu { LibraryContextMenu(model: model, item: url) }
-                // Over its neighbours, so they don't cover its ring.
-                .zIndex(selection.selected.contains(url) ? 1 : 0)
+            }
+        }
+        .frame(height: row.height)
+    }
+
+    /// A row's rings, each where its cell is, rising with it as the grid opens.
+    private func rings(_ row: SheetLayout.Row, layout: SheetLayout, shown: [PhotoFile]) -> some View {
+        let selection = model.selection
+        return HStack(spacing: SheetLayout.gap) {
+            ForEach(row.range.map { (index: $0, url: shown[$0].url) }, id: \.url) { cell in
+                let waiting = model.sheetWaiting.contains(cell.url)
+                ZStack {
+                    if SheetLayout.ringed(cell.url, selection: selection) {
+                        PencilRing()
+                            .stroke(Theme.accent, lineWidth: PencilRing.lineWidth)
+                            .padding(.horizontal, -PencilRing.outset.width)
+                            .padding(.vertical, -PencilRing.outset.height)
+                            .rotationEffect(PencilRing.tilt)
+                    }
+                }
+                .frame(width: layout.frames[cell.index].width, height: layout.frames[cell.index].height)
+                .opacity(waiting ? 0 : 1)
+                .offset(y: waiting ? 14 : 0)
             }
         }
         .frame(height: row.height)
@@ -353,8 +385,9 @@ private struct SheetNote: View {
     var body: some View { Text(text).font(Theme.serif(16, italic: true)).foregroundStyle(Theme.dim) }
 }
 
-/// One thumbnail: the picture filling its cell, the marks, and the pencil
-/// ring round the current photograph and each one selected.
+/// One thumbnail: the picture filling its cell and the marks. Its pencil
+/// ring, round the current photograph and each one selected, is drawn by
+/// the layer above (`rings`); `ringed` tells VoiceOver it's selected.
 private struct SheetCell: View {
     let file: PhotoFile
     let size: CGSize
@@ -388,16 +421,6 @@ private struct SheetCell: View {
         .clipped()
         .opacity(summary.flag == .reject ? PhotoMarks.rejectOpacity(inStrip: false, current: current) : 1)
         .overlay { PhotoMarks(summary: summary, name: file.name) }
-        .overlay {
-            if ringed {
-                PencilRing()
-                    .stroke(Theme.accent, lineWidth: PencilRing.lineWidth)
-                    .padding(.horizontal, -PencilRing.outset.width)
-                    .padding(.vertical, -PencilRing.outset.height)
-                    .rotationEffect(PencilRing.tilt)
-                    .allowsHitTesting(false)
-            }
-        }
         .modifier(PlaceReport(image: image, placed: placed))
         .opacity(waiting ? 0 : 1)
         .offset(y: waiting ? 14 : 0)
