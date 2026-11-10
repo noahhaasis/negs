@@ -518,6 +518,7 @@ struct InkSection<Content: View>: View {
                 .padding(.top, 8)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityValue(edited ? "Edited" : "")
             } else {
                 Color.clear.frame(height: 8)
             }
@@ -551,6 +552,12 @@ struct InkModule<Content: View>: View {
 
     private var off: Bool { enabled.map { !$0.wrappedValue } ?? false }
 
+    /// What VoiceOver says for the module's name: the dot and the strike
+    /// in words.
+    static func spoken(_ title: String, edited: Bool, skipped: Bool) -> String {
+        [title, edited ? "edited" : nil, skipped ? "skipped while scanning the film" : nil].compactMap { $0 }.joined(separator: ", ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if ruled { InkRule() }
@@ -559,11 +566,18 @@ struct InkModule<Content: View>: View {
                     .rotationEffect(.degrees(open && !skipped ? 90 : 0)).offset(x: open && !skipped ? 2 : 0)
                     .frame(width: 15, alignment: .leading)
                     .padding(.trailing, 4)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(Theme.serif(16, weight: off || skipped ? 400 : 600))
                     .foregroundStyle(off || skipped ? Theme.dim : Theme.paper)
                     .overlay { if skipped { PencilStroke().pencil().frame(height: 5).offset(y: 1) } }
                     .tooltip(help)
+                    // The chevron's turn and the dot, in words: VoiceOver
+                    // opens and closes the module from its name.
+                    .accessibilityLabel(Self.spoken(title, edited: edited, skipped: skipped))
+                    .accessibilityValue(skipped ? "" : open ? "Open" : "Closed")
+                    .accessibilityAddTraits(skipped ? [] : .isButton)
+                    .accessibilityAction { if !skipped { open.toggle() } }
                 Spacer(minLength: 8)
                 if edited { EditDot().padding(.trailing, 8) }
                 if let summary, !open || skipped {
@@ -589,7 +603,6 @@ struct InkModule<Content: View>: View {
             .inkFocus { if !skipped { open.toggle() } }
             .accessibilityElement(children: .contain)
             .accessibilityLabel(title)
-            .accessibilityValue(open ? "Open" : "Closed")
             if open && !skipped {
                 VStack(alignment: .leading, spacing: 0) {
                     content.inkDisabled(off)

@@ -48,6 +48,9 @@ struct PresetInspector: View {
         }
         .task { await model.refreshPresets() }
         .disabled(!model.canChangePresets)
+        // One named group, which also keeps its rules out of VoiceOver.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Presets")
     }
 
     /// The presets in the order shown: as dragged, while a tile is.

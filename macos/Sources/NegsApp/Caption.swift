@@ -111,5 +111,6 @@ struct PhotoCaption: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(items.joined(separator: ", "))
+        .accessibilityAddTraits(.isStaticText)
     }
 }

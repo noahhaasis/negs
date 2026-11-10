@@ -610,11 +610,11 @@ struct StraightenDial: View {
             .onTapGesture(count: 2) { began(); changed(0); ended() }
             .onHover { inside in (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set() }
             .help("Drag to straighten the photograph. Double-click to straighten it again.")
-            .accessibilityElement()
-            .accessibilityLabel("Straighten")
-            .accessibilityValue("\(Self.degrees(angle).dropLast()) degrees")
-            .accessibilityAdjustableAction { direction in
-                began(); changed(angle + (direction == .increment ? 0.5 : -0.5)); ended()
+            // A slider to VoiceOver, in half degrees.
+            .accessibilityRepresentation {
+                Slider(value: Binding(get: { angle }, set: { began(); changed($0); ended() }),
+                       in: -CropSettings.maxAngle...CropSettings.maxAngle, step: 0.5) { Text("Straighten") }
+                    .accessibilityValue("\(Self.degrees(angle).dropLast()) degrees")
             }
             .overlay(alignment: .topLeading) {
                 QuarterTurn(clockwise: false, action: { turn(false) }).offset(x: -34, y: -4)
@@ -775,6 +775,9 @@ struct CropInspector: View {
             .padding(.bottom, 16)
             .overlay(alignment: .top) { InkRule() }
         }
+        // One named group, which also keeps its rules out of VoiceOver.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Crop")
     }
 }
 

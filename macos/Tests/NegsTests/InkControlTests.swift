@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -283,5 +284,13 @@ import XCTest
         XCTAssertEqual(InspectorEdits.count(enlarger, model), 0)
         XCTAssertEqual(InspectorTab.allCases.map { InspectorEdits.count($0, model) }, [baseline[0] + 1, baseline[1], baseline[2] + 1],
                        "A control set back to its default stops counting")
+    }
+
+    /// VoiceOver hears a module's title with what its dot and strike say;
+    /// open or closed is its value.
+    func testAModuleSaysWhatItsMarksShow() {
+        XCTAssertEqual(InkModule<EmptyView>.spoken("Lens Diffusion", edited: false, skipped: false), "Lens Diffusion")
+        XCTAssertEqual(InkModule<EmptyView>.spoken("Grain", edited: true, skipped: false), "Grain, edited")
+        XCTAssertEqual(InkModule<EmptyView>.spoken("Enlarger", edited: true, skipped: true), "Enlarger, edited, skipped while scanning the film")
     }
 }

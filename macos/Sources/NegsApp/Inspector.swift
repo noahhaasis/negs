@@ -709,6 +709,8 @@ struct InspectorTabs: View {
         .frame(height: Theme.Size.tabRow, alignment: .top)
         .overlay(alignment: .top) { InkRule() }
         .overlay(alignment: .bottom) { InkRule() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Inspector tabs")
     }
 
     private struct TabWord: View {

@@ -227,7 +227,7 @@ struct ToneGraphView: View {
             HStack(spacing: 0) {
                 Spacer()
                 ForEach(Array(["rgb", "r", "g", "b"].enumerated()), id: \.element) { index, tag in
-                    if index > 0 { Text(" · ").font(Theme.ui(11)).foregroundStyle(Theme.track) }
+                    if index > 0 { Text(" · ").font(Theme.ui(11)).foregroundStyle(Theme.track).accessibilityHidden(true) }
                     let chosen = channelTag == tag
                     Button { channelTag = tag } label: {
                         Text(tag.uppercased()).font(Theme.ui(11, weight: chosen ? .semibold : .regular))

@@ -243,6 +243,12 @@ struct CropTrimMarks: View {
                     .offset(x: mark.minX - 4, y: mark.minY - 9)
             }
         }
+        // One Crop for VoiceOver, not one per corner.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Crop")
+        .accessibilityHint("Trim marks; ⌘K")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default, crop)
     }
 }
 
@@ -275,9 +281,5 @@ private struct TrimMark: View {
                     if !started, hypot(value.translation.width, value.translation.height) < 4 { crop() }
                 })
             .help("Crop (⌘K)")
-            .accessibilityElement()
-            .accessibilityLabel("Crop")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction(.default, crop)
     }
 }
