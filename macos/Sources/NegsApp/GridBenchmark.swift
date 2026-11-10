@@ -10,10 +10,10 @@ import QuartzCore
 /// turns round. SPEKTRAFILM_BENCHMARK_SHOTS names a folder for a screenshot
 /// in the middle of each speed and after the last.
 ///
-/// SPEKTRAFILM_BENCHMARK_GRID_FILL: waits for the first edited thumbnail the
-/// background helper makes, copies it to every other edited item's name,
-/// and quits, so a later run scrolls with every edited thumbnail on disk
-/// without developing them all.
+/// SPEKTRAFILM_BENCHMARK_GRID_FILL: waits for the first thumbnail the
+/// background helper makes, copies it to every other item's name, and
+/// quits, so a later run scrolls with every thumbnail on disk without
+/// developing them all.
 ///
 /// SPEKTRAFILM_BENCHMARK_THUMBNAILS: opens the grid in the same window and
 /// times the background helper developing the folder's thumbnails: until
@@ -35,6 +35,7 @@ import QuartzCore
     private var segment = 0, segmentStart = 0.0, lastTimestamp = 0.0, direction = 1.0, position = 0.0, shot = false
     private var intervals: [Double] = [], nominal: [Double] = [], busy: [Double] = []
     private var awake = CFAbsoluteTimeGetCurrent(), measuring = false
+    private var segmentCells = (requests: 0, hits: 0)
     private var peak = 0, startFootprint = 0
     private static var running: GridBenchmark?
 
@@ -115,6 +116,7 @@ import QuartzCore
 
     private func startSegment(_ index: Int) {
         segment = index; shot = false
+        segmentCells = PhotoThumbnails.cellCounts.withLock { $0 }
         intervals = []; nominal = []; busy = []
         lastTimestamp = 0
         guard let view = scrollView else { return }
@@ -168,6 +170,7 @@ import QuartzCore
 
     private func finishSegment() {
         let (speed, seconds) = segments[segment]
+        let cells = PhotoThumbnails.cellCounts.withLock { $0 }
         let frame = nominal.sorted()[nominal.count / 2]
         // A frame the display showed without a new one from the app.
         let missed = intervals.reduce(0) { $0 + max(0, Int(($1 / frame).rounded()) - 1) }
@@ -179,7 +182,8 @@ import QuartzCore
         Self.report(String(format: "scroll %.0f pt/s for %.0f s: %d frames at %.1f ms, %d missed (%.1f%%); frame interval p50 %@ p95 %@ p99 %@ worst %@ ms; ",
                            speed, seconds, intervals.count, frame, missed, 100 * Double(missed) / max(expected, 1),
                            pct(sortedIntervals, 50), pct(sortedIntervals, 95), pct(sortedIntervals, 99), pct(sortedIntervals, 100))
-                    + "main run-loop busy p50 \(pct(sortedBusy, 50)) p95 \(pct(sortedBusy, 95)) p99 \(pct(sortedBusy, 99)) worst \(pct(sortedBusy, 100)) ms over \(busy.count) passes")
+                    + "main run-loop busy p50 \(pct(sortedBusy, 50)) p95 \(pct(sortedBusy, 95)) p99 \(pct(sortedBusy, 99)) worst \(pct(sortedBusy, 100)) ms over \(busy.count) passes; "
+                    + "cells' thumbnails \(cells.requests - segmentCells.requests) asked, \(cells.requests - cells.hits - segmentCells.requests + segmentCells.hits) not in memory")
     }
 
     /// The tallest scroll view in the editor window: the grid's.
@@ -251,15 +255,16 @@ import QuartzCore
             MainActor.assumeIsolated {
                 let library = model.library, store = model.editedThumbnails
                 guard library.summariesLoaded, let made = model.thumbnailVersions.keys.first,
-                      let madeFile = library.items.first(where: { $0.url == made }), let look = library.looks[made],
+                      let madeFile = library.items.first(where: { $0.url == made }), let look = model.thumbnailLook(for: made),
                       let source = store.key(for: madeFile, look: look).map(store.url(for:)) else { return }
                 timer.invalidate()
                 var copied = 0
+                // Every item, edited or not: each has a developed thumbnail once the folder's filled.
                 for file in library.items where file.url != made {
-                    guard let look = library.looks[file.url], let key = store.key(for: file, look: look), !store.contains(key) else { continue }
+                    guard let look = model.thumbnailLook(for: file.url), let key = store.key(for: file, look: look), !store.contains(key) else { continue }
                     if (try? FileManager.default.copyItem(at: source, to: store.url(for: key))) != nil { copied += 1 }
                 }
-                report("filled \(copied) edited thumbnails from \(made.lastPathComponent)")
+                report("filled \(copied) thumbnails from \(made.lastPathComponent)")
                 NSApp.terminate(nil)
             }
         }

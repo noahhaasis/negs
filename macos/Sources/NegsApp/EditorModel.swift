@@ -1790,9 +1790,70 @@ import UserNotifications
 
     /// A strip or grid cell came on screen or left it.
     func thumbnailShown(_ file: PhotoFile, _ visible: Bool) {
+        prefetchThumbnails()
         guard visible else { thumbnailsOnScreen.remove(file.url); return }
         thumbnailsOnScreen.insert(file.url)
         if thumbnailLook(for: file.url) != nil { pumpThumbnails() }
+    }
+
+    /// How far either side of the middle of the screen thumbnails are read
+    /// into memory ahead of scrolling: 25–45 MB in the grid, which the
+    /// in-memory caches hold.
+    nonisolated static let prefetchReach = 32
+    /// The grid cells' size, for reading ahead at it.
+    @ObservationIgnored var gridThumbnailSize = PhotoThumbnails.Size.medium
+    @ObservationIgnored private var prefetchRound = 0
+    @ObservationIgnored private var prefetching: Task<Void, Never>?
+
+    /// Reads the thumbnails near the strip's or grid's view into memory, one
+    /// at a time and nearest first, so they're there before they're scrolled
+    /// to. Each change of the view starts again from its middle.
+    func prefetchThumbnails() {
+        #if SPEKTRAFILM_BENCHMARK
+        if ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_NO_PREFETCH"] != nil { return }
+        #endif
+        prefetchRound += 1
+        guard prefetching == nil else { return }
+        prefetching = Task { [weak self] in
+            // After this turn of the main actor, once the cells that changed have.
+            await Task.yield()
+            while let self, !Task.isCancelled, !self.closing {
+                let round = self.prefetchRound
+                for (file, size, edited) in await self.prefetchTargets() {
+                    guard self.prefetchRound == round, !Task.isCancelled else { break }
+                    _ = await Task.detached(priority: .utility) {
+                        await PhotoThumbnails.shared.image(for: file, size: size, look: edited?.look, edited: edited?.store, ahead: true)
+                    }.value
+                }
+                guard self.prefetchRound != round else { break }
+                // While scrolling, a round at most every 30 ms.
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+            self?.prefetching = nil
+        }
+    }
+
+    /// Those within `prefetchReach` of the middle of the screen (else the
+    /// current photograph), nearest first, but those on screen, which their
+    /// cells read; nothing when neither the strip nor the grid shows. Found
+    /// off the main actor: a folder can hold thousands.
+    private func prefetchTargets() async -> [(PhotoFile, PhotoThumbnails.Size, EditedThumbnail?)] {
+        let grid = mode == .grid
+        guard grid || (filmstripVisible && source != nil), !library.filtering else { return [] }
+        let size = grid ? gridThumbnailSize : .strip
+        let shown = shownPhotos, onScreen = thumbnailsOnScreen, current = grid ? selection.current : sourceItem
+        let near = await Task.detached(priority: .utility) { () -> [PhotoFile] in
+            guard !shown.isEmpty else { return [] }
+            var visible: [Int] = [], currentIndex: Int?
+            for (index, file) in shown.enumerated() {
+                if onScreen.contains(file.url) { visible.append(index) }
+                if file.url == current { currentIndex = index }
+            }
+            let centre = Self.thumbnailCentre(onScreen: visible, open: currentIndex)
+            let reach = max(0, centre - Self.prefetchReach)...min(shown.count - 1, centre + Self.prefetchReach)
+            return Self.outward(reach.filter { !onScreen.contains(shown[$0].url) }.map { ($0, shown[$0]) }, from: centre)
+        }.value
+        return near.map { ($0, size, editedThumbnail(for: $0.url)) }
     }
 
     /// Reads the engine's identity once, off the main actor, after launch.
@@ -1835,6 +1896,7 @@ import UserNotifications
     private func thumbnailMade(_ item: URL, look: String) {
         thumbnailsChecked[item] = (look, true)
         thumbnailVersions[item, default: 0] += 1
+        prefetchThumbnails()
     }
 
     /// The open photograph's developed thumbnail, made from the preview on

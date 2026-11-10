@@ -71,6 +71,7 @@ struct LibraryGrid: View {
                 }
                 .onAppear {
                     model.gridColumns = metrics.columns
+                    model.gridThumbnailSize = size
                     // Opens on the current photograph.
                     arriving = true
                     if let row = currentRow(shown, metrics) { proxy.scrollTo(row, anchor: .center) }
@@ -82,6 +83,7 @@ struct LibraryGrid: View {
                     // stays in the middle until they settle.
                     if arriving, let row = currentRow(shown, metrics) { proxy.scrollTo(row, anchor: .center) }
                 }
+                .onChange(of: size) { _, size in model.gridThumbnailSize = size; model.prefetchThumbnails() }
                 .task(id: metrics.columns) {
                     try? await Task.sleep(for: .seconds(1))
                     if !Task.isCancelled { arriving = false }
