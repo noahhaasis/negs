@@ -300,6 +300,11 @@ struct CanvasArea: View {
                 CropEditor(session: session, image: image)
             } else if let image = model.image {
                 canvas(model.original ?? image, size: model.imageSize, rotation: model.imageRotation)
+            } else if let standIn = model.standIn {
+                // Finished already: drawn as it is, the size the photograph will be.
+                PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
+                              border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
+                              scale: model.canvasScale, doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
             } else if let placeholder = model.placeholder {
                 canvas(placeholder, size: model.placeholderSize, rotation: model.imageRotation)
             } else if model.source == nil {
@@ -307,6 +312,15 @@ struct CanvasArea: View {
             }
         }
         .overlay(alignment: .top) { ActivityBadge(model: model) }
+    }
+
+    /// The stand-in's layout size: its own shape (fitted, only that shows),
+    /// with the long side of the photograph's placeholder once that's read,
+    /// else 2048, as a RAW's.
+    static func standInSize(_ image: CGImage, photo: CGSize) -> CGSize {
+        let long = max(photo.width, photo.height) > 0 ? max(photo.width, photo.height) : 2048
+        let scale = long / CGFloat(max(image.width, image.height, 1))
+        return CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
     }
 
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {

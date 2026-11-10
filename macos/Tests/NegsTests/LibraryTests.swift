@@ -139,6 +139,17 @@ final class LibraryFormatTests: XCTestCase {
 
 /// The folder as the library: listing, reading sidecars, outside changes.
 @MainActor final class PhotoLibraryTests: XCTestCase {
+    /// After those on screen, thumbnails are developed outward from the middle
+    /// of the screen, else from the open photograph, not from the folder's top.
+    func testThumbnailsAreDevelopedOutwardFromTheView() {
+        XCTAssertEqual(EditorModel.thumbnailCentre(onScreen: [40, 41, 42, 43, 44], open: 3), 42)
+        XCTAssertEqual(EditorModel.thumbnailCentre(onScreen: [], open: 7), 7)
+        XCTAssertEqual(EditorModel.thumbnailCentre(onScreen: [], open: nil), 0)
+        let items = [0, 1, 2, 4, 5, 6, 9].map { (index: $0, item: "p\($0)") }
+        XCTAssertEqual(EditorModel.outward(items, from: 4), ["p4", "p5", "p2", "p6", "p1", "p0", "p9"])
+        XCTAssertEqual(EditorModel.outward(items, from: 3), ["p2", "p4", "p1", "p5", "p0", "p6", "p9"])
+    }
+
     private func waitUntil(_ message: String = "", _ predicate: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(20)
         while !predicate() && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
@@ -806,6 +817,7 @@ final class LibraryFormatTests: XCTestCase {
         model.autoPlaceNewImages = true
         let edited = EditedThumbnailStore(directory: thumbnails)
         model.editedThumbnails = edited
+        model.renderArchive = EditedThumbnailStore(directory: thumbnails.appendingPathComponent("renders", isDirectory: true), limit: 1 << 30)
         func made(_ url: URL) -> Bool {
             guard let file = model.library.items.first(where: { $0.url == url }), let look = model.thumbnailLook(for: url),
                   let key = edited.key(for: file, look: look) else { return false }
@@ -827,6 +839,25 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertNotNil(model.editedThumbnail(for: c))
         XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: c).path), "nothing written beside an unedited photograph")
         let bVersion = model.thumbnailVersions[b]
+
+        // Opening c, its developed thumbnail stands in for the camera's
+        // preview until the develop arrives, which replaces it.
+        let standIn = try XCTUnwrap(model.developedThumbnail(of: c)?())
+        XCTAssertEqual(max(standIn.width, standIn.height), Int(EditedThumbnailStore.longSide))
+        XCTAssertNil(model.keptRender(of: c)?(), "never opened, nothing kept")
+        model.open(c)
+        try await waitUntil { model.previewCurrent && !model.brightnessMatchPending }
+        XCTAssertNil(model.standIn)
+        XCTAssertNotNil(model.image)
+        let cSize = model.imageSize
+        model.open(a)
+        try await waitUntil { model.previewCurrent && !model.brightnessMatchPending }
+        // Left, c's develop is kept, and laid out at its size when it's next opened.
+        try await waitUntil { model.keptRender(of: c)?() != nil }
+        let kept = try XCTUnwrap(model.keptRender(of: c)?())
+        XCTAssertEqual(kept.1, cSize)
+        XCTAssertLessThanOrEqual(max(kept.0.width, kept.0.height), EditedThumbnailStore.renderLongSide)
+        try await waitUntil { made(b) && made(c) }
 
         // A new default film: c again, b as it was.
         let film = try XCTUnwrap(model.films.first { $0.id != model.newPhotoFilm && !$0.positive }?.id)

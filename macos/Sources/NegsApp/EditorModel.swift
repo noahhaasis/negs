@@ -54,6 +54,10 @@ import UserNotifications
     private(set) var image: IOSurface?
     /// The unprocessed photograph, shown while the first render develops.
     private(set) var placeholder: CGImage?
+    /// Its developed thumbnail, shown in the placeholder's place: the
+    /// photograph as it will look, finished (cropped, turned, in its
+    /// border), rather than the camera's own preview. From ctruett's fork.
+    private(set) var standIn: CGImage?
     /// The undeveloped photograph, shown in place of `image` while the
     /// Original button is held.
     private(set) var original: IOSurface?
@@ -163,6 +167,10 @@ import UserNotifications
     }
     /// How many columns the grid shows now, for moving up and down a row.
     @ObservationIgnored var gridColumns = 1
+    /// The window's width for its photograph column alone, without the
+    /// inspector: what the grid will have once the inspector has slid away.
+    /// Set by the window.
+    @ObservationIgnored var fullCanvasWidth: () -> CGFloat = { 0 }
     var inspectorVisible = true
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
@@ -414,7 +422,7 @@ import UserNotifications
     private func forgetPhotograph() {
         photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
-        source = nil; sourceVariant = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
         interactionStart = nil; cropSession = nil
@@ -893,12 +901,13 @@ import UserNotifications
         // the preview on screen becomes its edited thumbnail.
         flushSidecar()
         saveOpenThumbnail()
+        saveOpenRender()
         // Paste from Previous: the last photograph left with edits.
         if photoSidecar?.written != nil, photoSidecar?.photo == source { previousEdits = Self.userEdits(state) }
         let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         sourceDeleted = false
-        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -939,11 +948,26 @@ import UserNotifications
             }
         } : nil
         launchFrame = restoringAtLaunch ? cachedFrame.map { ($0, generation, snapshot.rendered) } : nil
+        // The developed thumbnail stands in until then, if it's been made.
+        // Read now (~2 ms), as the window's next frame comes only after
+        // SwiftUI has updated it for this photograph (~180 ms on an M1 Pro):
+        // that frame shows it rather than an empty canvas. A restored
+        // session tries its saved frame first, off the main actor.
+        let standIn = developedThumbnail(of: item), kept = keptRender(of: item)
+        if session == nil, let image = standIn?() { self.standIn = image }
         Task { [weak self] in
             if let cachedFrame, let cached = await cachedFrame.value {
                 guard let self else { return }
                 if self.showCached(cached, generation: generation, rendered: snapshot.rendered) { return }
             }
+            if session != nil, let standIn, let image = await Task.detached(priority: .userInitiated, operation: standIn).value {
+                self?.showStandIn(image, generation: generation)
+            }
+            // Its last develop, if it was kept: sharper, and laid out as the
+            // develop will be, so the camera's preview isn't needed.
+            if let kept, let (image, size) = await Task.detached(priority: .userInitiated, operation: kept).value,
+               self?.showKept(image, size: size, generation: generation) == true { return }
+            // Still read for the photograph's size, which lays out the canvas.
             let thumbnail = await Task.detached(priority: .userInitiated) { Self.thumbnail(url) }.value
             if let (thumbnail, size) = thumbnail { self?.showPlaceholder(thumbnail, size: size, generation: generation) }
         }
@@ -970,13 +994,46 @@ import UserNotifications
         image = frame.surface; imageSize = frame.photoSize; isRaw = frame.raw
         sourceSize = frame.sourceSize; workingSize = frame.workingSize
         previewScale = frame.workingSize.width > 0 ? Double(frame.surface.width) / frame.workingSize.width : 1
-        showingCachedPreview = true; placeholder = nil; hideActivity()
+        showingCachedPreview = true; placeholder = nil; standIn = nil; hideActivity()
         // Counted with the frame for the crop it was read with.
         if crop == cached.scopesCrop, imageRotation == cached.scopesRotation {
             histogramRequest += 1; histogram = cached.scopes.histogram; waveform = cached.scopes.waveform
         } else { updateHistogram() }
         updateFilmStrip()
         return true
+    }
+
+    /// Reads `item`'s developed thumbnail, if one was made for the edits it
+    /// opens with.
+    func developedThumbnail(of item: URL) -> (@Sendable () -> CGImage?)? {
+        guard let edited = editedThumbnail(for: item), let file = library.items.first(where: { $0.url == item }),
+              let key = edited.store.key(for: file, look: edited.look) else { return nil }
+        let store = edited.store, look = edited.look
+        return {
+            store.image(key, maxPixels: Int(EditedThumbnailStore.longSide))
+                ?? store.previousKey(for: file, look: look).flatMap { store.image($0, maxPixels: Int(EditedThumbnailStore.longSide)) }
+        }
+    }
+
+    /// Reads `item`'s last develop, if one was kept for the edits it opens with.
+    func keptRender(of item: URL) -> (@Sendable () -> (CGImage, CGSize)?)? {
+        guard let look = thumbnailLook(for: item), let file = library.items.first(where: { $0.url == item }),
+              let key = renderArchive.key(for: file, look: look) else { return nil }
+        let archive = renderArchive
+        return { (archive.render(key) ?? archive.previousKey(for: file, look: look).flatMap { archive.render($0) }).map { ($0.image, $0.photoSize) } }
+    }
+
+    /// True if it's shown, or no longer needed.
+    private func showKept(_ render: CGImage, size: CGSize, generation: Int) -> Bool {
+        guard generation == sourceGeneration, image == nil else { return true }
+        placeholderSize = size; placeholder = render; standIn = nil
+        updateFilmStrip()
+        return true
+    }
+
+    private func showStandIn(_ thumbnail: CGImage, generation: Int) {
+        guard generation == sourceGeneration, image == nil else { return }
+        standIn = thumbnail
     }
 
     private func showPlaceholder(_ thumbnail: CGImage, size: CGSize, generation: Int) {
@@ -1480,6 +1537,7 @@ import UserNotifications
         // The grid shows the open photograph as edited.
         flushSidecar()
         saveOpenThumbnail()
+        saveOpenRender()
         if selection.current == nil { selection.select(source) }
         mode = .grid
     }
@@ -1715,6 +1773,10 @@ import UserNotifications
         // Read already: the new store names its thumbnails with it too.
         didSet { if let thumbnailStamp { editedThumbnails.engineStamp = thumbnailStamp } }
     }
+    /// Where photographs' last develops are kept, screen-sized; tests use their own.
+    @ObservationIgnored var renderArchive = EditedThumbnailStore.renders {
+        didSet { if let thumbnailStamp { renderArchive.engineStamp = thumbnailStamp } }
+    }
     /// The engine's identity, once read: until then only embedded previews show.
     private(set) var thumbnailStamp: String?
     /// Moves when an item's edited thumbnail is made, so its cells read it.
@@ -1777,45 +1839,120 @@ import UserNotifications
         return EditedThumbnail(look: look, version: thumbnailVersions[item] ?? 0, stamp: stamp, store: editedThumbnails)
     }
 
+    /// Where the pump develops out from once those on screen are done: the
+    /// middle of the screen (indices in folder order, ascending), else the open photograph.
+    nonisolated static func thumbnailCentre(onScreen: [Int], open: Int?) -> Int {
+        onScreen.isEmpty ? open ?? 0 : onScreen[onScreen.count / 2]
+    }
+
+    /// `items` nearest `centre` first; of two as near, the one before.
+    nonisolated static func outward<Item>(_ items: [(index: Int, item: Item)], from centre: Int) -> [Item] {
+        items.sorted { (abs($0.index - centre), $0.index) < (abs($1.index - centre), $1.index) }.map(\.item)
+    }
+
     /// A strip or grid cell came on screen or left it.
     func thumbnailShown(_ file: PhotoFile, _ visible: Bool) {
+        prefetchThumbnails()
         guard visible else { thumbnailsOnScreen.remove(file.url); return }
         thumbnailsOnScreen.insert(file.url)
         if thumbnailLook(for: file.url) != nil { pumpThumbnails() }
+    }
+
+    /// How far either side of the middle of the screen thumbnails are read
+    /// into memory ahead of scrolling: 25–45 MB in the grid, which the
+    /// in-memory caches hold.
+    nonisolated static let prefetchReach = 32
+    /// The grid cells' size, for reading ahead at it.
+    @ObservationIgnored var gridThumbnailSize = PhotoThumbnails.Size.medium
+    @ObservationIgnored private var prefetchRound = 0
+    @ObservationIgnored private var prefetching: Task<Void, Never>?
+
+    /// Reads the thumbnails near the strip's or grid's view into memory, one
+    /// at a time and nearest first, so they're there before they're scrolled
+    /// to. Each change of the view starts again from its middle.
+    func prefetchThumbnails() {
+        #if SPEKTRAFILM_BENCHMARK
+        if ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_NO_PREFETCH"] != nil { return }
+        #endif
+        prefetchRound += 1
+        guard prefetching == nil else { return }
+        prefetching = Task { [weak self] in
+            // After this turn of the main actor, once the cells that changed have.
+            await Task.yield()
+            while let self, !Task.isCancelled, !self.closing {
+                let round = self.prefetchRound
+                for (file, size, edited) in await self.prefetchTargets() {
+                    guard self.prefetchRound == round, !Task.isCancelled else { break }
+                    _ = await Task.detached(priority: .utility) {
+                        await PhotoThumbnails.shared.image(for: file, size: size, look: edited?.look, edited: edited?.store, ahead: true)
+                    }.value
+                }
+                guard self.prefetchRound != round else { break }
+                // While scrolling, a round at most every 30 ms.
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+            self?.prefetching = nil
+        }
+    }
+
+    /// Those within `prefetchReach` of the middle of the screen (else the
+    /// current photograph), nearest first, but those on screen, which their
+    /// cells read; nothing when neither the strip nor the grid shows. Found
+    /// off the main actor: a folder can hold thousands.
+    private func prefetchTargets() async -> [(PhotoFile, PhotoThumbnails.Size, EditedThumbnail?)] {
+        let grid = mode == .grid
+        guard grid || (filmstripVisible && source != nil), !library.filtering else { return [] }
+        let size = grid ? gridThumbnailSize : .strip
+        let shown = shownPhotos, onScreen = thumbnailsOnScreen, current = grid ? selection.current : sourceItem
+        let near = await Task.detached(priority: .utility) { () -> [PhotoFile] in
+            guard !shown.isEmpty else { return [] }
+            var visible: [Int] = [], currentIndex: Int?
+            for (index, file) in shown.enumerated() {
+                if onScreen.contains(file.url) { visible.append(index) }
+                if file.url == current { currentIndex = index }
+            }
+            let centre = Self.thumbnailCentre(onScreen: visible, open: currentIndex)
+            let reach = max(0, centre - Self.prefetchReach)...min(shown.count - 1, centre + Self.prefetchReach)
+            return Self.outward(reach.filter { !onScreen.contains(shown[$0].url) }.map { ($0, shown[$0]) }, from: centre)
+        }.value
+        return near.map { ($0, size, editedThumbnail(for: $0.url)) }
     }
 
     /// Reads the engine's identity once, off the main actor, after launch.
     private func readThumbnailStamp() {
         guard thumbnailStamp == nil, !readingThumbnailStamp, let paths = engine?.paths else { return }
         readingThumbnailStamp = true
-        let store = editedThumbnails
+        let store = editedThumbnails, archive = renderArchive
         Task { [weak self] in
             let stamp = await Task.detached(priority: .utility) { () -> String? in
                 let stamp = EditedThumbnailStore.stamp(paths)
                 store.engineStamp = stamp
+                archive.engineStamp = stamp
                 // The oldest go once a session.
                 store.prune()
+                archive.prune()
                 return stamp
             }.value
             guard let self, !self.closing else { return }
             self.thumbnailStamp = stamp
-            // The store may have been replaced while it was read.
+            // The stores may have been replaced while it was read.
             self.editedThumbnails.engineStamp = stamp
+            self.renderArchive.engineStamp = stamp
             self.pumpThumbnails()
         }
     }
 
     /// The bytes the thumbnails take on disk, for Settings.
     func thumbnailCacheSize() async -> Int {
-        let store = editedThumbnails
-        return await Task.detached(priority: .utility) { store.size() }.value
+        let store = editedThumbnails, archive = renderArchive
+        return await Task.detached(priority: .utility) { store.size() + archive.size() }.value
     }
 
     /// Removes every thumbnail; the open folder's are developed again.
     /// Those on screen stay until each is made again.
     func emptyThumbnailCache() async {
-        let store = editedThumbnails
-        await Task.detached(priority: .userInitiated) { store.removeAll() }.value
+        let store = editedThumbnails, archive = renderArchive
+        await Task.detached(priority: .userInitiated) { store.removeAll(); archive.removeAll() }.value
         thumbnailsEmptied += 1
         thumbnailsChecked = [:]
         pumpThumbnails()
@@ -1824,6 +1961,7 @@ import UserNotifications
     private func thumbnailMade(_ item: URL, look: String) {
         thumbnailsChecked[item] = (look, true)
         thumbnailVersions[item, default: 0] += 1
+        prefetchThumbnails()
     }
 
     /// The open photograph's developed thumbnail, made from the preview on
@@ -1836,14 +1974,30 @@ import UserNotifications
               library.looks[item] != nil || Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
         let size = imageSize, crop = crop, rotation = imageRotation, border = state.border, texture = filmTexture, strip = filmStrip
-        let store = editedThumbnails
+        let store = editedThumbnails, loose = store.looseKey(for: file, look: look)
         let shown = surface
         Task { [weak self] in
             guard let photo = await Task.detached(priority: .utility, operation: { ThumbnailComposer.image(of: shown) }).value,
                   let composed = ThumbnailComposer.compose(photo, size: size, crop: crop, cut: false, rotation: rotation, border: border, texture: texture,
                                                            strip: strip, space: photo.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) else { return }
-            let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key)) != nil }.value
+            let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key, loose: loose)) != nil }.value
             if saved { self?.thumbnailMade(item, look: look) }
+        }
+    }
+
+    /// The open photograph's develop, screen-sized and uncropped, kept as
+    /// it's left so it stands in when the photograph next opens (`renderArchive`).
+    /// Under the same conditions as its thumbnail, off the main actor.
+    private func saveOpenRender() {
+        guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
+              !brightnessMatchPending, let look = thumbnailLook(for: item),
+              library.looks[item] != nil || Self.uneditedLook(of: state) == look,
+              let file = library.items.first(where: { $0.url == item }), let key = renderArchive.key(for: file, look: look) else { return }
+        let archive = renderArchive, size = imageSize, shown = surface, loose = archive.looseKey(for: file, look: look)
+        Task.detached(priority: .utility) {
+            guard !archive.contains(key),
+                  let frame = ThumbnailComposer.image(of: shown, maxPixels: EditedThumbnailStore.renderLongSide) else { return }
+            try? archive.save(frame, as: key, loose: loose, photoSize: size)
         }
     }
 
@@ -1879,18 +2033,24 @@ import UserNotifications
             let developing = Set(self.thumbnailsDeveloping.values.map(\.item))
             self.thumbnailsPumpAgain = false
             // Each item but the open one, whose thumbnail comes from its
-            // preview, and those developing, on screen first: the first
-            // without a thumbnail on disk, one for each free helper. Those
-            // with one are noted.
+            // preview, and those developing, on screen first, then outward
+            // from the middle of the screen (or the open photograph), so the
+            // next ones scrolled to or opened are ready: the first without a
+            // thumbnail on disk, one for each free helper. Those with one are noted.
             let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: [(file: PhotoFile, look: String)]) in
-                var shown: [(file: PhotoFile, look: String)] = [], rest: [(file: PhotoFile, look: String)] = []
-                for file in items where file.url != open && !developing.contains(file.url) {
-                    guard let look = looks.look(for: file.url), failures[file.url] != look else { continue }
+                var shown: [(file: PhotoFile, look: String)] = [], rest: [(index: Int, file: PhotoFile, look: String)] = []
+                var onScreenIndices: [Int] = [], openIndex: Int?
+                for (index, file) in items.enumerated() {
+                    if file.url == open { openIndex = index; continue }
+                    if onScreen.contains(file.url) { onScreenIndices.append(index) }
+                    guard !developing.contains(file.url), let look = looks.look(for: file.url), failures[file.url] != look else { continue }
                     if let checked = checked[file.url], checked.look == look, checked.present { continue }
-                    if onScreen.contains(file.url) { shown.append((file, look)) } else { rest.append((file, look)) }
+                    if onScreen.contains(file.url) { shown.append((file, look)) } else { rest.append((index, file, look)) }
                 }
+                let centre = Self.thumbnailCentre(onScreen: onScreenIndices, open: openIndex)
+                let ordered = shown + Self.outward(rest.map { ($0.index, (file: $0.file, look: $0.look)) }, from: centre)
                 var present: [(URL, String)] = [], next: [(file: PhotoFile, look: String)] = []
-                for (file, look) in shown + rest {
+                for (file, look) in ordered {
                     guard let key = store.key(for: file, look: look) else { continue }
                     if store.contains(key) { present.append((file.url, look)) } else { next.append((file, look)) }
                     if next.count == free.count { break }
@@ -2033,8 +2193,8 @@ import UserNotifications
                                                            border: state.border, texture: filmTexture, strip: strip,
                                                            space: developed.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!),
                   let key = editedThumbnails.key(for: file, look: finalLook) else { return false }
-            let store = editedThumbnails
-            try await Task.detached(priority: .utility) { try store.save(composed, as: key) }.value
+            let store = editedThumbnails, loose = store.looseKey(for: file, look: finalLook)
+            try await Task.detached(priority: .utility) { try store.save(composed, as: key, loose: loose) }.value
             thumbnailMade(item, look: finalLook)
             if finalLook != look { library.reload(photo) }
             return true
@@ -2532,7 +2692,7 @@ import UserNotifications
                 }
                 showingInteractiveFrame = interactiveScale != nil
                 quickFrame = quick ? frame : nil
-                image = developed; placeholder = nil
+                image = developed; placeholder = nil; standIn = nil
                 updateHistogram()
                 let film = FilmHistogram(result["film_histogram"])
                 if film != filmHistogram { filmHistogram = film }

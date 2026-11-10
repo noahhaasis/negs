@@ -12,6 +12,9 @@ struct LibraryGrid: View {
     @State private var bandBase: Set<URL> = []
     /// From appearing until the columns have held still for a second.
     @State private var arriving = false
+    /// Laid out at the width the grid will have once the inspector has slid
+    /// away, so its columns don't change and its rows don't move as it opens.
+    @State private var settled = false
     @FocusState private var focused: Bool
     @Environment(\.displayScale) private var displayScale
 
@@ -20,7 +23,8 @@ struct LibraryGrid: View {
         let shown = library.filtering ? [] : model.shownPhotos
         let selection = model.selection
         GeometryReader { geometry in
-            let metrics = GridMetrics(width: geometry.size.width, cell: model.gridCellSize)
+            let width = settled ? geometry.size.width : max(geometry.size.width, model.fullCanvasWidth())
+            let metrics = GridMetrics(width: width, cell: model.gridCellSize)
             let size = PhotoThumbnails.Size.grid(points: metrics.cell, scale: displayScale)
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
@@ -28,7 +32,7 @@ struct LibraryGrid: View {
                         // Empty space: a click selects only the current
                         // photograph, a drag draws a rubber band.
                         Color.clear
-                            .frame(width: geometry.size.width, height: max(metrics.height(shown.count), geometry.size.height))
+                            .frame(width: width, height: max(metrics.height(shown.count), geometry.size.height))
                             .contentShape(Rectangle())
                             .gesture(bandGesture(metrics, shown))
                             .onTapGesture {
@@ -68,9 +72,12 @@ struct LibraryGrid: View {
                                 .allowsHitTesting(false)
                         }
                     }
+                    // Wider while the inspector slides away: it uncovers the right.
+                    .frame(width: geometry.size.width, alignment: .topLeading)
                 }
                 .onAppear {
                     model.gridColumns = metrics.columns
+                    model.gridThumbnailSize = size
                     // Opens on the current photograph.
                     arriving = true
                     if let row = currentRow(shown, metrics) { proxy.scrollTo(row, anchor: .center) }
@@ -82,9 +89,10 @@ struct LibraryGrid: View {
                     // stays in the middle until they settle.
                     if arriving, let row = currentRow(shown, metrics) { proxy.scrollTo(row, anchor: .center) }
                 }
+                .onChange(of: size) { _, size in model.gridThumbnailSize = size; model.prefetchThumbnails() }
                 .task(id: metrics.columns) {
                     try? await Task.sleep(for: .seconds(1))
-                    if !Task.isCancelled { arriving = false }
+                    if !Task.isCancelled { arriving = false; settled = true }
                 }
                 .onChange(of: selection.current) { _, _ in
                     guard band == nil, let row = currentRow(shown, metrics) else { return }

@@ -103,6 +103,8 @@ import SwiftUI
         toolbar.centeredItemIdentifiers = [.zoom, .edit, .gridSize]
         window.toolbar = toolbar
         model.undoManager = window.undoManager
+        // A collapsed inspector leaves the split view to the canvas alone.
+        model.fullCanvasWidth = { [weak split] in split?.splitView.bounds.width ?? 0 }
         // Dragging the inspector closed hides the adjustments, like the toolbar button.
         collapsing = inspector.observe(\.isCollapsed) { [weak self] item, _ in
             MainActor.assumeIsolated {
