@@ -245,6 +245,7 @@ private struct SheetGrid: View {
     private func grid(layout: SheetLayout, shown: [PhotoFile], size: PhotoThumbnails.Size, viewport: CGSize) -> some View {
         let selection = model.selection
         let currentRow = selection.current.flatMap { current in shown.firstIndex { $0.url == current } }.flatMap(layout.row(of:))
+        let order = shown.map(\.url)
         return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 ZStack(alignment: .topLeading) {
@@ -261,8 +262,8 @@ private struct SheetGrid: View {
                     LazyVStack(alignment: .leading, spacing: SheetLayout.gap) {
                         ForEach(layout.rows.indices, id: \.self) { index in
                             row(layout.rows[index], layout: layout, shown: shown, size: size)
-                                // The ring reaches into the gaps round its row.
-                                .zIndex(index == currentRow ? 1 : 0)
+                                // A ring reaches into the gaps round its row.
+                                .zIndex(layout.raised(index, order: order, selection: selection) ? 1 : 0)
                                 .id(index)
                         }
                     }
@@ -322,6 +323,8 @@ private struct SheetGrid: View {
                     if !command && !shift { model.editCurrent() }
                 }
                 .contextMenu { LibraryContextMenu(model: model, item: url) }
+                // Over its neighbours, so they don't cover its ring.
+                .zIndex(selection.selected.contains(url) ? 1 : 0)
             }
         }
         .frame(height: row.height)

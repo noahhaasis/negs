@@ -163,6 +163,14 @@ struct SheetLayout: Equatable {
         height = rows.isEmpty ? Self.top + Self.bottom : y - Self.gap + Self.bottom
     }
 
+    /// Whether the `row`th row holds a ringed photograph. Its ring reaches
+    /// 6–7 pt into the gaps, so it's drawn above the rows round it, and its
+    /// cell above the cells beside it.
+    func raised(_ row: Int, order: [URL], selection: LibrarySelection) -> Bool {
+        guard rows.indices.contains(row) else { return false }
+        return rows[row].range.contains { order.indices.contains($0) && selection.selected.contains(order[$0]) }
+    }
+
     /// The row holding the `index`th photograph.
     func row(of index: Int) -> Int? {
         guard frames.indices.contains(index) else { return nil }
