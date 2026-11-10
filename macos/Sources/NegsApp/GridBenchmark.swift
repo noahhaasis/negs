@@ -229,11 +229,15 @@ import QuartzCore
                     // Settled in the photo view, as a user double-clicking is.
                     model.doubleClickPhotograph(zoomed: false)
                     shown = Date(); phase = 1
-                case 1 where Date().timeIntervalSince(shown) > 0.3, 2 where Date().timeIntervalSince(shown) > 2:
+                case 1 where Date().timeIntervalSince(shown) > 0.12, 2 where Date().timeIntervalSince(shown) > 2:
                     let shownPhotos = model.shownPhotos
                     // The grid's own scroll view: its document is as tall as the grid's metrics say.
+                    // Laid out at the full width until it settles, as LibraryGrid does.
+                    @MainActor func layoutWidth(_ scroll: NSScrollView) -> CGFloat {
+                        phase == 1 ? max(scroll.contentView.bounds.width, model.fullCanvasWidth()) : scroll.contentView.bounds.width
+                    }
                     let grid = scrollViews().first { scroll in
-                        let height = GridMetrics(width: scroll.contentView.bounds.width, cell: model.gridCellSize).height(shownPhotos.count)
+                        let height = GridMetrics(width: layoutWidth(scroll), cell: model.gridCellSize).height(shownPhotos.count)
                         return abs((scroll.documentView?.frame.height ?? 0) - max(height, scroll.contentView.bounds.height)) < 2
                     }
                     guard let scroll = grid, let current = model.selection.current,
@@ -241,9 +245,10 @@ import QuartzCore
                         report("no grid or no current photograph"); timer.invalidate(); return NSApp.terminate(nil)
                     }
                     let visible = scroll.contentView.bounds
-                    let metrics = GridMetrics(width: visible.width, cell: model.gridCellSize)
+                    let metrics = GridMetrics(width: layoutWidth(scroll), cell: model.gridCellSize)
                     let cell = metrics.frame(index)
-                    report("grid position after \(phase == 1 ? "0.3" : "2") s: photograph \(index + 1) of \(shownPhotos.count), \(metrics.columns) columns, cell y \(Int(cell.minY))–\(Int(cell.maxY)), visible y \(Int(visible.minY))–\(Int(visible.maxY)) of \(Int(scroll.documentView?.frame.height ?? 0)): \(visible.contains(cell) ? "on screen" : "OFF SCREEN")")
+                    report("grid position after \(phase == 1 ? "0.12" : "2") s: grid \(Int(visible.width)) pt wide (full \(Int(model.fullCanvasWidth()))), photograph \(index + 1) of \(shownPhotos.count), \(metrics.columns) columns, cell y \(Int(cell.minY))–\(Int(cell.maxY)), visible y \(Int(visible.minY))–\(Int(visible.maxY)) of \(Int(scroll.documentView?.frame.height ?? 0)): \(visible.minY <= cell.minY && cell.maxY <= visible.maxY ? "on screen" : "OFF SCREEN")")
+                    if let shots = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_SHOTS"] { capture(URL(fileURLWithPath: shots).appendingPathComponent("grid-\(phase).png")) }
                     if phase == 2 { timer.invalidate(); NSApp.terminate(nil) }
                     phase += 1
                 default: break

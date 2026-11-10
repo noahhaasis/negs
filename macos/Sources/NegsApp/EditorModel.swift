@@ -167,6 +167,10 @@ import UserNotifications
     }
     /// How many columns the grid shows now, for moving up and down a row.
     @ObservationIgnored var gridColumns = 1
+    /// The window's width for its photograph column alone, without the
+    /// inspector: what the grid will have once the inspector has slid away.
+    /// Set by the window.
+    @ObservationIgnored var fullCanvasWidth: () -> CGFloat = { 0 }
     var inspectorVisible = true
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
