@@ -60,6 +60,14 @@ import UserNotifications
     /// photograph as it will look, finished (cropped, turned, in its
     /// border), rather than the camera's own preview. From ctruett's fork.
     private(set) var standIn: CGImage?
+    /// The film or paper tray, while it's open (IMPLEMENTATION.md §4.5, §5.1).
+    private(set) var tray: TrayVisit?
+    /// The tried stock's tile, enlarged on the canvas at once, until the
+    /// develop of that edit is in (§5.1).
+    private(set) var trialImage: CGImage?
+    /// The tray and the names that open it: a click anywhere else keeps the
+    /// stock being tried and closes the tray.
+    @ObservationIgnored let trayHitAreas = NSHashTable<NSView>.weakObjects()
     /// The undeveloped photograph, shown in place of `image` while the
     /// Original button is held.
     private(set) var original: IOSurface?
@@ -422,6 +430,8 @@ import UserNotifications
 
     /// No photograph open, and nothing of the last one written to its sidecar.
     private func forgetPhotograph() {
+        endTray(keep: true)
+        trialImage = nil
         photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
         photoFacts = nil
@@ -688,6 +698,69 @@ import UserNotifications
     func choosePaper(_ stock: String) {
         apply(PreviewRules.choosing(stock, paper: true, keepPaper: previews.keepPaper, in: state, stocks: stocks), action: "Change Paper")
     }
+
+    // MARK: The tray (§4.5, §5.1)
+
+    /// Opens the film or paper tray on the current stock, keeping whatever
+    /// the other tray was trying.
+    func openTray(paper: Bool) {
+        guard previews.enabled, source != nil, !cropping, mode == .photo else { return }
+        if let tray {
+            if tray.paper == paper { return }
+            endTray(keep: true)
+        }
+        // A slide is scanned: there's no paper to choose.
+        if paper, state.params["io.scan_film"].bool { return }
+        tray = TrayVisit(paper: paper, before: state)
+        if paper { previews.paperOpen = true } else { previews.filmOpen = true }
+        pumpPreviews()
+    }
+    /// A click on a name: opens its tray, or closes it keeping the stock.
+    func toggleTray(paper: Bool) {
+        if tray?.paper == paper { endTray(keep: true) } else { openTray(paper: paper) }
+    }
+
+    /// Tries a stock on the photograph; the tray stays open. Tries aren't
+    /// undo steps: keeping one is (`endTray`).
+    func tryStock(_ id: String) {
+        guard let tray, let source else { return }
+        let next = PreviewRules.choosing(id, paper: tray.paper, keepPaper: previews.keepPaper, in: state, stocks: stocks)
+        guard next != state else { return }
+        replaceState(next)
+        // The tile shows exactly this edit if it was made from the request
+        // it would be made from now.
+        guard !previewCurrent, let stock = stocks.first(where: { $0.paper == tray.paper && $0.id == id }),
+              let tile = previews.tile(id, paper: tray.paper), let image = tile.image else { return }
+        let wanted = PreviewTile.Key(generation: sourceGeneration, request: PreviewRules.request(
+            for: stock, keepPaper: previews.keepPaper, state: renderState, stocks: stocks, source: source, generation: sourceGeneration))
+        if tile.shown == wanted { trialImage = image }
+    }
+
+    /// ← →: the previous or next stock, in the tray's order (the
+    /// favourites' copies aside), among the matches while searching.
+    func stepTray(by offset: Int) {
+        guard let tray else { return }
+        let order = StockTrayRules.order(StockGroup.matching(tray.query, in: tray.paper ? paperGroups : filmGroups))
+        guard let id = StockTrayRules.step(from: tray.paper ? paper : film, by: offset, in: order) else { return }
+        tryStock(id)
+    }
+
+    /// Return, Done or a click outside keeps the stock being tried, as one
+    /// undo step from the stock before the tray opened; Esc puts that one
+    /// back (§5.1). Either closes the tray. Undo while it's open keeps first
+    /// (`EditorWindowController`), so it undoes the visit.
+    func endTray(keep: Bool) {
+        guard let tray else { return }
+        self.tray = nil
+        previews.filmOpen = false; previews.paperOpen = false
+        let before = withPreferences(tray.before)
+        if keep {
+            if state != before { registerUndo(restoring: tray.before, action: tray.action) }
+        } else if state != before {
+            replaceState(tray.before)
+        }
+        pumpPreviews()
+    }
     /// The state with the app's preferences that travel in it.
     private func withPreferences(_ state: EditState) -> EditState {
         var state = state; state.limitPreview = limitsPreview; return state
@@ -734,6 +807,9 @@ import UserNotifications
     }
     private func apply(_ next: EditState, action: String) {
         guard next != state else { return }
+        // Any other edit keeps the stock being tried and closes the tray, so
+        // the visit stays one undo step before it.
+        endTray(keep: true)
         if !interacting { registerUndo(restoring: state, action: action) }
         replaceState(next)
     }
@@ -743,6 +819,8 @@ import UserNotifications
         guard !closing else { return }
         let next = withPreferences(next)
         let render = next.rendered != state.rendered
+        // The enlarged tile was of the edit before.
+        if render { trialImage = nil }
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
@@ -843,6 +921,8 @@ import UserNotifications
     func beginCrop() {
         guard !cropping, image != nil, imageSize != .zero else { return }
         holdOriginal(false)
+        // The straighten dial takes the label's place.
+        endTray(keep: true)
         cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
     }
     /// Done applies the crop, and any rotation while cropping, as one undo
@@ -900,6 +980,9 @@ import UserNotifications
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
+        // A stock being tried is kept, as by a click outside the tray.
+        endTray(keep: true)
+        trialImage = nil
         // The previous photograph's last edits go to its sidecar first, and
         // the preview on screen becomes its edited thumbnail.
         flushSidecar()
@@ -1546,6 +1629,7 @@ import UserNotifications
     func showGrid() {
         guard let source = sourceItem, !cropping, mode != .grid else { return }
         holdOriginal(false)
+        endTray(keep: true)
         // The grid shows the open photograph as edited.
         flushSidecar()
         saveOpenThumbnail()
@@ -2705,6 +2789,7 @@ import UserNotifications
                 showingInteractiveFrame = interactiveScale != nil
                 quickFrame = quick ? frame : nil
                 image = developed; placeholder = nil; standIn = nil
+                if revision == currentRevision { trialImage = nil }
                 updateHistogram()
                 let film = FilmHistogram(result["film_histogram"])
                 if film != filmHistogram { filmHistogram = film }
@@ -2820,6 +2905,8 @@ import UserNotifications
         guard activityTimer == nil, !showsActivity else { return }
         activityTimer = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
+            // A tried stock's tile is up: the tag only once the develop runs long.
+            if self?.trialImage != nil { try? await Task.sleep(for: .milliseconds(1100)) }
             guard let self, !Task.isCancelled else { return }
             self.activityTimer = nil
             if !self.previewCurrent, !self.showingCachedPreview, !self.interacting, !self.renderFailed, self.source != nil {
@@ -2838,6 +2925,7 @@ import UserNotifications
     /// the plain preset list, and frees the thumbnails here and in the helper.
     func setPreviews(_ enabled: Bool) {
         guard enabled != previews.enabled else { return }
+        if !enabled { endTray(keep: true) }
         previews.enabled = enabled
         if enabled { pumpPreviews(); return }
         if previews.clear(), let engine {

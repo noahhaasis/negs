@@ -76,8 +76,8 @@ struct PrintLabel: View {
     }
 }
 
-/// A stock's name: a button that opens its stocks. Pointing at it draws a
-/// faint `track` rule under it; while its stocks are open, the pencil.
+/// A stock's name: a button that opens its tray. Pointing at it draws a
+/// faint `track` rule under it; while its tray is open, the pencil.
 private struct StockName: View {
     enum Strike {
         /// Scanning the film: the paper is struck through at about half its height.
@@ -99,10 +99,8 @@ private struct StockName: View {
     @State private var hovered = false
     @State private var anchor = MenuAnchor()
 
-    private var open: Binding<Bool> {
-        Binding(get: { paper ? model.previews.paperOpen : model.previews.filmOpen },
-                set: { StockFoldout.setOpen($0, paper: paper, model: model) })
-    }
+    /// Its tray is open.
+    private var open: Bool { model.tray?.paper == paper }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner + 1) {
@@ -120,9 +118,10 @@ private struct StockName: View {
             }
         }
         .contentShape(Rectangle())
+        // A click here opens or closes its tray, so it isn't a click outside the tray.
+        .background(TrayHitArea(model: model))
         .onHover { hovered = $0 && opens }
         .onTapGesture { if opens { activate() } }
-        .popover(isPresented: open, arrowEdge: .top) { StockFoldout(model: model, paper: paper) }
         .help(opens ? (paper ? ControlHelp.paper : ControlHelp.film) : name)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(paper ? "Paper" : "Film"): \(name)")
@@ -133,7 +132,7 @@ private struct StockName: View {
 
     @ViewBuilder private var underline: some View {
         if strike == nil {
-            if open.wrappedValue {
+            if open {
                 PencilStroke().pencil().frame(height: 6).allowsHitTesting(false)
             } else if hovered {
                 Rectangle().fill(Theme.track).frame(height: 1.5).offset(y: -1).allowsHitTesting(false)
@@ -157,7 +156,7 @@ private struct StockName: View {
     private func activate() {
         // Settings can turn the preview tiles off: then the plain menu.
         if model.previews.enabled {
-            open.wrappedValue.toggle()
+            model.toggleTray(paper: paper)
         } else {
             let stocks = paper ? model.papers : model.films
             let groups = paper ? model.paperGroups : model.filmGroups
@@ -165,14 +164,14 @@ private struct StockName: View {
             var items: [ChoiceItem] = []
             if !favorites.isEmpty {
                 items.append(.header("Favourites"))
-                items += favorites.map { .option($0.name, tag: StockFoldout.favoriteID($0.id)) }
+                items += favorites.map { .option($0.name, tag: StockMenu.favoriteID($0.id)) }
             }
             for group in groups {
                 items.append(.header(group.title))
                 items += group.stocks.map { .option($0.name, tag: $0.id) }
             }
             popUpChoiceMenu(items, selected: paper ? model.paper : model.film, under: anchor.view) { tag in
-                let id = StockFoldout.stockID(tag: tag)
+                let id = StockMenu.stockID(tag: tag)
                 if paper { model.choosePaper(id) } else { model.chooseFilm(id) }
             }
         }

@@ -33,6 +33,8 @@ import SwiftUI
     private var resigning: NSObjectProtocol?
     private var becomingKey: NSObjectProtocol?
     private var keyMonitor: Any?
+    private var mouseMonitor: Any?
+    private var menuTracking: NSObjectProtocol?
     /// The narrowest canvas, and the narrowest the content can be with the
     /// inspector shown beside it. The split view can't keep both columns at
     /// their minimums in a narrower window, so the window enforces the sum.
@@ -125,7 +127,18 @@ import SwiftUI
             MainActor.assumeIsolated { self?.windowChangedOcclusion() }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            MainActor.assumeIsolated { self?.holdOriginal(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true } ? nil : event
+            MainActor.assumeIsolated {
+                self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true
+            } ? nil : event
+        }
+        // A click outside the tray keeps the stock being tried (§5.1); so
+        // does opening a menu, so Edit › Undo undoes the whole visit.
+        menuTracking = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.endTray(keep: true) }
+        }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            MainActor.assumeIsolated { self?.clickOutsideTray(event) }
+            return event
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -187,6 +200,36 @@ import SwiftUI
         let root = panel.view
         if let current = window?.firstResponder as? NSView, InkKeyLoop.root(of: current) != nil { return false }
         return InkKeyLoop.advance(in: root, from: nil, forward: !event.modifierFlags.contains(.shift))
+    }
+
+    /// While the tray is open, Esc goes back to the stock from before it
+    /// opened, Return keeps the one being tried, and ← → step through the
+    /// stocks rather than the photographs (§5.1, §5.2). Typing keeps its keys.
+    private func trayKeys(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, model.tray != nil else { return false }
+        // ⌘Z keeps the stock being tried first, so it undoes the whole visit.
+        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "z",
+           !(window?.firstResponder is NSText) {
+            model.endTray(keep: true)
+            return false
+        }
+        guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              !(window?.firstResponder is NSText) else { return false }
+        switch event.keyCode {
+        case 53: model.endTray(keep: false)
+        case 36, 76: model.endTray(keep: true)
+        case 123, 124: model.stepTray(by: event.keyCode == 123 ? -1 : 1)
+        default: return false
+        }
+        return true
+    }
+
+    private func clickOutsideTray(_ event: NSEvent) {
+        guard model.tray != nil, event.window === window else { return }
+        for view in model.trayHitAreas.allObjects where view.window === window && !view.isHiddenOrHasHiddenAncestor {
+            if view.bounds.contains(view.convert(event.locationInWindow, from: nil)) { return }
+        }
+        model.endTray(keep: true)
     }
 
     private func escapeToGrid(_ event: NSEvent) -> Bool {

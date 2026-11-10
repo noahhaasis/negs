@@ -223,14 +223,19 @@ struct EditorCanvas: View {
                     if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
                 }
                 .overlay { LibraryNoteView(model: model) }
-            // The grid takes the strip's place; it comes back as it was.
-            if model.filmstripVisible, model.source != nil, !grid {
-                Divider()
-                PhotoBrowser(model: model)
-            }
-            if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
-                Divider()
-                StatusBar(model: model)
+            // The tray takes the strip's and the status line's place (§4.5).
+            if let tray = model.tray, !grid {
+                StockTray(model: model, visit: tray)
+            } else {
+                // The grid takes the strip's place; it comes back as it was.
+                if model.filmstripVisible, model.source != nil, !grid {
+                    Divider()
+                    PhotoBrowser(model: model)
+                }
+                if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
+                    Divider()
+                    StatusBar(model: model)
+                }
             }
         }
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
@@ -349,7 +354,13 @@ struct CanvasArea: View {
     }
 
     @ViewBuilder private var photograph: some View {
-        if let image = model.image {
+        if model.original == nil, let trial = model.trialImage {
+            // A tried stock's tile, enlarged at once until its develop is in (§5.1).
+            let size = Self.standInSize(trial, photo: model.photoSize)
+            PreviewCanvas(image: trial, size: size, rotation: 0, crop: CropSettings(), border: model.border.shown(for: size),
+                          filmTexture: model.filmTexture, filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage,
+                          scale: model.canvasScale, geometry: geometry, doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+        } else if let image = model.image {
             canvas(model.original ?? image, size: model.imageSize, rotation: model.imageRotation)
         } else if let standIn = model.standIn {
             // Finished already: drawn as it is, the size the photograph will be.
