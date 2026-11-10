@@ -113,12 +113,12 @@ final class SelectionTests: XCTestCase {
     }
 
     /// The sentence over the grid and its foot (§4.6), in the app's words.
-    func testTheCurrentAndTheSelectedAreRinged() {
+    func testTheCurrentAndTheSelectedAreDrawnSelected() {
         var selection = LibrarySelection()
-        XCTAssertFalse(photos.contains { SheetLayout.ringed($0, selection: selection) })
+        XCTAssertFalse(photos.contains { SheetLayout.drawnSelected($0, selection: selection) })
         selection.select(photos[3])
         selection.toggle(photos[4])
-        XCTAssertEqual(photos.indices.filter { SheetLayout.ringed(photos[$0], selection: selection) }, [3, 4])
+        XCTAssertEqual(photos.indices.filter { SheetLayout.drawnSelected(photos[$0], selection: selection) }, [3, 4])
     }
 
     func testTheSheetSaysWhatItShows() {

@@ -179,28 +179,48 @@ struct PhotoBrowser: View {
         let aspects = model.aspects
         // Read here, so a shape learnt redraws the strip.
         let ratios = aspects.ratios
+        let width = { (file: PhotoFile) -> CGFloat in (Self.pictureHeight * (ratios[file.url] ?? PhotoAspects.fallback)).rounded() }
         ScrollView(.horizontal) {
-            LazyHStack(spacing: Theme.Size.stripGap) {
-                ForEach(shown, id: \.url) { file in
-                    StripFrame(file: file, width: (Self.pictureHeight * (ratios[file.url] ?? PhotoAspects.fallback)).rounded(),
-                               current: file.url == model.sourceItem, selected: selected.contains(file.url),
-                               summary: library.summary(for: file.url), readOnly: library.readOnly,
-                               edited: model.editedThumbnail(for: file.url)) { visible in
-                        model.thumbnailShown(file, visible)
-                    } loaded: { image in
-                        aspects.note(file.url, image: image)
-                    } placed: { place in
-                        model.places.strip[file.url] = place
-                    } open: {
-                        let modifiers = NSEvent.modifierFlags
-                        focused = true
-                        model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
+            ZStack(alignment: .topLeading) {
+                LazyHStack(spacing: Theme.Size.stripGap) {
+                    ForEach(shown, id: \.url) { file in
+                        StripFrame(file: file, width: width(file),
+                                   current: file.url == model.sourceItem, selected: selected.contains(file.url),
+                                   summary: library.summary(for: file.url), readOnly: library.readOnly,
+                                   edited: model.editedThumbnail(for: file.url)) { visible in
+                            model.thumbnailShown(file, visible)
+                        } loaded: { image in
+                            aspects.note(file.url, image: image)
+                        } placed: { place in
+                            model.places.strip[file.url] = place
+                        } open: {
+                            let modifiers = NSEvent.modifierFlags
+                            focused = true
+                            model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
+                        }
+                        .contextMenu { LibraryContextMenu(model: model, item: file.url) }
+                        .id(file.url)
                     }
-                    .contextMenu { LibraryContextMenu(model: model, item: file.url) }
-                    .id(file.url)
                 }
+                .scrollTargetLayout()
+                // A pick's box reaches past its frame, over the gap and the
+                // frames beside it, so the boxes are drawn above every frame,
+                // laid out as the frames are (as the grid draws its own).
+                LazyHStack(alignment: .top, spacing: Theme.Size.stripGap) {
+                    ForEach(shown, id: \.url) { file in
+                        ZStack {
+                            if library.summary(for: file.url).flag == .pick {
+                                BoxInk(name: file.name, picked: true, inStrip: true)
+                            }
+                        }
+                        .frame(width: width(file), height: Self.pictureHeight)
+                    }
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
-            .scrollTargetLayout()
+            // Inside the scroll view, so the boxes' tops show in it.
+            .padding(.top, Theme.Size.stripTopPadding)
         }
         .scrollIndicators(.never)
         .scrollPosition(id: $scrollTarget, anchor: .center)
@@ -219,7 +239,6 @@ struct PhotoBrowser: View {
             model.move(by: press.key == .leftArrow ? -1 : 1, extending: press.modifiers.contains(.shift))
             return .handled
         }
-        .padding(.top, Theme.Size.stripTopPadding)
         .frame(height: Theme.Size.strip)
         .background(Theme.film)
         .overlay {

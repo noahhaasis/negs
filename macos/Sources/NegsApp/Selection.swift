@@ -110,8 +110,10 @@ struct SheetLayout: Equatable {
     }
 
     static let gap = Theme.Size.gridGap
-    /// The grid's padding: 6 at the top, 16 at the sides, 14 at the bottom.
-    static let top: CGFloat = 6, side: CGFloat = 16, bottom: CGFloat = 14
+    /// The grid's padding: 24 at the top and bottom, room for a box (round
+    /// 20) on the first and last rows, whose ends run up to 24 pt past the
+    /// picture; 16 at the sides.
+    static let top: CGFloat = 24, side: CGFloat = 16, bottom: CGFloat = 24
     /// The chosen row height (the foot's Size), 176 by default.
     static let sizes: ClosedRange<Double> = 100...360
     static let defaultSize = Double(Theme.Size.gridThumbnail)
@@ -163,9 +165,9 @@ struct SheetLayout: Equatable {
         height = rows.isEmpty ? Self.top + Self.bottom : y - Self.gap + Self.bottom
     }
 
-    /// Whether a photograph has the pencil ring: the current one and each
-    /// one selected.
-    static func ringed(_ url: URL, selection: LibrarySelection) -> Bool {
+    /// Whether a photograph is drawn as selected, boxed in yellow: the
+    /// current one and each one selected.
+    static func drawnSelected(_ url: URL, selection: LibrarySelection) -> Bool {
         url == selection.current || selection.selected.contains(url)
     }
 

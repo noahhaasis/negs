@@ -267,13 +267,14 @@ private struct SheetGrid: View {
                     .padding(.leading, SheetLayout.side)
                     .padding(.top, SheetLayout.top)
                     .padding(.bottom, SheetLayout.bottom)
-                    // The rings reach 7 pt past their pictures, over the
-                    // 6 pt gaps, so they're drawn above every thumbnail, laid
-                    // out as the rows are. Not by raising the ringed cells:
-                    // that would move them to the end for VoiceOver.
+                    // The boxes (a pick's cream one, selection's yellow one)
+                    // reach past their pictures, over the 6 pt gaps and the
+                    // thumbnails beside them, so they're drawn above every
+                    // thumbnail, laid out as the rows are. Not by raising the
+                    // boxed cells: that would move them to the end for VoiceOver.
                     LazyVStack(alignment: .leading, spacing: SheetLayout.gap) {
                         ForEach(layout.rows.indices, id: \.self) { index in
-                            rings(layout.rows[index], layout: layout, shown: shown)
+                            boxes(layout.rows[index], layout: layout, shown: shown)
                         }
                     }
                     .padding(.leading, SheetLayout.side)
@@ -317,7 +318,7 @@ private struct SheetGrid: View {
                 let url = cell.file.url
                 SheetCell(file: cell.file, size: layout.frames[cell.index].size, thumbnail: size,
                           waiting: model.sheetWaiting.contains(url),
-                          ringed: SheetLayout.ringed(url, selection: selection),
+                          selected: SheetLayout.drawnSelected(url, selection: selection),
                           current: url == selection.current, summary: library.summary(for: url),
                           readOnly: library.readOnly, edited: model.editedThumbnail(for: url)) { visible in
                     model.thumbnailShown(cell.file, visible)
@@ -340,19 +341,18 @@ private struct SheetGrid: View {
         .frame(height: row.height)
     }
 
-    /// A row's rings, each where its cell is, rising with it as the grid opens.
-    private func rings(_ row: SheetLayout.Row, layout: SheetLayout, shown: [PhotoFile]) -> some View {
-        let selection = model.selection
+    /// A row's boxes, each where its cell is, rising with it as the grid
+    /// opens: a pick's in cream, and selection's in yellow over it.
+    private func boxes(_ row: SheetLayout.Row, layout: SheetLayout, shown: [PhotoFile]) -> some View {
+        let selection = model.selection, library = model.library
         return HStack(spacing: SheetLayout.gap) {
-            ForEach(row.range.map { (index: $0, url: shown[$0].url) }, id: \.url) { cell in
-                let waiting = model.sheetWaiting.contains(cell.url)
+            ForEach(row.range.map { (index: $0, file: shown[$0]) }, id: \.file.url) { cell in
+                let url = cell.file.url
+                let waiting = model.sheetWaiting.contains(url)
+                let picked = library.summary(for: url).flag == .pick, selected = SheetLayout.drawnSelected(url, selection: selection)
                 ZStack {
-                    if SheetLayout.ringed(cell.url, selection: selection) {
-                        PencilRing()
-                            .stroke(Theme.accent, lineWidth: PencilRing.lineWidth)
-                            .padding(.horizontal, -PencilRing.outset.width)
-                            .padding(.vertical, -PencilRing.outset.height)
-                            .rotationEffect(PencilRing.tilt)
+                    if picked || selected {
+                        BoxInk(name: cell.file.name, picked: picked, selected: selected)
                     }
                 }
                 .frame(width: layout.frames[cell.index].width, height: layout.frames[cell.index].height)
@@ -386,16 +386,16 @@ private struct SheetNote: View {
     var body: some View { Text(text).font(Theme.serif(16, italic: true)).foregroundStyle(Theme.dim) }
 }
 
-/// One thumbnail: the picture filling its cell and the marks. Its pencil
-/// ring, round the current photograph and each one selected, is drawn by
-/// the layer above (`rings`); `ringed` tells VoiceOver it's selected.
+/// One thumbnail: the picture filling its cell and the marks. A pick's box,
+/// and the yellow box round the current photograph and each one selected,
+/// are drawn by the layer above (`boxes`); `selected` tells VoiceOver.
 private struct SheetCell: View {
     let file: PhotoFile
     let size: CGSize
     let thumbnail: PhotoThumbnails.Size
     /// Hidden while the grid opens or folds (`SheetFlight`).
     let waiting: Bool
-    let ringed: Bool
+    let selected: Bool
     let current: Bool
     let summary: LibrarySummary
     let readOnly: Bool
@@ -433,7 +433,7 @@ private struct SheetCell: View {
         .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
-        .accessibilityAddTraits(ringed ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction { click() }
         .accessibilityAction(named: "Edit", open)
         .onAppear { visible = true; shown(true) }

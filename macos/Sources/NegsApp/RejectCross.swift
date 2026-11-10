@@ -191,6 +191,6 @@ enum RejectCross {
         return path
     }
 
-    private static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
-    private static func smooth(_ t: CGFloat) -> CGFloat { t * t * (3 - 2 * t) }
+    static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
+    static func smooth(_ t: CGFloat) -> CGFloat { t * t * (3 - 2 * t) }
 }
