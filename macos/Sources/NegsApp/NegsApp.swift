@@ -326,6 +326,8 @@ struct CanvasArea: View {
     /// label step aside for a line round the print's place (§4.14).
     var dropping = false
     @State private var geometry = CanvasGeometry()
+    /// The pointer is over the photograph, which brightens the trim marks.
+    @State private var overPrint = false
 
     /// Above the photograph, for the caption; below it, for the label's two rows (§2.3).
     static let captionBand: CGFloat = 54
@@ -335,7 +337,7 @@ struct CanvasArea: View {
         ZStack {
             ViewerBackground.canvas
             if let session = model.cropSession, let image = model.image {
-                CropEditor(session: session, image: image)
+                CropEditor(model: model, session: session, image: image)
             } else if model.source == nil, model.image == nil, model.standIn == nil, model.placeholder == nil {
                 EmptyCanvas(model: model, dropping: dropping)
             } else {
@@ -363,6 +365,11 @@ struct CanvasArea: View {
             }
         }
         .overlay(alignment: .topLeading) { developTag }
+        .onContinuousHover { phase in
+            let over: Bool
+            if case .active(let point) = phase, let print = shownPrint { over = print.contains(point) } else { over = false }
+            if over != overPrint { overPrint = over }
+        }
     }
 
     /// The print's place on the canvas, once it's laid out.
@@ -426,6 +433,10 @@ struct CanvasArea: View {
                 .offset(x: left, y: print.minY - 10 - 40)
             PrintLabel(model: model, photoWidth: width, canvasWidth: max(size.width - margin - left, width))
                 .offset(x: left, y: print.maxY)
+            // Not zoomed in: the corners are off the canvas then (§4.3).
+            if !geometry.zoomed, model.image != nil, model.developFailure == nil {
+                CropTrimMarks(print: print, lit: overPrint, crop: model.beginCrop)
+            }
         }
     }
 

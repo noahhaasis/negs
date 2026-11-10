@@ -392,30 +392,39 @@ enum CropGeometry {
     }
 }
 
-/// The whole photograph with the crop drawn over it and the straightening
-/// dial below. Borders aren't shown, and the canvas doesn't zoom while cropping.
+/// The whole photograph with the crop drawn over it (§4.10). It sits where
+/// the print does, between the caption, which stays, and the label's band,
+/// which the straightening dial takes. Borders aren't shown, and the canvas
+/// doesn't zoom while cropping.
 struct CropEditor: View {
+    let model: EditorModel
     let session: CropSession
     let image: AnyObject
 
     @State private var drag: (handle: CropGeometry.Handle, start: CGRect)?
-    private let margin: CGFloat = 36
-    private let dialSpace: CGFloat = 76
+
+    /// The photograph's place: fitted between the caption's and the label's
+    /// bands and the canvas's side margins, as the print is.
+    static func place(photo: CGSize, in size: CGSize) -> CGRect {
+        let inset = ImageScrollView.fitInset, top = CanvasArea.captionBand, bottom = CanvasArea.labelBand
+        let room = CGSize(width: max(size.width - 2 * inset, 1), height: max(size.height - top - bottom, 1))
+        let scale = photo.width > 0 && photo.height > 0 ? min(room.width / photo.width, room.height / photo.height) : 1
+        let fitted = CGSize(width: photo.width * scale, height: photo.height * scale)
+        return CGRect(x: ((size.width - fitted.width) / 2).rounded(), y: (top + (room.height - fitted.height) / 2).rounded(),
+                      width: fitted.width, height: fitted.height)
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            let photo = session.photo
-            let available = CGSize(width: max(geometry.size.width - 2 * margin, 1), height: max(geometry.size.height - 2 * margin - dialSpace, 1))
-            let scale = photo.width > 0 && photo.height > 0 ? min(available.width / photo.width, available.height / photo.height) : 1
-            let frame = CGRect(x: (geometry.size.width - photo.width * scale) / 2, y: margin + (available.height - photo.height * scale) / 2,
-                               width: photo.width * scale, height: photo.height * scale)
+            let frame = Self.place(photo: session.photo, in: geometry.size)
+            let scale = session.photo.width > 0 ? frame.width / session.photo.width : 1
             let shown = session.shown
             let crop = CGRect(x: frame.minX + shown.minX * scale, y: frame.minY + shown.minY * scale,
                               width: shown.width * scale, height: shown.height * scale)
             ZStack(alignment: .topLeading) {
                 CropPhoto(image: image, frame: frame, rotation: session.rotation, angle: session.angle)
                 CropOverlay(photo: CropGeometry.corners(of: frame.size, angle: session.angle).map { CGPoint(x: $0.x + frame.minX, y: $0.y + frame.minY) },
-                            crop: crop, grid: session.straightening ? .fine : session.adjusting ? .thirds : nil)
+                            crop: crop, fine: session.straightening)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             .contentShape(Rectangle())
@@ -427,11 +436,17 @@ struct CropEditor: View {
                 case .ended: NSCursor.arrow.set()
                 }
             }
-            .overlay(alignment: .bottom) {
-                StraightenDial(angle: session.angle, began: session.beginStraightening, changed: session.straighten, ended: session.endStraightening)
-                    .frame(width: min(380, max(geometry.size.width - 2 * margin, 120)))
-                    .padding(.bottom, 20)
-            }
+            .overlay(alignment: .topLeading) { ZStack(alignment: .topLeading) {
+                let left = max(frame.minX, ImageScrollView.fitInset)
+                PhotoCaption(facts: model.photoFacts, fileName: model.sourceItem.map { model.library.name(of: $0) } ?? "",
+                             portrait: frame.height > frame.width)
+                    .frame(width: max(min(frame.maxX, geometry.size.width - ImageScrollView.fitInset) - left, 1), height: 40, alignment: .bottom)
+                    .offset(x: left, y: frame.minY - 10 - 40)
+                    .allowsHitTesting(false)
+                StraightenDial(angle: session.angle, began: session.beginStraightening, changed: session.straighten,
+                               ended: session.endStraightening, turn: model.turn(clockwise:))
+                    .offset(x: (frame.midX - StraightenDial.width / 2).rounded(), y: frame.maxY + 10)
+            } }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Crop")
@@ -468,7 +483,7 @@ struct CropEditor: View {
             }
     }
 
-    private static func cursor(for handle: CropGeometry.Handle?) -> NSCursor {
+    static func cursor(for handle: CropGeometry.Handle?) -> NSCursor {
         guard let handle else { return .arrow }
         if handle == .move { return .openHand }
         if #available(macOS 15, *) {
@@ -488,34 +503,35 @@ struct CropEditor: View {
     }
 }
 
-/// The dimmed photograph outside the crop, its outline and corner handles,
-/// and a grid while a handle moves or the photograph turns.
+/// Outside the crop the photograph darkens with `rgba(8,7,6,.6)`; the crop is
+/// a 1 pt `paper` line with the rule of thirds in faint `paper` and 3 pt
+/// `paper` corners just outside it. Straightening, a finer grid shows.
 private struct CropOverlay: View {
-    enum Grid { case thirds, fine }
     /// The turned photograph's corners.
     let photo: [CGPoint]
     let crop: CGRect
-    let grid: Grid?
+    let fine: Bool
+
+    static let shade = Color(red: 8 / 255, green: 7 / 255, blue: 6 / 255).opacity(0.6)
 
     var body: some View {
         Canvas { context, _ in
             var outside = Path()
             outside.addLines(photo); outside.closeSubpath()
             outside.addRect(crop)
-            context.fill(outside, with: .color(.black.opacity(0.55)), style: FillStyle(eoFill: true))
-            if let grid {
-                let lines = grid == .thirds ? 3 : 9
-                var path = Path()
-                for i in 1..<lines {
-                    let x = crop.minX + crop.width * CGFloat(i) / CGFloat(lines), y = crop.minY + crop.height * CGFloat(i) / CGFloat(lines)
-                    path.move(to: CGPoint(x: x, y: crop.minY)); path.addLine(to: CGPoint(x: x, y: crop.maxY))
-                    path.move(to: CGPoint(x: crop.minX, y: y)); path.addLine(to: CGPoint(x: crop.maxX, y: y))
-                }
-                context.stroke(path, with: .color(.white.opacity(grid == .thirds ? 0.6 : 0.4)), lineWidth: 0.5)
+            context.fill(outside, with: .color(Self.shade), style: FillStyle(eoFill: true))
+            let lines = fine ? 9 : 3
+            var grid = Path()
+            for i in 1..<lines {
+                let x = (crop.minX + crop.width * CGFloat(i) / CGFloat(lines)).rounded() + 0.5
+                let y = (crop.minY + crop.height * CGFloat(i) / CGFloat(lines)).rounded() + 0.5
+                grid.move(to: CGPoint(x: x, y: crop.minY)); grid.addLine(to: CGPoint(x: x, y: crop.maxY))
+                grid.move(to: CGPoint(x: crop.minX, y: y)); grid.addLine(to: CGPoint(x: crop.maxX, y: y))
             }
-            context.stroke(Path(crop.insetBy(dx: -0.5, dy: -0.5)), with: .color(.white.opacity(0.9)), lineWidth: 1)
-            // Corner brackets just outside the crop.
-            let length = min(22, crop.width / 2, crop.height / 2), width: CGFloat = 3
+            context.stroke(grid, with: .color(Theme.paper.opacity(0.3)), lineWidth: 1)
+            context.stroke(Path(crop.insetBy(dx: -0.5, dy: -0.5)), with: .color(Theme.paper.opacity(0.9)), lineWidth: 1)
+            // The corners, 20 pt along each edge, just outside the line.
+            let length = min(20, crop.width / 2, crop.height / 2), width: CGFloat = 3
             let outer = crop.insetBy(dx: -width / 2, dy: -width / 2)
             var corners = Path()
             for (x, y, dx, dy) in [(outer.minX, outer.minY, 1.0, 1.0), (outer.maxX, outer.minY, -1, 1), (outer.minX, outer.maxY, 1, -1), (outer.maxX, outer.maxY, -1, -1)] {
@@ -523,77 +539,112 @@ private struct CropOverlay: View {
                 corners.addLine(to: CGPoint(x: x, y: y))
                 corners.addLine(to: CGPoint(x: x, y: y + dy * length))
             }
-            context.drawLayer { layer in
-                layer.addFilter(.shadow(color: .black.opacity(0.35), radius: 1.5))
-                layer.stroke(corners, with: .color(.white), style: StrokeStyle(lineWidth: width, lineCap: .square))
-            }
+            context.stroke(corners, with: .color(Theme.paper), style: StrokeStyle(lineWidth: width, lineCap: .square))
         }
         .allowsHitTesting(false)
     }
 }
 
-/// A ruler to turn the photograph by degrees, like the iPhone's: drag it
-/// sideways, and it catches at zero. Double-click it to straighten again.
-private struct StraightenDial: View {
+/// The straightening dial, 362 wide, where the label was (§4.10): the angle
+/// in Newsreader 15 over 61 ticks, a degree apart, every fifth longer, and
+/// zero a 2 × 17 yellow line. Drag it sideways; it catches at zero, and a
+/// double-click straightens again. A quarter-turn arrow at each end turns
+/// the photograph: rotate exists only here.
+struct StraightenDial: View {
     let angle: Double
     let began: () -> Void
     let changed: (Double) -> Void
     let ended: () -> Void
+    /// A quarter turn, clockwise or not.
+    let turn: (Bool) -> Void
 
     @State private var start: Double?
-    /// Points per degree.
-    private let spacing: CGFloat = 7
+    static let width: CGFloat = 362
+    /// Points per degree: 61 ticks across the dial.
+    static let spacing = (width - 2) / 60
+
+    /// "0,0°", in the reader's own decimal mark.
+    static func degrees(_ angle: Double) -> String { "\((angle == 0 ? 0 : angle).formatted(.number.precision(.fractionLength(1))))°" }
+
+    /// The ticks to draw for `angle`: each degree's x across the dial, and
+    /// whether it's a fifth's or zero's.
+    static func ticks(angle: Double) -> [(degree: Int, x: CGFloat)] {
+        let mid = width / 2
+        return (-Int(CropSettings.maxAngle) - 30...Int(CropSettings.maxAngle) + 30).compactMap { degree in
+            let x = mid + (CGFloat(degree) - CGFloat(angle)) * spacing
+            return x >= 0 && x <= width ? (degree: degree, x: x) : nil
+        }
+    }
 
     var body: some View {
         VStack(spacing: 4) {
-            Text(angle == 0 ? "0°" : "\(angle.formatted(.number.precision(.fractionLength(1))))°")
-                .font(.callout.weight(.semibold)).monospacedDigit()
-                .foregroundStyle(angle == 0 ? .secondary : .primary)
+            Text(Self.degrees(angle))
+                .font(Theme.serif(15)).monospacedDigit()
+                .foregroundStyle(Theme.paper)
+                .accessibilityHidden(true)
             Canvas { context, size in
-                let mid = size.width / 2
-                for degree in -45...45 {
-                    let x = mid + (CGFloat(degree) - angle) * spacing
-                    guard x >= 0, x <= size.width else { continue }
-                    let major = degree % 5 == 0
-                    let height: CGFloat = degree == 0 ? size.height : major ? size.height * 0.7 : size.height * 0.4
-                    let fade = 1 - pow(abs(x - mid) / mid, 2)
-                    var tick = Path()
-                    tick.move(to: CGPoint(x: x, y: (size.height - height) / 2)); tick.addLine(to: CGPoint(x: x, y: (size.height + height) / 2))
-                    context.stroke(tick, with: .color(.primary.opacity((major ? 0.75 : 0.4) * fade)), lineWidth: degree == 0 ? 1.5 : 1)
+                for (degree, x) in Self.ticks(angle: angle) {
+                    let zero = degree == 0, major = degree % 5 == 0
+                    let rect = zero ? CGRect(x: x - 1, y: 0, width: 2, height: 17)
+                        : CGRect(x: (x - 0.5).rounded(), y: 0, width: 1, height: major ? 11 : 6)
+                    let shape = zero ? Path(roundedRect: rect, cornerRadius: 1) : Path(rect)
+                    context.fill(shape, with: .color(zero ? Theme.accent : major ? Theme.dim : Theme.track))
                 }
-                var needle = Path()
-                needle.move(to: CGPoint(x: mid, y: 0)); needle.addLine(to: CGPoint(x: mid, y: size.height))
-                context.stroke(needle, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             }
-            .frame(height: 22)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 1)
-                .onChanged { value in
-                    if start == nil { start = angle; began() }
-                    var next = (start ?? 0) - value.translation.width / spacing
-                    // Catch at zero, with a tap on a Force Touch trackpad.
-                    if abs(next) < 0.4 {
-                        if angle != 0 { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
-                        next = 0
+            .frame(width: Self.width, height: 18)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        if start == nil { start = angle; began() }
+                        var next = (start ?? 0) - value.translation.width / Self.spacing
+                        // Catch at zero, with a tap on a Force Touch trackpad.
+                        if abs(next) < 0.4 {
+                            if angle != 0 { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+                            next = 0
+                        }
+                        changed(next)
                     }
-                    changed(next)
-                }
-                .onEnded { _ in start = nil; ended() }
-        )
-        .onTapGesture(count: 2) { began(); changed(0); ended() }
-        .onHover { inside in (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set() }
-        .help("Drag to straighten the photograph. Double-click to reset.")
-        .accessibilityElement()
-        .accessibilityLabel("Straighten")
-        .accessibilityValue("\(angle.formatted(.number.precision(.fractionLength(1)))) degrees")
-        .accessibilityAdjustableAction { direction in
-            began(); changed(angle + (direction == .increment ? 0.5 : -0.5)); ended()
+                    .onEnded { _ in start = nil; ended() }
+            )
+            .onTapGesture(count: 2) { began(); changed(0); ended() }
+            .onHover { inside in (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set() }
+            .help("Drag to straighten the photograph. Double-click to straighten it again.")
+            .accessibilityElement()
+            .accessibilityLabel("Straighten")
+            .accessibilityValue("\(Self.degrees(angle).dropLast()) degrees")
+            .accessibilityAdjustableAction { direction in
+                began(); changed(angle + (direction == .increment ? 0.5 : -0.5)); ended()
+            }
+            .overlay(alignment: .topLeading) {
+                QuarterTurn(clockwise: false, action: { turn(false) }).offset(x: -34, y: -4)
+            }
+            .overlay(alignment: .topTrailing) {
+                QuarterTurn(clockwise: true, action: { turn(true) }).offset(x: 34, y: -4)
+            }
         }
+        .frame(width: Self.width)
+    }
+}
+
+/// A quarter-turn arrow at the dial's end: `dim`, `paper` under the pointer.
+private struct QuarterTurn: View {
+    let clockwise: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: clockwise ? "arrow.clockwise" : "arrow.counterclockwise")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(hovered ? Theme.paper : Theme.dim)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(InkPressStyle())
+        .onHover { hovered = $0 }
+        .help(clockwise ? "Rotate right (⌘R)" : "Rotate left (⌥⌘R)")
+        .accessibilityLabel(clockwise ? "Rotate right" : "Rotate left")
     }
 }
 
@@ -648,98 +699,219 @@ final class CropPhotoView: NSView {
     }
 }
 
-/// Replaces the adjustments while cropping.
+/// The crop panel takes the inspector while cropping (§4.10): "Crop" with
+/// Reset Crop, the aspect ratios as rows with a dot, Orientation in words,
+/// Straighten, the Size and hints, and Cancel and Done at the foot.
 struct CropInspector: View {
     let model: EditorModel
     @Bindable var session: CropSession
-    @FocusState private var field: Bool
 
     var body: some View {
-        Form {
-            Section("Aspect Ratio") {
-                Picker("Aspect ratio", selection: Binding(get: { session.aspect }, set: session.choose)) {
-                    ForEach(CropAspect.allCases) { aspect in
-                        if let format = aspect.format {
-                            (Text(aspect.title) + Text("  \(format)").foregroundStyle(.secondary)).tag(aspect)
-                        } else {
-                            Text(aspect.title).tag(aspect)
-                        }
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-                if session.aspect == .custom {
-                    LabeledContent("Ratio") {
-                        HStack(spacing: 6) {
-                            ratioField("Width", value: session.custom.width) { session.setCustom(width: $0) }
-                            Text("×").foregroundStyle(.secondary)
-                            ratioField("Height", value: session.custom.height) { session.setCustom(height: $0) }
-                        }
-                    }
-                }
-                Picker("Orientation", selection: Binding(get: { session.orientationPortrait }, set: { session.orient(portrait: $0) })) {
-                    Label("Landscape", systemImage: "rectangle").tag(false)
-                    Label("Portrait", systemImage: "rectangle.portrait").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .disabled(!session.aspect.turns)
-            }
-            Section("Straighten") {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Text("Angle")
-                        Spacer(minLength: 8)
-                        if session.angle != 0 {
-                            Button { session.beginStraightening(); session.straighten(to: 0); session.endStraightening() } label: {
-                                Image(systemName: "arrow.counterclockwise")
-                            }
-                            .buttonStyle(.borderless).foregroundStyle(.secondary).imageScale(.small)
-                            .help("Straighten to 0°").accessibilityLabel("Reset angle")
-                        }
-                        Text("\(session.angle.formatted(.number.precision(.fractionLength(1))))°")
-                            .monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 40, alignment: .trailing)
-                    }
-                    ResettableSlider(title: "Angle", value: Binding(get: { session.angle }, set: session.straighten),
-                                     range: -CropSettings.maxAngle...CropSettings.maxAngle, neutral: 0,
-                                     editing: { $0 ? session.beginStraightening() : session.endStraightening() },
-                                     reset: { session.beginStraightening(); session.straighten(to: 0); session.endStraightening() })
-                }
-                .help("Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.")
-            }
-            Section {
-                LabeledContent("Size") {
-                    let size = session.exportedSize(working: model.workingSize)
-                    Text(verbatim: "\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px").monospacedDigit()
-                }
-                .help("The exported photograph’s size, before the border.")
-                if let working = session.projectedWorking, session.source.width > 0 {
-                    let scale = working.width / session.source.width
-                    Text(scale >= 1 ? "Image Size develops the whole frame \(scale.formatted(FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))))× the source." : "Image Size develops the whole frame at \(EditorModel.percent(scale)) of the source.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if let error = session.sizeError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.red)
-                }
-            }
-            Section {
-                Button("Reset Crop", action: session.reset).frame(maxWidth: .infinity)
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text("Crop").font(Theme.ui(12, weight: .medium)).foregroundStyle(Theme.paper)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                WordButton(title: "Reset Crop", help: "Show the whole, unturned photograph again.", action: session.reset)
                     .disabled(!session.modified)
-                    .help("Show the whole, unturned photograph again.")
-            } footer: {
-                Text("Drag the corners or edges to crop, or drag inside to move it. Drag the dial below the photograph to straighten it. Press Return to apply or Escape to cancel. The border is added after cropping.")
-                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, Theme.Size.gutter)
+            .padding(.top, 13)
+            .frame(height: Theme.Size.paneHeader, alignment: .top)
+            InkRule()
+            ScrollView {
+                VStack(spacing: 0) {
+                    InkSection(title: "Aspect Ratio") {
+                        ForEach(CropAspect.allCases) { aspect in
+                            AspectRow(aspect: aspect, chosen: session.aspect == aspect) { session.choose(aspect) }
+                        }
+                        if session.aspect == .custom { CustomRatioRow(session: session) }
+                        OrientationRow(portrait: session.orientationPortrait) { session.orient(portrait: $0) }
+                            .inkDisabled(!session.aspect.turns)
+                    }
+                    InkSection(title: "Straighten") {
+                        LabeledSlider(title: "Angle", value: Binding(get: { session.angle }, set: session.straighten),
+                                      range: -CropSettings.maxAngle...CropSettings.maxAngle, step: 0.1, unit: "°", defaultValue: 0,
+                                      modified: session.angle != 0,
+                                      reset: { session.beginStraightening(); session.straighten(to: 0); session.endStraightening() },
+                                      editing: { $0 ? session.beginStraightening() : session.endStraightening() },
+                                      help: "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.")
+                    }
+                    InkSection(title: nil) {
+                        let size = session.exportedSize(working: model.workingSize)
+                        ReadoutRow(title: "Size", value: "\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px")
+                        HintText("The exported photograph’s size, before the border.")
+                        if let working = session.projectedWorking, session.source.width > 0 {
+                            let scale = working.width / session.source.width
+                            HintText(scale >= 1 ? "Image Size develops the whole frame \(scale.formatted(FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))))× the source." : "Image Size develops the whole frame at \(EditorModel.percent(scale)) of the source.")
+                        }
+                        if let error = session.sizeError { HintText(error, warning: true) }
+                        HintText("Drag the corners or edges to crop, or inside to move it. Drag the dial under the photograph to straighten it; the arrows at its ends turn it a quarter. The border is added after cropping.")
+                    }
+                }
+            }
+            .scrollIndicators(.never)
+            VStack(spacing: 8) {
+                Text("return applies · esc cancels")
+                    .font(Theme.serif(14, italic: true)).foregroundStyle(Theme.label).lineLimit(1)
+                // Done is twice Cancel's width.
+                GeometryReader { proxy in
+                    let third = max((proxy.size.width - 10) / 3, 1)
+                    HStack(spacing: 10) {
+                        Button("Cancel") { model.endCrop(apply: false) }
+                            .buttonStyle(SquareOutlinedButtonStyle())
+                            .frame(width: third)
+                            .help("Discard the crop (Esc)")
+                        Button("Done") { model.endCrop(apply: true) }
+                            .buttonStyle(PencilButtonStyle())
+                            .frame(width: third * 2)
+                            .help("Apply the crop (Return)")
+                    }
+                }
+                .frame(height: 36)
+            }
+            .padding(.horizontal, Theme.Size.gutter)
+            .padding(.top, 11)
+            .padding(.bottom, 16)
+            .overlay(alignment: .top) { InkRule() }
+        }
+    }
+}
+
+/// An aspect ratio as a row: a dot, filled in `paper` when it's chosen, the
+/// ratio, and its film or print format in italic on the right.
+private struct AspectRow: View {
+    let aspect: CropAspect
+    let chosen: Bool
+    let choose: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .strokeBorder(chosen ? Theme.paper : hovered ? Theme.dim : Theme.track, lineWidth: 1.2)
+                .background(Circle().fill(chosen ? Theme.paper : .clear))
+                .frame(width: 9, height: 9)
+            RowLabel(title: aspect.title, bright: chosen || hovered)
+            Spacer(minLength: 8)
+            if let format = aspect.format {
+                Text(format).font(Theme.serif(13.5, italic: true)).foregroundStyle(Theme.dim)
             }
         }
-        .formStyle(.grouped)
-        .onChange(of: field) { _, focused in session.typing = focused }
+        .padding(.horizontal, Theme.Size.gutter)
+        .frame(height: Theme.Size.row - 3)
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onTapGesture(perform: choose)
+        .inkFocus(activate: choose)
+        .accessibilityElement()
+        .accessibilityLabel([aspect.title, aspect.format].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default, choose)
+    }
+}
+
+/// Landscape and Portrait as two words, the chosen one in `paper` with the
+/// pencil under it.
+private struct OrientationRow: View {
+    let portrait: Bool
+    let choose: (Bool) -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            RowLabel(title: "Orientation")
+            Spacer(minLength: 8)
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                word("Landscape", portrait: false)
+                word("Portrait", portrait: true)
+            }
+        }
+        .padding(.horizontal, Theme.Size.gutter)
+        .frame(height: Theme.Size.row + 4)
     }
 
-    private func ratioField(_ title: String, value: CGFloat, set: @escaping (CGFloat) -> Void) -> some View {
-        TextField(title, value: Binding(get: { Double(value) }, set: { set(CGFloat($0)) }), format: .number.precision(.fractionLength(0...2)))
-            .textFieldStyle(.roundedBorder).labelsHidden().multilineTextAlignment(.trailing).monospacedDigit()
-            .frame(width: 56)
-            .focused($field)
-            .accessibilityLabel("\(title) ratio")
+    private func word(_ title: String, portrait: Bool) -> some View {
+        let chosen = self.portrait == portrait
+        return Button { choose(portrait) } label: {
+            Text(title).font(Theme.serif(14.5)).foregroundStyle(chosen ? Theme.paper : Theme.dim)
+                .pencilUnderline(chosen, offset: 3)
+        }
+        .buttonStyle(InkPressStyle())
+        .inkFocus { choose(portrait) }
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+}
+
+/// Custom's ratio, "3 × 2": click a side to type it.
+private struct CustomRatioRow: View {
+    let session: CropSession
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            RowLabel(title: "Ratio")
+            Spacer(minLength: 8)
+            RatioSide(title: "Width", value: session.custom.width, typing: { session.typing = $0 }) { session.setCustom(width: $0) }
+            Text("×").font(Theme.serif(14.5)).foregroundStyle(Theme.dim)
+            RatioSide(title: "Height", value: session.custom.height, typing: { session.typing = $0 }) { session.setCustom(height: $0) }
+        }
+        .padding(.horizontal, Theme.Size.gutter)
+        .frame(height: Theme.Size.row)
+    }
+}
+
+/// One side of the custom ratio, in the serif; a click turns it into a field.
+private struct RatioSide: View {
+    let title: String
+    let value: CGFloat
+    let typing: (Bool) -> Void
+    let set: (CGFloat) -> Void
+    @State private var editing = false
+    @State private var pointed = false
+
+    var body: some View {
+        if editing {
+            ValueField(title: "\(title) ratio", value: Binding(get: { Double(value) }, set: { set(CGFloat($0)) }), range: 0.1...1000, decimals: 2) { _ in
+                editing = false; typing(false)
+            }
+            .frame(width: 44, height: 20)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.paper).frame(height: 1) }
+        } else {
+            Text(Double(value).formatted(.number.precision(.fractionLength(0...2))))
+                .font(Theme.serif(14.5)).foregroundStyle(Theme.paper).monospacedDigit()
+                .overlay(alignment: .bottom) { Rectangle().fill(pointed ? Theme.dim : Theme.track).frame(height: 1).offset(y: 2) }
+                .contentShape(Rectangle())
+                .onHover { pointed = $0 }
+                .onTapGesture { editing = true; typing(true) }
+                .inkFocus { editing = true; typing(true) }
+                .help("Click to type the \(title.lowercased())")
+                .accessibilityLabel("\(title) ratio")
+                .accessibilityValue(Double(value).formatted())
+                .accessibilityAddTraits(.isButton)
+        }
+    }
+}
+
+/// Crop's Cancel: outlined like the other buttons, but square-cornered and
+/// 36 tall beside Done.
+struct SquareOutlinedButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Outlined(configuration: configuration) }
+
+    private struct Outlined: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var enabled
+        @State private var hovered = false
+
+        var body: some View {
+            configuration.label
+                .font(Theme.serif(16, weight: 500))
+                .foregroundStyle(Theme.paper)
+                .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
+                .padding(.bottom, 1)
+                .background(RoundedRectangle(cornerRadius: 3).fill(Theme.paper.opacity(configuration.isPressed ? 0.09 : hovered ? 0.04 : 0)))
+                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(hovered || configuration.isPressed ? Theme.dim : Theme.track, lineWidth: 1))
+                .contentShape(Rectangle())
+                .opacity(enabled ? 1 : Theme.disabledOpacity)
+                .onHover { hovered = $0 && enabled }
+        }
     }
 }

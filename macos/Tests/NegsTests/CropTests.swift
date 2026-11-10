@@ -250,6 +250,81 @@ import XCTest
         XCTAssertEqual(model.photoSize, CGSize(width: 64, height: 64))
     }
 
+    /// Rotate exists only while cropping (§4.10, §6.9): ⌘R and ⌥⌘R start
+    /// cropping and turn a quarter either way; Cancel turns it back, and
+    /// Done keeps the turn with the crop as one undo step.
+    func testRotatingStartsCroppingAndTurnsEitherWay() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+
+        XCTAssertFalse(model.cropping)
+        model.turn(clockwise: true)
+        XCTAssertTrue(model.cropping, "turning starts cropping")
+        XCTAssertEqual(model.value("io.rotate_cw"), .number(1))
+        model.turn(clockwise: false)
+        model.turn(clockwise: false)
+        XCTAssertEqual(model.value("io.rotate_cw"), .number(3), "left is three quarters right")
+        model.endCrop(apply: false)
+        XCTAssertFalse(model.cropping)
+        XCTAssertEqual(model.value("io.rotate_cw"), .number(0), "Cancel turns it back")
+        XCTAssertFalse(undo.canUndo)
+
+        try await waitUntil { model.previewCurrent }
+        model.turn(clockwise: false)
+        undo.beginUndoGrouping(); model.endCrop(apply: true); undo.endUndoGrouping()
+        XCTAssertEqual(model.value("io.rotate_cw"), .number(3))
+        undo.undo()
+        XCTAssertEqual(model.value("io.rotate_cw"), .number(0), "one undo step")
+    }
+
+    func testWithoutAPhotographRotatingDoesNothing() {
+        let model = EditorModel()
+        defer { model.shutdown() }
+        model.turn(clockwise: true)
+        XCTAssertFalse(model.cropping)
+        XCTAssertEqual(model.value("io.rotate_cw").double, 0)
+    }
+
+    /// 61 ticks a degree apart across 362 pt, zero in the middle, and the
+    /// scale slides under the middle as the photograph turns.
+    func testTheDialsTicks() {
+        let ticks = StraightenDial.ticks(angle: 0)
+        XCTAssertEqual(ticks.count, 61)
+        XCTAssertEqual(ticks.first?.degree, -30)
+        XCTAssertEqual(ticks.first?.x ?? -1, 1, accuracy: 0.01)
+        XCTAssertEqual(ticks.last?.x ?? -1, StraightenDial.width - 1, accuracy: 0.01)
+        let zero = try? XCTUnwrap(ticks.first { $0.degree == 0 })
+        XCTAssertEqual(zero?.x ?? 0, StraightenDial.width / 2, accuracy: 0.01)
+        let turned = StraightenDial.ticks(angle: 10)
+        XCTAssertEqual(turned.first { $0.degree == 0 }?.x ?? 0, StraightenDial.width / 2 - 10 * StraightenDial.spacing, accuracy: 0.01)
+        XCTAssertEqual(turned.first { $0.degree == 10 }?.x ?? 0, StraightenDial.width / 2, accuracy: 0.01)
+        XCTAssertEqual(StraightenDial.degrees(0), "\(0.0.formatted(.number.precision(.fractionLength(1))))°")
+        XCTAssertEqual(StraightenDial.degrees(-2.5), "\((-2.5).formatted(.number.precision(.fractionLength(1))))°")
+    }
+
+    /// The photograph being cropped sits where the print does: between the
+    /// caption's and the label's bands, inside the side margins, centred.
+    func testTheCropSitsWhereThePrintGoes() {
+        let canvas = CGSize(width: 1000, height: 800)
+        let wide = CropEditor.place(photo: CGSize(width: 6000, height: 4000), in: canvas)
+        XCTAssertEqual(wide.width, 1000 - 2 * ImageScrollView.fitInset, accuracy: 0.5)
+        XCTAssertEqual(wide.midX, 500, accuracy: 0.5)
+        XCTAssertGreaterThanOrEqual(wide.minY, CanvasArea.captionBand)
+        XCTAssertLessThanOrEqual(wide.maxY, 800 - CanvasArea.labelBand)
+        let tall = CropEditor.place(photo: CGSize(width: 4000, height: 6000), in: canvas)
+        XCTAssertEqual(tall.minY, CanvasArea.captionBand, accuracy: 0.5)
+        XCTAssertEqual(tall.maxY, 800 - CanvasArea.labelBand, accuracy: 0.5)
+        XCTAssertEqual(tall.midX, 500, accuracy: 0.5)
+    }
+
     private func waitUntil(_ predicate: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(20)
         while !predicate(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }

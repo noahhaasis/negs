@@ -948,6 +948,16 @@ import UserNotifications
         endTray(keep: true)
         cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
     }
+    /// A quarter turn, which happens only while cropping (§4.10): from the
+    /// menu, or ⌘R / ⌥⌘R, it starts cropping first. Done keeps it with the
+    /// crop as one undo step; Cancel turns it back.
+    func turn(clockwise: Bool) {
+        if !cropping { beginCrop() }
+        guard cropping else { return }
+        let turns = (Int(value("io.rotate_cw").double) + (clockwise ? 1 : 3)) % 4
+        var next = state; next.params["io.rotate_cw"] = .number(Double(turns)); replaceState(next)
+    }
+
     /// Done applies the crop, and any rotation while cropping, as one undo
     /// step. Cancel restores the rotation and keeps the previous crop.
     func endCrop(apply: Bool) {

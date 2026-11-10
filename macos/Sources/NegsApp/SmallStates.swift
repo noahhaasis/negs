@@ -220,3 +220,64 @@ struct DevelopFailure: View {
         .accessibilityElement(children: .contain)
     }
 }
+
+/// The trim marks beside the photograph, which are also crop (§4.3): `track`,
+/// `label` while the pointer is over the photograph, `paper` on the mark
+/// under it. A click on one, or a drag inward, starts cropping. Each takes
+/// clicks ±9 pt round its line.
+struct CropTrimMarks: View {
+    let print: CGRect
+    /// The pointer is over the photograph.
+    let lit: Bool
+    let crop: () -> Void
+
+    var body: some View {
+        let marks = TrimMarks.marks(beside: print)
+        ZStack(alignment: .topLeading) {
+            ForEach(marks.indices, id: \.self) { index in
+                let mark = marks[index]
+                // Left or right of the print, top or bottom.
+                let handle = CropGeometry.Handle(x: mark.midX < print.midX ? -1 : 1, y: mark.midY < print.midY ? -1 : 1)
+                TrimMark(lit: lit, handle: handle, crop: crop)
+                    .frame(width: mark.width + 8, height: mark.height + 18)
+                    .offset(x: mark.minX - 4, y: mark.minY - 9)
+            }
+        }
+    }
+}
+
+private struct TrimMark: View {
+    let lit: Bool
+    let handle: CropGeometry.Handle
+    let crop: () -> Void
+    @State private var hovered = false
+    @State private var started = false
+
+    var body: some View {
+        Rectangle()
+            .fill(hovered ? Theme.paper : lit ? Theme.label : Theme.track)
+            .frame(width: TrimMarks.length, height: TrimMarks.weight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.2), value: lit)
+            .onHover { inside in
+                hovered = inside
+                (inside ? CropEditor.cursor(for: handle) : NSCursor.arrow).set()
+            }
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    // Inward: towards the print's centre from this corner.
+                    let inward = -value.translation.width * CGFloat(handle.x) - value.translation.height * CGFloat(handle.y)
+                    if !started, inward > 4 { started = true; crop() }
+                }
+                .onEnded { value in
+                    defer { started = false }
+                    if !started, hypot(value.translation.width, value.translation.height) < 4 { crop() }
+                })
+            .help("Crop (⌘K)")
+            .accessibilityElement()
+            .accessibilityLabel("Crop")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, crop)
+    }
+}

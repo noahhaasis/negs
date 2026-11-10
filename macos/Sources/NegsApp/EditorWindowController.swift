@@ -26,8 +26,6 @@ import SwiftUI
     private let inspector: NSSplitViewItem
     private let panel: NSHostingController<InspectorPanel>
     private var items: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
-    private lazy var cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelCrop))
-    private lazy var doneButton = NSButton(title: "Done", target: self, action: #selector(applyCrop))
     private var collapsing: NSKeyValueObservation?
     private var appearing: NSObjectProtocol?
     private var resigning: NSObjectProtocol?
@@ -140,7 +138,7 @@ import SwiftUI
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
-                self?.alertKeys(event) == true || self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true
+                self?.alertKeys(event) == true || self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.cropKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true
             } ? nil : event
         }
         // A click outside the tray keeps the stock being tried (§5.1); so
@@ -253,6 +251,20 @@ import SwiftUI
         return true
     }
 
+    /// While cropping, Return applies the crop and Esc cancels it (§5.2),
+    /// unless a field is being typed in: it keeps its own.
+    private func cropKeys(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, let session = model.cropSession, !session.typing,
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              !(window?.firstResponder is NSText) else { return false }
+        switch event.keyCode {
+        case 36, 76: model.endCrop(apply: true)
+        case 53: model.endCrop(apply: false)
+        default: return false
+        }
+        return true
+    }
+
     private func clickOutsideTray(_ event: NSEvent) {
         guard model.tray != nil, event.window === window else { return }
         for view in model.trayHitAreas.allObjects where view.window === window && !view.isHiddenOrHasHiddenAncestor {
@@ -300,7 +312,6 @@ import SwiftUI
             window.subtitle = ""
         }
         showItems(for: model.mode)
-        showCropActions(model.cropping)
         if let item = items[.mode] as? NSToolbarItemGroup {
             item.selectedIndex = grid ? 1 : 0
             item.isEnabled = photo && !model.cropping
@@ -340,11 +351,6 @@ import SwiftUI
             let icon = symbol(name, label)
             items[id]?.image = model.inspectorVisible && model.inspectorPane == pane
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
-        }
-        // A ratio field being edited keeps its own Return and Escape.
-        if let session = model.cropSession {
-            cancelButton.keyEquivalent = session.typing ? "" : "\u{1b}"
-            doneButton.keyEquivalent = session.typing ? "" : "\r"
         }
         showSheet(grid)
         let alert = model.alert
@@ -440,27 +446,12 @@ import SwiftUI
         }
     }
 
-    /// While cropping, Cancel and Done take the place of Export.
-    private func showCropActions(_ cropping: Bool) {
-        guard let toolbar = window?.toolbar else { return }
-        let ids = toolbar.items.map(\.itemIdentifier)
-        if cropping, let i = ids.firstIndex(of: .export) {
-            toolbar.removeItem(at: i)
-            toolbar.insertItem(withItemIdentifier: .doneCrop, at: i)
-            toolbar.insertItem(withItemIdentifier: .cancelCrop, at: i)
-        } else if !cropping, let i = ids.firstIndex(of: .cancelCrop) {
-            toolbar.removeItem(at: i + 1)
-            toolbar.removeItem(at: i)
-            toolbar.insertItem(withItemIdentifier: .export, at: i)
-        }
-    }
-
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Self.itemIdentifiers(for: .photo) }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.gridSize, .cancelCrop, .doneCrop]
+        toolbarDefaultItemIdentifiers(toolbar) + [.gridSize]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -504,7 +495,7 @@ import SwiftUI
         case .edit:
             // Grouped items share one capsule, without the dividers of a segmented group.
             let group = NSToolbarItemGroup(itemIdentifier: id)
-            group.subitems = [button(.init("rotate"), "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
+            group.subitems = [button(.init("rotate"), "Rotate", "rotate.right", "Crop and rotate clockwise (⌘R)", #selector(rotateClockwise)),
                               button(.init("crop"), "Crop", "crop", "Crop the photograph (⌘K)", #selector(toggleCrop))]
             group.label = "Edit"
             item = group
@@ -514,19 +505,6 @@ import SwiftUI
             item = button(id, "Presets", "square.stack", "Show or hide presets (⌥⌘P)", #selector(togglePresets))
         case .adjustments:
             item = button(id, "Adjustments", "slider.horizontal.3", "Show or hide adjustments (⌥⌘I)", #selector(toggleAdjustments))
-        case .cancelCrop:
-            item = NSToolbarItem(itemIdentifier: id)
-            item.view = cancelButton; item.label = "Cancel"; item.toolTip = "Discard the crop (Esc)"
-        case .doneCrop:
-            item = NSToolbarItem(itemIdentifier: id)
-            item.view = doneButton; item.label = "Done"; item.toolTip = "Apply the crop (Return)"
-            // The confirming action is filled with the accent color. The style
-            // needs the macOS 26 SDK, which release CI's Xcode 16 lacks.
-            #if compiler(>=6.2)
-            if #available(macOS 26, *) { item.style = .prominent } else { doneButton.bezelColor = .controlAccentColor }
-            #else
-            doneButton.bezelColor = .controlAccentColor
-            #endif
         default:
             return nil
         }
@@ -582,10 +560,8 @@ import SwiftUI
     @objc private func resizeGrid(_ sender: NSSlider) { model.gridCellSize = sender.doubleValue.rounded() }
     @objc private func fit() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
-    @objc private func rotateClockwise() { model.rotate() }
+    @objc private func rotateClockwise() { model.turn(clockwise: true) }
     @objc private func toggleCrop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
-    @objc private func cancelCrop() { model.endCrop(apply: false) }
-    @objc private func applyCrop() { model.endCrop(apply: true) }
     @objc private func export() {
         if let run = model.batch { return toggleBatchPopover(run) }
         model.exportPanel()
@@ -685,5 +661,5 @@ import SwiftUI
 extension NSToolbarItem.Identifier {
     static let filmstrip = Self("filmstrip"), filter = Self("filter"), mode = Self("mode"), gridSize = Self("gridSize")
     static let open = Self("open"), zoom = Self("zoom"), edit = Self("edit")
-    static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
+    static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets")
 }
