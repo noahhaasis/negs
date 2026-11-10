@@ -24,6 +24,8 @@ import SwiftUI
     private var editor: EditorWindowController?
     private var terminating = false
     private var removingAppData = false
+    /// The quit questions are open in the alert sheet.
+    private var askingToQuit = false
     private var appDataRemovalFinished = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -90,7 +92,7 @@ import SwiftUI
             while let self, !Task.isCancelled {
                 let model = self.model
                 if model.ready && (model.source == nil || model.previewCurrent || model.renderFailed) || model.error != nil {
-                    return model.offerBatchResume(in: self.editor?.window)
+                    return model.offerBatchResume()
                 }
                 try? await Task.sleep(for: .milliseconds(500))
             }
@@ -120,28 +122,52 @@ import SwiftUI
         // Cleanup intentionally discards the session. Never recreate it here.
         if removingAppData { return appDataRemovalFinished ? .terminateNow : .terminateCancel }
         guard !terminating else { return .terminateLater }
-        if model.saving || (updates.installing && model.exporting) { return .terminateCancel }
+        if model.saving || (updates.installing && model.exporting) || askingToQuit { return .terminateCancel }
+        // A question already open is answered first.
+        if model.alerts.shown != nil { NSSound.beep(); return .terminateCancel }
+        let questions = quitQuestions()
+        guard !questions.isEmpty else { return saveAndTerminate(sender) }
+        askingToQuit = true
+        Task {
+            for (alert, quit) in questions where await model.ask(alert).button != quit {
+                askingToQuit = false
+                return sender.reply(toApplicationShouldTerminate: false)
+            }
+            askingToQuit = false
+            switch saveAndTerminate(sender) {
+            case .terminateNow: sender.reply(toApplicationShouldTerminate: true)
+            case .terminateCancel: sender.reply(toApplicationShouldTerminate: false)
+            default: break
+            }
+        }
+        return .terminateLater
+    }
+
+    /// What quitting now would stop, as questions in the alert sheet, each
+    /// with the button that quits.
+    private func quitQuestions() -> [(AppAlert, quit: Int)] {
+        var questions: [(AppAlert, quit: Int)] = []
         if model.batchRunning, let remaining = model.batch?.journal.remaining, !updates.installing {
             // Kept in the journal: the next launch offers to resume.
-            let alert = NSAlert()
-            alert.messageText = "Export \(remaining == 1 ? "the remaining photograph" : "\(remaining) remaining photographs") next time?"
-            alert.informativeText = "Quitting stops the export. Files already exported stay; Negs offers to export the rest when it opens again."
-            alert.addButton(withTitle: "Quit")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+            questions.append((AppAlert(
+                title: "Export \(remaining == 1 ? "the remaining photograph" : "\(remaining) remaining photographs") next time?",
+                detail: "Quitting stops the export. Files already exported stay; Negs offers to export the rest when it opens again.",
+                buttons: [.init(title: "Quit"), .init(title: "Cancel", role: .cancel)]), 0))
         }
         if model.exporting {
-            let alert = NSAlert()
-            alert.messageText = "An export is still in progress."
-            alert.informativeText = "Quitting cancels it. Any existing file at the destination is left unchanged."
-            alert.addButton(withTitle: "Continue Exporting")
-            alert.addButton(withTitle: "Quit")
-            guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+            questions.append((AppAlert(
+                title: "An export is still in progress.",
+                detail: "Quitting cancels it. Any existing file at the destination is left unchanged.",
+                buttons: [.init(title: "Continue Exporting", role: .cancel), .init(title: "Quit")]), 1))
         }
-        // Save once at quit/relaunch, not on slider changes or the rendering path.
-        // A failed write cancels termination instead of silently losing the
-        // session. The photograph's edits go to its sidecar first; one that
-        // can't be written was already reported and doesn't keep Negs open.
+        return questions
+    }
+
+    /// Save once at quit/relaunch, not on slider changes or the rendering path.
+    /// A failed write cancels termination instead of silently losing the
+    /// session. The photograph's edits go to its sidecar first; one that
+    /// can't be written was already reported and doesn't keep Negs open.
+    private func saveAndTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let session = model.session,
               ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] == nil else { return .terminateNow }
         terminating = true
@@ -162,19 +188,19 @@ import SwiftUI
 
     private func removeAllAppData() {
         guard !removingAppData, !terminating, !model.saving, !model.exporting, !model.batchRunning, !updates.installing, !updates.sessionInProgress else { return }
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Remove all Negs app data and quit?"
-        alert.informativeText = "This removes your settings, presets, saved editing session, recent-file history, and caches. Your current adjustments will be discarded. Original photographs and exported images are kept.\n\nNegs remains installed. You can move it to the Trash after it quits."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Remove App Data and Quit")
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
-        removingAppData = true
-        updates.stopForAppDataRemoval()
-        editor?.prepareForAppDataRemoval()
-        menu?.prepareForAppDataRemoval()
-        model.shutdown()
         Task {
+            let answer = await model.ask(AppAlert(
+                title: "Remove all Negs app data and quit?",
+                detail: "This removes your settings, presets, saved editing session, recent-file history, and caches. Your current adjustments will be discarded. Original photographs and exported images are kept.\n\nNegs remains installed. You can move it to the Trash after it quits.",
+                buttons: [.init(title: "Cancel", role: .cancel), .init(title: "Remove App Data and Quit", role: .destructive)]))
+            guard answer.button == 1 else { return }
+            // Anything started while it was asking keeps the data.
+            guard !removingAppData, !terminating, !model.saving, !model.exporting, !model.batchRunning, !updates.installing, !updates.sessionInProgress else { return }
+            removingAppData = true
+            updates.stopForAppDataRemoval()
+            editor?.prepareForAppDataRemoval()
+            menu?.prepareForAppDataRemoval()
+            model.shutdown()
             await model.flushPreviewCache()
             // Wait for an in-flight startup load before deleting session files.
             await sessions.finishPendingIO()
@@ -186,13 +212,10 @@ import SwiftUI
                     failures.append("The saved preferences could not be cleared.")
                 }
                 if failures.isEmpty { break }
-                let failed = NSAlert()
-                failed.alertStyle = .warning
-                failed.messageText = "Some app data could not be removed."
-                failed.informativeText = failures.joined(separator: "\n\n")
-                failed.addButton(withTitle: "Retry")
-                failed.addButton(withTitle: "Quit")
-                if failed.runModal() != .alertFirstButtonReturn { break }
+                // The window is gone, so the sheet stands on its own.
+                let retry = await model.ask(AppAlert(title: "Some app data could not be removed.", detail: failures.joined(separator: "\n\n"),
+                                                     buttons: [.init(title: "Retry"), .init(title: "Quit", role: .cancel)]))
+                if retry.button != 0 { break }
             }
             appDataRemovalFinished = true
             NSApp.terminate(nil)
@@ -245,9 +268,6 @@ struct EditorCanvas: View {
         // Under the grid's sheet, hidden from VoiceOver too.
         .accessibilityHidden(grid)
         .modifier(LibraryNoteTimer(model: model))
-        .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("OK", role: .cancel) { model.error = nil }
-        } message: { Text(model.error ?? "") }
         // The open photograph's folder is the library, listed once the
         // window is up and kept current while it stays open.
         .task(id: model.source?.deletingLastPathComponent()) {

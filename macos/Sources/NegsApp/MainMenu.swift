@@ -214,32 +214,10 @@ import SwiftUI
     @objc private func moveToTrashNow() { model.requestDelete(asking: false) }
     @objc private func deleteRejected() { model.requestDelete(model.rejected, asking: true) }
 
-    /// Copy Edits…: the groups to copy, in a sheet; the choice is remembered.
+    /// Copy Edits…: the groups to copy, in the alert sheet; the choice is remembered.
     @objc private func copyEditsChoosing() {
-        guard let window = NSApp.keyWindow as? EditorWindow else { return }
-        let alert = NSAlert()
-        alert.messageText = "Copy Edits"
-        alert.informativeText = "Choose the edits Paste Edits applies."
-        let chosen = model.copyGroups
-        let boxes = EditGroup.allCases.map { group in
-            let box = NSButton(checkboxWithTitle: group.title, target: nil, action: nil)
-            box.state = chosen.contains(group) ? .on : .off
-            return box
-        }
-        let stack = NSStackView(views: boxes)
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6
-        stack.frame.size = stack.fittingSize
-        alert.accessoryView = stack
-        alert.addButton(withTitle: "Copy")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [model] response in
-            MainActor.assumeIsolated {
-                guard response == .alertFirstButtonReturn else { return }
-                let groups = Set(zip(EditGroup.allCases, boxes).filter { $0.1.state == .on }.map(\.0))
-                model.copyGroups = groups
-                model.copyEdits(groups: groups)
-            }
-        }
+        guard NSApp.keyWindow is EditorWindow else { return }
+        model.copyEditsChoosing()
     }
     @objc private func showGrid() { model.showGrid() }
     @objc private func largerThumbnails() { model.changeGridCellSize(larger: true) }
@@ -272,7 +250,8 @@ import SwiftUI
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if removingAppData { return false }
+        // The alert sheet is answered first, as a system alert's would be.
+        if removingAppData || model.alert != nil { return false }
         let photo = model.source != nil
         // The grid shows no photograph to adjust, zoom or crop.
         let editing = photo && model.mode == .photo

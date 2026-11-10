@@ -144,7 +144,9 @@ private struct PresetRow: View {
             if let tile { PresetThumbnail(tile: tile, invalid: invalid != nil) }
             VStack(alignment: .leading, spacing: 2) {
                 if model.renamingPreset == preset.url {
-                    NameField(name: preset.name) { model.renamePreset(preset, to: $0) } cancel: { model.cancelRename(preset) }
+                    NameField(name: preset.name) { model.renamePreset(preset, to: $0) } cancel: { model.cancelRename(preset) } refuse: { name, problem in
+                        model.tell(AppAlert(title: "“\(name)” can’t be used as a preset name.", detail: problem))
+                    }
                 } else {
                     Text(preset.name).lineLimit(1).foregroundStyle(invalid == nil ? .primary : .secondary)
                 }
@@ -200,6 +202,8 @@ private struct NameField: NSViewRepresentable {
     let name: String
     let commit: (String) -> Void
     let cancel: () -> Void
+    /// A name that can't be used, and why.
+    let refuse: (String, String) -> Void
 
     func makeNSView(context: Context) -> NSTextField {
         let field = FocusingTextField(string: name)
@@ -232,12 +236,7 @@ private struct NameField: NSViewRepresentable {
             if let problem = PresetName.problem(name) {
                 NSSound.beep()
                 parent.commit(parent.name)
-                if !name.isEmpty {
-                    let alert = NSAlert()
-                    alert.messageText = "“\(name)” can’t be used as a preset name."
-                    alert.informativeText = problem
-                    alert.runModal()
-                }
+                if !name.isEmpty { parent.refuse(name, problem) }
             } else {
                 parent.commit(name)
             }

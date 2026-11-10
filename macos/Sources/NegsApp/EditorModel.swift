@@ -152,7 +152,14 @@ import UserNotifications
     /// Lab › Film format › Custom picked while the value is still a format's,
     /// so the slider stays. Opening a photograph and Reset Adjustments clear it.
     var customFilmFormat = false
-    var error: String?
+    /// Shown in the alert sheet until it's answered (`AlertSheet`).
+    var error: String? {
+        didSet { if error != oldValue { errorAlert = error.map { AlertRequest(alert: .error($0)) { _ in } } } }
+    }
+    /// `error` as the alert sheet shows it.
+    private(set) var errorAlert: AlertRequest?
+    /// The questions waiting for the alert sheet.
+    @ObservationIgnored let alerts = AlertQueue()
     var status = "Starting…"
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
@@ -1741,6 +1748,22 @@ import UserNotifications
         selection.selected.contains(item) ? selection.ordered(shownPhotos.map(\.url)) : [item]
     }
 
+    /// Photo › Copy Edits…: the groups to copy as tick boxes in the alert
+    /// sheet, the last choice ticked. Copy remembers the choice and copies.
+    func copyEditsChoosing() {
+        let chosen = copyGroups
+        Task {
+            let answer = await ask(AppAlert(
+                title: "Copy Edits", detail: "Choose the edits Paste Edits applies.",
+                buttons: [.init(title: "Copy"), .init(title: "Cancel", role: .cancel)],
+                choices: EditGroup.allCases.map { AppAlert.Choice(title: $0.title, on: chosen.contains($0)) }))
+            guard answer.button == 0 else { return }
+            let groups = Set(zip(EditGroup.allCases, answer.choices).filter(\.1).map(\.0))
+            copyGroups = groups
+            copyEdits(groups: groups)
+        }
+    }
+
     func copyEdits(from item: URL? = nil, groups: Set<EditGroup> = EditGroup.standard) {
         guard canChangeEdits, let item = item ?? copySource else { return }
         guard let edits = userEdits(of: item) else {
@@ -2400,19 +2423,11 @@ import UserNotifications
         let permanent = !plan.files.isEmpty && !trash.available(folder)
         guard asking || permanent else { return delete(plan) }
         let question = plan.question(name: library.name(of:), permanent: permanent)
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = question.message
-        alert.informativeText = question.information
-        alert.addButton(withTitle: question.button).hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
-        let answered = { [weak self] (response: NSApplication.ModalResponse) in
-            if response == .alertFirstButtonReturn { self?.delete(plan, permanent: permanent) }
-        }
-        if let window = NSApp.keyWindow as? EditorWindow {
-            alert.beginSheetModal(for: window) { response in MainActor.assumeIsolated { answered(response) } }
-        } else {
-            answered(alert.runModal())
+        let alert = AppAlert(title: question.message, detail: question.information,
+                             buttons: [.init(title: question.button, role: .destructive), .init(title: "Cancel", role: .cancel)])
+        Task { [weak self] in
+            guard await self?.ask(alert).button == 0 else { return }
+            self?.delete(plan, permanent: permanent)
         }
     }
 
@@ -3902,22 +3917,19 @@ import UserNotifications
     @ObservationIgnored var presentBatch: (NSView) -> Void = { _ in }
 
     /// A batch the last session didn't finish, offered once launch has settled.
-    func offerBatchResume(in window: NSWindow?) {
+    func offerBatchResume() {
         guard batch == nil, !closing else { return }
         let url = batchJournalURL
         Task { [weak self] in
             guard let journal = await Task.detached(priority: .utility, operation: { BatchJournal.read(from: url) }).value else { return }
             guard let self, !self.closing, self.batch == nil else { return }
             guard journal.remaining > 0 else { return BatchJournal.remove(at: url) }
-            let alert = NSAlert()
             let count = journal.remaining
-            alert.messageText = "Resume exporting \(count == 1 ? "1 photograph" : "\(count) photographs") to “\(journal.destination.lastPathComponent)”?"
-            alert.informativeText = "Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export."
-            alert.addButton(withTitle: "Resume")
-            alert.addButton(withTitle: "Discard")
-            let answer: NSApplication.ModalResponse
-            if let window { answer = await alert.beginSheetModal(for: window) } else { answer = alert.runModal() }
-            guard answer == .alertFirstButtonReturn else { return BatchJournal.remove(at: url) }
+            let answer = await self.ask(AppAlert(
+                title: "Resume exporting \(count == 1 ? "1 photograph" : "\(count) photographs") to “\(journal.destination.lastPathComponent)”?",
+                detail: "Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export.",
+                buttons: [.init(title: "Resume"), .init(title: "Discard")]))
+            guard answer.button == 0 else { return BatchJournal.remove(at: url) }
             // Started now, without the open photograph's state.
             if self.startBatch(journal) == nil { self.error = "The export couldn’t resume yet. Try again once Negs has started." }
         }
@@ -4115,14 +4127,12 @@ import UserNotifications
     }
 
     func deletePreset(_ preset: PresetFile) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Delete the preset “\(preset.name)”?"
-        alert.informativeText = "This can’t be undone. Photographs edited with it keep their settings."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task {
+            let answer = await ask(AppAlert(
+                title: "Delete the preset “\(preset.name)”?",
+                detail: "This can’t be undone. Photographs edited with it keep their settings.",
+                buttons: [.init(title: "Delete", role: .destructive), .init(title: "Cancel", role: .cancel)]))
+            guard answer.button == 0 else { return }
             do { try await presetLibrary.delete(preset) } catch { report(error) }
             await refreshPresets()
         }

@@ -43,6 +43,8 @@ import SwiftUI
     /// the grid opens (§4.6).
     private var sheet: (host: NSHostingView<GridSheet>, container: SheetContainer, flight: SheetFlight)?
     private var sheetShown = false
+    /// The alert sheet's window and the dimming, made the first time one shows.
+    private var alertPresenter: AlertPresenter?
     private lazy var filterMenu = FilterMenu(model: model)
     /// The narrowest canvas, and the narrowest the content can be with the
     /// inspector shown beside it. The split view can't keep both columns at
@@ -138,7 +140,7 @@ import SwiftUI
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
-                self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true
+                self?.alertKeys(event) == true || self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true
             } ? nil : event
         }
         // A click outside the tray keeps the stock being tried (§5.1); so
@@ -180,6 +182,21 @@ import SwiftUI
         NotificationCenter.default.removeObserver(appearing)
         self.appearing = nil
         panel.rootView = InspectorPanel(model: model)
+    }
+
+    /// While the alert sheet shows, Return answers it with its default
+    /// button and Esc with its Cancel one, before anything else takes them
+    /// (§5.2). Tab and Space move and press within it; the window's other
+    /// keys wait, and its menus are off (`MainMenu.validateMenuItem`).
+    private func alertKeys(_ event: NSEvent) -> Bool {
+        guard event.window === window, model.alert != nil, alertPresenter?.onWindow == true else { return false }
+        guard event.type == .keyDown, !event.modifierFlags.contains(.command) else { return false }
+        switch event.keyCode {
+        case 36, 76: model.confirmAlert(); return true
+        case 53: model.dismissAlert(); return true
+        case 48, 49: return false
+        default: return true
+        }
     }
 
     /// Holding \ shows the original, as in Lightroom, unless text is being
@@ -330,6 +347,9 @@ import SwiftUI
             doneButton.keyEquivalent = session.typing ? "" : "\r"
         }
         showSheet(grid)
+        let alert = model.alert
+        if alert != nil, alertPresenter == nil { alertPresenter = AlertPresenter(model: model, window: window, root: root) }
+        alertPresenter?.show(alert)
         // The grid's sheet covers the inspector, which stays as it was under it.
         let inspectorShown = model.inspectorVisible
         if inspector.isCollapsed == inspectorShown {
@@ -653,7 +673,7 @@ import SwiftUI
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(selectAll(_:)), #selector(deselectAll(_:)): selecting
+        case #selector(selectAll(_:)), #selector(deselectAll(_:)): selecting && model.alert == nil
         // Not while a sheet or another window has the keys, as for Photo › Copy Edits.
         case #selector(copy(_:)): model.canCopyEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
         case #selector(paste(_:)): model.canPasteEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
