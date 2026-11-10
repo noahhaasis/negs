@@ -33,6 +33,11 @@ import SwiftUI
     /// Room round the tiles for the pencil ring.
     static let inset: CGFloat = 8
     static let favouritesTitle = "Favourites"
+    /// The star's tooltip, and what VoiceOver hears, in the heading's spelling.
+    static func starHelp(favourite: Bool) -> String { favourite ? "Remove from favourites" : "Add to favourites" }
+    static func starLabel(_ name: String, favourite: Bool) -> String {
+        favourite ? "Remove \(name) from favourites" : "Add \(name) to favourites"
+    }
 
     struct Section: Identifiable {
         let title: String
@@ -414,8 +419,8 @@ private struct TrayTile: View {
                 .buttonStyle(.plain)
                 .focusable(false)
                 .padding(5)
-                .help(favorite ? "Remove from favorites" : "Add to favorites")
-                .accessibilityLabel(favorite ? "Remove \(stock.name) from favorites" : "Add \(stock.name) to favorites")
+                .help(StockTrayRules.starHelp(favourite: favorite))
+                .accessibilityLabel(StockTrayRules.starLabel(stock.name, favourite: favorite))
             }
         }
         .onHover { hovering = $0 }

@@ -31,6 +31,14 @@ import XCTest
         XCTAssertEqual(StockTrayRules.noMatch("x", paper: true), "No papers match “x”")
     }
 
+    func testTheStarSpellsFavouritesAsTheHeadingDoes() {
+        XCTAssertEqual(StockTrayRules.starHelp(favourite: true), "Remove from favourites")
+        XCTAssertEqual(StockTrayRules.starHelp(favourite: false), "Add to favourites")
+        XCTAssertEqual(StockTrayRules.starLabel("Kodak Gold 200", favourite: true), "Remove Kodak Gold 200 from favourites")
+        XCTAssertEqual(StockTrayRules.starLabel("Kodak Gold 200", favourite: false), "Add Kodak Gold 200 to favourites")
+        XCTAssertTrue(StockTrayRules.starHelp(favourite: true).contains(StockTrayRules.favouritesTitle.lowercased()))
+    }
+
     func testArrowsStepEachStockOnceAndHoldAtTheEnds() {
         let groups = [StockGroup(title: "A", stocks: [stock("a1", "A1"), stock("a2", "A2")]), StockGroup(title: "B", stocks: [stock("b1", "B1")])]
         let order = StockTrayRules.order(groups)
