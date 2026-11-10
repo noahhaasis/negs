@@ -1974,16 +1974,21 @@ import UserNotifications
                 // The decode first, which the match is solved on: the whole
                 // photograph for a match that's stored, so opening it finds
                 // the same value; else the thumbnail's own reduced read.
+                // Not developed, and the camera preview's colour space read
+                // meanwhile.
                 guard await waitForThumbnailTurn() else { return false }
                 var decode = command(state, longSide: storeMatch == nil ? longSide : 16)
                 if storeMatch != nil { decode["reduced_decode"] = .bool(false) }
+                decode["decode_only"] = .bool(true)
+                if raw { decode["preview_colour_space"] = .bool(true) }
                 let (_, decoded) = try await engine.request(decode)
                 let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
                 guard await waitForThumbnailTurn() else { return false }
                 let reference = engine.directory.appendingPathComponent("library-brightness.png")
                 defer { try? FileManager.default.removeItem(at: reference) }
                 if let solved = try? await Self.solveBrightnessMatch(engine: engine, source: photo, generation: generation, size: size, raw: raw,
-                                                                    request: matchSolveState(state), reference: reference),
+                                                                    request: matchSolveState(state), reference: reference,
+                                                                    declared: raw ? decoded["preview_colour_space"] : nil),
                    let matched = Self.matching(state, ev: solved.exposure, limited: solved.limited, inputs: matchInputs(state)) {
                     state = matched
                     if let storeMatch { finalLook = storeMatch(state) ?? look }
@@ -2918,14 +2923,23 @@ import UserNotifications
     /// Solves Match camera brightness for `source`, which `engine` holds
     /// decoded as `generation` (`size` pixels): the exposure that develops it
     /// as bright as the camera's preview, and whether highlights limited it.
-    /// `stillWanted` throws to stop before the helper is asked.
+    /// `stillWanted` throws to stop before the helper is asked. `declared`:
+    /// the helper's `preview_colour_space` answer, if it was read already.
     nonisolated static func solveBrightnessMatch(engine: EngineClient, source: URL, generation: Int, size: CGSize, raw: Bool, request: EditState,
-                                                 reference: URL, stillWanted: @MainActor () throws -> Void = {}) async throws -> (exposure: Double, limited: Bool) {
+                                                 reference: URL, declared given: JSONValue? = nil,
+                                                 stillWanted: @MainActor () throws -> Void = {}) async throws -> (exposure: Double, limited: Bool) {
         // What the RAW says its preview is in, read by the engine as on the
         // web and Windows.
-        let declared = raw ? PreviewColourSpace(rawValue: try await engine.request([
-            "command": .string("preview_colour_space"), "input": .string(source.path)
-        ]).1["colour_space"].string) : nil
+        let declared: PreviewColourSpace?
+        if !raw {
+            declared = nil
+        } else if let given {
+            declared = PreviewColourSpace(rawValue: given.string)
+        } else {
+            declared = PreviewColourSpace(rawValue: try await engine.request([
+                "command": .string("preview_colour_space"), "input": .string(source.path)
+            ]).1["colour_space"].string)
+        }
         try Task.checkCancellation()
         let data = try await Task.detached(priority: .userInitiated) {
             raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
