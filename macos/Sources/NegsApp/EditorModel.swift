@@ -54,6 +54,10 @@ import UserNotifications
     private(set) var image: IOSurface?
     /// The unprocessed photograph, shown while the first render develops.
     private(set) var placeholder: CGImage?
+    /// Its developed thumbnail, shown in the placeholder's place: the
+    /// photograph as it will look, finished (cropped, turned, in its
+    /// border), rather than the camera's own preview. From ctruett's fork.
+    private(set) var standIn: CGImage?
     /// The undeveloped photograph, shown in place of `image` while the
     /// Original button is held.
     private(set) var original: IOSurface?
@@ -414,7 +418,7 @@ import UserNotifications
     private func forgetPhotograph() {
         photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
-        source = nil; sourceVariant = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
         interactionStart = nil; cropSession = nil
@@ -898,7 +902,7 @@ import UserNotifications
         let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         sourceDeleted = false
-        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -939,11 +943,22 @@ import UserNotifications
             }
         } : nil
         launchFrame = restoringAtLaunch ? cachedFrame.map { ($0, generation, snapshot.rendered) } : nil
+        // The developed thumbnail stands in until then, if it's been made.
+        // Read now (~2 ms), as the window's next frame comes only after
+        // SwiftUI has updated it for this photograph (~180 ms on an M1 Pro):
+        // that frame shows it rather than an empty canvas. A restored
+        // session tries its saved frame first, off the main actor.
+        let standIn = developedThumbnail(of: item)
+        if session == nil, let image = standIn?() { self.standIn = image }
         Task { [weak self] in
             if let cachedFrame, let cached = await cachedFrame.value {
                 guard let self else { return }
                 if self.showCached(cached, generation: generation, rendered: snapshot.rendered) { return }
             }
+            if session != nil, let standIn, let image = await Task.detached(priority: .userInitiated, operation: standIn).value {
+                self?.showStandIn(image, generation: generation)
+            }
+            // Still read for the photograph's size, which lays out the canvas.
             let thumbnail = await Task.detached(priority: .userInitiated) { Self.thumbnail(url) }.value
             if let (thumbnail, size) = thumbnail { self?.showPlaceholder(thumbnail, size: size, generation: generation) }
         }
@@ -970,13 +985,27 @@ import UserNotifications
         image = frame.surface; imageSize = frame.photoSize; isRaw = frame.raw
         sourceSize = frame.sourceSize; workingSize = frame.workingSize
         previewScale = frame.workingSize.width > 0 ? Double(frame.surface.width) / frame.workingSize.width : 1
-        showingCachedPreview = true; placeholder = nil; hideActivity()
+        showingCachedPreview = true; placeholder = nil; standIn = nil; hideActivity()
         // Counted with the frame for the crop it was read with.
         if crop == cached.scopesCrop, imageRotation == cached.scopesRotation {
             histogramRequest += 1; histogram = cached.scopes.histogram; waveform = cached.scopes.waveform
         } else { updateHistogram() }
         updateFilmStrip()
         return true
+    }
+
+    /// Reads `item`'s developed thumbnail, if one was made for the edits it
+    /// opens with.
+    func developedThumbnail(of item: URL) -> (@Sendable () -> CGImage?)? {
+        guard let edited = editedThumbnail(for: item), let file = library.items.first(where: { $0.url == item }),
+              let key = edited.store.key(for: file, look: edited.look) else { return nil }
+        let store = edited.store
+        return { store.image(key, maxPixels: Int(EditedThumbnailStore.longSide)) }
+    }
+
+    private func showStandIn(_ thumbnail: CGImage, generation: Int) {
+        guard generation == sourceGeneration, image == nil else { return }
+        standIn = thumbnail
     }
 
     private func showPlaceholder(_ thumbnail: CGImage, size: CGSize, generation: Int) {
@@ -2611,7 +2640,7 @@ import UserNotifications
                 }
                 showingInteractiveFrame = interactiveScale != nil
                 quickFrame = quick ? frame : nil
-                image = developed; placeholder = nil
+                image = developed; placeholder = nil; standIn = nil
                 updateHistogram()
                 let film = FilmHistogram(result["film_histogram"])
                 if film != filmHistogram { filmHistogram = film }

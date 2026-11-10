@@ -45,6 +45,9 @@ import QuartzCore
         if environment["SPEKTRAFILM_BENCHMARK_GRID_FILL"] != nil { return fill(model) }
         if environment["SPEKTRAFILM_BENCHMARK_THUMBNAILS"] != nil { return thumbnails(model) }
         if environment["SPEKTRAFILM_BENCHMARK_GRID_POSITION"] != nil { return position(model) }
+        if environment["SPEKTRAFILM_BENCHMARK_OPEN_NEXT"] != nil {
+            return openNext(model, shots: environment["SPEKTRAFILM_BENCHMARK_SHOTS"].map { URL(fileURLWithPath: $0) })
+        }
         guard let spec = environment["SPEKTRAFILM_BENCHMARK_GRID"] else { return }
         let segments = spec.split(separator: ",").compactMap { part -> (Double, Double)? in
             let values = part.split(separator: ":").compactMap { Double($0) }
@@ -243,6 +246,59 @@ import QuartzCore
                     report("grid position after \(phase == 1 ? "0.3" : "2") s: photograph \(index + 1) of \(shownPhotos.count), \(metrics.columns) columns, cell y \(Int(cell.minY))–\(Int(cell.maxY)), visible y \(Int(visible.minY))–\(Int(visible.maxY)) of \(Int(scroll.documentView?.frame.height ?? 0)): \(visible.contains(cell) ? "on screen" : "OFF SCREEN")")
                     if phase == 2 { timer.invalidate(); NSApp.terminate(nil) }
                     phase += 1
+                default: break
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// SPEKTRAFILM_BENCHMARK_OPEN_NEXT: once the next five photographs'
+    /// thumbnails are developed (or after a minute), opens each in turn as →
+    /// does and reports when its stand-in, the camera's preview and the
+    /// develop first showed; with SPEKTRAFILM_BENCHMARK_SHOTS, a screenshot
+    /// at the stand-in and at the develop.
+    private static func openNext(_ model: EditorModel, shots: URL?) {
+        var phase = 0, started = Date(), opened = 0
+        var standIn: Double?, placeholder: Double?, developed: Double?
+        let timer = Timer(timeInterval: 1.0 / 240, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                let library = model.library, store = model.editedThumbnails
+                let elapsed = Date().timeIntervalSince(started) * 1000
+                switch phase {
+                case 0 where model.ready && library.summariesLoaded && model.thumbnailStamp != nil && model.previewCurrent:
+                    if let window = NSApp.windows.first(where: { $0.isVisible && $0.contentViewController != nil }) {
+                        window.setFrame(NSRect(x: 40, y: 40, width: 1400, height: 900), display: true)
+                    }
+                    phase = 1; started = Date()
+                case 1:
+                    let items = library.items
+                    guard let open = model.sourceItem, let index = items.firstIndex(where: { $0.url == open }) else { return }
+                    let next = items[(index + 1)..<min(index + 6, items.count)]
+                    let ready = next.allSatisfy { file in
+                        model.thumbnailLook(for: file.url).flatMap { store.key(for: file, look: $0) }.map(store.contains) ?? false
+                    }
+                    guard ready || elapsed > 60_000 else { return }
+                    report("next thumbnails \(ready ? "ready" : "NOT all ready") after \(Int(elapsed)) ms")
+                    phase = 2
+                case 2:
+                    standIn = nil; placeholder = nil; developed = nil
+                    started = Date()
+                    model.step(by: 1)
+                    opened += 1
+                    phase = 3
+                case 3:
+                    if standIn == nil, model.standIn != nil {
+                        standIn = elapsed
+                        if let shots { capture(shots.appendingPathComponent("open-\(opened)-standin.png"), wait: false) }
+                    }
+                    if placeholder == nil, model.placeholder != nil { placeholder = elapsed }
+                    if developed == nil, model.image != nil { developed = elapsed }
+                    guard model.previewCurrent, !model.brightnessMatchPending, developed != nil else { return }
+                    if let shots { capture(shots.appendingPathComponent("open-\(opened)-developed.png")) }
+                    func ms(_ value: Double?) -> String { value.map { "\(Int($0)) ms" } ?? "never" }
+                    report("opened \(model.sourceItem?.lastPathComponent ?? "?"): stand-in \(ms(standIn)), camera preview \(ms(placeholder)), develop \(ms(developed))")
+                    if opened == 5 { timer.invalidate(); NSApp.terminate(nil) } else { phase = 2 }
                 default: break
                 }
             }

@@ -839,6 +839,18 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: c).path), "nothing written beside an unedited photograph")
         let bVersion = model.thumbnailVersions[b]
 
+        // Opening c, its developed thumbnail stands in for the camera's
+        // preview until the develop arrives, which replaces it.
+        let standIn = try XCTUnwrap(model.developedThumbnail(of: c)?())
+        XCTAssertEqual(max(standIn.width, standIn.height), Int(EditedThumbnailStore.longSide))
+        model.open(c)
+        try await waitUntil { model.previewCurrent && !model.brightnessMatchPending }
+        XCTAssertNil(model.standIn)
+        XCTAssertNotNil(model.image)
+        model.open(a)
+        try await waitUntil { model.previewCurrent && !model.brightnessMatchPending }
+        try await waitUntil { made(b) && made(c) }
+
         // A new default film: c again, b as it was.
         let film = try XCTUnwrap(model.films.first { $0.id != model.newPhotoFilm && !$0.positive }?.id)
         model.setNewPhotoFilm(film)
