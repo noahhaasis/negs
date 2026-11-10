@@ -164,6 +164,8 @@ import UserNotifications
     private(set) var libraryNote: LibraryNote?
     /// The edit view or the grid. Every launch starts in the edit view.
     private(set) var mode = LibraryMode.photo
+    /// Each photograph's shape, for the strip's frames and the grid's rows.
+    @ObservationIgnored let aspects = PhotoAspects()
     /// The selected photographs and the current one, which in the edit view
     /// is `source`. In the grid it moves without developing anything.
     private(set) var selection = LibrarySelection()
@@ -379,7 +381,11 @@ import UserNotifications
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
         library.sidecarChanged = { [weak self] photo in self?.sidecarChangedOnDisk(photo) }
         library.filterChanged = { [weak self] in self?.filterChanged() }
-        library.looksChanged = { [weak self] in self?.pumpThumbnails() }
+        library.looksChanged = { [weak self] in
+            guard let self else { return }
+            self.pumpThumbnails()
+            self.aspects.read(self.library.items, around: self.sourceItem)
+        }
     }
 
     /// Starts the helper and asks for its catalog at once, so both load while
@@ -1979,9 +1985,11 @@ import UserNotifications
                 let round = self.prefetchRound
                 for (file, size, edited) in await self.prefetchTargets() {
                     guard self.prefetchRound == round, !Task.isCancelled else { break }
-                    _ = await Task.detached(priority: .utility) {
+                    let image = await Task.detached(priority: .utility) {
                         await PhotoThumbnails.shared.image(for: file, size: size, look: edited?.look, edited: edited?.store, ahead: true)
                     }.value
+                    // Its frame takes the shape of what will be shown.
+                    if let image { self.aspects.note(file.url, image: image) }
                 }
                 guard self.prefetchRound != round else { break }
                 // While scrolling, a round at most every 30 ms.

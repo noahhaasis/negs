@@ -182,7 +182,7 @@ private struct GridCell: View {
                 .opacity(summary.flag == .reject ? 0.4 : 1)
             }
             .frame(width: metrics.cell, height: metrics.imageHeight)
-            .overlay { PhotoBadges(summary: summary) }
+            .overlay { PhotoMarks(summary: summary) }
             .overlay {
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(current || selected ? Color.accentColor : .clear, lineWidth: current ? 3 : 1.5)
@@ -198,9 +198,9 @@ private struct GridCell: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: edit)
         .simultaneousGesture(TapGesture().onEnded(click))
-        .help(PhotoBadges.help(file.name, summary: summary, readOnly: readOnly))
+        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PhotoBadges.accessibilityLabel(file.name, summary: summary))
+        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
         .accessibilityAddTraits(current || selected ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction(named: "Edit", edit)
         .accessibilityAction { click() }

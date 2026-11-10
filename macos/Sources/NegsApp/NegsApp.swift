@@ -227,14 +227,22 @@ struct EditorCanvas: View {
             if let tray = model.tray, !grid {
                 StockTray(model: model, visit: tray)
             } else {
-                // The grid takes the strip's place; it comes back as it was.
-                if model.filmstripVisible, model.source != nil, !grid {
-                    Divider()
-                    PhotoBrowser(model: model)
+                VStack(spacing: 0) {
+                    // The grid takes the strip's place; it comes back as it was.
+                    if model.filmstripVisible, model.source != nil, !grid {
+                        PhotoBrowser(model: model)
+                    }
+                    if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
+                        Divider()
+                        StatusBar(model: model)
+                    }
                 }
-                if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
-                    Divider()
-                    StatusBar(model: model)
+                // The leader rises from the strip's right end, or from the
+                // status line's top edge with the strip hidden (§11).
+                .overlay(alignment: .topTrailing) {
+                    if model.source != nil, !grid, !model.cropping {
+                        StripLeader(model: model).alignmentGuide(.top) { $0[.bottom] }
+                    }
                 }
             }
         }
