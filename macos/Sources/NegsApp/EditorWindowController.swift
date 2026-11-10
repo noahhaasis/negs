@@ -21,7 +21,7 @@ import SwiftUI
 /// inspector column, with no toolbar (§3). The window, title band and
 /// columns are AppKit; the canvas and inspector contents are SwiftUI. They
 /// follow the model through Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSMenuItemValidation, NSPopoverDelegate {
+@MainActor final class EditorWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation, NSPopoverDelegate {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
     private let panel: NSHostingController<InspectorPanel>
@@ -121,6 +121,7 @@ import SwiftUI
         window.setFrameAutosaveName("editor")
         super.init(window: window)
         shouldCascadeWindows = false
+        window.delegate = self
 
         model.undoManager = window.undoManager
         model.presentBatch = { [weak self] view in self?.showBatchPopover(below: view) }
@@ -400,6 +401,14 @@ import SwiftUI
         let flight = SheetFlight(model: model, root: root, canvas: canvasView, container: container, sheet: host)
         sheet = (host, container, flight)
         return (host, container, flight)
+    }
+
+    /// In full screen the title bar's empty toolbar hides with the menu bar
+    /// and comes down with it. Left showing, it was a grey bar across the
+    /// top: the system draws a full-screen toolbar on its own material,
+    /// whatever the window's title bar looks like.
+    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions = []) -> NSApplication.PresentationOptions {
+        proposedOptions.union(.autoHideToolbar)
     }
 
     /// Sets the window's minimum content size and grows the window to it when
