@@ -1719,7 +1719,7 @@ import UserNotifications
     private(set) var thumbnailStamp: String?
     /// Moves when an item's edited thumbnail is made, so its cells read it.
     private(set) var thumbnailVersions: [URL: Int] = [:]
-    /// Edited items in the strip or grid now: developed first.
+    /// Items in the strip or grid now: developed first.
     @ObservationIgnored private var thumbnailsOnScreen: Set<URL> = []
     /// Each item's look last checked for a thumbnail, and whether it had one.
     @ObservationIgnored private var thumbnailsChecked: [URL: (look: String, present: Bool)] = [:]
@@ -1728,6 +1728,7 @@ import UserNotifications
     /// The background helper, started while there's work, and its job.
     @ObservationIgnored private var thumbnailEngine: EngineClient?
     @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
+    @ObservationIgnored private var thumbnailsPumpAgain = false
     @ObservationIgnored private var thumbnailIdle: Task<Void, Never>?
     @ObservationIgnored private var thumbnailGeneration = 0
     @ObservationIgnored private var readingThumbnailStamp = false
@@ -1737,11 +1738,29 @@ import UserNotifications
     /// (with sidecars off, every photograph opens with the defaults). Nil
     /// while that isn't known, or when its sidecar can't be read.
     func thumbnailLook(for item: URL) -> String? {
+        // Read lazily, so a cell depends only on what decided its look.
         if let look = library.looks[item] { return look }
         guard let unedited = uneditedLook else { return nil }
         if library.store == nil { return unedited }
         guard let summary = library.summaries[item], summary.problem == nil else { return nil }
         return unedited
+    }
+
+    /// What `thumbnailLook(for:)` reads, copied, so the pump can scan a whole
+    /// folder off the main actor. Decides as it does.
+    struct ThumbnailLooks: Sendable {
+        let looks: [URL: String], summaries: [URL: LibrarySummary], unedited: String?, sidecars: Bool
+
+        func look(for item: URL) -> String? {
+            if let look = looks[item] { return look }
+            guard let unedited else { return nil }
+            if !sidecars { return unedited }
+            guard let summary = summaries[item], summary.problem == nil else { return nil }
+            return unedited
+        }
+    }
+    private var thumbnailLooks: ThumbnailLooks {
+        ThumbnailLooks(looks: library.looks, summaries: library.summaries, unedited: uneditedLook, sidecars: library.store != nil)
     }
 
     func editedThumbnail(for item: URL) -> EditedThumbnail? {
@@ -1815,26 +1834,29 @@ import UserNotifications
     /// the folder in order. One at a time, waiting while the open photograph
     /// is edited or developed. The helper quits when there's nothing left.
     func pumpThumbnails() {
-        guard thumbnailTask == nil, !closing, hasCatalog, let paths = engine?.paths else { return }
+        guard !closing, hasCatalog, let paths = engine?.paths else { return }
+        // Its scan reads what it was started with: once more after, for what changed.
+        guard thumbnailTask == nil else { thumbnailsPumpAgain = true; return }
         if thumbnailStamp == nil { return readThumbnailStamp() }
         let store = editedThumbnails, lookup = sidecarLookup
-        let items = library.items, open = sourceItem
-        let onScreen = thumbnailsOnScreen
-        // Each item but the open one, whose thumbnail comes from its preview.
-        var wanted: [(file: PhotoFile, look: String)] = []
-        for file in items where file.url != open {
-            guard let look = thumbnailLook(for: file.url), thumbnailFailures[file.url] != look else { continue }
-            if let checked = thumbnailsChecked[file.url], checked.look == look, checked.present { continue }
-            wanted.append((file, look))
-        }
-        guard !wanted.isEmpty else { return stopThumbnailEngineSoon() }
-        wanted = wanted.filter { onScreen.contains($0.file.url) } + wanted.filter { !onScreen.contains($0.file.url) }
-        thumbnailIdle?.cancel(); thumbnailIdle = nil
+        // Copies (the dictionaries copy on write): a folder of thousands is
+        // scanned for every thumbnail, which must stay off the main actor.
+        let items = library.items, open = sourceItem, onScreen = thumbnailsOnScreen, looks = thumbnailLooks
+        let failures = thumbnailFailures, checked = thumbnailsChecked
+        thumbnailsPumpAgain = false
         thumbnailTask = Task { [weak self] in
-            // The first without a thumbnail on disk; those with one are noted.
+            // Each item but the open one, whose thumbnail comes from its
+            // preview, on screen first: the first without a thumbnail on
+            // disk. Those with one are noted.
             let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: (file: PhotoFile, look: String)?) in
+                var shown: [(file: PhotoFile, look: String)] = [], rest: [(file: PhotoFile, look: String)] = []
+                for file in items where file.url != open {
+                    guard let look = looks.look(for: file.url), failures[file.url] != look else { continue }
+                    if let checked = checked[file.url], checked.look == look, checked.present { continue }
+                    if onScreen.contains(file.url) { shown.append((file, look)) } else { rest.append((file, look)) }
+                }
                 var present: [(URL, String)] = []
-                for (file, look) in wanted {
+                for (file, look) in shown + rest {
                     guard let key = store.key(for: file, look: look) else { continue }
                     if store.contains(key) { present.append((file.url, look)) } else { return (present, (file, look)) }
                 }
@@ -1843,11 +1865,12 @@ import UserNotifications
             guard let self, !self.closing else { return }
             for (item, look) in found.present { self.thumbnailsChecked[item] = (look, true) }
             if let (file, look) = found.next {
+                self.thumbnailIdle?.cancel(); self.thumbnailIdle = nil
                 self.thumbnailsChecked[file.url] = (look, false)
                 if await !self.developThumbnail(file, look: look, lookup: lookup, paths: paths) { self.thumbnailFailures[file.url] = look }
             }
             self.thumbnailTask = nil
-            if found.next != nil { self.pumpThumbnails() } else { self.stopThumbnailEngineSoon() }
+            if found.next != nil || self.thumbnailsPumpAgain { self.pumpThumbnails() } else { self.stopThumbnailEngineSoon() }
         }
     }
 
