@@ -1754,6 +1754,9 @@ import UserNotifications
         /// The user's edits (`userEdits`), without a solved brightness match.
         var state: EditState
         var groups: Set<EditGroup>
+        /// The photograph had edits of its own. One without them pastes
+        /// none: what it lands on is left without edits in `groups`.
+        var edited = true
     }
 
     /// Copy Edits…'s choice, remembered for the next time.
@@ -1805,17 +1808,19 @@ import UserNotifications
 
     func copyEdits(from item: URL? = nil, groups: Set<EditGroup> = EditGroup.standard) {
         guard canChangeEdits, let item = item ?? copySource else { return }
-        guard let edits = userEdits(of: item) else {
+        guard let (edits, edited) = userEdits(of: item) else {
             libraryNote = LibraryNote(text: "Edits Not Copied", detail: "Its .negs file can’t be read", serial: (libraryNote?.serial ?? 0) + 1)
             return
         }
-        copiedEdits = CopiedEdits(state: edits, groups: groups)
+        copiedEdits = CopiedEdits(state: edits, groups: groups, edited: edited)
         libraryNote = LibraryNote(text: "Edits Copied", serial: (libraryNote?.serial ?? 0) + 1)
     }
 
     func pasteEdits(onto items: [URL]? = nil) {
         guard let copied = copiedEdits else { return }
-        changeEdits(items ?? editTargets, action: "Paste Edits", note: "Edits Pasted") { EditGroup.merge(copied.groups, from: copied.state, into: $0) }
+        changeEdits(items ?? editTargets, action: "Paste Edits", note: "Edits Pasted", fromUnedited: copied.edited ? nil : copied.groups) {
+            EditGroup.merge(copied.groups, from: copied.state, into: $0)
+        }
     }
 
     /// Applies the last photograph left with edits, no copy step.
@@ -1834,17 +1839,38 @@ import UserNotifications
         changeEdits(items ?? editTargets, action: "Reset Edits", note: "Edits Reset", reset: true) { $0 }
     }
 
-    /// `item`'s edits as `userEdits` gives them; nil if its sidecar can't be read.
-    private func userEdits(of item: URL) -> EditState? {
-        if item == sourceItem { return Self.userEdits(state) }
-        guard let lookup = sidecarLookup else { return Self.userEdits(plainState) }
+    /// `item`'s edits as `userEdits` gives them, and whether it has any of
+    /// its own; nil if its sidecar can't be read.
+    private func userEdits(of item: URL) -> (state: EditState, edited: Bool)? {
+        if item == sourceItem { return (Self.userEdits(state), openPhotographEdited) }
+        guard let lookup = sidecarLookup else { return (Self.userEdits(plainState), false) }
         let restore = SidecarRestore.read(photo: item.photoFile, variant: item.variantID, store: lookup.store, data: lookup.data)
         guard restore.problem == nil else { return nil }
-        return Self.userEdits(restore.edits.map { restoredState($0.state, legacy: false) } ?? plainState)
+        guard let saved = restore.edits else { return (Self.userEdits(plainState), false) }
+        return (Self.userEdits(restoredState(saved.state, legacy: false)), true)
+    }
+
+    /// The open photograph has edits its sidecar keeps: saved before, or
+    /// made since it opened. Without a sidecar there's no telling, and its
+    /// settings count as edits.
+    private var openPhotographEdited: Bool {
+        guard let context = photoSidecar, context.photo == source else { return true }
+        return context.editedAtOpen || Self.userEdits(state) != context.opened
     }
 
     /// A photograph without edits, not following any other.
     private var plainState: EditState { newPhotoState(after: EditState()) }
+
+    /// After pasting `groups` from a photograph without edits: `pasted` has
+    /// none either when everything else is as a photograph without edits
+    /// has it. The film and paper must be among `groups`, since a film kept
+    /// in a sidecar is an edit, whichever it is. What the pasted groups hold
+    /// doesn't count, such as the film the copied photograph showed by
+    /// following the one before it.
+    private func holdsNoEdits(_ pasted: EditState, pasting groups: Set<EditGroup>) -> Bool {
+        guard groups.contains(.filmAndPaper) else { return false }
+        return Self.userEdits(pasted) == Self.userEdits(EditGroup.merge(groups, from: pasted, into: plainState))
+    }
 
     /// What a photograph's edits are stored against: `params` with the
     /// engine's defaults too, so values from a newer version stay.
@@ -1854,8 +1880,11 @@ import UserNotifications
 
     /// Changes the edits of `items` as one undo step: the open one in place,
     /// the others in their sidecars. Each sidecar is kept as it was first, so
-    /// undo can put it back.
-    private func changeEdits(_ items: [URL], action: String, note: String, reset: Bool = false, _ transform: (EditState) -> EditState) {
+    /// undo can put it back. `fromUnedited`: the groups pasted from a
+    /// photograph without edits, which leave one without edits as it is,
+    /// and one whose edits were all in them without any.
+    private func changeEdits(_ items: [URL], action: String, note: String, reset: Bool = false, fromUnedited: Set<EditGroup>? = nil,
+                             _ transform: (EditState) -> EditState) {
         guard canChangeEdits, !items.isEmpty else { return }
         let open = sourceItem
         guard sidecarsEnabled, let sidecars, sidecars.writes, let lookup = sidecarLookup else {
@@ -1877,10 +1906,14 @@ import UserNotifications
                     guard var context = photoSidecar, context.photo == photo, context.blocked == nil, !context.awaitingCatalog else {
                         unsaved = unsaved ?? "Not saved: its .negs file can’t be changed"; continue
                     }
+                    // Nothing pasted onto nothing.
+                    if fromUnedited != nil, !openPhotographEdited { continue }
+                    let pasted = transform(state)
+                    let cleared = fromUnedited.map { holdsNoEdits(pasted, pasting: $0) } ?? false
                     if before[photo] == nil { before[photo] = .some(raw) }
                     openChanged = true
-                    if reset {
-                        replaceState(newPhotoState(after: state))
+                    if reset || cleared {
+                        replaceState(reset ? newPhotoState(after: state) : pasted)
                         // Unedited from here on: a later edit is measured from this.
                         sidecarWrite?.cancel(); sidecarWrite = nil
                         sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, edits: .some(nil),
@@ -1888,7 +1921,7 @@ import UserNotifications
                         context.written = nil; context.editedAtOpen = false; context.opened = Self.userEdits(state)
                         photoSidecar = context
                     } else {
-                        replaceState(transform(state))
+                        replaceState(pasted)
                         flushSidecar()
                     }
                     continue
@@ -1897,6 +1930,8 @@ import UserNotifications
                 let variant = item.variantID.map { id in sidecar?.variants.first { $0.id == id } } ?? sidecar?.variants.first
                 // A duplicate removed meanwhile.
                 if item.variantID != nil, variant == nil { continue }
+                // Nothing pasted onto nothing.
+                if fromUnedited != nil, variant?.edits == nil { continue }
                 if before[photo] == nil { before[photo] = .some(raw) }
                 let version = sidecar?.defaultsVersion ?? SidecarDefaults.latest
                 let table = try SidecarDefaults.load(version: version, data: lookup.data)
@@ -1904,8 +1939,11 @@ import UserNotifications
                 if !reset {
                     let saved = try variant?.edits.map { try PhotoSidecar.decodeEdits($0, table: table) }
                     let base = saved.map { restoredState($0.state, legacy: false) } ?? plainState
+                    let pasted = transform(base)
                     // Its match, if on, is solved again when it opens: the edits it was solved for changed.
-                    edits = PhotoSidecar.encodeEdits(transform(base), matchSolved: false, table: table)
+                    if !(fromUnedited.map { holdsNoEdits(pasted, pasting: $0) } ?? false) {
+                        edits = PhotoSidecar.encodeEdits(pasted, matchSolved: false, table: table)
+                    }
                 }
                 sidecars.enqueue(SidecarPatch(variant: variant?.id ?? SidecarRestore.newVariantID(), primary: item.variantID == nil,
                                               edits: .some(edits), known: known(table), defaultsVersion: version, app: Self.appVersion), for: photo)

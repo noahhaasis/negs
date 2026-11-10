@@ -619,6 +619,114 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertNil(try variants(a).first?.edits)
     }
 
+    /// Edits copied from a photograph without any paste none: a photograph
+    /// without edits stays so, and one whose edits were all in what's
+    /// pasted loses them, as Reset Edits would. Its crop, never pasted by
+    /// Copy Edits, stays. One undo step puts them back.
+    func testPastingAnUneditedPhotographsEditsLeavesNoEdits() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png"), d = try fixture(in: dir, "d.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 2, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}}}]}"#, sidecarOf: b)
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "d1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "crop": {"angle": 2.5}}}]}"#, sidecarOf: d)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let strip = UserDefaults.standard.object(forKey: "filmstripVisible")
+        addTeardownBlock { UserDefaults.standard.set(strip, forKey: "filmstripVisible") }
+        model.filmstripVisible = true
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step(_ body: () -> Void) { undo.beginUndoGrouping(); body(); undo.endUndoGrouping() }
+        func edits(_ photo: URL) throws -> JSONValue? { try store.read(photo: photo)?.variants.first?.edits }
+        func exists(_ photo: URL) -> Bool { FileManager.default.fileExists(atPath: PhotoSidecar.url(for: photo).path) }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 4 }
+
+        // From the open photograph, unedited, onto three in the grid.
+        model.copyEdits()
+        model.showGrid()
+        model.click(b); model.click(d, shift: true)
+        step { model.pasteEdits() }
+        await model.flushSidecars()
+        XCTAssertFalse(exists(c), "a photograph without edits gets no .negs file")
+        XCTAssertFalse(model.library.summary(for: c).edited)
+        XCTAssertNil(try edits(b), "its edits were all pasted over")
+        XCTAssertEqual(model.library.summary(for: b), LibrarySummary(rating: 2), "the rating stays")
+        XCTAssertTrue(model.library.summary(for: d).edited, "its crop stays")
+        XCTAssertEqual(try edits(d)?["crop.angle"], .number(2.5))
+        XCTAssertEqual(try edits(d)?["params.prep.lift"], .null, "its lift was pasted over")
+        undo.undo()
+        await model.flushSidecars()
+        XCTAssertEqual(try edits(b)?["params.prep.lift"], .number(5))
+        XCTAssertEqual(try edits(d)?["params.prep.lift"], .number(5))
+        XCTAssertFalse(exists(c))
+
+        // From one in the grid, unedited, onto the open photograph in the edit view.
+        model.click(c)
+        model.copyEdits()
+        model.click(b)
+        model.editCurrent()
+        XCTAssertEqual(model.source, b)
+        XCTAssertEqual(model.value("prep.lift"), .number(5))
+        step { model.pasteEdits() }
+        XCTAssertEqual(model.value("prep.lift"), .number(0))
+        await model.flushSidecars()
+        XCTAssertNil(try edits(b))
+        XCTAssertFalse(model.library.summary(for: b).edited)
+        undo.undo()
+        await model.flushSidecars()
+        XCTAssertEqual(model.value("prep.lift"), .number(5))
+        XCTAssertEqual(try edits(b)?["params.prep.lift"], .number(5))
+
+        // Onto an open photograph without edits: nothing to save.
+        model.open(c)
+        step { model.pasteEdits() }
+        await model.flushSidecars()
+        XCTAssertFalse(exists(c))
+        XCTAssertFalse(model.library.summary(for: c).edited)
+    }
+
+    /// With Match camera brightness on for new photographs, each one's own
+    /// solved exposure is no edit: pasting from one without edits still
+    /// leaves none. Choosing groups without the film keeps a saved film.
+    func testPastingAnUneditedPhotographsEditsIgnoresItsBrightnessMatch() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "brightnessMatch": {"ev": 0.7, "highlightLimited": true}}}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.autoPlaceNewImages = true
+        func edits(_ photo: URL) throws -> JSONValue? { try store.read(photo: photo)?.variants.first?.edits }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+        XCTAssertTrue(model.matchesBrightness)
+        try await waitUntil { model.error != nil || model.state.brightnessMatch?.ev != nil }
+        XCTAssertNotNil(model.state.brightnessMatch?.ev, "a's own exposure is solved")
+
+        // Lab alone: b keeps its film, so it stays edited.
+        model.copyEdits(groups: [.lab])
+        model.showGrid()
+        model.click(b); model.click(c, shift: true)
+        model.pasteEdits()
+        await model.flushSidecars()
+        XCTAssertEqual(try edits(b)?["film"], .string("kodak_portra_400"))
+        XCTAssertEqual(try edits(b)?["params.prep.lift"], .number(5))
+        XCTAssertNil(try store.read(photo: c))
+
+        model.click(a)
+        model.copyEdits()
+        model.click(b); model.click(c, shift: true)
+        model.pasteEdits()
+        await model.flushSidecars()
+        XCTAssertNil(try edits(b), "its match was on, as a new photograph's is")
+        XCTAssertFalse(model.library.summary(for: b).edited)
+        XCTAssertNil(try store.read(photo: c))
+    }
+
     /// ⌘C and ⌘V reach the window controller at the end of the responder
     /// chain and copy and paste edits as ⇧⌘C and ⇧⌘V do, one undo step;
     /// a text field or view being edited takes them first.
