@@ -3867,6 +3867,8 @@ import UserNotifications
 
     /// Whether the popover is open: it clears a finished batch when it closes.
     @ObservationIgnored var batchPopoverShown = false
+    /// Shows the batch's popover under a view; set by the window controller.
+    @ObservationIgnored var presentBatch: (NSView) -> Void = { _ in }
 
     /// A batch the last session didn't finish, offered once launch has settled.
     func offerBatchResume(in window: NSWindow?) {

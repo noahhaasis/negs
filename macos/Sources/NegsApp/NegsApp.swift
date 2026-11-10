@@ -219,7 +219,6 @@ struct EditorCanvas: View {
                 .overlay {
                     if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
                 }
-                .overlay { LibraryNoteView(model: model) }
             // The tray takes the strip's and the status line's place (§4.5).
             if let tray = model.tray, !grid {
                 StockTray(model: model, visit: tray)
@@ -246,6 +245,7 @@ struct EditorCanvas: View {
         }
         // Under the grid's sheet, hidden from VoiceOver too.
         .accessibilityHidden(grid)
+        .modifier(LibraryNoteTimer(model: model))
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
@@ -255,35 +255,6 @@ struct EditorCanvas: View {
             guard let folder = model.source?.deletingLastPathComponent() else { return }
             await model.library.watch(folder)
         }
-    }
-}
-
-/// What a rating or flag key did ("★★★", "Rejected"), briefly over the
-/// canvas. There is no permanent rating widget, so the canvas stays clean.
-struct LibraryNoteView: View {
-    let model: EditorModel
-
-    var body: some View {
-        ZStack {
-            if let note = model.libraryNote {
-                VStack(spacing: 4) {
-                    Text(note.text).font(.title2.weight(.semibold))
-                    if note.count > 1 { Text("\(note.count) photographs").font(.callout) }
-                    if let detail = note.detail { Text(detail).font(.callout).foregroundStyle(.secondary) }
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .transition(.opacity)
-                .task(id: note.serial) {
-                    try? await Task.sleep(for: .seconds(note.detail == nil ? 1 : 2.5))
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: 0.25)) { model.hideLibraryNote(note.serial) }
-                }
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .allowsHitTesting(false)
     }
 }
 
@@ -471,57 +442,5 @@ struct EmptyState: View {
         }
         .multilineTextAlignment(.center)
         .padding(30)
-    }
-}
-
-struct StatusBar: View {
-    let model: EditorModel
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(model.status).lineLimit(1).textSelection(.enabled)
-            Spacer(minLength: 12)
-            if model.exporting {
-                ProgressView().controlSize(.mini)
-                TimelineView(.periodic(from: model.exportStarted, by: 1)) { context in
-                    Text("Exporting · \(Int(context.date.timeIntervalSince(model.exportStarted))) s").monospacedDigit()
-                }
-                Button("Cancel", action: model.cancelExport).controlSize(.small)
-            }
-            if model.source != nil, model.mode == .photo { OriginalButton(model: model) }
-        }
-        .font(.caption).foregroundStyle(.secondary)
-        .padding(.horizontal, 14).frame(height: 28)
-        .background(.bar)
-        .accessibilityElement(children: .contain)
-    }
-}
-
-/// Press and hold to compare with the photograph before developing, like
-/// Lightroom's Show Original. The decode starts when the pointer arrives.
-struct OriginalButton: View {
-    let model: EditorModel
-    @State private var pressed = false
-
-    var body: some View {
-        let enabled = model.canShowOriginal
-        Image(systemName: "square.split.diagonal.fill")
-            .font(.system(size: 13))
-            .foregroundStyle(model.original != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-            .frame(width: 24, height: 20)
-            .contentShape(Rectangle())
-            .opacity(enabled ? 1 : 0.4)
-            .onHover { if $0 { model.prepareOriginal() } }
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in if !pressed { pressed = true; model.holdOriginal(true) } }
-                .onEnded { _ in pressed = false; model.holdOriginal(false) })
-            .allowsHitTesting(enabled)
-            .help("Hold to show the original (\\)")
-            .accessibilityElement()
-            .accessibilityLabel("Show Original")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityValue(model.original != nil ? "On" : "Off")
-            // VoiceOver can't hold, so activating it toggles.
-            .accessibilityAction { model.holdOriginal(!model.holdingOriginal) }
     }
 }

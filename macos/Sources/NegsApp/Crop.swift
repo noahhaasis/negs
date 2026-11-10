@@ -708,7 +708,7 @@ struct CropInspector: View {
             }
             Section {
                 LabeledContent("Size") {
-                    let size = exportedSize
+                    let size = session.exportedSize(working: model.workingSize)
                     Text(verbatim: "\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px").monospacedDigit()
                 }
                 .help("The exported photograph’s size, before the border.")
@@ -733,13 +733,6 @@ struct CropInspector: View {
         }
         .formStyle(.grouped)
         .onChange(of: field) { _, focused in session.typing = focused }
-    }
-
-    /// The draft's pixels in the frame an export develops: projected for a
-    /// Longest side target, otherwise the last render's working frame.
-    private var exportedSize: CGSize {
-        if let working = session.projectedWorking { return session.settings.size(of: working) }
-        return model.workingSize == .zero ? session.shown.size : session.settings.size(of: model.workingSize)
     }
 
     private func ratioField(_ title: String, value: CGFloat, set: @escaping (CGFloat) -> Void) -> some View {

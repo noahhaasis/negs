@@ -119,6 +119,7 @@ import SwiftUI
         toolbar.centeredItemIdentifiers = [.zoom, .edit, .gridSize]
         window.toolbar = toolbar
         model.undoManager = window.undoManager
+        model.presentBatch = { [weak self] view in self?.showBatchPopover(below: view) }
         // Dragging the inspector closed hides the adjustments, like the toolbar button.
         collapsing = inspector.observe(\.isCollapsed) { [weak self] item, _ in
             MainActor.assumeIsolated {
@@ -596,6 +597,17 @@ import SwiftUI
     private func toggleBatchPopover(_ run: BatchRun) {
         if let batchPopover, batchPopover.isShown { return batchPopover.performClose(nil) }
         guard let item = items[.export] else { return }
+        showBatchPopover(run) { $0.show(relativeTo: item) }
+    }
+
+    /// The batch's popover under a view: the status line's Show.
+    private func showBatchPopover(below view: NSView) {
+        guard let run = model.batch else { return }
+        if let batchPopover, batchPopover.isShown { return batchPopover.performClose(nil) }
+        showBatchPopover(run) { $0.show(relativeTo: view.bounds, of: view, preferredEdge: .maxY) }
+    }
+
+    private func showBatchPopover(_ run: BatchRun, show: (NSPopover) -> Void) {
         let content = NSHostingController(rootView: BatchProgressView(run: run, retry: { [weak self] in self?.model.retryBatch() },
                                                                       showInFinder: { [weak self] in self?.model.showBatchInFinder() }))
         content.sizingOptions = .preferredContentSize
@@ -605,7 +617,7 @@ import SwiftUI
         popover.delegate = self
         batchPopover = popover
         model.batchPopoverShown = true
-        popover.show(relativeTo: item)
+        show(popover)
     }
 
     func popoverDidClose(_ notification: Notification) {

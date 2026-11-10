@@ -431,8 +431,13 @@ private struct SheetFoot: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text(SheetWords.count(shown: model.shownPhotos.count, total: model.library.items.count,
-                                  selected: model.selection.selected.count, filtered: model.library.filter.active))
+            // A rating or flag note takes the count's place for a moment (§4.7).
+            if let note = model.libraryNote {
+                NoteWords(note: note)
+            } else {
+                Text(SheetWords.count(shown: model.shownPhotos.count, total: model.library.items.count,
+                                      selected: model.selection.selected.count, filtered: model.library.filter.active))
+            }
             Spacer(minLength: 0)
             HStack(spacing: 14) {
                 Text("Size")
