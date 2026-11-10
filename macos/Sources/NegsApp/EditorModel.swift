@@ -261,6 +261,10 @@ import UserNotifications
     /// declares for it (nil until asked; null when it declares none) and the
     /// preview itself. The file is the same for the whole generation.
     @ObservationIgnored private var matchReference: (generation: Int, declared: JSONValue?, prepared: Task<CameraBrightnessReference.Prepared, Never>?)?
+    /// Solved matches across photographs and launches (ticket 39).
+    @ObservationIgnored var matchCache = BrightnessMatchCache.shared
+    /// `BrightnessMatchCache.engineStamp` of the engine's paths, read once.
+    @ObservationIgnored private var matchEngine: (helper: URL, data: URL, stamp: String)?
     /// The edit whose decode for a brightness match failed: it renders
     /// without the match, which then reports the error as a render would.
     @ObservationIgnored private var matchDecodeFailed: FrameID?
@@ -284,6 +288,8 @@ import UserNotifications
     @ObservationIgnored var willRender: (() -> Void)?
     func killHelperForTesting() { engine?.killHelperForTesting() }
     var holdingFrameForMatch: Bool { heldPreview != nil }
+    /// Brightness matches solved by the helper (not found in `matchCache`), for tests.
+    @ObservationIgnored private(set) var matchSolves = 0
     #endif
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
@@ -499,6 +505,8 @@ import UserNotifications
 
     func start(paths: EnginePaths? = nil, restoration: Task<EditorSession?, Error>? = nil) async {
         launch(paths: paths)
+        let matches = matchCache
+        Task.detached(priority: .utility) { matches.preload() }
         guard let request = catalogRequest, let engine else { return }
         catalogRequest = nil
         var restoration = restoration
@@ -2538,6 +2546,7 @@ import UserNotifications
                 if raw { decode["preview_colour_space"] = .bool(true) }
                 // The camera preview read meanwhile (~35 ms).
                 let prepared = raw ? Task.detached(priority: .utility) { CameraBrightnessReference.Prepared(from: photo) } : nil
+                let cacheKey = storeMatch != nil ? matchCacheKey(photo, request: matchSolveState(state), paths: paths) : nil
                 let (_, decoded) = try await engine.request(decode)
                 let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
                 guard await waitForThumbnailTurn() else { return false }
@@ -2547,6 +2556,12 @@ import UserNotifications
                                                                     request: matchSolveState(state), reference: reference,
                                                                     declared: raw ? decoded["preview_colour_space"] : nil, prepared: prepared),
                    let matched = Self.matching(state, ev: solved.exposure, limited: solved.limited, inputs: matchInputs(state)) {
+                    // Solved on the whole decode (a stored match), so opening
+                    // the photograph would solve the same: kept for it.
+                    // The reduced decode's can differ by 0.01 EV and isn't.
+                    if let cacheKey, cacheKey == matchCacheKey(photo, request: matchSolveState(state), paths: paths) {
+                        matchCache.store(cacheKey, ev: solved.exposure, limited: solved.limited)
+                    }
                     state = matched
                     if let storeMatch { finalLook = storeMatch(state) ?? look }
                 }
@@ -3468,6 +3483,8 @@ import UserNotifications
             "reduced_decode": .bool(false), "decode_only": .bool(true)
         ]
         if askDeclared { decode["preview_colour_space"] = .bool(true) }
+        // Solved before on this file for this very request: the same value.
+        let cache = matchCache, key = matchCacheKey(source, request: request, paths: engine.paths)
         matchRequest = id; matchingBrightness = true
         matchTask = Task { [weak self] in
             defer {
@@ -3481,6 +3498,14 @@ import UserNotifications
             @MainActor func stillWanted() throws {
                 guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { throw CancellationError() }
             }
+            if let key, let kept = cache.solved(key) {
+                guard (try? stillWanted()) != nil, let self else { return }
+                self.applyBrightnessMatch(kept.ev, limited: kept.limited, inputs: inputs)
+                return
+            }
+            #if DEBUG
+            self?.matchSolves += 1
+            #endif
             do {
                 // The whole photograph, as a render decodes it, with the
                 // pipeline the solve and the render use.
@@ -3504,6 +3529,10 @@ import UserNotifications
                                                                  request: request, reference: reference, declared: declared,
                                                                  prepared: raw ? prepared : nil, stillWanted: stillWanted)
                 guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
+                // Kept unless the file changed while it was solved.
+                if let key, key == self.matchCacheKey(source, request: request, paths: engine.paths) {
+                    cache.store(key, ev: solved.exposure, limited: solved.limited)
+                }
                 self.applyBrightnessMatch(solved.exposure, limited: solved.limited, inputs: inputs)
             } catch is CancellationError {
                 // A different photograph or shutdown supersedes this request.
@@ -3514,6 +3543,14 @@ import UserNotifications
                 self.brightnessMatchFailure = (generation, failure.forPhoto ? nil : inputs, failure.message)
             }
         }
+    }
+
+    /// The match cache's name for solving `request` on `file` in the helper at `paths`.
+    private func matchCacheKey(_ file: URL, request: EditState, paths: EnginePaths) -> String? {
+        if matchEngine?.helper != paths.helper || matchEngine?.data != paths.data {
+            matchEngine = (paths.helper, paths.data, BrightnessMatchCache.engineStamp(paths))
+        }
+        return matchEngine.flatMap { BrightnessMatchCache.key(file: file, request: request, engine: $0.stamp) }
     }
 
     /// What the match is solved with: `state` as rendered, without the
@@ -4477,6 +4514,7 @@ import UserNotifications
 
     func shutdown() {
         cancelBrightnessMatch()
+        matchCache.flush()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         if let powerStateObserver { NotificationCenter.default.removeObserver(powerStateObserver); self.powerStateObserver = nil }
