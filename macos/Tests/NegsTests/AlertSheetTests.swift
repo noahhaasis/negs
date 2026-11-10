@@ -50,6 +50,27 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         XCTAssertEqual(OutlinedButtonStyle().weight, 500)
     }
 
+    @MainActor func testTheSheetIsACardUnderTheTitleBar() throws {
+        // Round 18, A: rounded all round, 12 pt under the title bar, so the
+        // bar doesn't look to cut it off.
+        XCTAssertEqual(AlertSheet.margin.top, AlertSheet.gap)
+        XCTAssertEqual(AlertSheet.gap, 12)
+        let host = NSHostingView(rootView: AlertSheet(request: AlertRequest(alert: question) { _ in }) { _ in })
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsWide) / host.bounds.width
+        // Points from the top left, as drawn.
+        func alpha(_ x: CGFloat, _ y: CGFloat) -> CGFloat {
+            bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))?.alphaComponent ?? 0
+        }
+        let left = AlertSheet.margin.leading, top = AlertSheet.gap
+        XCTAssertEqual(alpha(left + AlertSheet.width / 2, top + 3), 1, accuracy: 0.01, "the card's top edge")
+        XCTAssertLessThan(alpha(left + 1, top + 1), 0.9, "its top corners are rounded")
+        XCTAssertLessThan(alpha(left + AlertSheet.width / 2, top / 2), 0.9, "a gap above it, shadow at most")
+    }
+
     func testAnErrorsFirstSentenceIsItsHeading() {
         XCTAssertEqual(AppAlert.error("Could not save the editing session. Negs stayed open. Disk full."),
                        AppAlert(title: "Could not save the editing session", detail: "Negs stayed open. Disk full."))

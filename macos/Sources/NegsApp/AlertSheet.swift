@@ -124,16 +124,20 @@ extension EditorModel {
 // MARK: - The sheet
 
 /// The alert as drawn: heading in Newsreader 20 600, the detail in italic 16
-/// `label`, tick boxes if any, and the buttons outlined at the right. In
-/// `panel` with a 1 pt `line` border that leaves the top open, the bottom
-/// corners rounded 10, and a deep shadow, which the window leaves room for.
+/// `label`, tick boxes if any, and the buttons outlined at the right. A card
+/// (round 18, A): `panel` with a 1 pt `line` border, every corner rounded
+/// 10, `gap` under the title bar, and a deep shadow, which the window leaves
+/// room for.
 struct AlertSheet: View {
     let request: AlertRequest
     let answer: (Int) -> Void
 
     static let width: CGFloat = 440
+    /// Between the title bar and the card, so the bar doesn't look to cut it off.
+    static let gap: CGFloat = 12
+    static let radius: CGFloat = 10
     /// Room round the sheet for its shadow, which a window can't draw past.
-    static let margin = EdgeInsets(top: 0, leading: 44, bottom: 56, trailing: 44)
+    static let margin = EdgeInsets(top: gap, leading: 44, bottom: 56, trailing: 44)
 
     var body: some View {
         let alert = request.alert
@@ -174,31 +178,14 @@ struct AlertSheet: View {
         }
         .padding(EdgeInsets(top: 22, leading: 26, bottom: 20, trailing: 26))
         .frame(width: Self.width, alignment: .leading)
-        .background(UnevenRoundedRectangle(bottomLeadingRadius: 10, bottomTrailingRadius: 10).fill(Theme.panel))
-        .overlay(OpenTopBorder(radius: 10).stroke(Theme.line, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: Self.radius).fill(Theme.panel))
+        .overlay(RoundedRectangle(cornerRadius: Self.radius).strokeBorder(Theme.line, lineWidth: 1))
         .compositingGroup()
         .shadow(color: .black.opacity(0.7), radius: 25, y: 18)
         .shadow(color: .black.opacity(0.5), radius: 5, y: 3)
         .padding(Self.margin)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(alert.title)
-    }
-}
-
-/// The sheet's border down its sides and round its bottom, open at the top
-/// where it meets the title bar.
-private struct OpenTopBorder: Shape {
-    let radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let rect = rect.insetBy(dx: 0.5, dy: 0)
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - radius))
-        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.maxY - 0.5), tangent2End: CGPoint(x: rect.maxX, y: rect.maxY - 0.5), radius: radius)
-        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.maxY - 0.5), tangent2End: CGPoint(x: rect.maxX, y: rect.minY), radius: radius)
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        return path
     }
 }
 
