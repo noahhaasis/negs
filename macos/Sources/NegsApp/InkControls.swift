@@ -382,29 +382,43 @@ struct HintText: View {
 /// Outlined button (Balance Print, Try Again, OK, Import Presets…): 23 tall,
 /// a `track` outline, radius 12, Newsreader 13.5 500 in `paper`.
 struct OutlinedButtonStyle: ButtonStyle {
-    /// An alert's default button (Return): its ring in `dim`, a step
-    /// brighter, as well as at the right.
+    /// An alert's default button (Return): its ring in `dim`, its word at
+    /// 650 and a small ↩ after it (round 16, C), as well as at the right.
     var prominent = false
 
-    func makeBody(configuration: Configuration) -> some View { Outlined(configuration: configuration, prominent: prominent) }
+    /// The word's weight: 500, or 650 on Return's button.
+    var weight: CGFloat { prominent ? 650 : 500 }
+    /// What follows Return's word, so it says which button Return presses.
+    var mark: String? { prominent ? "↩" : nil }
+
+    func makeBody(configuration: Configuration) -> some View { Outlined(configuration: configuration, style: self) }
 
     private struct Outlined: View {
         let configuration: Configuration
-        let prominent: Bool
+        let style: OutlinedButtonStyle
         @Environment(\.isEnabled) private var enabled
         @State private var hovered = false
 
         var body: some View {
-            configuration.label
-                .font(Theme.serif(13.5, weight: 500))
-                .foregroundStyle(Theme.paper)
-                .padding(.horizontal, 12).padding(.bottom, 1)
-                .frame(height: 23)
-                .background(Capsule().fill(Theme.paper.opacity(configuration.isPressed ? 0.09 : hovered ? 0.04 : 0)))
-                .overlay(Capsule().strokeBorder(hovered || configuration.isPressed ? (prominent ? Theme.label : Theme.dim) : prominent ? Theme.dim : Theme.track, lineWidth: 1))
-                .contentShape(Capsule())
-                .opacity(enabled ? 1 : Theme.disabledOpacity)
-                .onHover { hovered = $0 && enabled }
+            let prominent = style.prominent
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                configuration.label
+                    .font(Theme.serif(13.5, weight: style.weight))
+                    .foregroundStyle(Theme.paper)
+                if let mark = style.mark {
+                    Text(mark).font(Theme.ui(10.5)).foregroundStyle(Theme.dim).accessibilityHidden(true)
+                }
+            }
+            // Newsreader's tall ascent sat the words 2 pt above the
+            // middle; this centres them by eye (between the capitals
+            // and the x-height).
+            .padding(.horizontal, 12).padding(.top, 2)
+            .frame(height: 23)
+            .background(Capsule().fill(Theme.paper.opacity(configuration.isPressed ? 0.09 : hovered ? 0.04 : 0)))
+            .overlay(Capsule().strokeBorder(hovered || configuration.isPressed ? (prominent ? Theme.label : Theme.dim) : prominent ? Theme.dim : Theme.track, lineWidth: 1))
+            .contentShape(Capsule())
+            .opacity(enabled ? 1 : Theme.disabledOpacity)
+            .onHover { hovered = $0 && enabled }
         }
     }
 }

@@ -42,6 +42,14 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         XCTAssertEqual(quit.cancelIndex, 0)
     }
 
+    func testReturnsButtonSaysSo() {
+        // Round 16, C: Return's button is heavier and ends in ↩; the others don't.
+        XCTAssertEqual(OutlinedButtonStyle(prominent: true).mark, "↩")
+        XCTAssertEqual(OutlinedButtonStyle(prominent: true).weight, 650)
+        XCTAssertNil(OutlinedButtonStyle().mark)
+        XCTAssertEqual(OutlinedButtonStyle().weight, 500)
+    }
+
     func testAnErrorsFirstSentenceIsItsHeading() {
         XCTAssertEqual(AppAlert.error("Could not save the editing session. Negs stayed open. Disk full."),
                        AppAlert(title: "Could not save the editing session", detail: "Negs stayed open. Disk full."))
