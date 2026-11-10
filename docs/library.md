@@ -40,7 +40,10 @@ opening it would. An unedited photograph's match is solved on the small read the
 thumbnail needs and stored nowhere. Thumbnails read only as much of a RAW as they
 need, except to solve a match that's stored: about 0.43 s each for a 24 MP NEF
 on an M1 Pro, half of it the match, and two at a time, each in a helper of its
-own, on a Mac with 8 cores and 16 GB or more (see [Large folders](#large-folders)). A new default film or paper, or turning the match for new
+own, on a Mac with 8 cores and 16 GB or more (see [Large folders](#large-folders)). On battery
+they're developed as on mains power, since each is made once and kept. In Low Power
+Mode only those on screen are developed, one at a time, and the rest of the folder
+waits until it's turned off. A new default film or paper, or turning the match for new
 photographs on or off, develops the unedited photographs again; edited ones stay.
 Until a thumbnail is ready the camera's preview shows. Thumbnails are kept in
 `~/Library/Caches` (up to 1 GB, the least recently used go first) and are safe to

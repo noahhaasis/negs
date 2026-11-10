@@ -409,6 +409,10 @@ import UserNotifications
             self.pumpThumbnails()
             self.aspects.read(self.library.items, around: self.sourceItem)
         }
+        // Posted on any thread; delivered on the main queue.
+        powerStateObserver = NotificationCenter.default.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled }
+        }
     }
 
     /// Starts the helper and asks for its catalog at once, so both load while
@@ -1977,6 +1981,18 @@ import UserNotifications
     /// (about 550 MB each): two on a Mac with the cores and memory.
     nonisolated static let thumbnailHelpers =
         ProcessInfo.processInfo.activeProcessorCount >= 8 && ProcessInfo.processInfo.physicalMemory >= 16 << 30 ? 2 : 1
+    /// Low Power Mode is on: only the thumbnails on screen are developed, in
+    /// one helper; the rest of the folder waits until it's off. Follows the
+    /// Mac's setting (tests set it).
+    @ObservationIgnored var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled {
+        didSet {
+            guard lowPowerMode != oldValue else { return }
+            if lowPowerMode { stopSpareThumbnailEngines() } else { pumpThumbnails() }
+        }
+    }
+    @ObservationIgnored private var powerStateObserver: NSObjectProtocol?
+    /// How many helpers develop thumbnails now.
+    private var thumbnailHelpersNow: Int { lowPowerMode ? 1 : Self.thumbnailHelpers }
     /// The background helpers, started while there's work, by slot.
     @ObservationIgnored private var thumbnailEngines: [Int: EngineClient] = [:]
     /// Each slot's thumbnail developing now, and its job.
@@ -2206,7 +2222,7 @@ import UserNotifications
         // Its scan reads what it was started with: once more after, for what changed.
         guard thumbnailTask == nil else { thumbnailsPumpAgain = true; return }
         // Each that finishes pumps again.
-        let free = (0..<Self.thumbnailHelpers).filter { thumbnailsDeveloping[$0] == nil }
+        let free = (0..<thumbnailHelpersNow).filter { thumbnailsDeveloping[$0] == nil }
         guard !free.isEmpty else { return }
         if thumbnailStamp == nil { return readThumbnailStamp() }
         thumbnailTask = Task { [weak self] in
@@ -2218,13 +2234,14 @@ import UserNotifications
             // is scanned for every thumbnail, which must stay off the main actor.
             let items = self.library.items, open = self.sourceItem, onScreen = self.thumbnailsOnScreen, looks = self.thumbnailLooks
             let failures = self.thumbnailFailures, checked = self.thumbnailsChecked, emptied = self.thumbnailsEmptied
-            let developing = Set(self.thumbnailsDeveloping.values.map(\.item))
+            let developing = Set(self.thumbnailsDeveloping.values.map(\.item)), onlyOnScreen = self.lowPowerMode
             self.thumbnailsPumpAgain = false
             // Each item but the open one, whose thumbnail comes from its
             // preview, and those developing, on screen first, then outward
             // from the middle of the screen (or the open photograph), so the
             // next ones scrolled to or opened are ready: the first without a
-            // thumbnail on disk, one for each free helper. Those with one are noted.
+            // thumbnail on disk, one for each free helper. Those with one are
+            // noted. In Low Power Mode, those on screen only.
             let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: [(file: PhotoFile, look: String)]) in
                 var shown: [(file: PhotoFile, look: String)] = [], rest: [(index: Int, file: PhotoFile, look: String)] = []
                 var onScreenIndices: [Int] = [], openIndex: Int?
@@ -2233,7 +2250,7 @@ import UserNotifications
                     if onScreen.contains(file.url) { onScreenIndices.append(index) }
                     guard !developing.contains(file.url), let look = looks.look(for: file.url), failures[file.url] != look else { continue }
                     if let checked = checked[file.url], checked.look == look, checked.present { continue }
-                    if onScreen.contains(file.url) { shown.append((file, look)) } else { rest.append((index, file, look)) }
+                    if onScreen.contains(file.url) { shown.append((file, look)) } else if !onlyOnScreen { rest.append((index, file, look)) }
                 }
                 let centre = Self.thumbnailCentre(onScreen: onScreenIndices, open: openIndex)
                 let ordered = shown + Self.outward(rest.map { ($0.index, (file: $0.file, look: $0.look)) }, from: centre)
@@ -2258,6 +2275,7 @@ import UserNotifications
                     guard let self else { return }
                     if await !self.developThumbnail(file, look: look, lookup: lookup, paths: paths, slot: slot) { self.thumbnailFailures[file.url] = look }
                     self.thumbnailsDeveloping[slot] = nil
+                    if slot >= self.thumbnailHelpersNow { self.stopSpareThumbnailEngines() }
                     self.pumpThumbnails()
                 }
                 self.thumbnailsDeveloping[slot] = (file.url, task)
@@ -2269,6 +2287,16 @@ import UserNotifications
                 self.stopThumbnailEngineSoon()
             }
         }
+    }
+
+    /// Quits the idle helpers past `thumbnailHelpersNow`, so their memory
+    /// goes; one still developing finishes first.
+    private func stopSpareThumbnailEngines() {
+        let spare = thumbnailEngines.filter { $0.key >= thumbnailHelpersNow && thumbnailsDeveloping[$0.key] == nil }
+        guard !spare.isEmpty else { return }
+        spare.keys.forEach { thumbnailEngines[$0] = nil }
+        let engines = Array(spare.values)
+        Task.detached(priority: .utility) { engines.forEach { $0.stop() } }
     }
 
     /// Quits the background helpers after a while without work, so their memory goes.
@@ -4209,6 +4237,7 @@ import UserNotifications
         cancelBrightnessMatch()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
+        if let powerStateObserver { NotificationCenter.default.removeObserver(powerStateObserver); self.powerStateObserver = nil }
         thumbnailTask?.cancel(); thumbnailIdle?.cancel()
         thumbnailsDeveloping.values.forEach { $0.task.cancel() }; thumbnailEngines.values.forEach { $0.stop() }
         exportJob?.cancel(); batch?.job?.cancel(); batchEngine?.stop(); engine?.stop()
