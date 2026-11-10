@@ -8,16 +8,16 @@ import XCTest
 /// Ticket 28: a discrete edit shows a canvas-size frame first, then the
 /// export-size one.
 final class QuickFrameStepTests: XCTestCase {
-    private func step(interacting: Bool = false, scale: CGFloat? = 0.25, pixels: Double = 24e6, hasFrame: Bool = true,
+    private func step(interacting: Bool = false, scale: CGFloat? = 0.25, pixels: Double = 24e6, finished: Bool = false,
                       done: Bool = false, reuses: Bool = false) -> EditorModel.RenderStep {
         EditorModel.renderStep(interacting: interacting, screenScale: scale, framePixels: pixels,
-                               hasFrame: hasFrame, quickFrameDone: done, reusesHelperOutput: reuses)
+                               showsFinishedFrame: finished, quickFrameDone: done, reusesHelperOutput: reuses)
     }
 
     func testDiscreteEditsOfLargePhotosRenderAQuickFrameFirst() {
         XCTAssertEqual(step(), .quick(0.25))
         XCTAssertEqual(step(done: true), .settled, "Its quick frame is done: settle")
-        XCTAssertEqual(step(hasFrame: false), .settled, "A new photograph has no frame to replace yet")
+        XCTAssertEqual(step(finished: true), .settled, "Its developed frame shows already (restored at launch, or kept)")
         XCTAssertEqual(step(reuses: true), .settled, "Post-only edits reuse the helper's output")
         XCTAssertEqual(step(pixels: 4e6), .settled, "Small photographs render fast enough")
         XCTAssertEqual(step(scale: 0.8), .settled, "The canvas shows most pixels anyway")
@@ -27,7 +27,7 @@ final class QuickFrameStepTests: XCTestCase {
 
     func testDragsAreUnchanged() {
         XCTAssertEqual(step(interacting: true), .drag(0.25))
-        XCTAssertEqual(step(interacting: true, pixels: 1e6, hasFrame: false, done: true, reuses: true), .drag(0.25))
+        XCTAssertEqual(step(interacting: true, pixels: 1e6, finished: true, done: true, reuses: true), .drag(0.25))
         XCTAssertEqual(step(interacting: true, scale: 1), .settled)
     }
 
@@ -347,6 +347,31 @@ final class QuickFrameStepTests: XCTestCase {
         XCTAssertFalse(model.holdingFrameForMatch)
     }
 
+    /// Ticket 39: a photograph's first frame is a quick one, marked Preview,
+    /// then the export-size frame, byte-identical to the one opened
+    /// without quick frames.
+    func testAPhotographsFirstFrameIsQuickThenTheSameSettledFrame() async throws {
+        let quick = EditorModel()
+        models.append(quick)
+        let defaults = UserDefaults.standard
+        let saved = ["autoPlaceNewImages"].map { ($0, defaults.object(forKey: $0)) }
+        restoreDefaults.append { for (key, value) in saved { defaults.set(value, forKey: key) } }
+        quick.autoPlaceNewImages = false
+        quick.canvasScale.fixed = 0.25
+        await quick.start(paths: paths(), restoration: Task { nil })
+        var firstStatus: String?
+        quick.open(try testPhoto())
+        try await waitUntil { quick.image != nil }
+        if !quick.previewCurrent { firstStatus = quick.status }
+        try await settled(quick)
+        XCTAssertEqual(quick.renderLog, [.quick(0.25), .settled])
+        if let firstStatus { XCTAssertTrue(firstStatus.hasPrefix("Preview"), firstStatus) }
+        XCTAssertEqual(try XCTUnwrap(quick.image).width, 3000)
+        let direct = try await openModel(scale: nil)
+        XCTAssertEqual(direct.renderLog, [.settled])
+        XCTAssertEqual(try bytes(quick.image), try bytes(direct.image), "The settled frame is byte-identical")
+    }
+
     /// Ticket 39: a new photograph's pending match is solved on a decode
     /// alone, before anything renders: every render is of the matched
     /// exposure, and one is at export size.
@@ -367,8 +392,7 @@ final class QuickFrameStepTests: XCTestCase {
         guard model.brightnessMatchActive else { throw XCTSkip("The test photo can't be matched: \(model.brightnessMatchNote ?? "")") }
         XCTAssertEqual(model.state.brightnessMatch?.inputs, model.matchInputs(model.state))
         XCTAssertNotNil(model.state.brightnessMatch?.ev)
-        XCTAssertEqual(model.renderLog.filter { $0 == .settled }.count, 1, "\(model.renderLog)")
-        XCTAssertEqual(model.renderLog.last, .settled)
+        XCTAssertEqual(model.renderLog, [.quick(0.25), .settled], "Decode, solve, quick frame, settled frame")
         // A render call that found the match pending started the solve
         // instead: no render went to the helper before the next call.
         let after = calls.dropFirst().map(\.rendered) + [model.renderLog.count]

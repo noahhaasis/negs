@@ -265,6 +265,13 @@ import UserNotifications
     @ObservationIgnored var matchCache = BrightnessMatchCache.shared
     /// `BrightnessMatchCache.engineStamp` of the engine's paths, read once.
     @ObservationIgnored private var matchEngine: (helper: URL, data: URL, stamp: String)?
+    /// The photograph the helper decoded alone (for a match, or before the
+    /// first frame), and its size from that decode.
+    @ObservationIgnored private var decodedFor: (generation: Int, size: CGSize)?
+    /// What the canvas shows before the first frame: this generation's
+    /// placeholder, at the photograph's size; `kept` when it's the
+    /// photograph's kept last develop.
+    @ObservationIgnored private var placeholderFor: (generation: Int, kept: Bool)?
     /// The edit whose decode for a brightness match failed: it renders
     /// without the match, which then reports the error as a render would.
     @ObservationIgnored private var matchDecodeFailed: FrameID?
@@ -1217,7 +1224,7 @@ import UserNotifications
     /// True if it's shown, or no longer needed.
     private func showKept(_ render: CGImage, size: CGSize, generation: Int) -> Bool {
         guard generation == sourceGeneration, image == nil else { return true }
-        placeholderSize = size; placeholder = render; standIn = nil
+        placeholderSize = size; placeholder = render; standIn = nil; placeholderFor = (generation, true)
         updateFilmStrip()
         return true
     }
@@ -1233,7 +1240,7 @@ import UserNotifications
 
     private func showPlaceholder(_ thumbnail: CGImage, size: CGSize, generation: Int) {
         guard generation == sourceGeneration, image == nil else { return }
-        placeholderSize = size; placeholder = thumbnail
+        placeholderSize = size; placeholder = thumbnail; placeholderFor = (generation, false)
         updateFilmStrip()
     }
     private func saveRecents() { UserDefaults.standard.set(recentFiles.map(\.path), forKey: "recentFiles") }
@@ -2976,11 +2983,15 @@ import UserNotifications
     nonisolated static let quickFrameMinimumPixels = 4.5e6
     nonisolated static let quickFrameMaximumPixelFraction = 0.5
 
+    /// `showsFinishedFrame`: the canvas shows this edit's developed frame
+    /// already (a restored launch frame, or a photograph's kept last
+    /// develop), which a quick frame would only blur. A new photograph's
+    /// first frame is quick too (ticket 39).
     nonisolated static func renderStep(interacting: Bool, screenScale: CGFloat?, framePixels: Double,
-                                       hasFrame: Bool, quickFrameDone: Bool, reusesHelperOutput: Bool) -> RenderStep {
+                                       showsFinishedFrame: Bool, quickFrameDone: Bool, reusesHelperOutput: Bool) -> RenderStep {
         let scale = screenScale.flatMap { $0 > 0 && $0 < 1 ? $0 : nil }
         if interacting { return scale.map(RenderStep.drag) ?? .settled }
-        guard let scale, hasFrame, !quickFrameDone, !reusesHelperOutput,
+        guard let scale, !showsFinishedFrame, !quickFrameDone, !reusesHelperOutput,
               framePixels >= quickFrameMinimumPixels,
               Double(scale * scale) <= quickFrameMaximumPixelFraction else { return .settled }
         return .quick(scale)
@@ -3012,6 +3023,22 @@ import UserNotifications
             reconcileBrightnessMatch()
             if matchTask != nil { return }
         }
+        // A photograph's first frame: its decode first, so the quick frame
+        // that follows knows the photograph's size and the canvas has laid
+        // out its placeholder, whose scale it renders at (ticket 39). The
+        // helper keeps the decode for the render. Not when its kept last
+        // develop or its restored frame shows: those go straight to export size.
+        let firstFrame = image == nil
+        let showsFinishedFrame = showingCachedPreview || firstFrame && placeholderFor.map { $0.generation == generation && $0.kept } == true
+        if firstFrame, !showsFinishedFrame, !interacting, decodedFor?.generation != generation {
+            rendering = true
+            let decoded = try? await engine.request(decodeOnlyCommand(source: source, generation: generation, state: snapshot, engine: engine)).1
+            rendering = false
+            // A failed decode leaves its error to the render.
+            if generation == sourceGeneration { decodedFor = (generation, decoded.map { CGSize(width: $0["source_width"].double, height: $0["source_height"].double) } ?? .zero) }
+            guard !closing else { return }
+            guard revision == currentRevision, generation == sourceGeneration else { return scheduleRender() }
+        }
         let buffer = engine.directory.appendingPathComponent("preview.rgba")
         var command: [String: JSONValue] = [
             "command": .string("render"), "input": .string(source.path),
@@ -3026,10 +3053,16 @@ import UserNotifications
         // shows; the frame on release is the export-size one. A discrete
         // edit shows such a frame first, unless the helper can answer
         // quickly anyway: a small photograph, or post adjustments alone.
+        // A first frame's canvas scale is the placeholder's, once it shows
+        // this photograph at its size (a test's fixed scale stands in).
+        let placeholderShown = placeholderFor.map { $0.generation == generation && !$0.kept } == true
+        let screenScale = !firstFrame ? canvasScale.screenPixelsPerPhotoPixel
+            : canvasScale.fixed ?? (placeholderShown ? canvasScale.screenPixelsPerPhotoPixel : nil)
+        let frameSize = !firstFrame ? imageSize : decodedFor?.generation == generation ? decodedFor?.size ?? .zero : .zero
         let step = Self.renderStep(
-            interacting: interacting, screenScale: canvasScale.screenPixelsPerPhotoPixel,
-            framePixels: Double(imageSize.width * imageSize.height),
-            hasFrame: image != nil && !showingCachedPreview, quickFrameDone: quickStep == frame,
+            interacting: interacting, screenScale: screenScale,
+            framePixels: Double(frameSize.width * frameSize.height),
+            showsFinishedFrame: showsFinishedFrame, quickFrameDone: quickStep == frame,
             reusesHelperOutput: helperOutput.map { $0.key == reuseKey && $0.launch == engine.runningLaunch } ?? false)
         let interactiveScale = step.interactiveScale
         if let interactiveScale { command["interactive_scale"] = .number(Double(interactiveScale)) }
@@ -3476,12 +3509,7 @@ import UserNotifications
         }
         let askDeclared = matchReference?.declared == nil && matchReference?.prepared != nil
         let prepared = matchReference?.prepared
-        var decode: [String: JSONValue] = [
-            "command": .string("thumbnail"), "input": .string(source.path), "source_generation": .number(Double(generation)),
-            "film": .string(request.film), "paper": .string(request.paper), "params": request.params,
-            "long_side": .number(16), "preview_path": .string(engine.directory.appendingPathComponent("match-decode.rgba").path),
-            "reduced_decode": .bool(false), "decode_only": .bool(true)
-        ]
+        var decode = decodeOnlyCommand(source: source, generation: generation, state: request, engine: engine)
         if askDeclared { decode["preview_colour_space"] = .bool(true) }
         // Solved before on this file for this very request: the same value.
         let cache = matchCache, key = matchCacheKey(source, request: request, paths: engine.paths)
@@ -3521,6 +3549,7 @@ import UserNotifications
                 try stillWanted()
                 let raw = decoded["raw"].bool
                 let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
+                self?.decodedFor = (generation, size)
                 if askDeclared, let self, self.matchReference?.generation == generation {
                     self.matchReference?.declared = decoded["preview_colour_space"]
                 }
@@ -3543,6 +3572,17 @@ import UserNotifications
                 self.brightnessMatchFailure = (generation, failure.forPhoto ? nil : inputs, failure.message)
             }
         }
+    }
+
+    /// Has the helper decode `source` whole, as a render would, without
+    /// developing it (and build the pipeline `state` renders with).
+    private func decodeOnlyCommand(source: URL, generation: Int, state: EditState, engine: EngineClient) -> [String: JSONValue] {
+        [
+            "command": .string("thumbnail"), "input": .string(source.path), "source_generation": .number(Double(generation)),
+            "film": .string(state.film), "paper": .string(state.paper), "params": state.params,
+            "long_side": .number(16), "preview_path": .string(engine.directory.appendingPathComponent("decode-only.rgba").path),
+            "reduced_decode": .bool(false), "decode_only": .bool(true)
+        ]
     }
 
     /// The match cache's name for solving `request` on `file` in the helper at `paths`.
