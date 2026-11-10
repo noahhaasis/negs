@@ -3395,6 +3395,10 @@ import UserNotifications
         pumpPreviews()
         settleQuickFrame()
     }
+    /// The shown frame is the settled render of its edit, not one rendered
+    /// at canvas size (a slider's or a discrete edit's quick frame). It
+    /// changes only with `image`, which the canvas observes.
+    var showsSettledFrame: Bool { showingCachedPreview || (!showingInteractiveFrame && quickFrame == nil) }
     /// The quick frame of the current edit is shown: the helper holds its decode.
     private var showsQuickFrame: Bool { quickFrame == FrameID(revision: revision, generation: sourceGeneration) }
 

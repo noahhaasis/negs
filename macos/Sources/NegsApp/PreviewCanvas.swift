@@ -20,6 +20,10 @@ struct PreviewCanvas: NSViewRepresentable {
     var geometry: CanvasGeometry?
     /// T is held: the print on screen turns half a turn (`PhotographView.turned`).
     var upsideDown = false
+    /// The image is a settled frame, not one rendered at canvas size while a
+    /// slider moves or before a discrete edit's export-size render: fitted,
+    /// it's shown resampled to the screen's pixels (`FitDownscale`).
+    var settled = true
     /// A double-click on the photograph; true if it's zoomed from fitting.
     var doubleClick: ((_ zoomed: Bool) -> Void)?
 
@@ -52,6 +56,7 @@ struct PreviewCanvas: NSViewRepresentable {
         // A different crop (such as an undone one) is a new picture: fit it.
         let recropped = photo.crop != crop && oldSize.width != 0
         if recropped { scroll.fitting = true }
+        photo.settled = settled
         photo.show(image, size: size, rotation: rotation, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
         photo.turned = upsideDown
         if oldSize != documentSize {
@@ -114,7 +119,8 @@ final class CenteringClipView: NSClipView {
 
 final class ImageScrollView: NSScrollView {
     var lastCommand: UUID?
-    var fitting = true
+    var fitting = true { didSet { if fitting != oldValue { photograph?.refreshSharp() } } }
+    private var photograph: PhotographView? { documentView as? PhotographView }
     var doubleClick: ((_ zoomed: Bool) -> Void)?
     var geometry: CanvasGeometry? { didSet { if geometry !== oldValue { observeBounds(); reportGeometry() } } }
     /// Space left and right of a fitted photograph (§2.3). The caption and
@@ -138,6 +144,12 @@ final class ImageScrollView: NSScrollView {
         let amount = Self.magnification(fitting: fitting, document: size, viewport: fitViewport, backingScale: window?.backingScaleFactor ?? 2)
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
         reportGeometry()
+        photograph?.refreshSharp()
+    }
+    /// Every scroll and zoom, gestures included, moves the clip view's bounds.
+    override func reflectScrolledClipView(_ clipView: NSClipView) {
+        super.reflectScrolledClipView(clipView)
+        photograph?.refreshSharp()
     }
 
     private var boundsObserver: NSObjectProtocol?
@@ -210,6 +222,12 @@ final class ImageScrollView: NSScrollView {
     }
 }
 
+extension NSWindow {
+    /// A point in the window's coordinates, in its backing pixels.
+    func backingPoint(_ point: CGPoint) -> CGPoint { convertToBacking(CGRect(origin: point, size: .zero)).origin }
+    func pointFromBacking(_ point: CGPoint) -> CGPoint { convertFromBacking(CGRect(origin: point, size: .zero)).origin }
+}
+
 final class PhotographView: NSView {
     /// The print, with its border: turned half a turn about the middle of
     /// what's on screen while T is held. Only the layers turn; the
@@ -219,6 +237,10 @@ final class PhotographView: NSView {
     private let clip = CALayer()
     /// The whole photograph, straightened inside the crop.
     private let photo = CALayer()
+    /// Over `photo` once the fitted view settles: the whole photograph
+    /// resampled to the physical pixels it covers, drawn 1:1 on the pixel
+    /// grid (`FitDownscale`). Hidden whenever it doesn't match the canvas.
+    let sharp = CALayer()
     private var borderLayers: BorderLayers!
     private var image: AnyObject?
     private var size = CGSize.zero
@@ -245,10 +267,17 @@ final class PhotographView: NSView {
         photo.minificationFilter = .trilinear
         photo.magnificationFilter = .linear
         photo.isOpaque = true
-        let none = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull()]
-        photo.actions = none; clip.actions = none; turn.actions = none
+        // Drawn 1:1, so no mipmaps.
+        sharp.contentsGravity = .resize
+        sharp.minificationFilter = .linear
+        sharp.magnificationFilter = .linear
+        sharp.isOpaque = true
+        sharp.isHidden = true
+        let none = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull(), "hidden": NSNull()]
+        photo.actions = none; clip.actions = none; turn.actions = none; sharp.actions = none
         clip.masksToBounds = true
         clip.addSublayer(photo)
+        clip.addSublayer(sharp)
         turn.addSublayer(clip)
         layer?.addSublayer(turn)
         borderLayers = BorderLayers(in: turn, around: clip)
@@ -262,6 +291,8 @@ final class PhotographView: NSView {
         self.border = border; self.filmTexture = filmTexture; self.filmStrip = filmStrip
         photo.contents = image
         needsLayout = true
+        // A new picture never shows the last one's resample, not even for a frame.
+        refreshSharp()
     }
 
     override func layout() {
@@ -271,16 +302,157 @@ final class PhotographView: NSView {
         placeTurn()
         Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, center: CGPoint(x: bounds.midX, y: bounds.midY))
         borderLayers.layout(border, photo: displaySize, host: turn, texture: filmTexture, filmStrip: filmStrip)
+        refreshSharp()
         CATransaction.commit()
+    }
+
+    // MARK: The fitted photograph, resampled
+
+    /// Set by the canvas: false for frames rendered at canvas size.
+    var settled = true { didSet { if settled != oldValue { refreshSharp() } } }
+    private struct SharpKey: Equatable {
+        let source: ObjectIdentifier, seed: UInt32, width: Int, height: Int
+    }
+    private struct Resampled {
+        weak var source: IOSurface?
+        let key: SharpKey
+        let surface: IOSurface
+    }
+    /// The last two resamples (the developed photograph's and the original's,
+    /// for Before and After), dropped with their sources.
+    private var resampled: [Resampled] = []
+    private var shownSharp: SharpKey?
+    /// The resample on its way, and the one waiting for the canvas to settle.
+    private var resampling: SharpKey?
+    private var pendingSharp: DispatchWorkItem?
+    private var failedSharp: SharpKey?
+    private var lastSharpSize: (width: Int, height: Int)?
+    /// The last picture checked for `FitDownscale.canResample`, which reads its tag.
+    private weak var checkedSource: IOSurface?
+    private var checkedResamples = false
+    /// After the canvas changes size, the resample waits this long for it to
+    /// stop, as while the inspector slides in.
+    static let sharpSettle: TimeInterval = 0.15
+
+    /// What the fitted view would show resampled now, or nil for Core
+    /// Animation's own scaling: zoomed, in a live resize, a straightened
+    /// photograph, a frame rendered at canvas size, or nothing to downscale.
+    private func wantedSharp() -> (source: IOSurface, key: SharpKey, scale: CGFloat)? {
+        guard settled, crop.angle == 0, let source = image as? IOSurface, let window, !inLiveResize,
+              let scroll = enclosingScrollView as? ImageScrollView, scroll.fitting, scroll.magnification > 0 else { return nil }
+        if checkedSource !== source { checkedSource = source; checkedResamples = FitDownscale.canResample(source) }
+        guard checkedResamples else { return nil }
+        let scale = scroll.magnification * window.backingScaleFactor
+        guard let target = FitDownscale.targetSize(photo: size, scale: scale), source.width > target.width, source.height > target.height else { return nil }
+        return (source, SharpKey(source: ObjectIdentifier(source), seed: source.seed, width: target.width, height: target.height), scale)
+    }
+
+    /// Shows, places, hides or asks for the resampled photograph. Cheap; called
+    /// on every change to the picture, its layout, the zoom or the window.
+    func refreshSharp() {
+        resampled.removeAll { $0.source == nil }
+        guard let wanted = wantedSharp() else {
+            hideSharp(); pendingSharp?.cancel(); pendingSharp = nil
+            return
+        }
+        let key = wanted.key
+        if shownSharp != key {
+            if let hit = resampled.first(where: { $0.key == key && $0.source === wanted.source }) {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                sharp.contents = hit.surface
+                shownSharp = key
+                CATransaction.commit()
+            } else {
+                hideSharp()
+                requestSharp(wanted.source, key: key)
+                return
+            }
+        }
+        placeSharp(scale: wanted.scale)
+    }
+
+    private func hideSharp() {
+        guard shownSharp != nil || !sharp.isHidden else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        sharp.isHidden = true; sharp.contents = nil
+        shownSharp = nil
+        CATransaction.commit()
+    }
+
+    private func requestSharp(_ source: IOSurface, key: SharpKey) {
+        guard resampling != key, failedSharp != key else { return }
+        let resized = lastSharpSize.map { $0 != (key.width, key.height) } ?? true
+        lastSharpSize = (key.width, key.height)
+        pendingSharp?.cancel()
+        let work = DispatchWorkItem { [weak self, weak source] in
+            MainActor.assumeIsolated {
+                guard let self, let source else { return }
+                self.pendingSharp = nil
+                // Still wanted: the canvas may have moved on meanwhile.
+                guard let wanted = self.wantedSharp(), wanted.key == key, self.resampling != key else { return }
+                self.resampling = key
+                FitResampler.shared.resample(source, width: key.width, height: key.height) { [weak self, weak source] surface in
+                    guard let self else { return }
+                    if self.resampling == key { self.resampling = nil }
+                    guard let surface, let source else { if surface == nil { self.failedSharp = key }; return }
+                    self.resampled.removeAll { $0.key == key || $0.source == nil }
+                    self.resampled.append(Resampled(source: source, key: key, surface: surface))
+                    if self.resampled.count > 2 { self.resampled.removeFirst(self.resampled.count - 2) }
+                    self.refreshSharp()
+                }
+            }
+        }
+        pendingSharp = work
+        // A new picture at the same size goes at once; a new size waits for
+        // the canvas to stop changing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + (resized ? Self.sharpSettle : 0), execute: work)
+    }
+
+    /// Sizes the resample to its pixels and puts its corner on a physical
+    /// pixel, where the photograph's corner is to within half a pixel.
+    private func placeSharp(scale: CGFloat) {
+        guard let shownSharp, let window else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        let extent = CGSize(width: CGFloat(shownSharp.width) / scale, height: CGFloat(shownSharp.height) / scale)
+        let corner = CGPoint(x: photo.position.x - photo.bounds.width / 2, y: photo.position.y - photo.bounds.height / 2)
+        let snapped = FitDownscale.snapped(corner, toBacking: { window.backingPoint(self.convert(self.turn.convert($0, from: self.clip), to: nil)) },
+                                           fromBacking: { self.clip.convert(self.convert(window.pointFromBacking($0), from: nil), from: self.turn) })
+        sharp.bounds = CGRect(origin: .zero, size: extent)
+        sharp.position = CGPoint(x: snapped.x + extent.width / 2, y: snapped.y + extent.height / 2)
+        sharp.isHidden = false
+        CATransaction.commit()
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        refreshSharp()
+    }
+    override func viewWillStartLiveResize() {
+        super.viewWillStartLiveResize()
+        refreshSharp()
+    }
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        refreshSharp()
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshSharp()
     }
 
     /// Turns the print about the middle of the part on screen, so zoomed in
     /// the same place stays in view, upside down. At once, as the original shows.
+    /// The middle is on a whole or half physical pixel, so the turn keeps the
+    /// resampled photograph on the pixel grid.
     private func placeTurn() {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         let clipView = enclosingScrollView?.contentView
         let visible = clipView.map { convert($0.bounds, from: $0) }
-        let centre = Self.turnCentre(visible: visible, bounds: CGRect(origin: .zero, size: bounds.size))
+        var centre = Self.turnCentre(visible: visible, bounds: CGRect(origin: .zero, size: bounds.size))
+        if let window {
+            centre = FitDownscale.snappedHalf(centre, toBacking: { window.backingPoint(self.convert($0, to: nil)) },
+                                              fromBacking: { self.convert(window.pointFromBacking($0), from: nil) })
+        }
         turn.anchorPoint = bounds.width > 0 && bounds.height > 0 ? CGPoint(x: centre.x / bounds.width, y: centre.y / bounds.height) : CGPoint(x: 0.5, y: 0.5)
         turn.position = centre
         turn.setAffineTransform(turned ? CGAffineTransform(rotationAngle: .pi) : .identity)
