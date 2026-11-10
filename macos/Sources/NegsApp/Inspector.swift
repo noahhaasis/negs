@@ -698,7 +698,10 @@ struct InspectorTabs: View {
     @Binding var tab: InspectorTab
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 24) {
+        // Top-aligned: each word is laid out alike (title, then its marks'
+        // room), so the titles share one baseline whatever the counts say.
+        // The marks' room is part of each word, hence the smaller gap.
+        HStack(alignment: .top, spacing: TabWord.gap) {
             ForEach(InspectorTab.allCases, id: \.self) { item in
                 TabWord(title: item.rawValue, chosen: tab == item, count: InspectorEdits.count(item, model)) { tab = item }
             }
@@ -726,14 +729,27 @@ struct TabWord: View {
     var body: some View {
         Button(action: choose) {
             HStack(alignment: .top, spacing: 0) {
-                Text(title).font(Theme.serif(21, weight: chosen ? 700 : 500))
-                    .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
-                    .padding(.bottom, 5)
-                    .pencilUnderline(chosen, height: 6, offset: 0)
-                if count > 0 {
-                    EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
-                    Text("\(count)").font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
+                // As wide as the title in 700 whether chosen or not, so
+                // choosing a tab doesn't nudge the ones after it.
+                ZStack(alignment: .leading) {
+                    Text(title).font(Theme.serif(21, weight: 700)).hidden()
+                    Text(title).font(Theme.serif(21, weight: chosen ? 700 : 500))
+                        .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
+                        .padding(.bottom, 5)
+                        .pencilUnderline(chosen, height: 6, offset: 0)
                 }
+                // The dot and count always keep their room, a two-digit
+                // count's, so a first edit doesn't push the next tabs along.
+                HStack(alignment: .top, spacing: 0) {
+                    EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
+                    ZStack(alignment: .leading) {
+                        Text("88").hidden()
+                        Text("\(count)")
+                    }
+                    .font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
+                }
+                .opacity(count > 0 ? 1 : 0)
+                .accessibilityHidden(true)
             }
         }
         .buttonStyle(InkPressStyle())
@@ -755,6 +771,9 @@ struct AdjustmentInspector: View {
     /// The modules and sections whose "N more" were opened.
     @AppStorage(Self.moreKey) private var moreShown = ""
     static let allControlsKey = "labAllControls", moreKey = "moreAdjustments"
+
+    /// The space between one word's marks and the next word.
+    static let gap: CGFloat = 10
 
     var body: some View {
         // The histogram, film and paper, and the tabs stay put above the

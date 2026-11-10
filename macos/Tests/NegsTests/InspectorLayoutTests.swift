@@ -12,6 +12,23 @@ import XCTest
         try await checkInspectorLayout(limited: true)
     }
 
+    /// Prep, Lab and Output stay put: a tab is as big chosen (700) as not
+    /// (500), and with an edit count as without, so neither choosing a tab
+    /// nor a first edit moves the words beside it or their baseline.
+    func testTabWordsKeepTheirSizeWhenChosenOrEdited() {
+        _ = NSApplication.shared
+        func size(_ title: String, chosen: Bool, count: Int) -> CGSize {
+            NSHostingView(rootView: TabWord(title: title, chosen: chosen, count: count) {}).fittingSize
+        }
+        for tab in InspectorTab.allCases {
+            let plain = size(tab.rawValue, chosen: false, count: 0)
+            XCTAssertGreaterThan(plain.width, 0)
+            for (chosen, count) in [(true, 0), (false, 1), (true, 1), (false, 12), (true, 12)] {
+                XCTAssertEqual(size(tab.rawValue, chosen: chosen, count: count), plain, "\(tab.rawValue), chosen \(chosen), \(count) edits")
+            }
+        }
+    }
+
     /// Exercise the real form and helper through a reduced drag frame and
     /// the settled render.
     private func checkInspectorLayout(limited: Bool) async throws {
