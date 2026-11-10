@@ -1008,8 +1008,11 @@ import UserNotifications
     func developedThumbnail(of item: URL) -> (@Sendable () -> CGImage?)? {
         guard let edited = editedThumbnail(for: item), let file = library.items.first(where: { $0.url == item }),
               let key = edited.store.key(for: file, look: edited.look) else { return nil }
-        let store = edited.store
-        return { store.image(key, maxPixels: Int(EditedThumbnailStore.longSide)) }
+        let store = edited.store, look = edited.look
+        return {
+            store.image(key, maxPixels: Int(EditedThumbnailStore.longSide))
+                ?? store.previousKey(for: file, look: look).flatMap { store.image($0, maxPixels: Int(EditedThumbnailStore.longSide)) }
+        }
     }
 
     /// Reads `item`'s last develop, if one was kept for the edits it opens with.
@@ -1017,7 +1020,7 @@ import UserNotifications
         guard let look = thumbnailLook(for: item), let file = library.items.first(where: { $0.url == item }),
               let key = renderArchive.key(for: file, look: look) else { return nil }
         let archive = renderArchive
-        return { archive.render(key).map { ($0.image, $0.photoSize) } }
+        return { (archive.render(key) ?? archive.previousKey(for: file, look: look).flatMap { archive.render($0) }).map { ($0.image, $0.photoSize) } }
     }
 
     /// True if it's shown, or no longer needed.
@@ -1971,13 +1974,13 @@ import UserNotifications
               library.looks[item] != nil || Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
         let size = imageSize, crop = crop, rotation = imageRotation, border = state.border, texture = filmTexture, strip = filmStrip
-        let store = editedThumbnails
+        let store = editedThumbnails, loose = store.looseKey(for: file, look: look)
         let shown = surface
         Task { [weak self] in
             guard let photo = await Task.detached(priority: .utility, operation: { ThumbnailComposer.image(of: shown) }).value,
                   let composed = ThumbnailComposer.compose(photo, size: size, crop: crop, cut: false, rotation: rotation, border: border, texture: texture,
                                                            strip: strip, space: photo.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) else { return }
-            let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key)) != nil }.value
+            let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key, loose: loose)) != nil }.value
             if saved { self?.thumbnailMade(item, look: look) }
         }
     }
@@ -1990,11 +1993,11 @@ import UserNotifications
               !brightnessMatchPending, let look = thumbnailLook(for: item),
               library.looks[item] != nil || Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = renderArchive.key(for: file, look: look) else { return }
-        let archive = renderArchive, size = imageSize, shown = surface
+        let archive = renderArchive, size = imageSize, shown = surface, loose = archive.looseKey(for: file, look: look)
         Task.detached(priority: .utility) {
             guard !archive.contains(key),
                   let frame = ThumbnailComposer.image(of: shown, maxPixels: EditedThumbnailStore.renderLongSide) else { return }
-            try? archive.save(frame, as: key, photoSize: size)
+            try? archive.save(frame, as: key, loose: loose, photoSize: size)
         }
     }
 
@@ -2190,8 +2193,8 @@ import UserNotifications
                                                            border: state.border, texture: filmTexture, strip: strip,
                                                            space: developed.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!),
                   let key = editedThumbnails.key(for: file, look: finalLook) else { return false }
-            let store = editedThumbnails
-            try await Task.detached(priority: .utility) { try store.save(composed, as: key) }.value
+            let store = editedThumbnails, loose = store.looseKey(for: file, look: finalLook)
+            try await Task.detached(priority: .utility) { try store.save(composed, as: key, loose: loose) }.value
             thumbnailMade(item, look: finalLook)
             if finalLook != look { library.reload(photo) }
             return true

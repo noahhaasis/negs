@@ -276,6 +276,59 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), [writing.lastPathComponent])
     }
 
+    /// After an update a photograph's thumbnail and kept develop are no
+    /// longer found by name; the last engine's stand in until they're made
+    /// again, which the pump still sees is needed.
+    func testThumbnailsOfThePreviousEngineStandIn() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("negs-thumbs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let photoURL = dir.appendingPathComponent("a.jpg")
+        try Data([1, 2, 3]).write(to: photoURL)
+        let photo = PhotoFile(url: photoURL)
+        let store = EditedThumbnailStore(directory: dir.appendingPathComponent("thumbnails"))
+        func image(_ red: CGFloat) throws -> CGImage {
+            let context = try XCTUnwrap(CGContext(data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0,
+                                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            context.setFillColor(red: red, green: 0.3, blue: 0.1, alpha: 1); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+            return try XCTUnwrap(context.makeImage())
+        }
+        func red(_ image: CGImage?) throws -> Int {
+            let image = try XCTUnwrap(image)
+            let context = try XCTUnwrap(CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return Int(try XCTUnwrap(context.data).load(as: UInt8.self))
+        }
+        store.engineStamp = "old"
+        XCTAssertNil(store.previousKey(for: photo, look: "edits"), "nothing saved yet")
+        let old = try XCTUnwrap(store.key(for: photo, look: "edits"))
+        try store.save(image(0.9), as: old, loose: store.looseKey(for: photo, look: "edits"), photoSize: CGSize(width: 6000, height: 4500))
+        let other = await PhotoThumbnails.shared.image(for: photo, size: .large, look: "other edits", edited: store)
+        XCTAssertNil(other, "only for the same edits")
+
+        store.engineStamp = "new"
+        let new = try XCTUnwrap(store.key(for: photo, look: "edits"))
+        XCTAssertFalse(store.contains(new), "the pump develops it again")
+        XCTAssertEqual(store.previousKey(for: photo, look: "edits"), old)
+        XCTAssertEqual(store.render(old)?.photoSize, CGSize(width: 6000, height: 4500))
+        let standIn = await PhotoThumbnails.shared.image(for: photo, size: .large, look: "edits", edited: store)
+        XCTAssertGreaterThan(try red(standIn), 200)
+        // Made again: it replaces the stand-in, in memory too.
+        try store.save(image(0.1), as: new, loose: store.looseKey(for: photo, look: "edits"))
+        let made = await PhotoThumbnails.shared.image(for: photo, size: .large, look: "edits", edited: store)
+        XCTAssertLessThan(try red(made), 60)
+        XCTAssertEqual(store.previousKey(for: photo, look: "edits"), new, "the link follows the newest")
+
+        // Links go with what they point at, and count for nothing.
+        let sizes = try [old, new].map { try XCTUnwrap(store.url(for: $0).resourceValues(forKeys: [.fileSizeKey]).fileSize) }
+        XCTAssertEqual(store.size(), sizes[0] + sizes[1])
+        try FileManager.default.removeItem(at: store.url(for: new))
+        store.prune(limit: 0)
+        XCTAssertNil(store.previousKey(for: photo, look: "edits"))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.directory.path), [])
+    }
+
     /// A match solved in the background lands only on the edits it was solved for.
     func testPatchOnlyIfEdits() throws {
         let raw = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "a", "edits": {"film": "x"}}]}"#.utf8))

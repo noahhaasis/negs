@@ -72,7 +72,8 @@ actor PhotoThumbnails {
     static let shared = PhotoThumbnails()
     private final class Cached {
         let file: PhotoFile
-        /// The edited thumbnail's name, or nil for the embedded preview.
+        /// The edited thumbnail's name (`previous(_:)` for the last engine's
+        /// standing in for it), or nil for the embedded preview.
         let look: String?
         let image: CGImage
         init(file: PhotoFile, look: String?, image: CGImage) { self.file = file; self.look = look; self.image = image }
@@ -93,6 +94,8 @@ actor PhotoThumbnails {
         }
         return caches
     }()
+
+    private static func previous(_ key: String) -> String { "previous|" + key }
 
     #if SPEKTRAFILM_BENCHMARK
     /// Cells' requests, and those the in-memory cache answered, for GridBenchmark.
@@ -115,10 +118,17 @@ actor PhotoThumbnails {
     func image(for item: PhotoFile, size: Size = .strip, look: String? = nil, edited: EditedThumbnailStore? = nil, ahead: Bool = false) -> CGImage? {
         guard !Task.isCancelled, let cache = caches[size] else { return nil }
         if let look, let edited, let key = edited.key(for: item, look: look) {
-            if let cached = cache.object(forKey: item.url as NSURL), cached.file == item, cached.look == key { count(ahead, hit: true); return cached.image }
+            if let cached = cache.object(forKey: item.url as NSURL), cached.file == item,
+               cached.look == key || cached.look == Self.previous(key) && !edited.contains(key) { count(ahead, hit: true); return cached.image }
             if let image = edited.image(key, maxPixels: size.rawValue) {
                 count(ahead, hit: false)
                 cache.setObject(Cached(file: item, look: key, image: image), forKey: item.url as NSURL, cost: image.bytesPerRow * image.height)
+                return image
+            }
+            // After an update, the last engine's until this one's is made.
+            if let previous = edited.previousKey(for: item, look: look), let image = edited.image(previous, maxPixels: size.rawValue) {
+                count(ahead, hit: false)
+                cache.setObject(Cached(file: item, look: Self.previous(key), image: image), forKey: item.url as NSURL, cost: image.bytesPerRow * image.height)
                 return image
             }
         }
