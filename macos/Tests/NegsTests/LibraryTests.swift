@@ -139,6 +139,17 @@ final class LibraryFormatTests: XCTestCase {
 
 /// The folder as the library: listing, reading sidecars, outside changes.
 @MainActor final class PhotoLibraryTests: XCTestCase {
+    /// After those on screen, thumbnails are developed outward from the middle
+    /// of the screen, else from the open photograph, not from the folder's top.
+    func testThumbnailsAreDevelopedOutwardFromTheView() {
+        XCTAssertEqual(EditorModel.thumbnailCentre(onScreen: [40, 41, 42, 43, 44], open: 3), 42)
+        XCTAssertEqual(EditorModel.thumbnailCentre(onScreen: [], open: 7), 7)
+        XCTAssertEqual(EditorModel.thumbnailCentre(onScreen: [], open: nil), 0)
+        let items = [0, 1, 2, 4, 5, 6, 9].map { (index: $0, item: "p\($0)") }
+        XCTAssertEqual(EditorModel.outward(items, from: 4), ["p4", "p5", "p2", "p6", "p1", "p0", "p9"])
+        XCTAssertEqual(EditorModel.outward(items, from: 3), ["p2", "p4", "p1", "p5", "p0", "p6", "p9"])
+    }
+
     private func waitUntil(_ message: String = "", _ predicate: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(20)
         while !predicate() && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }

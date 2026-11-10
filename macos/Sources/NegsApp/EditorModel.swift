@@ -1777,6 +1777,17 @@ import UserNotifications
         return EditedThumbnail(look: look, version: thumbnailVersions[item] ?? 0, stamp: stamp, store: editedThumbnails)
     }
 
+    /// Where the pump develops out from once those on screen are done: the
+    /// middle of the screen (indices in folder order, ascending), else the open photograph.
+    nonisolated static func thumbnailCentre(onScreen: [Int], open: Int?) -> Int {
+        onScreen.isEmpty ? open ?? 0 : onScreen[onScreen.count / 2]
+    }
+
+    /// `items` nearest `centre` first; of two as near, the one before.
+    nonisolated static func outward<Item>(_ items: [(index: Int, item: Item)], from centre: Int) -> [Item] {
+        items.sorted { (abs($0.index - centre), $0.index) < (abs($1.index - centre), $1.index) }.map(\.item)
+    }
+
     /// A strip or grid cell came on screen or left it.
     func thumbnailShown(_ file: PhotoFile, _ visible: Bool) {
         guard visible else { thumbnailsOnScreen.remove(file.url); return }
@@ -1879,18 +1890,24 @@ import UserNotifications
             let developing = Set(self.thumbnailsDeveloping.values.map(\.item))
             self.thumbnailsPumpAgain = false
             // Each item but the open one, whose thumbnail comes from its
-            // preview, and those developing, on screen first: the first
-            // without a thumbnail on disk, one for each free helper. Those
-            // with one are noted.
+            // preview, and those developing, on screen first, then outward
+            // from the middle of the screen (or the open photograph), so the
+            // next ones scrolled to or opened are ready: the first without a
+            // thumbnail on disk, one for each free helper. Those with one are noted.
             let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: [(file: PhotoFile, look: String)]) in
-                var shown: [(file: PhotoFile, look: String)] = [], rest: [(file: PhotoFile, look: String)] = []
-                for file in items where file.url != open && !developing.contains(file.url) {
-                    guard let look = looks.look(for: file.url), failures[file.url] != look else { continue }
+                var shown: [(file: PhotoFile, look: String)] = [], rest: [(index: Int, file: PhotoFile, look: String)] = []
+                var onScreenIndices: [Int] = [], openIndex: Int?
+                for (index, file) in items.enumerated() {
+                    if file.url == open { openIndex = index; continue }
+                    if onScreen.contains(file.url) { onScreenIndices.append(index) }
+                    guard !developing.contains(file.url), let look = looks.look(for: file.url), failures[file.url] != look else { continue }
                     if let checked = checked[file.url], checked.look == look, checked.present { continue }
-                    if onScreen.contains(file.url) { shown.append((file, look)) } else { rest.append((file, look)) }
+                    if onScreen.contains(file.url) { shown.append((file, look)) } else { rest.append((index, file, look)) }
                 }
+                let centre = Self.thumbnailCentre(onScreen: onScreenIndices, open: openIndex)
+                let ordered = shown + Self.outward(rest.map { ($0.index, (file: $0.file, look: $0.look)) }, from: centre)
                 var present: [(URL, String)] = [], next: [(file: PhotoFile, look: String)] = []
-                for (file, look) in shown + rest {
+                for (file, look) in ordered {
                     guard let key = store.key(for: file, look: look) else { continue }
                     if store.contains(key) { present.append((file.url, look)) } else { next.append((file, look)) }
                     if next.count == free.count { break }
