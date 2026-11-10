@@ -901,6 +901,7 @@ import UserNotifications
         // the preview on screen becomes its edited thumbnail.
         flushSidecar()
         saveOpenThumbnail()
+        saveOpenRender()
         // Paste from Previous: the last photograph left with edits.
         if photoSidecar?.written != nil, photoSidecar?.photo == source { previousEdits = Self.userEdits(state) }
         let previous = state
@@ -952,7 +953,7 @@ import UserNotifications
         // SwiftUI has updated it for this photograph (~180 ms on an M1 Pro):
         // that frame shows it rather than an empty canvas. A restored
         // session tries its saved frame first, off the main actor.
-        let standIn = developedThumbnail(of: item)
+        let standIn = developedThumbnail(of: item), kept = keptRender(of: item)
         if session == nil, let image = standIn?() { self.standIn = image }
         Task { [weak self] in
             if let cachedFrame, let cached = await cachedFrame.value {
@@ -962,6 +963,10 @@ import UserNotifications
             if session != nil, let standIn, let image = await Task.detached(priority: .userInitiated, operation: standIn).value {
                 self?.showStandIn(image, generation: generation)
             }
+            // Its last develop, if it was kept: sharper, and laid out as the
+            // develop will be, so the camera's preview isn't needed.
+            if let kept, let (image, size) = await Task.detached(priority: .userInitiated, operation: kept).value,
+               self?.showKept(image, size: size, generation: generation) == true { return }
             // Still read for the photograph's size, which lays out the canvas.
             let thumbnail = await Task.detached(priority: .userInitiated) { Self.thumbnail(url) }.value
             if let (thumbnail, size) = thumbnail { self?.showPlaceholder(thumbnail, size: size, generation: generation) }
@@ -1005,6 +1010,22 @@ import UserNotifications
               let key = edited.store.key(for: file, look: edited.look) else { return nil }
         let store = edited.store
         return { store.image(key, maxPixels: Int(EditedThumbnailStore.longSide)) }
+    }
+
+    /// Reads `item`'s last develop, if one was kept for the edits it opens with.
+    func keptRender(of item: URL) -> (@Sendable () -> (CGImage, CGSize)?)? {
+        guard let look = thumbnailLook(for: item), let file = library.items.first(where: { $0.url == item }),
+              let key = renderArchive.key(for: file, look: look) else { return nil }
+        let archive = renderArchive
+        return { archive.render(key).map { ($0.image, $0.photoSize) } }
+    }
+
+    /// True if it's shown, or no longer needed.
+    private func showKept(_ render: CGImage, size: CGSize, generation: Int) -> Bool {
+        guard generation == sourceGeneration, image == nil else { return true }
+        placeholderSize = size; placeholder = render; standIn = nil
+        updateFilmStrip()
+        return true
     }
 
     private func showStandIn(_ thumbnail: CGImage, generation: Int) {
@@ -1513,6 +1534,7 @@ import UserNotifications
         // The grid shows the open photograph as edited.
         flushSidecar()
         saveOpenThumbnail()
+        saveOpenRender()
         if selection.current == nil { selection.select(source) }
         mode = .grid
     }
@@ -1748,6 +1770,10 @@ import UserNotifications
         // Read already: the new store names its thumbnails with it too.
         didSet { if let thumbnailStamp { editedThumbnails.engineStamp = thumbnailStamp } }
     }
+    /// Where photographs' last develops are kept, screen-sized; tests use their own.
+    @ObservationIgnored var renderArchive = EditedThumbnailStore.renders {
+        didSet { if let thumbnailStamp { renderArchive.engineStamp = thumbnailStamp } }
+    }
     /// The engine's identity, once read: until then only embedded previews show.
     private(set) var thumbnailStamp: String?
     /// Moves when an item's edited thumbnail is made, so its cells read it.
@@ -1893,34 +1919,37 @@ import UserNotifications
     private func readThumbnailStamp() {
         guard thumbnailStamp == nil, !readingThumbnailStamp, let paths = engine?.paths else { return }
         readingThumbnailStamp = true
-        let store = editedThumbnails
+        let store = editedThumbnails, archive = renderArchive
         Task { [weak self] in
             let stamp = await Task.detached(priority: .utility) { () -> String? in
                 let stamp = EditedThumbnailStore.stamp(paths)
                 store.engineStamp = stamp
+                archive.engineStamp = stamp
                 // The oldest go once a session.
                 store.prune()
+                archive.prune()
                 return stamp
             }.value
             guard let self, !self.closing else { return }
             self.thumbnailStamp = stamp
-            // The store may have been replaced while it was read.
+            // The stores may have been replaced while it was read.
             self.editedThumbnails.engineStamp = stamp
+            self.renderArchive.engineStamp = stamp
             self.pumpThumbnails()
         }
     }
 
     /// The bytes the thumbnails take on disk, for Settings.
     func thumbnailCacheSize() async -> Int {
-        let store = editedThumbnails
-        return await Task.detached(priority: .utility) { store.size() }.value
+        let store = editedThumbnails, archive = renderArchive
+        return await Task.detached(priority: .utility) { store.size() + archive.size() }.value
     }
 
     /// Removes every thumbnail; the open folder's are developed again.
     /// Those on screen stay until each is made again.
     func emptyThumbnailCache() async {
-        let store = editedThumbnails
-        await Task.detached(priority: .userInitiated) { store.removeAll() }.value
+        let store = editedThumbnails, archive = renderArchive
+        await Task.detached(priority: .userInitiated) { store.removeAll(); archive.removeAll() }.value
         thumbnailsEmptied += 1
         thumbnailsChecked = [:]
         pumpThumbnails()
@@ -1950,6 +1979,22 @@ import UserNotifications
                                                            strip: strip, space: photo.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) else { return }
             let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key)) != nil }.value
             if saved { self?.thumbnailMade(item, look: look) }
+        }
+    }
+
+    /// The open photograph's develop, screen-sized and uncropped, kept as
+    /// it's left so it stands in when the photograph next opens (`renderArchive`).
+    /// Under the same conditions as its thumbnail, off the main actor.
+    private func saveOpenRender() {
+        guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
+              !brightnessMatchPending, let look = thumbnailLook(for: item),
+              library.looks[item] != nil || Self.uneditedLook(of: state) == look,
+              let file = library.items.first(where: { $0.url == item }), let key = renderArchive.key(for: file, look: look) else { return }
+        let archive = renderArchive, size = imageSize, shown = surface
+        Task.detached(priority: .utility) {
+            guard !archive.contains(key),
+                  let frame = ThumbnailComposer.image(of: shown, maxPixels: EditedThumbnailStore.renderLongSide) else { return }
+            try? archive.save(frame, as: key, photoSize: size)
         }
     }
 

@@ -260,11 +260,12 @@ import QuartzCore
 
     /// SPEKTRAFILM_BENCHMARK_OPEN_NEXT: once the next five photographs'
     /// thumbnails are developed (or after a minute), opens each in turn as →
-    /// does and reports when its stand-in, the camera's preview and the
-    /// develop first showed; with SPEKTRAFILM_BENCHMARK_SHOTS, a screenshot
-    /// at the stand-in and at the develop.
+    /// does, then goes back through them as ← does, and reports when its
+    /// stand-in, its placeholder (its kept develop, else the camera's
+    /// preview) and the develop first showed; with SPEKTRAFILM_BENCHMARK_SHOTS,
+    /// a screenshot at the stand-in, the placeholder and the develop.
     private static func openNext(_ model: EditorModel, shots: URL?) {
-        var phase = 0, started = Date(), opened = 0
+        var phase = 0, started = Date(), opened = 0, kept = false
         var standIn: Double?, placeholder: Double?, developed: Double?
         let timer = Timer(timeInterval: 1.0 / 240, repeats: true) { timer in
             MainActor.assumeIsolated {
@@ -288,8 +289,13 @@ import QuartzCore
                     phase = 2
                 case 2:
                     standIn = nil; placeholder = nil; developed = nil
+                    let step = opened < 5 ? 1 : -1
+                    if let open = model.sourceItem, let index = library.items.firstIndex(where: { $0.url == open }),
+                       library.items.indices.contains(index + step) {
+                        kept = model.keptRender(of: library.items[index + step].url)?() != nil
+                    }
                     started = Date()
-                    model.step(by: 1)
+                    model.step(by: step)
                     opened += 1
                     phase = 3
                 case 3:
@@ -297,13 +303,16 @@ import QuartzCore
                         standIn = elapsed
                         if let shots { capture(shots.appendingPathComponent("open-\(opened)-standin.png"), wait: false) }
                     }
-                    if placeholder == nil, model.placeholder != nil { placeholder = elapsed }
+                    if placeholder == nil, model.placeholder != nil {
+                        placeholder = elapsed
+                        if let shots { capture(shots.appendingPathComponent("open-\(opened)-placeholder.png"), wait: false) }
+                    }
                     if developed == nil, model.image != nil { developed = elapsed }
                     guard model.previewCurrent, !model.brightnessMatchPending, developed != nil else { return }
                     if let shots { capture(shots.appendingPathComponent("open-\(opened)-developed.png")) }
                     func ms(_ value: Double?) -> String { value.map { "\(Int($0)) ms" } ?? "never" }
-                    report("opened \(model.sourceItem?.lastPathComponent ?? "?"): stand-in \(ms(standIn)), camera preview \(ms(placeholder)), develop \(ms(developed))")
-                    if opened == 5 { timer.invalidate(); NSApp.terminate(nil) } else { phase = 2 }
+                    report("opened \(model.sourceItem?.lastPathComponent ?? "?") (\(kept ? "develop kept" : "nothing kept")): stand-in \(ms(standIn)), placeholder \(ms(placeholder)), develop \(ms(developed))")
+                    if opened == 10 { timer.invalidate(); NSApp.terminate(nil) } else { phase = 2 }
                 default: break
                 }
             }

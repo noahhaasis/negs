@@ -18,13 +18,27 @@ final class EditedThumbnailStore: @unchecked Sendable {
         ? EditedThumbnailStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("negs-thumbnails-\(UUID().uuidString)", isDirectory: true))
         : EditedThumbnailStore()
 
+    /// Each photograph's last develop, screen-sized (`renderLongSide`) and
+    /// uncropped, kept as it's left: it stands in when the photograph next
+    /// opens, sharper than its thumbnail, until the develop arrives. Named
+    /// as the thumbnails are. From ctruett's fork, which keeps every settled
+    /// render; ours are JPEGs, as a full frame is ~100 MB.
+    static let renders = NSClassFromString("XCTestCase") != nil
+        ? EditedThumbnailStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("negs-renders-\(UUID().uuidString)", isDirectory: true),
+                               limit: 2 * 1024 * 1024 * 1024)
+        : EditedThumbnailStore(directory: AppDataLocations.cachesDirectory.appendingPathComponent("Renders", isDirectory: true), limit: 2 * 1024 * 1024 * 1024)
+    static let renderLongSide = 2560
+
     let directory: URL
+    /// The bytes kept; past it the least recently used go.
+    let limit: Int
     private let lock = NSLock()
     private var engine: String?
     private var writes = 0
 
-    init(directory: URL = AppDataLocations.cachesDirectory.appendingPathComponent("Thumbnails", isDirectory: true)) {
+    init(directory: URL = AppDataLocations.cachesDirectory.appendingPathComponent("Thumbnails", isDirectory: true), limit: Int = EditedThumbnailStore.limit) {
         self.directory = directory
+        self.limit = limit
     }
 
     /// The helper and its data, which every thumbnail depends on. Until it's
@@ -87,14 +101,40 @@ final class EditedThumbnailStore: @unchecked Sendable {
         return image
     }
 
-    /// Writes `image` as `key`, through a temporary file and a rename.
-    func save(_ image: CGImage, as key: String) throws {
+    /// A kept develop and the photograph's size it's laid out at; nil if there's none.
+    func render(_ key: String) -> (image: CGImage, photoSize: CGSize)? {
+        let file = url(for: key)
+        guard FileManager.default.fileExists(atPath: file.path),
+              let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let description = (properties[kCGImagePropertyExifDictionary] as? [CFString: Any])?[kCGImagePropertyExifUserComment] as? String,
+              let photoSize = Self.photoSize(description),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { return nil }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+        return (image, photoSize)
+    }
+
+    /// "negs-photo-size 6048x4024", the layout size a kept develop is shown at.
+    static func photoSizeDescription(_ size: CGSize) -> String { "negs-photo-size \(Int(size.width.rounded()))x\(Int(size.height.rounded()))" }
+    static func photoSize(_ description: String) -> CGSize? {
+        guard description.hasPrefix("negs-photo-size ") else { return nil }
+        let numbers = description.dropFirst("negs-photo-size ".count).split(separator: "x").compactMap { Int($0) }
+        guard numbers.count == 2, numbers[0] > 0, numbers[1] > 0 else { return nil }
+        return CGSize(width: numbers[0], height: numbers[1])
+    }
+
+    /// Writes `image` as `key`, through a temporary file and a rename; a kept
+    /// develop with the photograph's size it's laid out at.
+    func save(_ image: CGImage, as key: String, photoSize: CGSize? = nil) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let file = url(for: key), temporary = directory.appendingPathComponent(".\(key)-\(UUID().uuidString).jpg")
         guard let destination = CGImageDestinationCreateWithURL(temporary as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw EngineError(message: "The thumbnail couldn’t be written.")
         }
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+        var properties: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.85]
+        // In the EXIF user comment: a JPEG drops a TIFF description.
+        if let photoSize { properties[kCGImagePropertyExifDictionary] = [kCGImagePropertyExifUserComment: Self.photoSizeDescription(photoSize)] }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination), rename(temporary.path, file.path) == 0 else {
             try? FileManager.default.removeItem(at: temporary)
             throw EngineError(message: "The thumbnail couldn’t be written.")
@@ -105,7 +145,8 @@ final class EditedThumbnailStore: @unchecked Sendable {
 
     /// Removes the least recently used thumbnails while there are more than
     /// `limit` bytes, down to three quarters of it.
-    func prune(limit: Int = EditedThumbnailStore.limit) {
+    func prune(limit: Int? = nil) {
+        let limit = limit ?? self.limit
         var entries = entries()
         var total = entries.reduce(0) { $0 + $1.size }
         guard total > limit else { return }

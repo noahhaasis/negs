@@ -817,6 +817,7 @@ final class LibraryFormatTests: XCTestCase {
         model.autoPlaceNewImages = true
         let edited = EditedThumbnailStore(directory: thumbnails)
         model.editedThumbnails = edited
+        model.renderArchive = EditedThumbnailStore(directory: thumbnails.appendingPathComponent("renders", isDirectory: true), limit: 1 << 30)
         func made(_ url: URL) -> Bool {
             guard let file = model.library.items.first(where: { $0.url == url }), let look = model.thumbnailLook(for: url),
                   let key = edited.key(for: file, look: look) else { return false }
@@ -843,12 +844,19 @@ final class LibraryFormatTests: XCTestCase {
         // preview until the develop arrives, which replaces it.
         let standIn = try XCTUnwrap(model.developedThumbnail(of: c)?())
         XCTAssertEqual(max(standIn.width, standIn.height), Int(EditedThumbnailStore.longSide))
+        XCTAssertNil(model.keptRender(of: c)?(), "never opened, nothing kept")
         model.open(c)
         try await waitUntil { model.previewCurrent && !model.brightnessMatchPending }
         XCTAssertNil(model.standIn)
         XCTAssertNotNil(model.image)
+        let cSize = model.imageSize
         model.open(a)
         try await waitUntil { model.previewCurrent && !model.brightnessMatchPending }
+        // Left, c's develop is kept, and laid out at its size when it's next opened.
+        try await waitUntil { model.keptRender(of: c)?() != nil }
+        let kept = try XCTUnwrap(model.keptRender(of: c)?())
+        XCTAssertEqual(kept.1, cSize)
+        XCTAssertLessThanOrEqual(max(kept.0.width, kept.0.height), EditedThumbnailStore.renderLongSide)
         try await waitUntil { made(b) && made(c) }
 
         // A new default film: c again, b as it was.
