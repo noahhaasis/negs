@@ -37,16 +37,9 @@ import SwiftUI
         // launches must not reopen a previous photograph.
         #if SPEKTRAFILM_BENCHMARK
         LaunchBenchmark.begin(model)
-        let fontsStarted = DispatchTime.now().uptimeNanoseconds
         #endif
-        // Newsreader, for this process only, before any view is built.
-        Theme.Fonts.register()
-        #if SPEKTRAFILM_BENCHMARK
-        if LaunchBenchmark.enabled {
-            FileHandle.standardError.write(Data(String(format: "benchmark: fonts registered %@ in %.2f ms\n", Theme.Fonts.registered ? "yes" : "NO",
-                                                       Double(DispatchTime.now().uptimeNanoseconds - fontsStarted) / 1e6).utf8))
-        }
-        #endif
+        // Newsreader is read on another thread while AppKit starts.
+        Theme.Fonts.prepare()
         model.launch()
         let benchmark = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] != nil
         var store: SessionStore? = benchmark ? nil : sessions

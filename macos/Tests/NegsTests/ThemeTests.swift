@@ -3,18 +3,18 @@ import CoreText
 import XCTest
 @testable import NegsApp
 
-/// The T2 · Label tokens (Theme.swift): the bundled Newsreader registers and
+/// The T2 · Label tokens (Theme.swift): the bundled Newsreader loads and
 /// keeps its axes, every text colour meets the contrast rules, and the pencil
 /// marks stay inside the boxes they're drawn in.
 final class ThemeTests: XCTestCase {
-    func testNewsreaderRegistersWithBothAxes() throws {
+    func testNewsreaderLoadsWithBothAxes() throws {
         let directory = try XCTUnwrap(Theme.Fonts.directory(), "macos/Fonts holds the subset fonts")
         for name in [Theme.Fonts.upright, Theme.Fonts.italic, "OFL-Newsreader.txt"] {
             XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path), name)
         }
-        XCTAssertTrue(Theme.Fonts.register(in: directory))
-        XCTAssertTrue(Theme.Fonts.register(in: directory), "Registering twice is harmless")
-        XCTAssertTrue(Theme.Fonts.registered)
+        XCTAssertTrue(Theme.Fonts.load(in: directory))
+        XCTAssertTrue(Theme.Fonts.load(in: directory), "Loading twice is harmless")
+        XCTAssertTrue(Theme.Fonts.loaded)
 
         let font = Theme.serifFont(24, weight: 600)
         XCTAssertTrue((CTFontCopyFamilyName(font) as String).hasPrefix("Newsreader"))
@@ -34,8 +34,17 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(heavy[NSNumber(value: Theme.Fonts.axis("wght"))]?.doubleValue, 700)
     }
 
+    /// Launch reads the fonts on another thread; the first font asked for
+    /// waits for them rather than falling back.
+    func testFirstFontWaitsForLaunchRead() {
+        Theme.Fonts.prepare()
+        Theme.Fonts.prepare()
+        XCTAssertTrue((CTFontCopyFamilyName(Theme.serifFont(31, weight: 500)) as String).hasPrefix("Newsreader"))
+        XCTAssertTrue(Theme.Fonts.loaded)
+    }
+
     func testSubsetCoversEuropeanFileNames() throws {
-        XCTAssertTrue(Theme.Fonts.register())
+        XCTAssertTrue(Theme.Fonts.load())
         let font = Theme.serifFont(15)
         for text in ["Łódź", "Ağrı", "Říčany", "Ærøskøbing", "f/2,8 · 1/1250 · −0,65 € …", "“Istanbul 2026”"] {
             var characters = Array(text.utf16)
@@ -45,7 +54,7 @@ final class ThemeTests: XCTestCase {
     }
 
     func testFiguresAreTabular() throws {
-        XCTAssertTrue(Theme.Fonts.register())
+        XCTAssertTrue(Theme.Fonts.load())
         let font = Theme.serifFont(14.5)
         let settings = CTFontDescriptorCopyAttribute(CTFontCopyFontDescriptor(font), kCTFontFeatureSettingsAttribute) as? [[String: Any]] ?? []
         let tags = settings.compactMap { $0[kCTFontOpenTypeFeatureTag as String] as? String }

@@ -132,12 +132,11 @@ enum Theme {
     /// The same face as a Core Text font, for AppKit text and layers.
     static func serifFont(_ size: CGFloat, weight: CGFloat = 400, italic: Bool = false) -> CTFont {
         let key = FontKey(size: size, weight: weight, italic: italic)
-        return fontCache.withLock { cache in
-            if let font = cache[key] { return font }
-            let font = Fonts.make(key)
-            cache[key] = font
-            return font
-        }
+        if let font = fontCache.withLock({ $0[key] }) { return font }
+        let font = Fonts.make(key)
+        // A fallback isn't kept, so Newsreader replaces it once it's read.
+        if Fonts.loaded { fontCache.withLock { $0[key] = font } }
+        return font
     }
     /// SF, the system font: control labels, the status line, small UI text.
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -147,7 +146,7 @@ enum Theme {
     struct FontKey: Hashable { let size: CGFloat, weight: CGFloat, italic: Bool }
     private static let fontCache = OSAllocatedUnfairLock(initialState: [FontKey: CTFont]())
 
-    /// Finding and registering the bundled fonts.
+    /// Finding and reading the bundled fonts.
     enum Fonts {
         static let upright = "Newsreader-Negs.ttf", italic = "Newsreader-Negs-Italic.ttf"
 
@@ -165,33 +164,43 @@ enum Theme {
         }
 
         private static let descriptors = OSAllocatedUnfairLock<(upright: CTFontDescriptor, italic: CTFontDescriptor)?>(initialState: nil)
+        private static let loading = DispatchGroup()
+        private static let started = OSAllocatedUnfairLock(initialState: false)
 
-        /// Registers Newsreader for this process, before any view is built
-        /// (applicationWillFinishLaunching). Returns whether both faces were
-        /// found and registered; without them the serif falls back to the
-        /// system's serif (New York).
-        @discardableResult
-        static func register(in directory: URL? = directory()) -> Bool {
-            guard let directory else { return false }
-            let urls = [upright, italic].map { directory.appendingPathComponent($0) }
-            var found: [CTFontDescriptor] = []
-            for url in urls {
-                var error: Unmanaged<CFError>?
-                // Already registered (a second call, or tests) is fine.
-                if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error),
-                   let error = error?.takeRetainedValue(), CFErrorGetCode(error) != CTFontManagerError.alreadyRegistered.rawValue {
-                    return false
-                }
-                guard let descriptor = (CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor])?.first else { return false }
-                found.append(descriptor)
+        /// Starts reading Newsreader on another thread, at launch
+        /// (applicationWillFinishLaunching). The fonts are made from the
+        /// files' own descriptors, which needs no registration: registering
+        /// for the process cost ≈10 ms of the main thread at launch, reading
+        /// the descriptors ≈3 ms, and that now happens off it. The first font
+        /// asked for waits for it (`make`).
+        static func prepare(in directory: URL? = directory()) {
+            guard started.withLock({ let was = $0; $0 = true; return !was }) else { return }
+            loading.enter()
+            DispatchQueue.global(qos: .userInteractive).async {
+                load(in: directory)
+                loading.leave()
             }
+        }
+
+        /// Reads both faces now. Returns whether both were found; without
+        /// them the serif falls back to the system's serif (New York).
+        @discardableResult
+        static func load(in directory: URL? = directory()) -> Bool {
+            guard let directory else { return false }
+            let found = [upright, italic].compactMap {
+                (CTFontManagerCreateFontDescriptorsFromURL(directory.appendingPathComponent($0) as CFURL) as? [CTFontDescriptor])?.first
+            }
+            guard found.count == 2 else { return false }
             let pair = (upright: found[0], italic: found[1])
             descriptors.withLock { $0 = pair }
             return true
         }
-        static var registered: Bool { descriptors.withLock { $0 != nil } }
+        static var loaded: Bool { descriptors.withLock { $0 != nil } }
 
         static func make(_ key: FontKey) -> CTFont {
+            // A slow disk never holds a view up for long: past 0.2 s the
+            // fallback draws, and later fonts are Newsreader once it's read.
+            if started.withLock({ $0 }), !loaded { _ = loading.wait(timeout: .now() + 0.2) }
             let base = descriptors.withLock { $0.map { key.italic ? $0.italic : $0.upright } }
             guard let base else { return fallback(key) }
             let variation: [NSNumber: NSNumber] = [
