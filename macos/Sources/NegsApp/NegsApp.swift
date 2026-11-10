@@ -230,7 +230,8 @@ struct EditorCanvas: View {
                         PhotoBrowser(model: model)
                     }
                     if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
-                        Divider()
+                        // No rule: strip and status line are 186 pt, the
+                        // tray's height, so the photograph doesn't move (§2.3).
                         StatusBar(model: model)
                     }
                 }
