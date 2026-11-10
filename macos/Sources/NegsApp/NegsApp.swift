@@ -319,9 +319,6 @@ struct CanvasArea: View {
     let model: EditorModel
     /// While a file is dragged over the window, the caption and label step aside.
     var marksHidden = false
-    /// Settings › Custom viewer background.
-    @AppStorage(ViewerBackground.customKey) private var customBackground = false
-    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
     @State private var geometry = CanvasGeometry()
 
     /// Above the photograph, for the caption; below it, for the label's two rows (§2.3).
@@ -330,7 +327,7 @@ struct CanvasArea: View {
 
     var body: some View {
         ZStack {
-            ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
+            ViewerBackground.canvas
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)
             } else if model.source == nil, model.image == nil, model.standIn == nil, model.placeholder == nil {
