@@ -257,7 +257,7 @@ private struct OriginalWord: View {
                 .onChanged { _ in if !pressed { pressed = true; model.holdOriginal(true) } }
                 .onEnded { _ in pressed = false; model.holdOriginal(false) })
             .allowsHitTesting(enabled)
-            .help("Hold to show the original (\\)")
+            .help("Hold to show the original (\\). Hold T to turn the photograph upside down.")
             .accessibilityElement()
             .accessibilityLabel("Show Original")
             .accessibilityAddTraits(.isButton)

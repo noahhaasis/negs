@@ -141,7 +141,7 @@ import XCTest
         view.show(image, size: CGSize(width: 400, height: 400), rotation: 0, crop: straightened)
         view.setFrameSize(view.displaySize)
         view.layoutSubtreeIfNeeded()
-        let photo = try XCTUnwrap(view.layer?.sublayers?.flatMap { $0.sublayers ?? [] }.first { $0.contents as AnyObject === image })
+        let photo = try XCTUnwrap(view.layer?.descendants.first { $0.contents as AnyObject === image })
         XCTAssertTrue(try XCTUnwrap(photo.superlayer).masksToBounds)
         // The photograph's top-left corner turns 10° clockwise about its centre:
         // in y-up layer coordinates, its direction from the centre turns from 135° to 125°.

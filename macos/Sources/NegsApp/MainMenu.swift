@@ -79,6 +79,9 @@ import SwiftUI
         hidden(view, #selector(largerThumbnails), "=", .command)
         command(view, "Smaller Thumbnails", #selector(smallerThumbnails), "-")
         view.addItem(.separator())
+        // A plain key too: the photograph with only its caption and label.
+        // Esc leaves it first: `EditorWindowController.escapeToGrid`.
+        command(view, "Image Only", #selector(toggleImageOnly), "f", [])
         command(view, "Hide Film Strip", #selector(toggleFilmstrip), "f", [.command, .option])
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
@@ -181,7 +184,8 @@ import SwiftUI
     @objc private func savePreview() { model.savePanel(export: false) }
     @objc private func exportPhotograph() { model.exportPanel() }
     @objc private func exportLUT() { model.exportLUTPanel() }
-    @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
+    @objc private func toggleImageOnly() { model.toggleImageOnly() }
+    @objc private func toggleFilmstrip() { model.toggleFilmstrip() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
     @objc private func newPreset() { model.newPreset() }
@@ -263,13 +267,18 @@ import SwiftUI
             item.title = model.exportTitle
             return model.canExport && !model.cropping
         case #selector(exportLUT): return model.canExportLUT && model.mode == .photo
+        case #selector(toggleImageOnly):
+            item.state = model.imageOnly ? .on : .off
+            // In the grid it opens the current photograph in Image Only.
+            let shown = model.mode == .grid ? model.selection.current != nil : photo
+            return Self.takesRatingKeys(NSApp.keyWindow) && (model.imageOnly || (shown && !model.cropping))
         case #selector(toggleFilmstrip):
-            item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
+            item.title = model.stripShown ? "Hide Film Strip" : "Show Film Strip"
             return model.mode == .photo
         case #selector(toggleAdjustments):
-            item.state = model.inspectorVisible && model.inspectorPane == .adjustments ? .on : .off; return model.mode == .photo
+            item.state = model.inspectorShown && model.inspectorPane == .adjustments ? .on : .off; return model.mode == .photo
         case #selector(togglePresets):
-            item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return model.mode == .photo
+            item.state = model.inspectorShown && model.inspectorPane == .presets ? .on : .off; return model.mode == .photo
         case #selector(newPreset): return model.canChangePresets && model.mode == .photo
         case #selector(importPresets): return model.canChangePresets
         case #selector(showPresetsFolder): return true

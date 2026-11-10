@@ -235,13 +235,14 @@ struct EditorCanvas: View {
             // The grid's sheet covers it (`GridSheet`), so coming back to
             // the same photograph is instant and keeps its zoom.
             CanvasArea(model: model, dropping: dropTargeted)
-            // The tray takes the strip's and the status line's place (§4.5).
+            // The tray takes the strip's and the status line's place (§4.5),
+            // in Image Only too, which comes back when it closes.
             if let tray = model.tray, !grid {
                 StockTray(model: model, visit: tray)
-            } else if !dropTargeted {
+            } else if !dropTargeted, !model.imageOnly {
                 VStack(spacing: 0) {
                     // It stays under the grid's sheet, which folds back into it.
-                    if model.filmstripVisible, model.source != nil {
+                    if model.stripShown, model.source != nil {
                         PhotoBrowser(model: model)
                     }
                     // None in the empty window (§4.14).
@@ -407,14 +408,16 @@ struct CanvasArea: View {
             let size = Self.standInSize(trial, photo: model.photoSize)
             PreviewCanvas(image: trial, size: size, rotation: 0, crop: CropSettings(), border: model.border.shown(for: size),
                           filmTexture: model.filmTexture, filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage,
-                          scale: model.canvasScale, geometry: geometry, doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+                          scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
+                          doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
         } else if let image = model.image {
             canvas(model.original ?? image, size: model.imageSize, rotation: model.imageRotation)
         } else if let standIn = model.standIn {
             // Finished already: drawn as it is, the size the photograph will be.
             PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
                           border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
-                          scale: model.canvasScale, geometry: geometry, doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+                          scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
+                          doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
         } else if let placeholder = model.placeholder {
             canvas(placeholder, size: model.placeholderSize, rotation: model.imageRotation)
         } else {
@@ -438,7 +441,8 @@ struct CanvasArea: View {
             PrintLabel(model: model, photoWidth: width, canvasWidth: max(size.width - margin - left, width))
                 .offset(x: left, y: print.maxY)
             // Not zoomed in: the corners are off the canvas then (§4.3).
-            if !geometry.zoomed, model.image != nil, model.developFailure == nil {
+            // Nor in Image Only, which crops nothing.
+            if !geometry.zoomed, !model.imageOnly, model.image != nil, model.developFailure == nil {
                 CropTrimMarks(print: print, lit: overPrint, crop: model.beginCrop)
             }
         }
@@ -456,6 +460,6 @@ struct CanvasArea: View {
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale, geometry: geometry,
-                      doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+                      upsideDown: model.upsideDown, doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
     }
 }
