@@ -169,20 +169,16 @@ import UserNotifications
     /// The selected photographs and the current one, which in the edit view
     /// is `source`. In the grid it moves without developing anything.
     private(set) var selection = LibrarySelection()
-    /// The width of the grid's photographs, in points.
-    var gridCellSize = UserDefaults.standard.object(forKey: "gridThumbnailSize") as? Double ?? GridMetrics.defaultSize {
+    /// The height of the grid's rows, in points (the sheet's Size).
+    var gridCellSize = UserDefaults.standard.object(forKey: "gridThumbnailSize") as? Double ?? SheetLayout.defaultSize {
         didSet {
-            let clamped = min(max(gridCellSize, GridMetrics.sizes.lowerBound), GridMetrics.sizes.upperBound)
+            let clamped = min(max(gridCellSize, SheetLayout.sizes.lowerBound), SheetLayout.sizes.upperBound)
             if clamped != gridCellSize { gridCellSize = clamped; return }
             UserDefaults.standard.set(gridCellSize, forKey: "gridThumbnailSize")
         }
     }
-    /// How many columns the grid shows now, for moving up and down a row.
-    @ObservationIgnored var gridColumns = 1
-    /// The window's width for its photograph column alone, without the
-    /// inspector: what the grid will have once the inspector has slid away.
-    /// Set by the window.
-    @ObservationIgnored var fullCanvasWidth: () -> CGFloat = { 0 }
+    /// The grid as laid out now, for moving up and down a row. Set by the sheet.
+    @ObservationIgnored var gridLayout: SheetLayout?
     var inspectorVisible = true
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
@@ -1605,10 +1601,9 @@ import UserNotifications
         else { selection.select(photo) }
     }
 
-    /// The arrow keys. In the edit view ← and → open the next photograph; in
-    /// the grid the current photograph moves without developing, a row at a
-    /// time up and down (`offset` ± `gridColumns`). With ⇧ the selection
-    /// grows or shrinks instead and the current photograph stays.
+    /// ← and →. In the edit view they open the next photograph; in the grid
+    /// the current photograph moves without developing. With ⇧ the
+    /// selection grows or shrinks instead and the current photograph stays.
     func move(by offset: Int, extending: Bool) {
         guard !cropping else { return }
         let order = shownPhotos.map(\.url)
@@ -1618,11 +1613,25 @@ import UserNotifications
             if let first = order.first { selection.select(first) }
             return
         }
-        var to = index + offset
-        // Down from the row above a short last row lands on its last photograph, as in Finder.
-        if to >= order.count, offset > 1, index / offset < (order.count - 1) / offset { to = order.count - 1 }
-        guard order.indices.contains(to) else { return }
-        selection.select(order[to])
+        guard order.indices.contains(index + offset) else { return }
+        selection.select(order[index + offset])
+    }
+
+    /// ↑ and ↓ in the grid: the photograph a row up or down, the one
+    /// nearest across (`SheetLayout.vertical`). With ⇧ the selection grows
+    /// or shrinks to it.
+    func moveRow(by rows: Int, extending: Bool) {
+        guard !cropping, mode == .grid else { return }
+        let order = shownPhotos.map(\.url)
+        // ⇧ moves the selection's moving end, as ⇧← and ⇧→ do.
+        let from = extending ? selection.lead ?? selection.current : selection.current
+        guard let from, let index = order.firstIndex(of: from) else {
+            if let first = order.first, !extending { selection.select(first) }
+            return
+        }
+        guard let layout = gridLayout, layout.frames.count == order.count,
+              let to = layout.vertical(from: index, by: rows) else { return }
+        if extending { selection.extend(by: to - index, in: order) } else { selection.select(order[to]) }
     }
 
     /// ⌘A: every photograph shown.

@@ -70,21 +70,61 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(selection.current, photos[0])
     }
 
-    func testGridMetrics() {
-        let metrics = GridMetrics(width: 1000, cell: 180)
-        // (1000 - 40 + 14) / 194 = 5 columns, centred.
-        XCTAssertEqual(metrics.columns, 5)
-        XCTAssertEqual(metrics.inset, (1000 - (5 * 180 + 4 * 14)) / 2)
-        XCTAssertEqual(metrics.rows(11), 3)
-        XCTAssertEqual(metrics.frame(6).minX, metrics.frame(1).minX)
-        XCTAssertEqual(metrics.frame(6).minY, GridMetrics.padding + metrics.rowHeight + GridMetrics.spacing)
-        // A band over the second row's first two cells, and the gap below it.
-        let second = metrics.frame(5).union(metrics.frame(6)).insetBy(dx: 10, dy: 10)
-        XCTAssertEqual(metrics.indices(in: second, count: 11), [5, 6])
-        let gap = CGRect(x: 0, y: metrics.frame(0).maxY + 2, width: 1000, height: 4)
-        XCTAssertEqual(metrics.indices(in: gap, count: 11), [], "between rows touches none")
-        XCTAssertEqual(metrics.indices(in: CGRect(x: 0, y: 0, width: 1000, height: 2000), count: 11), Array(0..<11))
-        XCTAssertEqual(GridMetrics(width: 50, cell: 360).columns, 1, "always at least one column")
+    /// The sheet packs photographs in rows at their own proportions (§4.6).
+    func testSheetLayoutPacksRowsAtTheirOwnProportions() {
+        let layout = SheetLayout(ratios: [1.5, 1.5, 1.5, 1.5, 0.75], width: 1000, target: 176)
+        // 968 pt across: three at 176 leave a gap, four overfill; four at
+        // 158 is nearer 176 than three at 212, so the row takes four.
+        XCTAssertEqual(layout.rows.map(\.range), [0..<4, 4..<5])
+        XCTAssertEqual(layout.rows[0].height, 158)
+        XCTAssertEqual(layout.frames[0].minX, SheetLayout.side)
+        XCTAssertEqual(layout.frames[1].minX, layout.frames[0].maxX + SheetLayout.gap)
+        XCTAssertEqual(layout.frames[3].maxX, 1000 - SheetLayout.side, "a full row ends flush")
+        XCTAssertEqual(layout.frames[0].width, 237, "each at its own proportions")
+        // The last row isn't stretched.
+        XCTAssertEqual(layout.rows[1].height, 176)
+        XCTAssertEqual(layout.frames[4].size, CGSize(width: 132, height: 176))
+        XCTAssertEqual(layout.rows[1].y, SheetLayout.top + 158 + SheetLayout.gap)
+        XCTAssertEqual(layout.height, SheetLayout.top + 158 + SheetLayout.gap + 176 + SheetLayout.bottom)
+
+        // Up and down land on the nearest across, as in Finder.
+        XCTAssertEqual(layout.vertical(from: 3, by: 1), 4)
+        XCTAssertEqual(layout.vertical(from: 4, by: -1), 0)
+        XCTAssertNil(layout.vertical(from: 0, by: -1))
+        XCTAssertNil(layout.vertical(from: 4, by: 1))
+        XCTAssertEqual(layout.row(of: 3), 0)
+        XCTAssertEqual(layout.row(of: 4), 1)
+        XCTAssertNil(layout.row(of: 5))
+
+        // The rubber band.
+        XCTAssertEqual(layout.indices(in: layout.frames[1].union(layout.frames[2]).insetBy(dx: 10, dy: 10)), [1, 2])
+        let gap = CGRect(x: 0, y: layout.frames[0].maxY + 2, width: 1000, height: 2)
+        XCTAssertEqual(layout.indices(in: gap), [], "between rows touches none")
+        XCTAssertEqual(layout.indices(in: CGRect(x: 0, y: 0, width: 1000, height: 2000)), Array(0..<5))
+
+        // A panorama wider than the sheet has a row to itself, shrunk to fit.
+        let wide = SheetLayout(ratios: [10, 1.5], width: 500, target: 176)
+        XCTAssertEqual(wide.rows.map(\.range), [0..<1, 1..<2])
+        XCTAssertEqual(wide.frames[0].width, 468)
+        XCTAssertEqual(wide.rows[0].height, 47)
+        let empty = SheetLayout(ratios: [], width: 500, target: 176)
+        XCTAssertTrue(empty.rows.isEmpty)
+        XCTAssertEqual(empty.height, SheetLayout.top + SheetLayout.bottom)
+    }
+
+    /// The sentence over the grid and its foot (§4.6), in the app's words.
+    func testTheSheetSaysWhatItShows() {
+        XCTAssertEqual(SheetWords.words(for: LibraryFilter()), [])
+        let filter = LibraryFilter(rating: .atLeast(3), flags: [.pick], editedOnly: true)
+        XCTAssertEqual(SheetWords.words(for: filter), [SheetWords.Part(lead: "rated ", word: "★★★ or more"),
+                                                       SheetWords.Part(lead: "", word: "picks"),
+                                                       SheetWords.Part(lead: "", word: "edited")])
+        XCTAssertEqual(SheetWords.words(for: LibraryFilter(rating: .atLeast(5))), [SheetWords.Part(lead: "rated ", word: "★★★★★")])
+        XCTAssertEqual(SheetWords.words(for: LibraryFilter(rating: .unrated, flags: [.pick, .reject])),
+                       [SheetWords.Part(lead: "", word: "unrated"), SheetWords.Part(lead: "", word: "picks or rejected")])
+        XCTAssertEqual(SheetWords.count(shown: 12, total: 12, selected: 1, filtered: false), "12 photographs · 1 selected")
+        XCTAssertEqual(SheetWords.count(shown: 4, total: 12, selected: 1, filtered: true), "4 of 12 photographs")
+        XCTAssertEqual(SheetWords.count(shown: 1, total: 1, selected: 0, filtered: false), "1 photograph")
     }
 
     /// The edit view's tools leave the toolbar in the grid; Open, the

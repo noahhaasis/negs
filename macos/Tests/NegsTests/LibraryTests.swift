@@ -472,16 +472,24 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.shownPhotos.map(\.url), [b])
         model.library.filter = LibraryFilter()
 
-        // Arrows: a row is two columns here; down onto a short row lands on its end.
-        model.gridColumns = 2
+        // Arrows: two to a row here (as the sheet lays them out); up and
+        // down land on the nearest across, onto a short row too.
+        model.gridLayout = SheetLayout(ratios: [1.5, 1.5, 1.5], width: 2 * 1.5 * 176 + SheetLayout.gap + 2 * SheetLayout.side, target: 176)
+        XCTAssertEqual(model.gridLayout?.rows.map(\.range), [0..<2, 2..<3])
         model.click(a)
-        model.move(by: 2, extending: false)
+        model.moveRow(by: 1, extending: false)
         XCTAssertEqual(model.selection.current, c)
-        model.move(by: -2, extending: false)
+        model.moveRow(by: -1, extending: false)
         XCTAssertEqual(model.selection.current, a)
+        model.moveRow(by: -1, extending: false)
+        XCTAssertEqual(model.selection.current, a, "nothing above the first row")
         model.move(by: 1, extending: false)
-        model.move(by: 2, extending: false)
+        model.moveRow(by: 1, extending: false)
         XCTAssertEqual(model.selection.current, c)
+        model.moveRow(by: -1, extending: true)
+        XCTAssertEqual(model.selection.selected, [a, b, c], "⇧↑ selects the range up to the photograph above")
+        model.moveRow(by: 1, extending: true)
+        XCTAssertEqual(model.selection.selected, [c])
         model.move(by: -1, extending: true)
         XCTAssertEqual(model.selection.selected, [b, c])
         XCTAssertEqual(model.source, a)

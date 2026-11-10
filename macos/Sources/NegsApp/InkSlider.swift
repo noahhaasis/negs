@@ -13,6 +13,8 @@ final class InkSliderView: NSView, InkFocusTarget {
     var range: ClosedRange<Double> = 0...1 { didSet { if range != oldValue { needsLayout = true } } }
     var step = 0.01
     var neutral = 0.0 { didSet { if neutral != oldValue { needsLayout = true } } }
+    /// The tick at the neutral value; a slider without a default has none.
+    var showsNeutral = true { didSet { tick.isHidden = !showsNeutral } }
     /// The model's value, which the knob shows (snapped by the model).
     var value = 0.0 { didSet { if value != oldValue { needsLayout = true } } }
     var changed = false { didSet { if changed != oldValue { restyle() } } }
@@ -168,6 +170,7 @@ struct InkSlider: NSViewRepresentable {
     let reset: () -> Void
     var type: () -> Void = {}
     var toolTip: String? = nil
+    var showsNeutral = true
 
     func makeNSView(context: Context) -> InkSliderView {
         let slider = InkSliderView()
@@ -181,6 +184,7 @@ struct InkSlider: NSViewRepresentable {
         slider.range = range
         slider.step = step
         slider.neutral = min(max(neutral, range.lowerBound), range.upperBound)
+        if slider.showsNeutral != showsNeutral { slider.showsNeutral = showsNeutral }
         slider.value = value.wrappedValue
         slider.changed = changed
         slider.rowHovered = hovered

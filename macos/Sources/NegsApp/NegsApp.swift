@@ -209,12 +209,9 @@ struct EditorCanvas: View {
     var body: some View {
         let grid = model.mode == .grid
         VStack(spacing: 0) {
-            ZStack {
-                // The canvas stays under the grid, so coming back to the
-                // same photograph is instant and keeps its zoom.
-                CanvasArea(model: model, marksHidden: dropTargeted).accessibilityHidden(grid)
-                if grid { LibraryGrid(model: model) }
-            }
+            // The grid's sheet covers it (`GridSheet`), so coming back to
+            // the same photograph is instant and keeps its zoom.
+            CanvasArea(model: model, marksHidden: dropTargeted)
                 .dropDestination(for: URL.self) { urls, _ in
                     guard let url = urls.first, url.isFileURL else { return false }
                     model.open(url); return true
@@ -246,6 +243,8 @@ struct EditorCanvas: View {
                 }
             }
         }
+        // Under the grid's sheet, hidden from VoiceOver too.
+        .accessibilityHidden(grid)
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
@@ -309,6 +308,8 @@ struct InspectorPanel: View {
             }
         }
         .tint(Theme.paper)
+        // Under the grid's sheet (§4.6).
+        .accessibilityHidden(model.mode == .grid)
     }
 }
 

@@ -35,6 +35,11 @@ import SwiftUI
     private var keyMonitor: Any?
     private var mouseMonitor: Any?
     private var menuTracking: NSObjectProtocol?
+    /// The split view's container, which the grid's sheet covers.
+    private let root: NSView
+    /// The grid's sheet, made the first time the grid opens (§4.6).
+    private var sheet: NSHostingView<GridSheet>?
+    private lazy var filterMenu = FilterMenu(model: model)
     /// The narrowest canvas, and the narrowest the content can be with the
     /// inspector shown beside it. The split view can't keep both columns at
     /// their minimums in a narrower window, so the window enforces the sum.
@@ -50,7 +55,7 @@ import SwiftUI
     private var batchPopover: NSPopover?
     private var exportIcon = ""
     private lazy var sizeSlider: NSSlider = {
-        let slider = NSSlider(value: GridMetrics.defaultSize, minValue: GridMetrics.sizes.lowerBound, maxValue: GridMetrics.sizes.upperBound,
+        let slider = NSSlider(value: SheetLayout.defaultSize, minValue: SheetLayout.sizes.lowerBound, maxValue: SheetLayout.sizes.upperBound,
                               target: self, action: #selector(resizeGrid(_:)))
         slider.controlSize = .small
         slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
@@ -80,6 +85,7 @@ import SwiftUI
         split.addSplitViewItem(canvasItem)
         split.addSplitViewItem(inspector)
         split.splitView.autosaveName = "editor"
+        root = split.view
         canvasMinimum = canvasItem.minimumThickness
         columnsMinimum = canvasItem.minimumThickness + inspector.minimumThickness + split.splitView.dividerThickness
 
@@ -108,8 +114,6 @@ import SwiftUI
         toolbar.centeredItemIdentifiers = [.zoom, .edit, .gridSize]
         window.toolbar = toolbar
         model.undoManager = window.undoManager
-        // A collapsed inspector leaves the split view to the canvas alone.
-        model.fullCanvasWidth = { [weak split] in split?.splitView.bounds.width ?? 0 }
         // Dragging the inspector closed hides the adjustments, like the toolbar button.
         collapsing = inspector.observe(\.isCollapsed) { [weak self] item, _ in
             MainActor.assumeIsolated {
@@ -234,11 +238,13 @@ import SwiftUI
         model.endTray(keep: true)
     }
 
+    /// Esc in the photograph view opens the grid; in the grid it folds it
+    /// back (§5.2).
     private func escapeToGrid(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, event.keyCode == 53, event.window === window,
               event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
-              model.mode == .photo, model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
-        model.showGrid()
+              model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
+        if model.mode == .grid { model.editCurrent() } else { model.showGrid() }
         return true
     }
 
@@ -317,13 +323,35 @@ import SwiftUI
             cancelButton.keyEquivalent = session.typing ? "" : "\u{1b}"
             doneButton.keyEquivalent = session.typing ? "" : "\r"
         }
-        // The grid takes the whole window; the inspector comes back as it was.
-        let inspectorShown = model.inspectorVisible && !grid
+        showSheet(grid)
+        // The grid's sheet covers the inspector, which stays as it was under it.
+        let inspectorShown = model.inspectorVisible
         if inspector.isCollapsed == inspectorShown {
             // Make room before the inspector slides in, so neither column is
             // squeezed below its minimum.
             if inspectorShown { Self.fitMinimum(of: window, width: columnsMinimum) }
             inspector.animator().isCollapsed = !inspectorShown
+        }
+    }
+
+    /// The sheet over the whole window below the title bar, with the
+    /// canvas and the inspector under it. Keys go to it while it shows.
+    private func showSheet(_ shown: Bool) {
+        guard shown || sheet != nil else { return }
+        let sheet = self.sheet ?? {
+            let sheet = NSHostingView(rootView: GridSheet(model: model))
+            sheet.sizingOptions = []
+            sheet.frame = root.bounds
+            sheet.autoresizingMask = [.width, .height]
+            root.addSubview(sheet, positioned: .above, relativeTo: nil)
+            self.sheet = sheet
+            return sheet
+        }()
+        guard sheet.isHidden == shown else { return }
+        sheet.isHidden = !shown
+        if shown { window?.makeFirstResponder(sheet) }
+        else if window?.firstResponder === sheet || (window?.firstResponder as? NSView)?.isDescendant(of: sheet) == true {
+            window?.makeFirstResponder(nil)
         }
     }
 
@@ -488,42 +516,11 @@ import SwiftUI
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let filter = model.library.filter
-        func add(_ title: String, _ action: Selector, on: Bool, tag: Int = 0) {
-            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
-            item.target = self; item.tag = tag; item.state = on ? .on : .off
-        }
         // A pull-down toolbar menu takes its first item as the button's title
         // and doesn't list it.
         menu.addItem(withTitle: "Filter", action: nil, keyEquivalent: "")
-        menu.addItem(.sectionHeader(title: "Rating"))
-        add("Any Rating", #selector(filterRating(_:)), on: filter.rating == .any, tag: -1)
-        for stars in 1...5 {
-            add(stars == 5 ? "★★★★★" : "≥ " + String(repeating: "★", count: stars), #selector(filterRating(_:)), on: filter.rating == .atLeast(stars), tag: stars)
-        }
-        add("Unrated Only", #selector(filterRating(_:)), on: filter.rating == .unrated, tag: 0)
-        menu.addItem(.separator())
-        menu.addItem(.sectionHeader(title: "Flags"))
-        for (index, (flag, title)) in Self.flagChoices.enumerated() {
-            add(title, #selector(filterFlag(_:)), on: filter.flags.contains(flag), tag: index)
-        }
-        menu.addItem(.separator())
-        add("Edited Only", #selector(filterEdited), on: filter.editedOnly)
-        menu.addItem(.separator())
-        let clear = menu.addItem(withTitle: "Clear Filter", action: filter.active ? #selector(clearFilter) : nil, keyEquivalent: "l")
-        clear.keyEquivalentModifierMask = [.command, .option]; clear.target = self
+        filterMenu.fill(menu)
     }
-
-    @objc private func filterRating(_ item: NSMenuItem) {
-        model.library.filter.rating = switch item.tag { case -1: .any; case 0: .unrated; default: .atLeast(item.tag) }
-    }
-    @objc private func filterFlag(_ item: NSMenuItem) {
-        let flag = Self.flagChoices[item.tag].flag
-        if model.library.filter.flags.contains(flag) { model.library.filter.flags.remove(flag) } else { model.library.filter.flags.insert(flag) }
-    }
-    private static let flagChoices: [(flag: LibraryFilter.Flag, title: String)] = [(.pick, "Picks"), (.unflagged, "Unflagged"), (.reject, "Rejected")]
-    @objc private func filterEdited() { model.library.filter.editedOnly.toggle() }
-    @objc private func clearFilter() { model.library.filter = LibraryFilter() }
 
     static func describe(_ filter: LibraryFilter) -> String {
         var parts: [String] = []
@@ -532,7 +529,7 @@ import SwiftUI
         case .atLeast(let stars): parts.append(stars == 5 ? "★★★★★" : "≥ " + String(repeating: "★", count: stars))
         case .unrated: parts.append("unrated")
         }
-        let names = flagChoices.filter { filter.flags.contains($0.flag) }.map { $0.title.lowercased() }
+        let names = FilterMenu.flagChoices.filter { filter.flags.contains($0.flag) }.map { $0.title.lowercased() }
         if !names.isEmpty { parts.append(names.joined(separator: " or ")) }
         if filter.editedOnly { parts.append("edited") }
         return parts.joined(separator: ", ")
