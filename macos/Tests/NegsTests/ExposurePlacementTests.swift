@@ -42,6 +42,45 @@ final class ExposurePlacementTests: XCTestCase {
         }
     }
 
+    /// A thumbnail's reference read while the helper decodes is the one read
+    /// after: the same bytes, or the same refusal, whatever the reply says.
+    func testReferenceReadAheadIsTheSame() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let context = try XCTUnwrap(CGContext(data: nil, width: 640, height: 480, bitsPerComponent: 8, bytesPerRow: 2560,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        for x in stride(from: 0, to: 640, by: 16) {
+            context.setFillColor(red: CGFloat(x) / 640, green: 0.7, blue: 0.3, alpha: 1)
+            context.fill(CGRect(x: x, y: 0, width: 16, height: 480))
+        }
+        let embedded = directory.appendingPathComponent("embedded-thumbnail.jpg"), none = directory.appendingPathComponent("none.png")
+        try writeImage(try XCTUnwrap(context.makeImage()), to: embedded, type: .jpeg, properties: [kCGImageDestinationEmbedThumbnail: true])
+        try writeImage(try XCTUnwrap(context.makeImage()), to: none, type: .png)
+        var files = [(embedded, CGSize(width: 640, height: 480)), (none, CGSize(width: 640, height: 480))]
+        if let path = ProcessInfo.processInfo.environment["SPEKTRAFILM_RAW_SAMPLE"] {
+            let url = URL(fileURLWithPath: path)
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil)), 0, nil) as? [CFString: Any])
+            files.append((url, CGSize(width: try XCTUnwrap(properties[kCGImagePropertyPixelWidth] as? Double),
+                                      height: try XCTUnwrap(properties[kCGImagePropertyPixelHeight] as? Double))))
+        }
+        func outcome(_ make: () throws -> Data) -> String {
+            do { return "png \(try make().base64EncodedString())" } catch { return "refused: \(CameraBrightnessReference.failure(error).message)" }
+        }
+        for (url, size) in files {
+            let prepared = CameraBrightnessReference.Prepared(from: url)
+            let sizes = [size, CGSize(width: size.width + 40, height: size.height), CGSize(width: size.height, height: size.width), .zero]
+            for expected in sizes {
+                for declared in [nil, .srgb, .adobeRGB, .other] as [PreviewColourSpace?] {
+                    let now = outcome { try CameraBrightnessReference.png(from: url, expectedSize: expected, declared: declared) }
+                    XCTAssertEqual(outcome { try prepared.png(expectedSize: expected, declared: declared) }, now,
+                                   "\(url.lastPathComponent) \(expected) \(String(describing: declared))")
+                    if url != none, expected == size, declared != .other { XCTAssertTrue(now.hasPrefix("png "), url.lastPathComponent) }
+                }
+            }
+        }
+    }
+
     func testReferenceDoesNotGenerateThumbnailWhenNoneIsEmbedded() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

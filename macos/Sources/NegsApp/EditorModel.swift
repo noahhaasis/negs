@@ -2528,6 +2528,8 @@ import UserNotifications
                 if storeMatch != nil { decode["reduced_decode"] = .bool(false) }
                 decode["decode_only"] = .bool(true)
                 if raw { decode["preview_colour_space"] = .bool(true) }
+                // The camera preview read meanwhile (~35 ms).
+                let prepared = raw ? Task.detached(priority: .utility) { CameraBrightnessReference.Prepared(from: photo) } : nil
                 let (_, decoded) = try await engine.request(decode)
                 let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
                 guard await waitForThumbnailTurn() else { return false }
@@ -2535,7 +2537,7 @@ import UserNotifications
                 defer { try? FileManager.default.removeItem(at: reference) }
                 if let solved = try? await Self.solveBrightnessMatch(engine: engine, source: photo, generation: generation, size: size, raw: raw,
                                                                     request: matchSolveState(state), reference: reference,
-                                                                    declared: raw ? decoded["preview_colour_space"] : nil),
+                                                                    declared: raw ? decoded["preview_colour_space"] : nil, prepared: prepared),
                    let matched = Self.matching(state, ev: solved.exposure, limited: solved.limited, inputs: matchInputs(state)) {
                     state = matched
                     if let storeMatch { finalLook = storeMatch(state) ?? look }
@@ -3476,7 +3478,7 @@ import UserNotifications
     /// `stillWanted` throws to stop before the helper is asked. `declared`:
     /// the helper's `preview_colour_space` answer, if it was read already.
     nonisolated static func solveBrightnessMatch(engine: EngineClient, source: URL, generation: Int, size: CGSize, raw: Bool, request: EditState,
-                                                 reference: URL, declared given: JSONValue? = nil,
+                                                 reference: URL, declared given: JSONValue? = nil, prepared: Task<CameraBrightnessReference.Prepared, Never>? = nil,
                                                  stillWanted: @MainActor () throws -> Void = {}) async throws -> (exposure: Double, limited: Bool) {
         // What the RAW says its preview is in, read by the engine as on the
         // web and Windows.
@@ -3491,10 +3493,14 @@ import UserNotifications
             ]).1["colour_space"].string)
         }
         try Task.checkCancellation()
-        let data = try await Task.detached(priority: .userInitiated) {
-            raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
-                : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
-        }.value
+        let data = if raw, let prepared {
+            try await prepared.value.png(expectedSize: size, declared: declared)
+        } else {
+            try await Task.detached(priority: .userInitiated) {
+                raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
+                    : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
+            }.value
+        }
         try Task.checkCancellation()
         try await stillWanted()
         try data.write(to: reference, options: .atomic)
