@@ -1725,8 +1725,15 @@ import UserNotifications
     @ObservationIgnored private var thumbnailsChecked: [URL: (look: String, present: Bool)] = [:]
     /// Looks that failed to develop this session, not tried again.
     @ObservationIgnored private var thumbnailFailures: [URL: String] = [:]
-    /// The background helper, started while there's work, and its job.
-    @ObservationIgnored private var thumbnailEngine: EngineClient?
+    /// How many thumbnails develop at once, each in a helper of its own
+    /// (about 550 MB each): two on a Mac with the cores and memory.
+    nonisolated static let thumbnailHelpers =
+        ProcessInfo.processInfo.activeProcessorCount >= 8 && ProcessInfo.processInfo.physicalMemory >= 16 << 30 ? 2 : 1
+    /// The background helpers, started while there's work, by slot.
+    @ObservationIgnored private var thumbnailEngines: [Int: EngineClient] = [:]
+    /// Each slot's thumbnail developing now, and its job.
+    @ObservationIgnored private var thumbnailsDeveloping: [Int: (item: URL, task: Task<Void, Never>)] = [:]
+    /// The scan for the next thumbnails to develop.
     @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
     @ObservationIgnored private var thumbnailsPumpAgain = false
     @ObservationIgnored private var thumbnailIdle: Task<Void, Never>?
@@ -1847,14 +1854,18 @@ import UserNotifications
             && (mode == .grid || source == nil || previewCurrent || renderFailed)
     }
 
-    /// Develops the next item without a current thumbnail, edited or not, in
-    /// a helper of its own, at utility priority: those on screen first, then
-    /// the folder in order. One at a time, waiting while the open photograph
-    /// is edited or developed. The helper quits when there's nothing left.
+    /// Develops the next items without a current thumbnail, edited or not,
+    /// in helpers of their own, at utility priority: those on screen first,
+    /// then the folder in order. `thumbnailHelpers` at a time, waiting while
+    /// the open photograph is edited or developed. The helpers quit when
+    /// there's nothing left.
     func pumpThumbnails() {
         guard !closing, hasCatalog, let paths = engine?.paths else { return }
         // Its scan reads what it was started with: once more after, for what changed.
         guard thumbnailTask == nil else { thumbnailsPumpAgain = true; return }
+        // Each that finishes pumps again.
+        let free = (0..<Self.thumbnailHelpers).filter { thumbnailsDeveloping[$0] == nil }
+        guard !free.isEmpty else { return }
         if thumbnailStamp == nil { return readThumbnailStamp() }
         thumbnailTask = Task { [weak self] in
             // None is developed before then, so the folder isn't scanned
@@ -1865,23 +1876,26 @@ import UserNotifications
             // is scanned for every thumbnail, which must stay off the main actor.
             let items = self.library.items, open = self.sourceItem, onScreen = self.thumbnailsOnScreen, looks = self.thumbnailLooks
             let failures = self.thumbnailFailures, checked = self.thumbnailsChecked, emptied = self.thumbnailsEmptied
+            let developing = Set(self.thumbnailsDeveloping.values.map(\.item))
             self.thumbnailsPumpAgain = false
             // Each item but the open one, whose thumbnail comes from its
-            // preview, on screen first: the first without a thumbnail on
-            // disk. Those with one are noted.
-            let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: (file: PhotoFile, look: String)?) in
+            // preview, and those developing, on screen first: the first
+            // without a thumbnail on disk, one for each free helper. Those
+            // with one are noted.
+            let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: [(file: PhotoFile, look: String)]) in
                 var shown: [(file: PhotoFile, look: String)] = [], rest: [(file: PhotoFile, look: String)] = []
-                for file in items where file.url != open {
+                for file in items where file.url != open && !developing.contains(file.url) {
                     guard let look = looks.look(for: file.url), failures[file.url] != look else { continue }
                     if let checked = checked[file.url], checked.look == look, checked.present { continue }
                     if onScreen.contains(file.url) { shown.append((file, look)) } else { rest.append((file, look)) }
                 }
-                var present: [(URL, String)] = []
+                var present: [(URL, String)] = [], next: [(file: PhotoFile, look: String)] = []
                 for (file, look) in shown + rest {
                     guard let key = store.key(for: file, look: look) else { continue }
-                    if store.contains(key) { present.append((file.url, look)) } else { return (present, (file, look)) }
+                    if store.contains(key) { present.append((file.url, look)) } else { next.append((file, look)) }
+                    if next.count == free.count { break }
                 }
-                return (present, nil)
+                return (present, next)
             }.value
             guard !self.closing else { return }
             guard emptied == self.thumbnailsEmptied else {
@@ -1889,24 +1903,35 @@ import UserNotifications
                 return self.pumpThumbnails()
             }
             for (item, look) in found.present { self.thumbnailsChecked[item] = (look, true) }
-            if let (file, look) = found.next {
+            for (slot, (file, look)) in zip(free, found.next) {
                 self.thumbnailIdle?.cancel(); self.thumbnailIdle = nil
                 self.thumbnailsChecked[file.url] = (look, false)
-                if await !self.developThumbnail(file, look: look, lookup: lookup, paths: paths) { self.thumbnailFailures[file.url] = look }
+                let task = Task { [weak self] in
+                    guard let self else { return }
+                    if await !self.developThumbnail(file, look: look, lookup: lookup, paths: paths, slot: slot) { self.thumbnailFailures[file.url] = look }
+                    self.thumbnailsDeveloping[slot] = nil
+                    self.pumpThumbnails()
+                }
+                self.thumbnailsDeveloping[slot] = (file.url, task)
             }
             self.thumbnailTask = nil
-            if found.next != nil || self.thumbnailsPumpAgain { self.pumpThumbnails() } else { self.stopThumbnailEngineSoon() }
+            if self.thumbnailsPumpAgain {
+                self.pumpThumbnails()
+            } else if self.thumbnailsDeveloping.isEmpty {
+                self.stopThumbnailEngineSoon()
+            }
         }
     }
 
-    /// Quits the background helper after a while without work, so its memory goes.
+    /// Quits the background helpers after a while without work, so their memory goes.
     private func stopThumbnailEngineSoon() {
-        guard thumbnailEngine != nil, thumbnailIdle == nil else { return }
+        guard !thumbnailEngines.isEmpty, thumbnailIdle == nil else { return }
         thumbnailIdle = Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))
-            guard let self, !Task.isCancelled, self.thumbnailTask == nil, let engine = self.thumbnailEngine else { return }
-            self.thumbnailEngine = nil; self.thumbnailIdle = nil
-            await Task.detached(priority: .utility) { engine.stop() }.value
+            guard let self, !Task.isCancelled, self.thumbnailTask == nil, self.thumbnailsDeveloping.isEmpty else { return }
+            let engines = Array(self.thumbnailEngines.values)
+            self.thumbnailEngines = [:]; self.thumbnailIdle = nil
+            await Task.detached(priority: .utility) { engines.forEach { $0.stop() } }.value
         }
     }
 
@@ -1926,7 +1951,7 @@ import UserNotifications
     /// solved on the reduced decode for the thumbnail only. Everything else
     /// reads only as much of a RAW as the thumbnail needs. False when it
     /// can't be made.
-    private func developThumbnail(_ file: PhotoFile, look: String, lookup: SidecarLookup?, paths: EnginePaths) async -> Bool {
+    private func developThumbnail(_ file: PhotoFile, look: String, lookup: SidecarLookup?, paths: EnginePaths, slot: Int) async -> Bool {
         let item = file.url, photo = item.photoFile
         var state: EditState, matchSolved: Bool
         /// Stores a solved match with the stored edits: their new look, or nil.
@@ -1945,8 +1970,8 @@ import UserNotifications
         let raw = Self.rawExtensions.contains(photo.pathExtension.lowercased())
         let engine: EngineClient
         do {
-            if let running = thumbnailEngine { engine = running } else {
-                engine = try EngineClient(paths: paths, quality: .utility); thumbnailEngine = engine
+            if let running = thumbnailEngines[slot] { engine = running } else {
+                engine = try EngineClient(paths: paths, quality: .utility); thumbnailEngines[slot] = engine
             }
         } catch { return false }
         thumbnailGeneration += 1
@@ -3817,7 +3842,8 @@ import UserNotifications
         cancelBrightnessMatch()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
-        thumbnailTask?.cancel(); thumbnailIdle?.cancel(); thumbnailEngine?.stop()
+        thumbnailTask?.cancel(); thumbnailIdle?.cancel()
+        thumbnailsDeveloping.values.forEach { $0.task.cancel() }; thumbnailEngines.values.forEach { $0.stop() }
         exportJob?.cancel(); batch?.job?.cancel(); batchEngine?.stop(); engine?.stop()
     }
     private func report(_ error: Error) { self.error = error.localizedDescription; status = "Could not complete the operation" }
