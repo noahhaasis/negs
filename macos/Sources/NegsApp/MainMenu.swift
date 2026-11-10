@@ -241,7 +241,9 @@ import SwiftUI
         guard takesRatingKeys(window) else { return false }
         var view = window?.firstResponder as? NSView
         while let next = view {
+            // A list, or a focused control that deletes its own (a preset tile).
             if next is NSTableView { return false }
+            if let anchor = next as? FocusAnchorView, anchor.delete != nil { return false }
             view = next.superview
         }
         return true

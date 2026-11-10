@@ -94,6 +94,7 @@ struct FocusBox: View {
 /// the control's action on Space or Return.
 final class FocusAnchorView: NSView, InkFocusTarget {
     var activate: (() -> Void)?
+    var delete: (() -> Void)?
     var enabled = true
     var takesKeyboardFocus: Bool { enabled }
     private let box = CAShapeLayer()
@@ -125,6 +126,7 @@ final class FocusAnchorView: NSView, InkFocusTarget {
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 49, 36, 76: activate?()
+        case 51, 117 where delete != nil: delete?()
         case 48: if let root = InkKeyLoop.root(of: self) { InkKeyLoop.advance(in: root, from: self, forward: !event.modifierFlags.contains(.shift)) }
         case 125: if let root = InkKeyLoop.root(of: self) { InkKeyLoop.advance(in: root, from: self, forward: true) }
         case 126: if let root = InkKeyLoop.root(of: self) { InkKeyLoop.advance(in: root, from: self, forward: false) }
@@ -135,17 +137,22 @@ final class FocusAnchorView: NSView, InkFocusTarget {
 
 private struct FocusAnchor: NSViewRepresentable {
     let activate: (() -> Void)?
+    var delete: (() -> Void)?
     func makeNSView(context: Context) -> FocusAnchorView { FocusAnchorView() }
     func updateNSView(_ view: FocusAnchorView, context: Context) {
         view.activate = activate
+        view.delete = delete
         view.enabled = context.environment.isEnabled
     }
 }
 
 extension View {
     /// Takes keyboard focus, shows the cream box only when the keyboard
-    /// moved it there, and runs `activate` on Space or Return.
-    func inkFocus(activate: (() -> Void)? = nil) -> some View { background(FocusAnchor(activate: activate)) }
+    /// moved it there, and runs `activate` on Space or Return (and `delete`,
+    /// if given, on ⌫ or ⌦).
+    func inkFocus(activate: (() -> Void)? = nil, delete: (() -> Void)? = nil) -> some View {
+        background(FocusAnchor(activate: activate, delete: delete))
+    }
 
     /// The pencil under a word, 5 pt tall, just under its baseline.
     func pencilUnderline(_ shown: Bool = true, height: CGFloat = 5, offset: CGFloat = 4) -> some View {

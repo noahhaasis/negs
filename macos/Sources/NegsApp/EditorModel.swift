@@ -218,6 +218,12 @@ import UserNotifications
     @ObservationIgnored private var checkingPresets = 0
     /// The preset whose name is being edited in the list.
     var renamingPreset: URL?
+    /// The preset applied last to each photograph this session, which the
+    /// Presets pane rings (§4.12). By the photograph's item, so a duplicate
+    /// has its own.
+    private(set) var appliedPresets: [URL: URL] = [:]
+    /// The preset applied last to the photograph on screen.
+    var appliedPreset: URL? { sourceItem.flatMap { appliedPresets[$0] } }
     /// A preset New Preset just made: Escape while naming it removes it.
     @ObservationIgnored private var unnamedPreset: URL?
     var zoomCommand = UUID()
@@ -4021,6 +4027,7 @@ import UserNotifications
                     var next = state
                     next.film = film; next.paper = paper; next.params = result["params"]
                     apply(next, action: "Apply Preset “\(preset.name)”")
+                    notePresetApplied(preset.url)
                     status = "Applied preset “\(preset.name)”"
                     return
                 }
@@ -4036,12 +4043,14 @@ import UserNotifications
     func newPreset() {
         guard canChangePresets, let engine else { return }
         showPane(.presets)
-        let snapshot = state, name = PresetName.from(fileName: filmName)
+        let snapshot = state, name = PresetName.from(fileName: filmName), snapshotItem = sourceItem
         Task {
             do {
                 let (_, result) = try await engine.request(["command": .string("preset_export"), "film": .string(snapshot.film),
                                                             "paper": .string(snapshot.paper), "params": snapshot.params])
                 let file = try await presetLibrary.add(Data(result["text"].string.utf8), name: name)
+                // The photograph's settings are this preset's: it's the one ringed.
+                notePresetApplied(file.url, to: snapshotItem)
                 await refreshPresets()
                 unnamedPreset = file.url
                 renamingPreset = file.url
@@ -4116,6 +4125,7 @@ import UserNotifications
         renamingPreset = nil
         guard preset.url == unnamedPreset else { return }
         unnamedPreset = nil
+        forgetApplied(preset.url)
         Task {
             do { try await presetLibrary.delete(preset) } catch { report(error) }
             await refreshPresets()
@@ -4129,11 +4139,23 @@ import UserNotifications
         Task {
             do {
                 let renamed = try await presetLibrary.rename(preset, to: name)
+                appliedPresets = appliedPresets.mapValues { $0 == preset.url ? renamed.url : $0 }
                 // Same file, same thumbnail: no blank tile while it's renamed.
                 previews.moveTile(preset: preset.url, to: renamed.url)
             } catch { report(error) }
             await refreshPresets()
         }
+    }
+
+    /// Notes `preset` as the one applied last to `item` (the photograph on
+    /// screen when nil).
+    func notePresetApplied(_ preset: URL, to item: URL? = nil) {
+        guard let item = item ?? sourceItem else { return }
+        appliedPresets[item] = preset
+    }
+
+    private func forgetApplied(_ preset: URL) {
+        appliedPresets = appliedPresets.filter { $0.value != preset }
     }
 
     func deletePreset(_ preset: PresetFile) {
@@ -4143,7 +4165,10 @@ import UserNotifications
                 detail: "This can’t be undone. Photographs edited with it keep their settings.",
                 buttons: [.init(title: "Delete", role: .destructive), .init(title: "Cancel", role: .cancel)]))
             guard answer.button == 0 else { return }
-            do { try await presetLibrary.delete(preset) } catch { report(error) }
+            do {
+                try await presetLibrary.delete(preset)
+                forgetApplied(preset.url)
+            } catch { report(error) }
             await refreshPresets()
         }
     }
