@@ -1720,7 +1720,7 @@ import UserNotifications
     /// Moves when an item's edited thumbnail is made, so its cells read it.
     private(set) var thumbnailVersions: [URL: Int] = [:]
     /// Items in the strip or grid now: developed first.
-    @ObservationIgnored private var thumbnailsOnScreen: Set<URL> = []
+    @ObservationIgnored private(set) var thumbnailsOnScreen: Set<URL> = []
     /// Each item's look last checked for a thumbnail, and whether it had one.
     @ObservationIgnored private var thumbnailsChecked: [URL: (look: String, present: Bool)] = [:]
     /// Looks that failed to develop this session, not tried again.
