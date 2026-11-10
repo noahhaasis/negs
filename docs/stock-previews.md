@@ -75,6 +75,16 @@ and open items:
   stock's calibration (exposure, grain, post…) re-render in ~7–10 ms per tile.
 - `{"command": "release_thumbnails"}` → `{}` frees those caches.
 - Use the existing render timeout. A thumbnail takes ≤ ~70 ms on the Linux box.
+- `"reduced_decode": true` (optional, for the library's thumbnails) reads a RAW only as large
+  as the frame needs (the crop filling `long_side`, at most `THUMBNAIL_FRAME_MAX`), through
+  the same Apple processing (`CIRAWFilter.scaleFactor`). The reply's `source_width` and
+  `source_height` stay the whole photograph's, and `reduced_decode` says whether the read
+  was reduced. A held reduced source is decoded again for anything that needs more of it;
+  a whole one serves reduced requests as it is. Not reduced: non-RAW files, RAWs rawler
+  reads (shrunk afterwards as before), and RAWs Apple can't lens-correct for which Negs has
+  its own profile (it corrects in sensor pixels). Unedited 24 MP NEF, 512 px, M1 Pro:
+  ~480 → ~240 ms, helper peak 1,050 → 275 MB; whole-frame brightness within 0.004 stops,
+  8×8 regions within 0.02 stops.
 
 Engine change that all platforms get for free: the input gamut compression baked into the
 spectral LUT (`spektrafilm-core/src/input_gamut.rs`, `remap`) now runs rows in parallel.

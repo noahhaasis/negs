@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 final class EditedThumbnailStore: @unchecked Sendable {
     /// The thumbnail's long side, border included.
     static let longSide: CGFloat = 512
-    static let limit = 500 * 1024 * 1024
+    static let limit = 1024 * 1024 * 1024
     /// The app's; under XCTest a temporary folder, never the user's Caches.
     static let shared = NSClassFromString("XCTestCase") != nil
         ? EditedThumbnailStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("negs-thumbnails-\(UUID().uuidString)", isDirectory: true))
@@ -71,7 +71,9 @@ final class EditedThumbnailStore: @unchecked Sendable {
     /// The thumbnail at most `maxPixels` on its long side; nil if there's none.
     func image(_ key: String, maxPixels: Int) -> CGImage? {
         let file = url(for: key)
-        guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+        // Every cell asks before its thumbnail is made; ImageIO would log each miss.
+        guard FileManager.default.fileExists(atPath: file.path),
+              let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceThumbnailMaxPixelSize: maxPixels,
@@ -104,18 +106,31 @@ final class EditedThumbnailStore: @unchecked Sendable {
     /// Removes the least recently used thumbnails while there are more than
     /// `limit` bytes, down to three quarters of it.
     func prune(limit: Int = EditedThumbnailStore.limit) {
-        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return }
-        var entries = files.compactMap { file -> (url: URL, size: Int, date: Date)? in
-            guard let values = try? file.resourceValues(forKeys: Set(keys)) else { return nil }
-            return (file, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
-        }
+        var entries = entries()
         var total = entries.reduce(0) { $0 + $1.size }
         guard total > limit else { return }
         entries.sort { $0.date < $1.date }
         for entry in entries where total > limit * 3 / 4 {
             try? FileManager.default.removeItem(at: entry.url)
             total -= entry.size
+        }
+    }
+
+    /// The bytes the thumbnails take.
+    func size() -> Int { entries().reduce(0) { $0 + $1.size } }
+
+    /// Removes every thumbnail. One being written (a hidden temporary file)
+    /// is kept, so its save still succeeds.
+    func removeAll() {
+        for entry in entries() { try? FileManager.default.removeItem(at: entry.url) }
+    }
+
+    private func entries() -> [(url: URL, size: Int, date: Date)] {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return [] }
+        return files.compactMap { file in
+            guard let values = try? file.resourceValues(forKeys: Set(keys)) else { return nil }
+            return (file, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
         }
     }
 }

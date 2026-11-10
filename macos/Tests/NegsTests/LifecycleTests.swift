@@ -12,8 +12,8 @@ import XCTest
         let first = try makeFixture(), second = try makeFixture()
         defer { try? FileManager.default.removeItem(at: first); try? FileManager.default.removeItem(at: second) }
         model.open(first)
-        model.chooseFilm("kodak_portra_400")
-        let film = model.film, paper = model.paper
+        // Not the film new photographs open with.
+        model.chooseFilm(model.newPhotoFilm == "kodak_portra_400" ? "kodak_ektar_100" : "kodak_portra_400")
         model.set("prep.highlights", .number(-80))
         model.set("prep.color_boost", .number(35))
         model.set("camera.exposure_compensation_ev", .number(1.5))
@@ -34,8 +34,9 @@ import XCTest
         for path in ["prep.highlights", "prep.color_boost", "camera.exposure_compensation_ev", "post.contrast", "io.raw_white_balance.temperature", "io.raw_white_balance.mode"] {
             XCTAssertEqual(model.value(path), model.defaultValue(path), path)
         }
-        XCTAssertEqual(model.film, film)
-        XCTAssertEqual(model.paper, paper)
+        // Settings › New photographs' film and paper, not the last photograph's.
+        XCTAssertEqual(model.film, model.newPhotoFilm)
+        XCTAssertEqual(model.paper, model.newPhotoPaper)
         XCTAssertEqual(model.value("camera.film_format_mm"), model.defaultValue("camera.film_format_mm"))
         XCTAssertFalse(model.customFilmFormat, "A new photograph also forgets Film format › Custom")
         XCTAssertFalse(undo.canUndo, "A new photograph cannot undo edits from the previous one")

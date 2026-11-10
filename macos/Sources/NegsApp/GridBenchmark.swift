@@ -13,7 +13,13 @@ import QuartzCore
 /// SPEKTRAFILM_BENCHMARK_GRID_FILL: waits for the first edited thumbnail the
 /// background helper makes, copies it to every other edited item's name,
 /// and quits, so a later run scrolls with every edited thumbnail on disk
-/// without developing them all. Compiled only with -DSPEKTRAFILM_BENCHMARK.
+/// without developing them all.
+///
+/// SPEKTRAFILM_BENCHMARK_THUMBNAILS: opens the grid in the same window and
+/// times the background helper developing the folder's thumbnails: until
+/// the cells first on screen have theirs, each tenth of the folder, and the
+/// whole, with the app's memory. Quits once every photograph has one, or
+/// after a minute without a new one. Compiled only with -DSPEKTRAFILM_BENCHMARK.
 @MainActor final class GridBenchmark: NSObject {
     private let model: EditorModel
     private let segments: [(speed: Double, seconds: Double)]
@@ -31,6 +37,7 @@ import QuartzCore
         let environment = ProcessInfo.processInfo.environment
         guard !LaunchBenchmark.enabled else { return }
         if environment["SPEKTRAFILM_BENCHMARK_GRID_FILL"] != nil { return fill(model) }
+        if environment["SPEKTRAFILM_BENCHMARK_THUMBNAILS"] != nil { return thumbnails(model) }
         guard let spec = environment["SPEKTRAFILM_BENCHMARK_GRID"] else { return }
         let segments = spec.split(separator: ",").compactMap { part -> (Double, Double)? in
             let values = part.split(separator: ":").compactMap { Double($0) }
@@ -195,6 +202,48 @@ import QuartzCore
                     if (try? FileManager.default.copyItem(at: source, to: store.url(for: key))) != nil { copied += 1 }
                 }
                 report("filled \(copied) edited thumbnails from \(made.lastPathComponent)")
+                NSApp.terminate(nil)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private static func thumbnails(_ model: EditorModel) {
+        let launched = Date()
+        var shown: Date?, screen: Set<URL> = [], screenDone = false, tenth = 1
+        var lastMade = 0, lastChange = Date(), peak = 0
+        let timer = Timer(timeInterval: 0.25, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                let library = model.library
+                guard let start = shown else {
+                    guard model.ready, library.summariesLoaded, model.thumbnailStamp != nil, model.previewCurrent || model.renderFailed else { return }
+                    if let window = NSApp.windows.first(where: { $0.isVisible && $0.contentViewController != nil }) {
+                        window.setFrame(NSRect(x: 40, y: 40, width: 1400, height: 900), display: true)
+                    }
+                    model.showGrid()
+                    shown = Date()
+                    report("grid shown \(Int(Date().timeIntervalSince(launched) * 1000)) ms after launch, \(library.items.count) items, \(library.looks.count) edited")
+                    return
+                }
+                let elapsed = Date().timeIntervalSince(start), versions = model.thumbnailVersions
+                let made = versions.count, total = library.items.count
+                peak = max(peak, footprint())
+                // The cells the grid laid out first (before then, the strip's).
+                if screen.isEmpty, elapsed > 2 { screen = model.thumbnailsOnScreen }
+                if !screenDone, !screen.isEmpty, screen.allSatisfy({ versions[$0] != nil }) {
+                    screenDone = true
+                    report("the \(screen.count) first on screen in \(Int(elapsed * 1000)) ms")
+                }
+                while tenth <= 10, made * 10 >= total * tenth {
+                    report(String(format: "%d of %d in %.1f s, %.0f ms each, %.0f MB", made, total, elapsed, elapsed * 1000 / Double(max(made, 1)), Double(footprint()) / 1e6))
+                    tenth += 1
+                }
+                if made != lastMade { lastMade = made; lastChange = Date() }
+                let finished = library.items.allSatisfy { versions[$0.url] != nil }
+                guard finished || Date().timeIntervalSince(lastChange) > 60 else { return }
+                if !finished { report("stopped at \(made) of \(total): a minute without a new one") }
+                report(String(format: "memory: peak %.0f MB, %.0f MB at the end", Double(peak) / 1e6, Double(footprint()) / 1e6))
+                timer.invalidate()
                 NSApp.terminate(nil)
             }
         }

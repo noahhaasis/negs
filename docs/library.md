@@ -28,21 +28,38 @@ Photo › Advance After Rating moves on to the next photograph after each key.
 Thumbnails show the stars at the bottom, a flag or ✕ at the top left, and a
 sliders mark at the top right once a photograph has edits. Rejects are greyed.
 
-A photograph you've edited shows as developed: cropped, turned and inside its
-border, as in the edit view. Its thumbnail is made from the preview on screen
-when you leave it for another photograph or the grid, so it costs no extra
-render. Other edited photographs, such as after a paste or with edits from
-another Mac, are developed in the background one at a time, and Negs waits
-while you edit. A pasted Match camera brightness is solved then too, as
-opening the photograph would. Until a thumbnail is ready the camera's preview
-shows. Thumbnails are kept in `~/Library/Caches` (up to about 500 MB, the
-least recently used go first) and are safe to delete.
+Every photograph shows as developed, as Lightroom shows its own renders: an
+edited one with its edits (cropped, turned and inside its border, as in the edit
+view), one you haven't edited as opening it would, with the film and paper of
+Settings › New photographs. The open photograph's thumbnail is made from the
+preview on screen when you leave it for another photograph or the grid, so it
+costs no extra render. The rest of the folder is developed in the background one
+at a time, those on screen first, and Negs waits while you edit. A pasted Match
+camera brightness is solved then too, from the whole photograph, and stored, as
+opening it would. An unedited photograph's match is solved on the small read the
+thumbnail needs and stored nowhere. Thumbnails read only as much of a RAW as they
+need, except to solve a match that's stored: about 0.43 s each for a 24 MP NEF
+on an M1 Pro, half of it the match, and two at a time, each in a helper of its
+own, on a Mac with 8 cores and 16 GB or more (see [Large folders](#large-folders)). A new default film or paper, or turning the match for new
+photographs on or off, develops the unedited photographs again; edited ones stay.
+Until a thumbnail is ready the camera's preview shows. Thumbnails are kept in
+`~/Library/Caches` (up to 1 GB, the least recently used go first) and are safe to
+delete: Settings › Empty Thumbnail Cache shows their size and removes them, and
+the open folder's are developed again in the background. They're about 48 KB each (Z 6 NEFs with the default film, grain and
+halation: 17–92 KB, 72 KB for nine in ten), so 1 GB holds about 21,000 and a
+folder of 1,000 takes about 50 MB. Past the limit the cache is cut to three
+quarters, about 16,000. After a new default film the old unedited thumbnails are
+never shown again, so they're the first to go.
 
 ## Edits per photograph
 
 Opening a photograph shows its own edits. One you have never edited starts from
-the defaults, with the film, paper, Image Size and output colour of the
-photograph before it. Its Match camera brightness is solved when it opens and
+the defaults, with the film and paper of Settings › New photographs (until you
+choose, the defaults table's Kodak Gold 200 on Portra Endura) and the Image Size
+and output colour of the photograph before it. Changing that film or paper
+changes the open photograph too while it has no edits of its own, without an
+undo step; edited photographs keep theirs, since a sidecar always names its film
+and paper. Its Match camera brightness is solved when it opens and
 written nowhere beside it; the session keeps the open photograph's, so
 relaunching on it doesn't solve it again, unless the file or the settings the
 match depends on changed.
@@ -111,8 +128,8 @@ as from the edit view, another through the same Save dialog.
 Each photograph exports with its own edits as they were when you chose Export,
 so editing meanwhile changes nothing queued, and each file is the same, byte for
 byte, as exporting that photograph alone. A photograph you never edited
-exports as opening it would show it: the defaults, with the open photograph's
-film, paper, image size and output colour. If that includes *Match camera
+exports as opening it would show it: the defaults, with the default film and
+paper and the open photograph's image size and output colour. If that includes *Match camera
 brightness*, it's solved just before the photograph exports. Photographs are
 exported one at a time, in the background, while you keep working, and the Mac
 doesn't sleep while idle meanwhile.
@@ -195,6 +212,63 @@ No frame took longer than 26 ms (three refreshes); the main run loop's longest
 pass was 42 ms. At 1,500 pt/s and faster the cells show their placeholder while
 they pass and fill in within about a second of stopping. Memory goes from about
 430 MB to a peak of 555–575 MB while scrolling.
+
+### Every photograph developed
+
+Measured on 2026-11-10 (ticket 35) on the same M1 Pro on mains power, against
+main as it was before (`1aa0fb6`). The folders are APFS clones of 109 Z 6 NEFs in
+turn (24 MP), with sidecars as above (799 of 5,000 edited, their match solved);
+the match for new photographs is on, as it is by default. Each NEF is read 9 or
+46 times, so the file cache is warmer than with a real shoot.
+
+**Developing a folder** from an empty cache, while the grid shows:
+
+| Folder | Time | Each | Helper (peak) | App (peak) | On disk |
+| --- | --- | --- | --- | --- | --- |
+| 1,000 | 9.7 min | 0.58 s | 540 MB | 480 MB | 48 MB |
+| 5,000 | 55.5 min | 0.67 s | 550 MB | 470 MB | 240 MB |
+| 1,000, now | 4.3 min | 0.26 s | 640 + 520 MB | 460 MB | 48 MB |
+
+An unedited photograph was about half a second: the reduced read and a develop
+220 ms, its match 280 ms (the RAW's preview colour space 50 ms, the camera's
+preview 35 ms, the placement's trial renders 200 ms), its render 20 ms and
+saving it 3 ms. The helper runs at utility priority and gives way to anything
+else the Mac is doing, which is why the 5,000, measured with more else
+running, came out slower per photograph.
+
+Two changes since (the last row). The decode the match is solved on is no
+longer developed, and the preview's colour space is read on a second thread
+while the RAW decodes: on 100 photographs, alternating, 485–500 ms each before
+and 425–430 after, the same solved match, the helper about 40 MB larger. Then
+two helpers at once, on a Mac with at least 8 cores and 16 GB: 422–442 ms each
+with one and 237–260 with two (1.7×; they share the GPU), the second helper
+490–790 MB at its peak. The editor's own helper is unchanged
+(1.1–1.6 GB at its peak in both). Main's background helper, reading edited
+photographs whole, peaked at 1.0–1.2 GB.
+
+**Launch** doesn't get slower: 52 alternating launches of each build with each
+folder and 12 with a single photograph, window, photograph, preview and settled
+times all within the run-to-run spread (each set's window median within 21 ms
+of main's, either way). With two helpers, 12 more of each against main: each
+folder's window, preview and settled medians within 56 ms, either way.
+With every photograph to develop, the background helper waits until the open
+photograph's preview is in, and the folder's scan for the next thumbnail runs
+off the main thread.
+
+**Scrolling the grid** of 5,000 while its thumbnails are being developed (three
+runs each, missed frames at 120 Hz): main develops only the 799 edited ones, from
+the whole RAW; every photograph now, from the reduced read.
+
+| Speed | Main | Every photograph |
+| --- | --- | --- |
+| 600 pt/s | 0–0.2% | 0% |
+| 1,500 pt/s | 0–0.2% | 0–0.1% |
+| 4,000 pt/s | 1.5–2.1% | 0.5–0.8% |
+
+The app's memory while scrolling is about 25 MB more (a peak of 606–608 MB
+against 580–591 MB). With two helpers (three alternating runs each), 4,000 pt/s
+missed 0.8–1.7% against 0.4–1.5% with one, and 600 and 1,500 pt/s 0–0.1%; the
+main thread's busy passes were the same.
 
 ## Selecting
 

@@ -94,7 +94,10 @@ import SwiftUI
         super.init(window: window)
         shouldCascadeWindows = false
 
-        let toolbar = NSToolbar(identifier: "editor")
+        // Its own identifier: toolbars sharing one copy each other's inserts
+        // and removals, but the items follow this window's mode. One left
+        // behind without its delegate can't make them and throws.
+        let toolbar = NSToolbar(identifier: "editor-\(UUID().uuidString)")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.centeredItemIdentifiers = [.zoom, .edit, .gridSize]

@@ -21,6 +21,8 @@ struct NativeImage {
     lens_correction_supported: u32,
     orientation: u32,
     oriented: u32,
+    full_width: u32,
+    full_height: u32,
     version: [c_char; 32],
     error: [c_char; 768],
 }
@@ -33,6 +35,8 @@ unsafe extern "C" {
         as_shot: i32,
         lens_correction: i32,
         defer_orientation: i32,
+        max_long_side: u32,
+        own_lens_profile: i32,
         output: *mut NativeImage,
     ) -> i32;
     fn sf_apple_raw_free(pixels: *mut f32);
@@ -72,8 +76,11 @@ impl RawDecoder for AppleRawVersion {
     /// coordinates before orientation as on the rawler path.
     fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
         options.white_balance.validate()?;
-        // Read before decoding, so Apple can leave such a file unoriented.
-        let own_lens = if options.lens_correction.enabled { crate::lens::read_profile(path) } else { None };
+        // Read before decoding, so Apple can leave such a file unoriented, and
+        // so a reduced read stays whole for a file Negs corrects itself.
+        let profile_read = options.lens_correction.enabled || options.max_long_side > 0;
+        let profile = if profile_read { crate::lens::read_profile(path) } else { None };
+        let own_lens = profile.is_some() && options.lens_correction.enabled;
         let file = path;
         let path = CString::new(path.as_os_str().as_bytes())?;
         let mut native = NativeImage {
@@ -84,6 +91,8 @@ impl RawDecoder for AppleRawVersion {
             lens_correction_supported: 0,
             orientation: 1,
             oriented: 0,
+            full_width: 0,
+            full_height: 0,
             version: [0; 32],
             error: [0; 768],
         };
@@ -94,7 +103,9 @@ impl RawDecoder for AppleRawVersion {
                 options.apply_orientation.into(),
                 (options.white_balance.mode == crate::RawWhiteBalanceMode::AsShot).into(),
                 options.lens_correction.enabled.into(),
-                own_lens.is_some().into(),
+                own_lens.into(),
+                options.max_long_side,
+                profile.is_some().into(),
                 &mut native,
             )
         };
@@ -131,6 +142,9 @@ impl RawDecoder for AppleRawVersion {
         // Apple rotated the pixels by a quarter turn, so its unoriented extent
         // is transposed.
         let transposed = native.oriented != 0 && native.orientation >= 5;
+        // Upright, as the image will be once `pending` is applied.
+        let full = if pending >= 5 { (native.full_height, native.full_width) } else { (native.full_width, native.full_height) };
+        let reduced_from = ((native.full_width, native.full_height) != (native.width, native.height)).then_some(full);
         let decoder_version = Some(unsafe { CStr::from_ptr(native.version.as_ptr()) }
             .to_string_lossy().into_owned());
         drop(native);
@@ -143,7 +157,7 @@ impl RawDecoder for AppleRawVersion {
         let data: Vec<Scalar> = rgb.into_par_iter().map(from_f32).collect();
         let mut image = ImageBuf::from_data(width, height, data);
         if !lens_correction_supported {
-            let profile = if options.lens_correction.enabled { own_lens } else { crate::lens::read_profile(file) };
+            let profile = if profile_read { profile } else { crate::lens::read_profile(file) };
             if let Some(profile) = profile {
                 let (w, h) = (image.width as usize, image.height as usize);
                 let size = if transposed { (h, w) } else { (w, h) };
@@ -158,6 +172,7 @@ impl RawDecoder for AppleRawVersion {
         }
         Ok(RawImage {
             image: image.oriented(pending),
+            reduced_from,
             lens_correction_supported,
             decoder_version,
         })

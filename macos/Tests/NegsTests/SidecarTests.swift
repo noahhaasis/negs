@@ -291,10 +291,13 @@ final class SidecarFormatTests: XCTestCase {
     /// Settings this suite changes, restored afterwards.
     private func preferences(match: Bool) {
         let defaults = UserDefaults.standard
-        let saved = ["autoPlaceNewImages", "sidecars"].map { ($0, defaults.object(forKey: $0)) }
+        let stocks = [EditorModel.newPhotoFilmKey, EditorModel.newPhotoPaperKey]
+        let saved = (["autoPlaceNewImages", "sidecars"] + stocks).map { ($0, defaults.object(forKey: $0)) }
         addTeardownBlock { for (key, value) in saved { defaults.set(value, forKey: key) } }
         defaults.set(match, forKey: "autoPlaceNewImages")
         defaults.set(true, forKey: "sidecars")
+        // New photographs start with the defaults table's film and paper.
+        for key in stocks { defaults.removeObject(forKey: key) }
     }
 
     private func model(store: SidecarStore) async -> EditorModel {
@@ -335,8 +338,8 @@ final class SidecarFormatTests: XCTestCase {
         XCTAssertEqual(saved.variants[0].edits?["film"], .string("kodak_portra_400"))
         XCTAssertEqual(saved.variants[0].edits?["params.prep.highlights"], .number(-80))
         XCTAssertEqual(saved.variants[0].edits?["border.enabled"], .bool(true))
-        // A photograph without a sidecar keeps the film, not the edits.
-        XCTAssertEqual(model.film, "kodak_portra_400")
+        // A photograph without a sidecar has the default film, not the last one or its edits.
+        XCTAssertEqual(model.film, "kodak_gold_200")
         XCTAssertEqual(model.value("prep.highlights"), model.defaultValue("prep.highlights"))
         XCTAssertEqual(model.imageRotation, 0)
         XCTAssertFalse(model.border.enabled)
@@ -355,6 +358,74 @@ final class SidecarFormatTests: XCTestCase {
         XCTAssertEqual(model.value("prep.shadows"), .number(30))
         try await waitUntil { model.previewCurrent || model.error != nil }
         XCTAssertNil(model.error)
+    }
+
+    /// Settings › New photographs: a photograph without edits opens with the
+    /// default film and paper, not the last photograph's, and the open one
+    /// follows a new default until it's edited. An edited photograph keeps its
+    /// film and paper whatever the default becomes, even one it shared with
+    /// the old default: its sidecar always names them.
+    func testNewPhotographsOpenWithTheDefaultFilmAndPaper() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
+        preferences(match: false)
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = try fixture(in: dir, "first.png"), second = try fixture(in: dir, "second.png"), third = try fixture(in: dir, "third.png")
+        let store = SidecarStore()
+        let model = await model(store: store)
+        let table = try SidecarDefaults.load(version: SidecarDefaults.latest, data: data)
+        XCTAssertEqual([model.newPhotoFilm, model.newPhotoPaper], [table.film, table.paper])
+
+        // first: edited, on the default film.
+        model.open(first)
+        XCTAssertEqual([model.film, model.paper], [table.film, table.paper])
+        model.set("prep.contrast", .number(20))
+        // second: edited, on another film.
+        model.open(second)
+        model.chooseFilm("kodak_ektar_100")
+        model.set("prep.contrast", .number(10))
+        // third: never edited. Not the last photograph's film.
+        model.open(third)
+        XCTAssertEqual([model.film, model.paper], [table.film, table.paper])
+
+        // A new default reaches the open, unedited photograph, as no edit.
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        undo.beginUndoGrouping()
+        model.setNewPhotoPaper("kodak_supra_endura")
+        model.setNewPhotoFilm("kodak_portra_400")
+        undo.endUndoGrouping()
+        XCTAssertEqual([model.newPhotoFilm, model.newPhotoPaper], ["kodak_portra_400", "kodak_portra_endura"], "the film brings its own paper")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: EditorModel.newPhotoFilmKey), "kodak_portra_400")
+        XCTAssertEqual([model.film, model.paper], ["kodak_portra_400", "kodak_portra_endura"])
+        if undo.canUndo { undo.undo() }
+        XCTAssertEqual(model.film, "kodak_portra_400", "not an undo step")
+        model.undoManager = nil
+        model.setNewPhotoPaper("kodak_supra_endura")
+        XCTAssertEqual([model.film, model.paper], ["kodak_portra_400", "kodak_supra_endura"])
+        await model.flushSidecars()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: third).path), "following the default isn't editing")
+
+        // Edited photographs keep theirs, open or not.
+        model.open(first)
+        XCTAssertEqual([model.film, model.paper], [table.film, table.paper])
+        XCTAssertEqual(model.value("prep.contrast"), .number(20))
+        model.setNewPhotoFilm("kodak_gold_200")
+        model.setNewPhotoFilm("kodak_portra_400")
+        XCTAssertEqual(model.film, table.film, "an edited photograph doesn't follow")
+        model.open(second)
+        XCTAssertEqual(model.film, "kodak_ektar_100")
+        await store.flush()
+        XCTAssertEqual(try store.read(photo: first)?.variants.first?.edits?["film"], .string(table.film))
+        XCTAssertEqual(try store.read(photo: first)?.variants.first?.edits?["paper"], .string(table.paper))
+
+        // Reset Edits: as never edited, with the default.
+        model.resetEdits(of: [second])
+        XCTAssertEqual([model.film, model.paper], ["kodak_portra_400", "kodak_portra_endura"])
+        // A default this version lacks falls back to the table's.
+        UserDefaults.standard.set("dyeworks_imaginary", forKey: EditorModel.newPhotoFilmKey)
+        let other = await self.model(store: SidecarStore())
+        try await waitUntil { !other.films.isEmpty }
+        XCTAssertEqual(other.newPhotoFilm, table.film)
     }
 
     func testEditsAreWrittenASecondAfterTheLastOneAndRemovedWhenUndone() async throws {

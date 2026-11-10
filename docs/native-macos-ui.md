@@ -284,7 +284,7 @@ drags Exposure instead of print exposure (its 0.1 EV steps repeat values, so
 fewer frames are requested), and `SPEKTRAFILM_BENCHMARK_SHOTS=/tmp/negs-drag`
 saves window screenshots during the drag and after letting go.
 
-The same build has three more benchmarks, each with its own variable. Give
+The same build has four more benchmarks, each with its own variable. Give
 each run a home of its own (`HOME` and `CFFIXED_USER_HOME`); the app's
 `NegsApp` defaults still land in your own domain, so export them first and
 afterwards delete the keys the run added and import them back.
@@ -306,6 +306,11 @@ afterwards delete the keys the run added and import them back.
   background helper makes, copies it under every other edited photograph's
   name and quits, so a later grid run scrolls with every edited thumbnail on
   disk without developing them all.
+- `SPEKTRAFILM_BENCHMARK_THUMBNAILS=1` opens the grid the same way and times the
+  background helper developing the folder's thumbnails: until the cells first
+  on screen have theirs, each tenth of the folder, and the whole, with the app's
+  memory. Start from an empty home for a cold cache. It quits once every
+  photograph has one, or after a minute without a new one.
 
 The phase 8 numbers for the library (ticket 30) are in
 [library.md](library.md#large-folders).

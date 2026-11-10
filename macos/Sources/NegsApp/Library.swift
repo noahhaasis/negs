@@ -156,7 +156,9 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     @ObservationIgnored var sidecarChanged: ((URL) -> Void)?
     /// Told when the filter changes, so the selection can follow it.
     @ObservationIgnored var filterChanged: (() -> Void)?
-    /// Told when items' stored edits changed, so their thumbnails follow.
+    /// Told when items' stored edits changed, items came, or their sidecars
+    /// were first read, so their thumbnails follow: an item without edits
+    /// gets one once it's known to have none.
     @ObservationIgnored var looksChanged: (() -> Void)?
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -308,6 +310,10 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     }
 
     private func refresh(_ directory: URL) async {
+        let filesBefore = files, looksBefore = looks, summariesBefore = summaries
+        defer {
+            if self.directory == directory, files != filesBefore || looks != looksBefore || summaries != summariesBefore { looksChanged?() }
+        }
         let scan = Task.detached(priority: .utility) {
             (try PhotoFolder.listing(in: directory), !PhotoLibrary.canWrite(in: directory))
         }
@@ -350,7 +356,6 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         }.value
         guard self.directory == directory, self.store === store, !Task.isCancelled else { return }
         var updated = summaries
-        let before = looks
         var notify: [URL] = []
         for (photo, items) in read {
             let known = sidecarFiles.keys.contains(photo)
@@ -363,7 +368,6 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         if updated != summaries { summaries = updated }
         summariesLoaded = true
         for photo in notify { sidecarChanged?(photo) }
-        if looks != before { looksChanged?() }
     }
 
     /// Whether sidecars can be written beside `photo`.
