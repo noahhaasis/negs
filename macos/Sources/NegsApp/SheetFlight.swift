@@ -13,6 +13,11 @@ import SwiftUI
     }
     var strip: [URL: Place] = [:]
     var sheet: [URL: Place] = [:]
+    /// The coordinate space the places are measured in, named at the root of
+    /// the canvas's and the sheet's hosting views. Not `.global`: that's the
+    /// window's, which takes in the title bar above them, so the flights
+    /// landed 38 pt low and the frames jumped up as they took over.
+    static let space = "thumbnailPlaces"
 }
 
 /// Reports a thumbnail's rect and picture as they change, and nil once it's gone.
@@ -23,7 +28,7 @@ struct PlaceReport: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rect in
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ThumbnailPlaces.space)) } action: { rect in
                 self.rect = rect
                 placed(ThumbnailPlaces.Place(rect: rect, image: image))
             }
@@ -114,7 +119,7 @@ struct PlaceReport: ViewModifier {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         container.alphaValue = 1
-        let mask = maskLayer(from: band, to: root.bounds)
+        mask(from: band, to: root.bounds)
         var latest: CFTimeInterval = Self.duration
         for (url, to) in grid {
             let delay = Self.stagger * CFTimeInterval(min(abs((order[url] ?? centre) - centre), Self.staggerSteps))
@@ -135,8 +140,7 @@ struct PlaceReport: ViewModifier {
         }
         CATransaction.commit()
         after(latest + 0.02, generation) { [weak self] in
-            mask.removeFromSuperlayer()
-            self?.container.layer?.mask = nil
+            self?.unmask()
             self?.model.sheetWaiting = []
         }
     }
@@ -159,7 +163,7 @@ struct PlaceReport: ViewModifier {
             self.model.sheetWaiting = carried
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            _ = self.maskLayer(from: self.root.bounds, to: self.band)
+            self.mask(from: self.root.bounds, to: self.band)
             for url in carried {
                 guard let from = grid[url], let to = strip[url], let image = from.image ?? to.image else { continue }
                 let opacity: Float = url == self.model.sourceItem ? 1 : Float(Theme.stripDim)
@@ -192,16 +196,25 @@ struct PlaceReport: ViewModifier {
     /// A rect in the root's coordinates, in the flight layer's.
     private func layerRect(_ rect: CGRect) -> CGRect { flight.convert(rect, from: root) }
 
-    /// Masks the sheet to a rect growing (or shrinking) from `from` to `to`.
-    private func maskLayer(from: CGRect, to: CGRect) -> CALayer {
-        container.wantsLayer = true
-        let mask = CALayer()
-        mask.backgroundColor = NSColor.black.cgColor
-        let start = container.convert(from, from: root), end = container.convert(to, from: root)
-        mask.frame = end
-        container.layer?.mask = mask
-        animate(mask, from: start, to: end, opacity: nil, delay: 0)
-        return mask
+    /// Masks the sheet and the flyers to a rect growing (or shrinking) from
+    /// `from` to `to`. A frame partly past the strip's end is clipped there
+    /// as the strip clips it, rather than drawn over the inspector; on the
+    /// same timing, the flyers otherwise stay inside it all the way.
+    private func mask(from: CGRect, to: CGRect) {
+        for view in [container, flight] {
+            view.wantsLayer = true
+            let mask = CALayer()
+            mask.backgroundColor = NSColor.black.cgColor
+            let start = view.convert(from, from: root), end = view.convert(to, from: root)
+            mask.frame = end
+            view.layer?.mask = mask
+            animate(mask, from: start, to: end, opacity: nil, delay: 0)
+        }
+    }
+
+    private func unmask() {
+        container.layer?.mask = nil
+        flight.layer?.mask = nil
     }
 
     /// A picture flying from `from` to `to` (root coordinates), cropped to fill like the views.
@@ -239,7 +252,7 @@ struct PlaceReport: ViewModifier {
 
     private func cancelFlight() {
         flight.layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
-        container.layer?.mask = nil
+        unmask()
     }
 
     // MARK: Timing

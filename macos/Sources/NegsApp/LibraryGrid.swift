@@ -22,6 +22,8 @@ struct GridSheet: View {
                 SheetFoot(model: model)
             }
             .background(Theme.film)
+            // Where the cells report their places (`SheetFlight`).
+            .coordinateSpace(.named(ThumbnailPlaces.space))
             .overlay(alignment: .topTrailing) { SheetHandle(model: model) }
             .environment(\.colorScheme, .dark)
             .accessibilityElement(children: .contain)

@@ -262,6 +262,8 @@ struct EditorCanvas: View {
                 }
             }
         }
+        // Where the strip's frames report their places (`SheetFlight`).
+        .coordinateSpace(.named(ThumbnailPlaces.space))
         // A photograph or a folder dropped anywhere on the column opens.
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first, url.isFileURL else { return false }
