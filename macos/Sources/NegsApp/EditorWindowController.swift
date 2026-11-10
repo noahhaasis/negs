@@ -140,7 +140,7 @@ import SwiftUI
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
-                self?.alertKeys(event) == true || self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.cropKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true
+                self?.alertKeys(event) == true || self?.holdOriginal(event) == true || self?.trayKeys(event) == true || self?.cropKeys(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true || self?.arrowsToStep(event) == true
             } ? nil : event
         }
         // A click outside the tray keeps the stock being tried (§5.1); so
@@ -282,6 +282,20 @@ import SwiftUI
               event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
               model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
         if model.mode == .grid { model.editCurrent() } else { model.showGrid() }
+        return true
+    }
+
+    /// ← and → in the photograph view open the previous and next photograph
+    /// wherever the keys are, not only once the strip has been clicked; with
+    /// ⇧ they select a range, as in the strip. The inspector's controls and
+    /// text keep their arrows, and the tray its (`trayKeys`).
+    private func arrowsToStep(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.keyCode == 123 || event.keyCode == 124, event.window === window,
+              model.mode == .photo, model.source != nil, !model.cropping,
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              !(window?.firstResponder is NSText) else { return false }
+        if let focused = window?.firstResponder as? NSView, InkKeyLoop.root(of: focused) != nil { return false }
+        model.move(by: event.keyCode == 123 ? -1 : 1, extending: event.modifierFlags.contains(.shift))
         return true
     }
 
