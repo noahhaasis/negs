@@ -472,16 +472,24 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.shownPhotos.map(\.url), [b])
         model.library.filter = LibraryFilter()
 
-        // Arrows: a row is two columns here; down onto a short row lands on its end.
-        model.gridColumns = 2
+        // Arrows: two to a row here (as the sheet lays them out); up and
+        // down land on the nearest across, onto a short row too.
+        model.gridLayout = SheetLayout(ratios: [1.5, 1.5, 1.5], width: 2 * 1.5 * 176 + SheetLayout.gap + 2 * SheetLayout.side, target: 176)
+        XCTAssertEqual(model.gridLayout?.rows.map(\.range), [0..<2, 2..<3])
         model.click(a)
-        model.move(by: 2, extending: false)
+        model.moveRow(by: 1, extending: false)
         XCTAssertEqual(model.selection.current, c)
-        model.move(by: -2, extending: false)
+        model.moveRow(by: -1, extending: false)
         XCTAssertEqual(model.selection.current, a)
+        model.moveRow(by: -1, extending: false)
+        XCTAssertEqual(model.selection.current, a, "nothing above the first row")
         model.move(by: 1, extending: false)
-        model.move(by: 2, extending: false)
+        model.moveRow(by: 1, extending: false)
         XCTAssertEqual(model.selection.current, c)
+        model.moveRow(by: -1, extending: true)
+        XCTAssertEqual(model.selection.selected, [a, b, c], "⇧↑ selects the range up to the photograph above")
+        model.moveRow(by: 1, extending: true)
+        XCTAssertEqual(model.selection.selected, [c])
         model.move(by: -1, extending: true)
         XCTAssertEqual(model.selection.selected, [b, c])
         XCTAssertEqual(model.source, a)
@@ -491,9 +499,12 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.ratingTargets, [c])
 
         // Leaving opens the current photograph and keeps the selection.
+        XCTAssertFalse(model.sheetFolding)
         model.click(b, command: true)
         model.editCurrent()
         XCTAssertEqual(model.mode, .photo)
+        XCTAssertTrue(model.sheetFolding, "the sheet stays drawn until the window has folded it into the strip")
+        model.sheetFolding = false
         XCTAssertEqual(model.source, c)
         XCTAssertEqual(model.selection.selected, [b, c])
         // In the edit view a rating is the open photograph's alone.
@@ -629,7 +640,7 @@ final class LibraryFormatTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         defer { window.orderOut(nil) }
         // The grid collapses the inspector; don't save that for later tests' windows.
-        let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+        let split = try XCTUnwrap((window.contentViewController as? EditorFrame)?.split)
         split.splitView.autosaveName = nil
         window.setFrameAutosaveName("")
         // After the controller, which gives the model the window's.
@@ -988,6 +999,31 @@ final class LibraryFormatTests: XCTestCase {
         await skipped.task?.value
         XCTAssertEqual(skipped.items.first?.status, .skipped)
         await model.flushSidecars()
+    }
+
+    func testThePopoversRuleIsYellowOnlyForWhatExported() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func item(_ name: String, _ status: BatchItem.Status) -> BatchItem {
+            var item = BatchItem(item: dir.appendingPathComponent(name), title: name, state: EditState(), needsMatch: false, storesMatch: false,
+                                 rating: nil, fileName: name, size: nil, look: nil)
+            item.status = status
+            return item
+        }
+        func run(_ statuses: [BatchItem.Status]) throws -> BatchRun {
+            let items = statuses.enumerated().map { item("IMG_\($0.offset).CR3", $0.element) }
+            return BatchRun(journal: BatchJournal(destination: dir, bookmark: try dir.bookmarkData(), options: BatchOptions(), items: items),
+                            journalURL: dir.appendingPathComponent("active-export.json"))
+        }
+        let mixed = try run([.done, .failed, .skipped, .waiting])
+        XCTAssertEqual(mixed.ruleParts.exported, 0.25, accuracy: 1e-9)
+        XCTAssertEqual(mixed.ruleParts.other, 0.5, accuracy: 1e-9)
+        // Every photograph failed: finished, but no yellow.
+        let failed = try run([.failed, .failed])
+        XCTAssertEqual(failed.fraction, 1)
+        XCTAssertEqual(failed.ruleParts.exported, 0)
+        XCTAssertEqual(failed.ruleParts.other, 1, accuracy: 1e-9)
+        XCTAssertEqual(try run([]).ruleParts.exported, 0)
     }
 
     func testBatchJournalRoundTrip() throws {

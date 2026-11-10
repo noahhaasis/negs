@@ -78,15 +78,16 @@ actor PhotoThumbnails {
         let image: CGImage
         init(file: PhotoFile, look: String?, image: CGImage) { self.file = file; self.look = look; self.image = image }
     }
-    /// The film strip's size, and the grid's two (for cells up to about 190
-    /// and 380 points on a Retina screen).
+    /// The film strip's size (its frames are 140 pt tall, up to about 210
+    /// wide), and the grid's two (for pictures up to about 190 and 380
+    /// points on their long side on a Retina screen).
     enum Size: Int, CaseIterable, Sendable {
-        case strip = 192, medium = 384, large = 768
+        case strip = 432, medium = 384, large = 768
         static func grid(points: CGFloat, scale: CGFloat) -> Size { points * scale <= 384 ? .medium : .large }
     }
     private let caches: [Size: NSCache<NSURL, Cached>] = {
         var caches: [Size: NSCache<NSURL, Cached>] = [:]
-        for (size, megabytes, count) in [(Size.strip, 16, 160), (.medium, 48, 400), (.large, 96, 200)] {
+        for (size, megabytes, count) in [(Size.strip, 48, 120), (.medium, 48, 400), (.large, 96, 200)] {
             let cache = NSCache<NSURL, Cached>()
             cache.totalCostLimit = megabytes * 1024 * 1024
             cache.countLimit = count
@@ -156,26 +157,40 @@ actor PhotoThumbnails {
     }
 }
 
-/// The film strip: the library's photographs, as filtered. The library
-/// lists the folder (`EditorCanvas` keeps it current); thumbnails never wait
-/// for the ratings.
+/// The film strip (§4.4): the library's photographs, as filtered, laid edge
+/// to edge on black film at their own proportions, the current frame at full
+/// strength and the others dimmed. A 12 pt rebate under the frames carries
+/// the pencil under the current one. No numbers, no names. The library lists
+/// the folder (`EditorCanvas` keeps it current); thumbnails never wait for
+/// the ratings.
 struct PhotoBrowser: View {
     let model: EditorModel
     @State private var scrollTarget: URL?
     /// A click takes the keys, so ← and → move on from there.
     @FocusState private var focused: Bool
 
+    /// The picture's height: the strip less its top padding and rebate.
+    static let pictureHeight = Theme.Size.strip - Theme.Size.stripTopPadding - Theme.Size.stripRebate
+
     var body: some View {
         let library = model.library
         let shown = library.filtering ? [] : model.shownPhotos
         let selected = model.selection.selected
+        let aspects = model.aspects
+        // Read here, so a shape learnt redraws the strip.
+        let ratios = aspects.ratios
         ScrollView(.horizontal) {
-            LazyHStack(spacing: 8) {
+            LazyHStack(spacing: Theme.Size.stripGap) {
                 ForEach(shown, id: \.url) { file in
-                    PhotoThumbnail(file: file, current: file.url == model.sourceItem, selected: selected.contains(file.url),
-                                   summary: library.summary(for: file.url), readOnly: library.readOnly,
-                                   edited: model.editedThumbnail(for: file.url)) { visible in
+                    StripFrame(file: file, width: (Self.pictureHeight * (ratios[file.url] ?? PhotoAspects.fallback)).rounded(),
+                               current: file.url == model.sourceItem, selected: selected.contains(file.url),
+                               summary: library.summary(for: file.url), readOnly: library.readOnly,
+                               edited: model.editedThumbnail(for: file.url)) { visible in
                         model.thumbnailShown(file, visible)
+                    } loaded: { image in
+                        aspects.note(file.url, image: image)
+                    } placed: { place in
+                        model.places.strip[file.url] = place
                     } open: {
                         let modifiers = NSEvent.modifierFlags
                         focused = true
@@ -186,10 +201,8 @@ struct PhotoBrowser: View {
                 }
             }
             .scrollTargetLayout()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
-        .scrollIndicators(.automatic)
+        .scrollIndicators(.never)
         .scrollPosition(id: $scrollTarget, anchor: .center)
         .onChange(of: model.sourceItem) { _, source in scrollTarget = source }
         .onChange(of: library.loading) { _, loading in if !loading { scrollTarget = model.sourceItem } }
@@ -206,71 +219,68 @@ struct PhotoBrowser: View {
             model.move(by: press.key == .leftArrow ? -1 : 1, extending: press.modifiers.contains(.shift))
             return .handled
         }
-        .frame(height: 112)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(.top, Theme.Size.stripTopPadding)
+        .frame(height: Theme.Size.strip)
+        .background(Theme.film)
         .overlay {
             // Only an active filter waits for the ratings.
             if library.loading || library.filtering { ProgressView().controlSize(.small) }
-            else if library.failed { Text("This folder couldn’t be read.").foregroundStyle(.secondary) }
-            else if library.files.isEmpty { Text("No supported photographs in this folder.").foregroundStyle(.secondary) }
+            else if library.failed { StripNote(text: "This folder couldn’t be read.") }
+            else if library.files.isEmpty { StripNote(text: "No supported photographs in this folder.") }
         }
         .disabled(model.cropping)
         .accessibilityLabel("Film Strip")
     }
 }
 
-private struct PhotoThumbnail: View {
+private struct StripNote: View {
+    let text: String
+    var body: some View { Text(text).font(Theme.serif(14, italic: true)).foregroundStyle(Theme.dim) }
+}
+
+/// One frame of the strip: the picture, dimmed unless it's current, and the
+/// rebate under it.
+private struct StripFrame: View {
     let file: PhotoFile
-    private var url: URL { file.url }
-    /// The open photograph, outlined thickly; others selected, thinly.
+    let width: CGFloat
+    /// The open photograph: at full strength, with the pencil under it.
     let current: Bool
+    /// Selected for the context menu: at full strength, with a plain rule under it.
     let selected: Bool
     let summary: LibrarySummary
     let readOnly: Bool
     let edited: EditedThumbnail?
     /// On and off screen: what's shown is developed first.
     let shown: (Bool) -> Void
+    let loaded: (CGImage) -> Void
+    /// Where its picture is drawn, for the grid's flight; nil once gone.
+    let placed: (ThumbnailPlaces.Place?) -> Void
     let open: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
 
     private struct Load: Hashable { let file: PhotoFile; let edited: EditedThumbnail? }
 
-    private var rejected: Bool { summary.flag == .reject }
-
     var body: some View {
         Button(action: open) {
-            VStack(spacing: 5) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.04))
-                    Group {
-                        if let image {
-                            Image(decorative: image, scale: 2).resizable().scaledToFit().padding(3)
-                        } else {
-                            Image(systemName: "photo").foregroundStyle(.tertiary)
-                        }
+            VStack(spacing: 0) {
+                StripPicture(image: image, width: width, current: current, selected: selected, rejected: summary.flag == .reject)
+                    .overlay { PhotoMarks(summary: summary, name: file.name) }
+                    .modifier(PlaceReport(image: image, placed: placed))
+                ZStack(alignment: .top) {
+                    if current {
+                        PencilStroke().pencil().frame(height: Theme.pencilHeight).padding(.top, 1)
+                    } else if selected {
+                        Rectangle().fill(Theme.label).frame(height: 1.5).padding(.top, 3)
                     }
-                    // Rejects are greyed; their name stays readable.
-                    .opacity(rejected ? 0.4 : 1)
                 }
-                .frame(width: 96, height: 68)
-                .overlay { PhotoBadges(summary: summary) }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(current || selected ? Color.accentColor : .clear, lineWidth: current ? 2 : 1)
-                }
-                Text(file.name)
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(current || selected ? .primary : .secondary)
+                .frame(width: width, height: Theme.Size.stripRebate, alignment: .top)
             }
-            .frame(width: 96)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .help(PhotoBadges.help(file.name, summary: summary, readOnly: readOnly))
-        .accessibilityLabel(PhotoBadges.accessibilityLabel(file.name, summary: summary))
+        .buttonStyle(StripFrameStyle())
+        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
+        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
         .accessibilityAddTraits(current || selected ? [.isSelected] : [])
         .onAppear { visible = true; shown(true) }
         .onDisappear { visible = false; image = nil; shown(false) }
@@ -285,63 +295,123 @@ private struct PhotoThumbnail: View {
             } onCancel: { request.cancel() }
             guard !Task.isCancelled else { return }
             // An edited thumbnail on its way keeps the last one shown.
-            if let result { image = result }
+            if let result { image = result; loaded(result) }
         }
     }
 }
 
-/// A thumbnail's flag (top left), edited mark (top right) and stars
-/// (bottom). Unrated, unflagged, unedited photographs show none of them.
-struct PhotoBadges: View {
-    let summary: LibrarySummary
+/// The picture, filling its frame. Frames not current are at 0.42, 0.75
+/// under the pointer and 0.9 pressed; a reject is greyed further.
+private struct StripPicture: View {
+    let image: CGImage?
+    let width: CGFloat
+    let current: Bool
+    let selected: Bool
+    let rejected: Bool
+    @Environment(\.stripFrameState) private var state
 
     var body: some View {
         ZStack {
-            if let flag = summary.flag {
-                badge(flag == .pick ? "flag.fill" : "xmark").frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-            if summary.edited {
-                badge("slider.horizontal.3").frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
-            if summary.rating > 0 {
-                HStack(spacing: 1) {
-                    ForEach(0..<summary.rating, id: \.self) { _ in Image(systemName: "star.fill") }
-                }
-                .font(.system(size: 7))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(.black.opacity(0.55)))
-                .padding(.bottom, 4)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            if let image {
+                Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Theme.blank
             }
         }
-        .accessibilityHidden(true)
-        .allowsHitTesting(false)
+        .frame(width: width, height: PhotoBrowser.pictureHeight)
+        .clipped()
+        .opacity(opacity)
     }
 
-    private func badge(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 8, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 15, height: 15)
-            .background(Circle().fill(.black.opacity(0.55)))
-            .padding(4)
+    private var opacity: Double {
+        if rejected { return PhotoMarks.rejectOpacity(inStrip: true, current: current || selected) }
+        if current || selected { return 1 }
+        return state.pressed ? 0.9 : state.hovered ? 0.75 : Theme.stripDim
     }
+}
 
-    static func help(_ name: String, summary: LibrarySummary, readOnly: Bool) -> String {
-        var lines = [name]
-        if let problem = summary.problem { lines.append(problem) }
-        if readOnly { lines.append("Ratings and edits can’t be saved in this folder: it’s read-only.") }
-        return lines.joined(separator: "\n")
+private struct StripFrameState: Equatable { var hovered = false, pressed = false }
+
+private extension EnvironmentValues {
+    @Entry var stripFrameState = StripFrameState()
+}
+
+private struct StripFrameStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Hovering(configuration: configuration) }
+
+    private struct Hovering: View {
+        let configuration: Configuration
+        @State private var hovered = false
+        var body: some View {
+            configuration.label
+                .environment(\.stripFrameState, StripFrameState(hovered: hovered, pressed: configuration.isPressed))
+                .onHover { hovered = $0 }
+        }
     }
+}
 
-    static func accessibilityLabel(_ name: String, summary: LibrarySummary) -> String {
-        var parts = [name]
-        if summary.rating > 0 { parts.append(summary.rating == 1 ? "1 star" : "\(summary.rating) stars") }
-        if let flag = summary.flag { parts.append(flag == .pick ? "Pick" : "Rejected") }
-        if summary.edited { parts.append("Edited") }
-        return parts.joined(separator: ", ")
+/// The grid's handle (§4.4): at the strip's right end the film rises into a
+/// tongue cut on the slant, like the start of a roll, with an arrow pointing
+/// up. It rises a little under the pointer. A click, or G, opens the grid.
+struct StripLeader: View {
+    let model: EditorModel
+    @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static let width: CGFloat = 92
+    static let height: CGFloat = 24
+    static let raised: CGFloat = 30
+    /// The slant takes the first 28 pt.
+    static let slant: CGFloat = 28
+
+    var body: some View {
+        Button { model.showGrid() } label: {
+            LeaderShape()
+                .fill(Theme.film)
+                .frame(width: Self.width, height: hovered ? Self.raised : Self.height)
+                .overlay(alignment: .topTrailing) {
+                    LeaderArrow()
+                        .stroke(hovered ? Theme.paper : Theme.label, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                        .frame(width: 12.7, height: 6.4)
+                        // The arrow's box: 9 pt square, 22 pt from the right, 10 from the top.
+                        .padding(.trailing, 22 + 4.5 - 6.35)
+                        .padding(.top, 10 + 4.5 - 6.36 - (hovered ? 1 : 0))
+                }
+                .contentShape(LeaderShape())
+                .frame(height: Self.raised, alignment: .bottom)
+        }
+        .buttonStyle(.plain)
+        .onHover { over in
+            withAnimation(reduceMotion ? nil : .timingCurve(0.3, 1.5, 0.5, 1, duration: 0.28)) { hovered = over }
+        }
+        .help("Show all photographs (G)")
+        .accessibilityLabel("Show all photographs")
+    }
+}
+
+/// The tongue: `polygon(0 100%, 28px 0, 100% 0, 100% 100%)`.
+private struct LeaderShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX + StripLeader.slant, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// A chevron, its point at the top middle of the rect; turned over, it points down.
+struct LeaderArrow: Shape {
+    var down = false
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let (top, bottom) = down ? (rect.maxY, rect.minY) : (rect.minY, rect.maxY)
+        path.move(to: CGPoint(x: rect.minX, y: bottom))
+        path.addLine(to: CGPoint(x: rect.midX, y: top))
+        path.addLine(to: CGPoint(x: rect.maxX, y: bottom))
+        return path
     }
 }
 

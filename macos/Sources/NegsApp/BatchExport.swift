@@ -246,7 +246,7 @@ enum ExportRating {
     }
 }
 
-/// A batch as the toolbar's ring and its popover show it: running, or
+/// A batch as the status line and its popover show it: running, or
 /// finished with failures until they've been seen.
 @MainActor @Observable final class BatchRun {
     var journal: BatchJournal
@@ -272,6 +272,13 @@ enum ExportRating {
     var failures: [BatchItem] { items.filter { $0.status == .failed } }
     var skipped: [BatchItem] { items.filter { $0.status == .skipped } }
     var fraction: Double { total == 0 ? 1 : Double(finished) / Double(total) }
+    /// The popover's rule: the share exported, then the share that failed
+    /// or was skipped. A batch that all failed draws no yellow.
+    var ruleParts: (exported: Double, other: Double) {
+        guard total > 0 else { return (0, 0) }
+        let exported = Double(exported.count) / Double(total)
+        return (exported, max(0, fraction - exported))
+    }
     /// Ended with something to look at: failures, or a cancel.
     var needsAttention: Bool { !running && (!failures.isEmpty || cancelled) }
 
@@ -350,76 +357,55 @@ enum ExportRating {
     func controlTextDidChange(_ notification: Notification) { sync() }
 }
 
-/// The toolbar's Export item while a batch runs: a ring filled as far as the
-/// batch has come, like Safari's downloads.
-enum BatchRing {
-    static func image(_ fraction: Double) -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
-            let ring = rect.insetBy(dx: 2, dy: 2)
-            let track = NSBezierPath(ovalIn: ring)
-            track.lineWidth = 2
-            NSColor.tertiaryLabelColor.setStroke()
-            track.stroke()
-            let center = NSPoint(x: rect.midX, y: rect.midY)
-            let arc = NSBezierPath()
-            arc.appendArc(withCenter: center, radius: ring.width / 2, startAngle: 90, endAngle: 90 - 360 * max(0.03, min(1, fraction)), clockwise: true)
-            arc.lineWidth = 2
-            arc.lineCapStyle = .round
-            NSColor.controlAccentColor.setStroke()
-            arc.stroke()
-            // The arrow of the Export icon, small, in the middle.
-            let arrow = NSBezierPath()
-            arrow.move(to: NSPoint(x: center.x, y: center.y + 3.5)); arrow.line(to: NSPoint(x: center.x, y: center.y - 3))
-            arrow.move(to: NSPoint(x: center.x - 2.5, y: center.y - 0.5)); arrow.line(to: NSPoint(x: center.x, y: center.y - 3))
-            arrow.line(to: NSPoint(x: center.x + 2.5, y: center.y - 0.5))
-            arrow.lineWidth = 1.5
-            arrow.lineCapStyle = .round; arrow.lineJoinStyle = .round
-            NSColor.labelColor.setStroke()
-            arrow.stroke()
-            return true
-        }
-        image.accessibilityDescription = "Exporting, \(Int((fraction * 100).rounded())) percent"
-        return image
-    }
-}
-
-/// The popover under the ring: how far the batch has come, what failed and
-/// why, and Cancel, Retry Failed and Show in Finder.
+/// The popover over the status line's Show, in ink (round 16, A): how far
+/// the batch has come under a pencil rule, what failed and why, and Cancel,
+/// Retry Failed and Show in Finder. The panel's colours, not the system's
+/// frosted glass (`EditorWindowController` paints the popover's frame).
 struct BatchProgressView: View {
     let run: BatchRun
     let retry: () -> Void
     let showInFinder: () -> Void
 
+    static let width: CGFloat = 300
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(run.title).font(.headline)
-            ProgressView(value: run.fraction)
-            if run.running, let index = run.current, run.items.indices.contains(index) {
-                Text(run.items[index].title).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            } else {
-                Text("To “\(run.journal.destination.lastPathComponent)”").font(.callout).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(run.title).font(Theme.serif(17, weight: 600)).foregroundStyle(Theme.paper)
+            BatchRule(parts: run.ruleParts).padding(.top, 10)
+            Group {
+                if run.running, let index = run.current, run.items.indices.contains(index) {
+                    Text(run.items[index].title).truncationMode(.middle)
+                } else {
+                    Text("To “\(run.journal.destination.lastPathComponent)”")
+                }
             }
+            .font(Theme.serif(14, italic: true)).foregroundStyle(Theme.label).lineLimit(1)
+            .padding(.top, 8)
             if !run.failures.isEmpty {
-                Divider()
-                Text(run.failures.count == 1 ? "1 failed" : "\(run.failures.count) failed").font(.callout.weight(.semibold))
+                Rectangle().fill(Theme.line).frame(height: 1).padding(.vertical, 10)
+                Text(run.failures.count == 1 ? "1 failed" : "\(run.failures.count) failed")
+                    .font(Theme.serif(15, weight: 600)).foregroundStyle(Theme.paper)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 7) {
                         ForEach(run.failures) { item in
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(item.title).lineLimit(1).truncationMode(.middle)
-                                Text(item.reason ?? "Unknown error").foregroundStyle(.secondary).lineLimit(3)
+                                Text(item.title).font(Theme.ui(12.5)).foregroundStyle(Theme.label).lineLimit(1).truncationMode(.middle)
+                                Text(item.reason ?? "Unknown error").font(Theme.serif(13.5, italic: true)).foregroundStyle(Theme.dim).lineLimit(3)
                             }
-                            .font(.callout)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityElement(children: .combine)
                         }
                     }
+                    .padding(.top, 6)
                 }
+                .scrollIndicators(.automatic)
                 .frame(maxHeight: 160)
                 .fixedSize(horizontal: false, vertical: true)
             }
             if !run.skipped.isEmpty {
                 Text(run.skipped.count == 1 ? "1 skipped: a file of its name exists." : "\(run.skipped.count) skipped: files of their names exist.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Theme.serif(13.5, italic: true)).foregroundStyle(Theme.dim)
+                    .padding(.top, 8)
             }
             HStack {
                 if run.running {
@@ -430,8 +416,36 @@ struct BatchProgressView: View {
                 Spacer()
                 Button("Show in Finder", action: showInFinder)
             }
+            .buttonStyle(OutlinedButtonStyle())
+            .padding(.top, 14)
         }
-        .padding(14)
-        .frame(width: 300)
+        .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+        .frame(width: Self.width, alignment: .leading)
+        .background(Theme.panel)
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The popover's progress: a line in `track` across its width, yellow for
+/// what's exported, `dim` for what failed or was skipped. The words above
+/// and below say which.
+private struct BatchRule: View {
+    let parts: (exported: Double, other: Double)
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            ZStack(alignment: .leading) {
+                Rectangle().fill(Theme.track).frame(height: 1)
+                HStack(spacing: 0) {
+                    Rectangle().fill(Theme.accent).frame(width: width * parts.exported, height: 2)
+                    Rectangle().fill(Theme.dim).frame(width: width * parts.other, height: 1)
+                }
+            }
+        }
+        .frame(height: 2)
+        .accessibilityElement()
+        .accessibilityLabel("Export progress")
+        .accessibilityValue("\(Int((parts.exported * 100).rounded())) percent exported")
     }
 }

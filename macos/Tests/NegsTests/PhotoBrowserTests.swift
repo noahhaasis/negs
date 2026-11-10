@@ -52,8 +52,10 @@ final class PhotoBrowserTests: XCTestCase {
         let thumbnails = PhotoThumbnails()
         let result = await thumbnails.image(for: url)
         let image = try XCTUnwrap(result)
-        XCTAssertEqual(image.width, 96)
-        XCTAssertEqual(image.height, 192)
+        // The strip's size on the long side, turned upright.
+        let side = PhotoThumbnails.Size.strip.rawValue
+        XCTAssertEqual(image.width, side / 2)
+        XCTAssertEqual(image.height, side)
         let cached = await thumbnails.image(for: url)
         XCTAssertTrue(cached === image)
         let missing = await thumbnails.image(for: directory.appendingPathComponent("missing.nef"))
@@ -138,8 +140,9 @@ final class PhotoBrowserTests: XCTestCase {
         let replaced = try XCTUnwrap(PhotoFolder.snapshot(in: directory).first { $0.url == url })
         let updated = await thumbnails.image(for: replaced)
         XCTAssertFalse(updated === image)
-        XCTAssertEqual(updated?.height, 192)
-        XCTAssertEqual(updated?.width, 96)
+        // Never enlarged past the file's own pixels.
+        XCTAssertEqual(updated?.height, 400)
+        XCTAssertEqual(updated?.width, 200)
     }
 
     func testFolderScanBenchmark() throws {
@@ -207,11 +210,8 @@ final class PhotoBrowserTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         for (name, appearance, visible) in [("light", NSAppearance.Name.aqua, true), ("dark", .darkAqua, true), ("hidden", .aqua, false)] {
             window.appearance = NSAppearance(named: appearance)
-            if model.filmstripVisible != visible {
-                let toggle = try XCTUnwrap(window.toolbar?.items.first { $0.itemIdentifier.rawValue == "filmstrip" })
-                XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(toggle.action), to: toggle.target, from: toggle))
-                XCTAssertEqual(model.filmstripVisible, visible)
-            }
+            // View › Hide Film Strip (⌥⌘F) toggles this.
+            model.filmstripVisible = visible
             try await Task.sleep(nanoseconds: 800_000_000)
             let view = try XCTUnwrap(window.contentView)
             view.layoutSubtreeIfNeeded()
@@ -226,7 +226,7 @@ final class PhotoBrowserTests: XCTestCase {
                 try await Task.sleep(nanoseconds: 700_000_000)
                 XCTAssertEqual(model.source?.lastPathComponent, "Photo18.png")
                 // The selected thumbnail is centered; click its right neighbour.
-                let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+                let split = try XCTUnwrap((window.contentViewController as? EditorFrame)?.split)
                 let canvas = try XCTUnwrap(split.splitView.subviews.first)
                 let point = NSPoint(x: canvas.frame.width / 2 + 104, y: 80)
                 for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {

@@ -37,7 +37,7 @@ import SwiftUI
         app.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let file = submenu("File")
-        command(file, "Open Photograph…", #selector(openPhotograph), "o")
+        command(file, "Open…", #selector(openPhotograph), "o")
         // The action only lets validation disable the submenu while it's empty.
         let recentItem = file.addItem(withTitle: "Open Recent", action: #selector(showRecent), keyEquivalent: "")
         recentItem.target = self
@@ -52,6 +52,7 @@ import SwiftUI
         file.addItem(.separator())
         command(file, "New Preset", #selector(newPreset), "s", [.command, .shift])
         command(file, "Import Presets…", #selector(importPresets), "o", [.command, .shift])
+        command(file, "Show Presets Folder", #selector(showPresetsFolder), "")
 
         let edit = submenu("Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -81,10 +82,14 @@ import SwiftUI
         command(view, "Hide Film Strip", #selector(toggleFilmstrip), "f", [.command, .option])
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
+        // Every control in every module, as the Lab's Advanced controls switch did.
+        command(view, "Show All Controls", #selector(toggleAllControls), "")
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
+        // Rotate lives in cropping (§4.10); from here it starts cropping.
         command(view, "Rotate Clockwise", #selector(rotate), "r")
+        command(view, "Rotate Counterclockwise", #selector(rotateLeft), "r", [.command, .option])
         command(view, "Crop", #selector(crop), "k")
         view.addItem(.separator())
         // ⇧⌘R is Photo › Reset Edits.
@@ -186,9 +191,12 @@ import SwiftUI
     @objc private func togglePresets() { model.togglePane(.presets) }
     @objc private func newPreset() { model.newPreset() }
     @objc private func importPresets() { model.importPresetsPanel() }
+    @objc private func showPresetsFolder() { model.showPresetsFolder() }
+    @objc private func toggleAllControls() { AdjustmentInspector.toggleAllControls() }
     @objc private func fitPhotograph() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
-    @objc private func rotate() { model.rotate() }
+    @objc private func rotate() { model.turn(clockwise: true) }
+    @objc private func rotateLeft() { model.turn(clockwise: false) }
     @objc private func crop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
     @objc private func resetAdjustments() { model.reset() }
     @objc private func rate(_ item: NSMenuItem) { model.setRating(item.tag) }
@@ -209,32 +217,10 @@ import SwiftUI
     @objc private func moveToTrashNow() { model.requestDelete(asking: false) }
     @objc private func deleteRejected() { model.requestDelete(model.rejected, asking: true) }
 
-    /// Copy Edits…: the groups to copy, in a sheet; the choice is remembered.
+    /// Copy Edits…: the groups to copy, in the alert sheet; the choice is remembered.
     @objc private func copyEditsChoosing() {
-        guard let window = NSApp.keyWindow as? EditorWindow else { return }
-        let alert = NSAlert()
-        alert.messageText = "Copy Edits"
-        alert.informativeText = "Choose the edits Paste Edits applies."
-        let chosen = model.copyGroups
-        let boxes = EditGroup.allCases.map { group in
-            let box = NSButton(checkboxWithTitle: group.title, target: nil, action: nil)
-            box.state = chosen.contains(group) ? .on : .off
-            return box
-        }
-        let stack = NSStackView(views: boxes)
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6
-        stack.frame.size = stack.fittingSize
-        alert.accessoryView = stack
-        alert.addButton(withTitle: "Copy")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [model] response in
-            MainActor.assumeIsolated {
-                guard response == .alertFirstButtonReturn else { return }
-                let groups = Set(zip(EditGroup.allCases, boxes).filter { $0.1.state == .on }.map(\.0))
-                model.copyGroups = groups
-                model.copyEdits(groups: groups)
-            }
-        }
+        guard NSApp.keyWindow is EditorWindow else { return }
+        model.copyEditsChoosing()
     }
     @objc private func showGrid() { model.showGrid() }
     @objc private func largerThumbnails() { model.changeGridCellSize(larger: true) }
@@ -255,7 +241,9 @@ import SwiftUI
         guard takesRatingKeys(window) else { return false }
         var view = window?.firstResponder as? NSView
         while let next = view {
+            // A list, or a focused control that deletes its own (a preset tile).
             if next is NSTableView { return false }
+            if let anchor = next as? FocusAnchorView, anchor.delete != nil { return false }
             view = next.superview
         }
         return true
@@ -267,7 +255,8 @@ import SwiftUI
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if removingAppData { return false }
+        // The alert sheet is answered first, as a system alert's would be.
+        if removingAppData || model.alert != nil { return false }
         let photo = model.source != nil
         // The grid shows no photograph to adjust, zoom or crop.
         let editing = photo && model.mode == .photo
@@ -288,16 +277,20 @@ import SwiftUI
             item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return model.mode == .photo
         case #selector(newPreset): return model.canChangePresets && model.mode == .photo
         case #selector(importPresets): return model.canChangePresets
+        case #selector(showPresetsFolder): return true
+        case #selector(toggleAllControls):
+            item.state = UserDefaults.standard.bool(forKey: AdjustmentInspector.allControlsKey) ? .on : .off
+            return model.mode == .photo
         case #selector(fitPhotograph), #selector(actualSize): return editing && !model.cropping
-        case #selector(rotate): return editing
+        case #selector(rotate), #selector(rotateLeft): return model.cropping || (editing && model.image != nil)
         case #selector(crop):
             item.title = model.cropping ? "Done Cropping" : "Crop"
             return model.cropping || (model.image != nil && model.mode == .photo)
         case #selector(resetAdjustments): return model.hasCatalog && !model.cropping && model.mode == .photo
         case #selector(editPhotograph): return model.mode == .grid && model.selection.current != nil && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(showGrid): return editing && !model.cropping && Self.takesRatingKeys(NSApp.keyWindow)
-        case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < GridMetrics.sizes.upperBound
-        case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > GridMetrics.sizes.lowerBound
+        case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < SheetLayout.sizes.upperBound
+        case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > SheetLayout.sizes.lowerBound
         case #selector(copyEdits), #selector(copyEditsChoosing):
             return model.canCopyEdits && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(pasteEdits):

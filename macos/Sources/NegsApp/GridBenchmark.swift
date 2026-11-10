@@ -101,7 +101,7 @@ import QuartzCore
                 case 2 where Date().timeIntervalSince(self.phaseStart) > 2:
                     // Settled at the top: scroll.
                     let documentHeight = self.scrollView?.documentView?.frame.height ?? 0
-                    Self.report("grid \(Int(self.scrollView?.contentView.bounds.width ?? 0))×\(Int(self.scrollView?.contentView.bounds.height ?? 0)) pt, \(model.gridColumns) columns, document \(Int(documentHeight)) pt high")
+                    Self.report("grid \(Int(self.scrollView?.contentView.bounds.width ?? 0))×\(Int(self.scrollView?.contentView.bounds.height ?? 0)) pt, \(model.gridLayout?.rows.count ?? 0) rows, document \(Int(documentHeight)) pt high")
                     self.startFootprint = Self.footprint(); self.peak = self.startFootprint
                     self.phase = 3
                     self.startSegment(0)
@@ -231,23 +231,18 @@ import QuartzCore
                     shown = Date(); phase = 1
                 case 1 where Date().timeIntervalSince(shown) > 0.12, 2 where Date().timeIntervalSince(shown) > 2:
                     let shownPhotos = model.shownPhotos
-                    // The grid's own scroll view: its document is as tall as the grid's metrics say.
-                    // Laid out at the full width until it settles, as LibraryGrid does.
-                    @MainActor func layoutWidth(_ scroll: NSScrollView) -> CGFloat {
-                        phase == 1 ? max(scroll.contentView.bounds.width, model.fullCanvasWidth()) : scroll.contentView.bounds.width
-                    }
+                    // The grid's own scroll view: its document is as tall as the sheet's layout says.
                     let grid = scrollViews().first { scroll in
-                        let height = GridMetrics(width: layoutWidth(scroll), cell: model.gridCellSize).height(shownPhotos.count)
-                        return abs((scroll.documentView?.frame.height ?? 0) - max(height, scroll.contentView.bounds.height)) < 2
+                        guard let layout = model.gridLayout else { return false }
+                        return abs((scroll.documentView?.frame.height ?? 0) - max(layout.height, scroll.contentView.bounds.height)) < 2
                     }
-                    guard let scroll = grid, let current = model.selection.current,
-                          let index = shownPhotos.firstIndex(where: { $0.url == current }) else {
+                    guard let scroll = grid, let layout = model.gridLayout, let current = model.selection.current,
+                          let index = shownPhotos.firstIndex(where: { $0.url == current }), layout.frames.indices.contains(index) else {
                         report("no grid or no current photograph"); timer.invalidate(); return NSApp.terminate(nil)
                     }
                     let visible = scroll.contentView.bounds
-                    let metrics = GridMetrics(width: layoutWidth(scroll), cell: model.gridCellSize)
-                    let cell = metrics.frame(index)
-                    report("grid position after \(phase == 1 ? "0.12" : "2") s: grid \(Int(visible.width)) pt wide (full \(Int(model.fullCanvasWidth()))), photograph \(index + 1) of \(shownPhotos.count), \(metrics.columns) columns, cell y \(Int(cell.minY))–\(Int(cell.maxY)), visible y \(Int(visible.minY))–\(Int(visible.maxY)) of \(Int(scroll.documentView?.frame.height ?? 0)): \(visible.minY <= cell.minY && cell.maxY <= visible.maxY ? "on screen" : "OFF SCREEN")")
+                    let cell = layout.frames[index]
+                    report("grid position after \(phase == 1 ? "0.12" : "2") s: grid \(Int(visible.width)) pt wide, photograph \(index + 1) of \(shownPhotos.count), \(layout.rows.count) rows, cell y \(Int(cell.minY))–\(Int(cell.maxY)), visible y \(Int(visible.minY))–\(Int(visible.maxY)) of \(Int(scroll.documentView?.frame.height ?? 0)): \(visible.minY <= cell.minY && cell.maxY <= visible.maxY ? "on screen" : "OFF SCREEN")")
                     if let shots = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_SHOTS"] { capture(URL(fileURLWithPath: shots).appendingPathComponent("grid-\(phase).png")) }
                     if phase == 2 { timer.invalidate(); NSApp.terminate(nil) }
                     phase += 1

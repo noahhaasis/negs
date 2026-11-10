@@ -242,9 +242,9 @@ final class PreviewTests: XCTestCase {
     }
 
     func testAFavoritesOwnTagStandsForItsStock() {
-        XCTAssertEqual(StockFoldout.stockID(tag: StockFoldout.favoriteID("kodak_gold_200")), "kodak_gold_200")
-        XCTAssertEqual(StockFoldout.stockID(tag: "kodak_gold_200"), "kodak_gold_200")
-        XCTAssertNotEqual(StockFoldout.favoriteID("kodak_gold_200"), "kodak_gold_200")
+        XCTAssertEqual(StockMenu.stockID(tag: StockMenu.favoriteID("kodak_gold_200")), "kodak_gold_200")
+        XCTAssertEqual(StockMenu.stockID(tag: "kodak_gold_200"), "kodak_gold_200")
+        XCTAssertNotEqual(StockMenu.favoriteID("kodak_gold_200"), "kodak_gold_200")
     }
 
     @MainActor func testNewUsersStartWithDefaultFavoritesAndKeepTheirOwnList() {

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The edit view shows one photograph; the grid shows the folder.
@@ -96,59 +97,100 @@ struct LibrarySelection: Equatable, Sendable {
     func ordered(_ order: [URL]) -> [URL] { order.filter { selected.contains($0) } }
 }
 
-/// The grid's layout, worked out rather than measured, so moving up or down
-/// a row and the rubber band know where every cell is.
-struct GridMetrics: Equatable {
-    /// The photograph's box; the name sits under it.
-    let cell: CGFloat
-    let columns: Int
-    let inset: CGFloat
-    static let spacing: CGFloat = 14
-    static let padding: CGFloat = 20
-    static let nameHeight: CGFloat = 20
-    /// The film strip's thumbnail proportions.
-    static let aspect: CGFloat = 68.0 / 96.0
+/// The sheet's layout (§4.6): thumbnails packed edge to edge in rows with
+/// gaps of 6, each at its own proportions, every full row stretched or
+/// shrunk a little to the sheet's width, and the last row left short at the
+/// chosen height. Worked out rather than measured, so moving up or down a
+/// row, the rubber band and the scroll position know where every cell is.
+struct SheetLayout: Equatable {
+    struct Row: Equatable {
+        let range: Range<Int>
+        let y: CGFloat
+        let height: CGFloat
+    }
+
+    static let gap = Theme.Size.gridGap
+    /// The grid's padding: 6 at the top, 16 at the sides, 14 at the bottom.
+    static let top: CGFloat = 6, side: CGFloat = 16, bottom: CGFloat = 14
+    /// The chosen row height (the foot's Size), 176 by default.
     static let sizes: ClosedRange<Double> = 100...360
-    static let defaultSize: Double = 180
+    static let defaultSize = Double(Theme.Size.gridThumbnail)
 
-    init(width: CGFloat, cell: CGFloat) {
-        self.cell = cell
-        let usable = max(width - 2 * Self.padding, cell)
-        columns = max(1, Int((usable + Self.spacing) / (cell + Self.spacing)))
-        let row = CGFloat(columns) * cell + CGFloat(columns - 1) * Self.spacing
-        inset = max(Self.padding, (width - row) / 2)
-    }
+    let width: CGFloat
+    let frames: [CGRect]
+    let rows: [Row]
+    /// The whole grid's height, padding included.
+    let height: CGFloat
 
-    var imageHeight: CGFloat { (cell * Self.aspect).rounded() }
-    var rowHeight: CGFloat { imageHeight + Self.nameHeight }
-
-    func rows(_ count: Int) -> Int { (count + columns - 1) / columns }
-    func height(_ count: Int) -> CGFloat {
-        let rows = rows(count)
-        return 2 * Self.padding + CGFloat(rows) * rowHeight + CGFloat(max(rows - 1, 0)) * Self.spacing
-    }
-
-    /// Where the `index`th cell sits, name included.
-    func frame(_ index: Int) -> CGRect {
-        let row = index / columns, column = index % columns
-        return CGRect(x: inset + CGFloat(column) * (cell + Self.spacing),
-                      y: Self.padding + CGFloat(row) * (rowHeight + Self.spacing), width: cell, height: rowHeight)
-    }
-
-    /// The cells `rect` touches, of `count`.
-    func indices(in rect: CGRect, count: Int) -> [Int] {
-        guard count > 0, rect.maxY >= Self.padding else { return [] }
-        let stride = rowHeight + Self.spacing
-        let first = max(0, Int((rect.minY - Self.padding) / stride))
-        let last = min(rows(count) - 1, Int((rect.maxY - Self.padding) / stride))
-        guard first <= last else { return [] }
-        var hit: [Int] = []
-        for row in first...last {
-            for column in 0..<columns {
-                let index = row * columns + column
-                if index < count, frame(index).intersects(rect) { hit.append(index) }
+    /// `ratios`: each photograph's width ÷ height, in order.
+    init(ratios: [CGFloat], width: CGFloat, target: CGFloat) {
+        let usable = max(width - 2 * Self.side, 1)
+        let target = max(target, 1)
+        var frames: [CGRect] = [], rows: [Row] = []
+        frames.reserveCapacity(ratios.count)
+        var y = Self.top, start = 0
+        func ratio(_ index: Int) -> CGFloat { min(max(ratios[index], 0.1), 10) }
+        while start < ratios.count {
+            var end = start, sum: CGFloat = 0, full = false
+            while end < ratios.count {
+                let next = sum + ratio(end)
+                let gaps = Self.gap * CGFloat(end - start)
+                guard next * target + gaps >= usable else { sum = next; end += 1; continue }
+                full = true
+                // Take this one too if that leaves the row nearer the
+                // chosen height than stopping short of it does.
+                if end == start || abs(log((usable - gaps) / next / target)) <= abs(log((usable - gaps + Self.gap) / sum / target)) {
+                    sum = next; end += 1
+                }
+                break
             }
+            let count = end - start
+            let height = (full ? (usable - Self.gap * CGFloat(count - 1)) / sum : target).rounded()
+            var x = Self.side
+            for index in start..<end {
+                // Whole points; a full row's last cell ends flush at the right.
+                let cellWidth = full && index == end - 1 ? Self.side + usable - x : max(1, (ratio(index) * height).rounded())
+                frames.append(CGRect(x: x, y: y, width: cellWidth, height: height))
+                x += cellWidth + Self.gap
+            }
+            rows.append(Row(range: start..<end, y: y, height: height))
+            y += height + Self.gap
+            start = end
         }
-        return hit
+        self.width = width
+        self.frames = frames
+        self.rows = rows
+        height = rows.isEmpty ? Self.top + Self.bottom : y - Self.gap + Self.bottom
+    }
+
+    /// Whether a photograph has the pencil ring: the current one and each
+    /// one selected.
+    static func ringed(_ url: URL, selection: LibrarySelection) -> Bool {
+        url == selection.current || selection.selected.contains(url)
+    }
+
+    /// The row holding the `index`th photograph.
+    func row(of index: Int) -> Int? {
+        guard frames.indices.contains(index) else { return nil }
+        var low = 0, high = rows.count - 1
+        while low < high {
+            let middle = (low + high + 1) / 2
+            if rows[middle].range.lowerBound <= index { low = middle } else { high = middle - 1 }
+        }
+        return low
+    }
+
+    /// The photograph `by` rows up (−) or down (+) from `index`: the one
+    /// nearest it across, as in Finder. Nil past the first or last row.
+    func vertical(from index: Int, by: Int) -> Int? {
+        guard let row = row(of: index), rows.indices.contains(row + by) else { return nil }
+        let x = frames[index].midX
+        return rows[row + by].range.min { abs(frames[$0].midX - x) < abs(frames[$1].midX - x) }
+    }
+
+    /// The cells `rect` touches.
+    func indices(in rect: CGRect) -> [Int] {
+        rows.filter { $0.y <= rect.maxY && $0.y + $0.height >= rect.minY }
+            .flatMap { row in row.range.filter { frames[$0].intersects(rect) } }
     }
 }

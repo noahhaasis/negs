@@ -125,8 +125,6 @@ struct UpdateSettings: View {
     @ObservedObject var updates: UpdateController
     var model: EditorModel
     var removeAppData: () -> Void
-    @AppStorage(ViewerBackground.customKey) private var customBackground = false
-    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
     @State private var thumbnailBytes: Int?
     @State private var emptyingThumbnails = false
 
@@ -188,18 +186,6 @@ struct UpdateSettings: View {
                 get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))
                 .padding(.top, 8)
             Text("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Divider().padding(.vertical, 8)
-            HStack(spacing: 8) {
-                Toggle("Custom viewer background", isOn: $customBackground)
-                ColorPicker("Viewer background colour", selection: Binding(
-                    get: { ViewerBackground.color(hex: backgroundHex) ?? Color(nsColor: .underPageBackgroundColor) },
-                    set: { backgroundHex = ViewerBackground.hex($0) }), supportsOpacity: false)
-                    .labelsHidden()
-                    .disabled(!customBackground)
-                    .help("The colour behind the photograph.")
-            }
-            Text("The colour behind the photograph. Off, it follows the system's light or dark appearance.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 8)
             Toggle("Limit preview to 12 MP", isOn: Binding(

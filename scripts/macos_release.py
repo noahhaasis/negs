@@ -61,6 +61,8 @@ def write_plist(path, meta):
                 CFBundleName="Negs", CFBundlePackageType="APPL",
                 CFBundleShortVersionString=meta["version"], CFBundleVersion=meta["build"],
                 LSMinimumSystemVersion="14.0", NSHighResolutionCapable=True,
+                # In Assets.car: menus and default buttons take it, not the system blue.
+                NSAccentColorName="AccentColor",
                 CFBundleDocumentTypes=[dict(CFBundleTypeName="Photograph", CFBundleTypeRole="Viewer",
                     LSHandlerRank="Alternate", LSItemContentTypes=["public.png", "public.tiff", "public.jpeg", "public.camera-raw-image"])])
     if meta["feed"]:

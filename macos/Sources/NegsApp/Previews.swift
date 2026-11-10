@@ -4,13 +4,15 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// Film and paper as foldouts of thumbnails: the photograph developed with
+/// Film and paper as trays of thumbnails: the photograph developed with
 /// each stock and the current settings; and each preset's thumbnail in the
 /// Presets panel. `EditorModel` schedules them (`pumpPreviews`); this
 /// file holds the pure rules, the tiles and the grid.
 enum PreviewRules {
-    /// The thumbnail's long edge: two columns of a ~340 pt inspector at 2×.
-    static let longSide = 320
+    /// The thumbnail's long edge: a 212 × 118 pt tile in the tray at 2×
+    /// (a 3:2 landscape fills it), and sharp enough to stand in, enlarged, for
+    /// a tried stock until its develop is in.
+    static let longSide = 480
 
     /// The edit with `id` chosen, exactly as choosing it from the menu makes
     /// it. A film brings its own grain/DIR/halation presets, sets scanning for
@@ -162,7 +164,7 @@ struct StockEntry {
     let tile: PreviewTile
 }
 
-/// The tiles, the foldouts' open state and the settings.
+/// The tiles, which tray is open and the settings.
 @MainActor @Observable final class Previews {
     static let defaultsKey = "previews"
     static let keepPaperKey = "keep_paper"
@@ -181,10 +183,10 @@ struct StockEntry {
     private(set) var favoriteFilms: [String] { didSet { defaults.set(favoriteFilms, forKey: Self.favoriteFilmsKey) } }
     private(set) var favoritePapers: [String] { didSet { defaults.set(favoritePapers, forKey: Self.favoritePapersKey) } }
     @ObservationIgnored private let defaults: UserDefaults
-    /// Collapsed at every launch.
+    /// Which tray is open (`EditorModel.tray`): its tiles develop.
     var filmOpen = false
     var paperOpen = false
-    /// Whether each grid is on screen (not on another tab or pane).
+    /// Whether each tray's tiles are on screen.
     @ObservationIgnored var filmShown = false
     @ObservationIgnored var paperShown = false
     /// Whether the Presets panel's list is on screen.
@@ -253,233 +255,10 @@ struct StockEntry {
     }
 }
 
-// MARK: Views
-
-/// A Film or Paper foldout: the current stock's name on the header, a
-/// two-column grid of tiles under the menu's headings inside. Film, the
-/// long list, has a search field over its grid.
-struct StockFoldout: View {
-    let model: EditorModel
-    let paper: Bool
-    @State private var query = ""
-    /// About two and a half rows of tiles, so the cut-off row shows it scrolls.
-    static let gridHeight: CGFloat = 290
+/// The plain menu's tags, with the previews off in Settings: a favourite
+/// is listed twice, so its copy among the favourites has its own tag.
+enum StockMenu {
     static func favoriteID(_ id: String) -> String { "favorite:\(id)" }
-    /// The stock a tile or menu tag stands for.
+    /// The stock a menu tag stands for.
     static func stockID(tag: String) -> String { tag.hasPrefix("favorite:") ? String(tag.dropFirst("favorite:".count)) : tag }
-    /// The current stock's tile, the copy among the favourites if starred.
-    private var scrollID: String {
-        let id = paper ? model.paper : model.film
-        return model.previews.isFavorite(id, paper: paper) ? Self.favoriteID(id) : id
-    }
-
-    var body: some View {
-        let previews = model.previews
-        let isExpanded = Binding(
-            get: { paper ? previews.paperOpen : previews.filmOpen },
-            set: { open in
-                if paper { previews.paperOpen = open } else { previews.filmOpen = open }
-                model.pumpPreviews()
-            })
-        DisclosureGroup(isExpanded: isExpanded) {
-            // A fixed window onto the grid keeps the header, and the tab
-            // switch below, in reach however far down the stocks go. It
-            // opens on the current stock.
-            ScrollViewReader { proxy in
-                if !paper {
-                    StockSearchField(text: $query, prompt: "Search films") {
-                        // Return takes the first match, as listed.
-                        if let first = StockGroup.matching(query, in: model.filmGroups).first?.stocks.first {
-                            model.chooseFilm(first.id)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-                ScrollView {
-                    StockGrid(model: model, paper: paper, query: query)
-                }
-                .scrollDisabled(false)
-                .frame(height: StockFoldout.gridHeight)
-                .onAppear { proxy.scrollTo(scrollID, anchor: .center) }
-                // Each search starts at the top of its matches; clearing it
-                // goes back to the current stock.
-                .onChange(of: query) {
-                    if query.isEmpty { proxy.scrollTo(scrollID, anchor: .center) } else { proxy.scrollTo(StockGrid.topID, anchor: .top) }
-                }
-            }
-        } label: {
-            HStack {
-                Text(paper ? "Paper" : "Film")
-                Spacer()
-                Text(paper ? model.paperName : model.filmName)
-                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-            }
-            .help(paper ? ControlHelp.paper : ControlHelp.film)
-            .contentShape(Rectangle())
-            .onTapGesture { withAnimation { isExpanded.wrappedValue.toggle() } }
-        }
-    }
-}
-
-private struct StockGrid: View {
-    let model: EditorModel
-    let paper: Bool
-    var query = ""
-    static let topID = "stock-grid-top"
-
-    var body: some View {
-        let previews = model.previews
-        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-        let groups = StockGroup.matching(query, in: paper ? model.paperGroups : model.filmGroups)
-        // While searching, the matches show once, under their groups.
-        let favorites = searching ? [] : previews.favorites(in: paper ? model.papers : model.films, paper: paper)
-        Color.clear.frame(height: 0).id(Self.topID)
-        if groups.isEmpty {
-            Text("No \(paper ? "papers" : "films") match “\(query.trimmingCharacters(in: .whitespaces))”")
-                .font(.callout).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity).padding(.top, 24)
-        }
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), spacing: 8, alignment: .top)],
-                  alignment: .leading, spacing: 8) {
-            // The favourites first, untitled; each stays in its group too.
-            if !favorites.isEmpty {
-                Section { tiles(favorites, favorites: true) }
-            }
-            ForEach(groups) { group in
-                Section {
-                    tiles(group.stocks)
-                } header: {
-                    Text(group.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .onAppear { setShown(true) }
-        .onDisappear { setShown(false) }
-    }
-
-    /// A favourite's tile is in the grid twice, so the copy on top has its
-    /// own scroll id (`StockFoldout.scrollID`).
-    private func tiles(_ stocks: [Stock], favorites: Bool = false) -> some View {
-        let previews = model.previews
-        let selected = paper ? model.paper : model.film
-        return ForEach(stocks) { stock in
-            if let tile = previews.tile(stock.id, paper: paper) {
-                StockTileView(stock: stock, tile: tile, selected: stock.id == selected,
-                              favorite: previews.isFavorite(stock.id, paper: paper),
-                              toggleFavorite: { previews.toggleFavorite(stock.id, paper: paper) }) {
-                    if paper { model.choosePaper(stock.id) } else { model.chooseFilm(stock.id) }
-                }
-                .id(favorites ? StockFoldout.favoriteID(stock.id) : stock.id)
-            }
-        }
-    }
-
-    private func setShown(_ shown: Bool) {
-        if paper { model.previews.paperShown = shown } else { model.previews.filmShown = shown }
-        model.pumpPreviews()
-    }
-}
-
-/// A native search field: filters as you type, Escape or its clear button
-/// empties it, Return calls `submit`.
-private struct StockSearchField: NSViewRepresentable {
-    @Binding var text: String
-    let prompt: String
-    let submit: () -> Void
-
-    func makeNSView(context: Context) -> NSSearchField {
-        let field = NSSearchField()
-        field.controlSize = .small
-        field.font = .systemFont(ofSize: NSFont.systemFontSize(for: .small))
-        field.placeholderString = prompt
-        field.setAccessibilityLabel(prompt)
-        field.sendsSearchStringImmediately = true
-        field.target = context.coordinator
-        field.action = #selector(Coordinator.changed(_:))
-        field.delegate = context.coordinator
-        field.stringValue = text
-        return field
-    }
-
-    func updateNSView(_ field: NSSearchField, context: Context) {
-        context.coordinator.parent = self
-        if field.stringValue != text { field.stringValue = text }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
-        var parent: StockSearchField
-        init(_ parent: StockSearchField) { self.parent = parent }
-
-        @objc func changed(_ field: NSSearchField) {
-            if parent.text != field.stringValue { parent.text = field.stringValue }
-        }
-
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
-            parent.submit()
-            return true
-        }
-    }
-}
-
-private struct StockTileView: View {
-    let stock: Stock
-    let tile: PreviewTile
-    let selected: Bool
-    let favorite: Bool
-    let toggleFavorite: () -> Void
-    let choose: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: choose) {
-            VStack(alignment: .leading, spacing: 3) {
-                // The thumbnail is an overlay so its fill can't widen the
-                // tile past its column (as a ZStack child it did, and the
-                // tiles overlapped).
-                RoundedRectangle(cornerRadius: 5).fill(.quaternary)
-                    .frame(maxWidth: .infinity).frame(height: 92)
-                    .overlay {
-                        if let image = tile.image {
-                            Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
-                                .opacity(tile.dimmed ? 0.55 : 1)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay {
-                    if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor, lineWidth: 2) }
-                }
-                Text(stock.name).font(.caption).lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(selected ? .primary : .secondary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(stock.name)
-        .accessibilityLabel(stock.name)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        // The star sits over the thumbnail's corner, outside the tile's own
-        // button so a click stars rather than chooses. Shown on a favourite,
-        // or while the pointer is over the tile.
-        .overlay(alignment: .topTrailing) {
-            if favorite || hovering {
-                Button(action: toggleFavorite) {
-                    Image(systemName: favorite ? "star.fill" : "star")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(favorite ? Color.yellow : Color.white)
-                        .shadow(color: .black.opacity(0.6), radius: 1.5)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(favorite ? "Remove from favorites" : "Add to favorites")
-                .accessibilityLabel(favorite ? "Remove \(stock.name) from favorites" : "Add \(stock.name) to favorites")
-            }
-        }
-        .onHover { hovering = $0 }
-    }
 }

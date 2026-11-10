@@ -33,6 +33,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(info["SURequireSignedFeed"])
         self.assertTrue(info["SUVerifyUpdateBeforeExtraction"])
         self.assertFalse(info["SUAllowsAutomaticUpdates"])
+        self.assertEqual(info["NSAccentColorName"], "AccentColor")
 
     def test_existing_feed_requires_a_new_build(self):
         feed = f'<rss xmlns:sparkle="{SPARKLE}"><channel><item><sparkle:version>42</sparkle:version></item></channel></rss>'

@@ -45,6 +45,8 @@ import UserNotifications
     private(set) var filmStrip: FilmStrip?
     private(set) var stocks: [Stock] = []
     private(set) var source: URL?
+    /// The camera's facts for the caption over the photograph, read off the main actor.
+    private(set) var photoFacts: PhotoFacts?
     /// The duplicate of `source` open (its sidecar variant); nil for the
     /// photograph itself.
     private(set) var sourceVariant: String?
@@ -58,6 +60,14 @@ import UserNotifications
     /// photograph as it will look, finished (cropped, turned, in its
     /// border), rather than the camera's own preview. From ctruett's fork.
     private(set) var standIn: CGImage?
+    /// The film or paper tray, while it's open (IMPLEMENTATION.md §4.5, §5.1).
+    private(set) var tray: TrayVisit?
+    /// The tried stock's tile, enlarged on the canvas at once, until the
+    /// develop of that edit is in (§5.1).
+    private(set) var trialImage: CGImage?
+    /// The tray and the names that open it: a click anywhere else keeps the
+    /// stock being tried and closes the tray.
+    @ObservationIgnored let trayHitAreas = NSHashTable<NSView>.weakObjects()
     /// The undeveloped photograph, shown in place of `image` while the
     /// Original button is held.
     private(set) var original: IOSurface?
@@ -98,8 +108,10 @@ import UserNotifications
     private(set) var previewCurrent = false
     /// The shown preview is out of date, and the update is slow enough to mention.
     private(set) var showsActivity = false
-    /// The latest edit couldn't be developed; the last good preview stays.
-    private(set) var renderFailed = false
+    /// Why the latest edit couldn't be developed, said on the canvas over
+    /// the last good preview (§4.14); nil when it could.
+    private(set) var developFailure: String?
+    var renderFailed: Bool { developFailure != nil }
     private(set) var saving = false
     private(set) var exporting = false
     private(set) var exportStarted = Date()
@@ -140,7 +152,14 @@ import UserNotifications
     /// Lab › Film format › Custom picked while the value is still a format's,
     /// so the slider stays. Opening a photograph and Reset Adjustments clear it.
     var customFilmFormat = false
-    var error: String?
+    /// Shown in the alert sheet until it's answered (`AlertSheet`).
+    var error: String? {
+        didSet { if error != oldValue { errorAlert = error.map { AlertRequest(alert: .error($0)) { _ in } } } }
+    }
+    /// `error` as the alert sheet shows it.
+    private(set) var errorAlert: AlertRequest?
+    /// The questions waiting for the alert sheet.
+    @ObservationIgnored let alerts = AlertQueue()
     var status = "Starting…"
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
@@ -153,24 +172,34 @@ import UserNotifications
     /// The brief note over the canvas after a rating or flag key.
     private(set) var libraryNote: LibraryNote?
     /// The edit view or the grid. Every launch starts in the edit view.
-    private(set) var mode = LibraryMode.photo
+    private(set) var mode = LibraryMode.photo {
+        // The sheet stays drawn while it folds back into the strip; the
+        // window clears this once it has (`SheetFlight`).
+        didSet { if oldValue == .grid, mode == .photo { sheetFolding = true } }
+    }
+    /// The grid is folding back into the strip (§4.6).
+    var sheetFolding = false
+    /// Grid thumbnails waiting while the grid opens or folds: a flyer is
+    /// carrying them, or they fade in after.
+    var sheetWaiting: Set<URL> = []
+    /// Where the strip's frames and the grid's thumbnails are drawn, for
+    /// the flight between them.
+    @ObservationIgnored let places = ThumbnailPlaces()
+    /// Each photograph's shape, for the strip's frames and the grid's rows.
+    @ObservationIgnored let aspects = PhotoAspects()
     /// The selected photographs and the current one, which in the edit view
     /// is `source`. In the grid it moves without developing anything.
     private(set) var selection = LibrarySelection()
-    /// The width of the grid's photographs, in points.
-    var gridCellSize = UserDefaults.standard.object(forKey: "gridThumbnailSize") as? Double ?? GridMetrics.defaultSize {
+    /// The height of the grid's rows, in points (the sheet's Size).
+    var gridCellSize = UserDefaults.standard.object(forKey: "gridThumbnailSize") as? Double ?? SheetLayout.defaultSize {
         didSet {
-            let clamped = min(max(gridCellSize, GridMetrics.sizes.lowerBound), GridMetrics.sizes.upperBound)
+            let clamped = min(max(gridCellSize, SheetLayout.sizes.lowerBound), SheetLayout.sizes.upperBound)
             if clamped != gridCellSize { gridCellSize = clamped; return }
             UserDefaults.standard.set(gridCellSize, forKey: "gridThumbnailSize")
         }
     }
-    /// How many columns the grid shows now, for moving up and down a row.
-    @ObservationIgnored var gridColumns = 1
-    /// The window's width for its photograph column alone, without the
-    /// inspector: what the grid will have once the inspector has slid away.
-    /// Set by the window.
-    @ObservationIgnored var fullCanvasWidth: () -> CGFloat = { 0 }
+    /// The grid as laid out now, for moving up and down a row. Set by the sheet.
+    @ObservationIgnored var gridLayout: SheetLayout?
     var inspectorVisible = true
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
@@ -189,6 +218,12 @@ import UserNotifications
     @ObservationIgnored private var checkingPresets = 0
     /// The preset whose name is being edited in the list.
     var renamingPreset: URL?
+    /// The preset applied last to each photograph this session, which the
+    /// Presets pane rings (§4.12). By the photograph's item, so a duplicate
+    /// has its own.
+    private(set) var appliedPresets: [URL: URL] = [:]
+    /// The preset applied last to the photograph on screen.
+    var appliedPreset: URL? { sourceItem.flatMap { appliedPresets[$0] } }
     /// A preset New Preset just made: Escape while naming it removes it.
     @ObservationIgnored private var unnamedPreset: URL?
     var zoomCommand = UUID()
@@ -369,7 +404,11 @@ import UserNotifications
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
         library.sidecarChanged = { [weak self] photo in self?.sidecarChangedOnDisk(photo) }
         library.filterChanged = { [weak self] in self?.filterChanged() }
-        library.looksChanged = { [weak self] in self?.pumpThumbnails() }
+        library.looksChanged = { [weak self] in
+            guard let self else { return }
+            self.pumpThumbnails()
+            self.aspects.read(self.library.items, around: self.sourceItem)
+        }
     }
 
     /// Starts the helper and asks for its catalog at once, so both load while
@@ -420,9 +459,12 @@ import UserNotifications
 
     /// No photograph open, and nothing of the last one written to its sidecar.
     private func forgetPhotograph() {
+        endTray(keep: true)
+        trialImage = nil
         photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
-        source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
+        photoFacts = nil
+        source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
         interactionStart = nil; cropSession = nil
@@ -685,6 +727,69 @@ import UserNotifications
     func choosePaper(_ stock: String) {
         apply(PreviewRules.choosing(stock, paper: true, keepPaper: previews.keepPaper, in: state, stocks: stocks), action: "Change Paper")
     }
+
+    // MARK: The tray (§4.5, §5.1)
+
+    /// Opens the film or paper tray on the current stock, keeping whatever
+    /// the other tray was trying.
+    func openTray(paper: Bool) {
+        guard previews.enabled, source != nil, !cropping, mode == .photo else { return }
+        if let tray {
+            if tray.paper == paper { return }
+            endTray(keep: true)
+        }
+        // A slide is scanned: there's no paper to choose.
+        if paper, state.params["io.scan_film"].bool { return }
+        tray = TrayVisit(paper: paper, before: state)
+        if paper { previews.paperOpen = true } else { previews.filmOpen = true }
+        pumpPreviews()
+    }
+    /// A click on a name: opens its tray, or closes it keeping the stock.
+    func toggleTray(paper: Bool) {
+        if tray?.paper == paper { endTray(keep: true) } else { openTray(paper: paper) }
+    }
+
+    /// Tries a stock on the photograph; the tray stays open. Tries aren't
+    /// undo steps: keeping one is (`endTray`).
+    func tryStock(_ id: String) {
+        guard let tray, let source else { return }
+        let next = PreviewRules.choosing(id, paper: tray.paper, keepPaper: previews.keepPaper, in: state, stocks: stocks)
+        guard next != state else { return }
+        replaceState(next)
+        // The tile shows exactly this edit if it was made from the request
+        // it would be made from now.
+        guard !previewCurrent, let stock = stocks.first(where: { $0.paper == tray.paper && $0.id == id }),
+              let tile = previews.tile(id, paper: tray.paper), let image = tile.image else { return }
+        let wanted = PreviewTile.Key(generation: sourceGeneration, request: PreviewRules.request(
+            for: stock, keepPaper: previews.keepPaper, state: renderState, stocks: stocks, source: source, generation: sourceGeneration))
+        if tile.shown == wanted { trialImage = image }
+    }
+
+    /// ← →: the previous or next stock, in the tray's order (the
+    /// favourites' copies aside), among the matches while searching.
+    func stepTray(by offset: Int) {
+        guard let tray else { return }
+        let order = StockTrayRules.order(StockGroup.matching(tray.query, in: tray.paper ? paperGroups : filmGroups))
+        guard let id = StockTrayRules.step(from: tray.paper ? paper : film, by: offset, in: order) else { return }
+        tryStock(id)
+    }
+
+    /// Return, Done or a click outside keeps the stock being tried, as one
+    /// undo step from the stock before the tray opened; Esc puts that one
+    /// back (§5.1). Either closes the tray. Undo while it's open keeps first
+    /// (`EditorWindowController`), so it undoes the visit.
+    func endTray(keep: Bool) {
+        guard let tray else { return }
+        self.tray = nil
+        previews.filmOpen = false; previews.paperOpen = false
+        let before = withPreferences(tray.before)
+        if keep {
+            if state != before { registerUndo(restoring: tray.before, action: tray.action) }
+        } else if state != before {
+            replaceState(tray.before)
+        }
+        pumpPreviews()
+    }
     /// The state with the app's preferences that travel in it.
     private func withPreferences(_ state: EditState) -> EditState {
         var state = state; state.limitPreview = limitsPreview; return state
@@ -731,6 +836,9 @@ import UserNotifications
     }
     private func apply(_ next: EditState, action: String) {
         guard next != state else { return }
+        // Any other edit keeps the stock being tried and closes the tray, so
+        // the visit stays one undo step before it.
+        endTray(keep: true)
         if !interacting { registerUndo(restoring: state, action: action) }
         replaceState(next)
     }
@@ -740,6 +848,8 @@ import UserNotifications
         guard !closing else { return }
         let next = withPreferences(next)
         let render = next.rendered != state.rendered
+        // The enlarged tile was of the edit before.
+        if render { trialImage = nil }
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
@@ -840,8 +950,20 @@ import UserNotifications
     func beginCrop() {
         guard !cropping, image != nil, imageSize != .zero else { return }
         holdOriginal(false)
+        // The straighten dial takes the label's place.
+        endTray(keep: true)
         cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
     }
+    /// A quarter turn, which happens only while cropping (§4.10): from the
+    /// menu, or ⌘R / ⌥⌘R, it starts cropping first. Done keeps it with the
+    /// crop as one undo step; Cancel turns it back.
+    func turn(clockwise: Bool) {
+        if !cropping { beginCrop() }
+        guard cropping else { return }
+        let turns = (Int(value("io.rotate_cw").double) + (clockwise ? 1 : 3)) % 4
+        var next = state; next.params["io.rotate_cw"] = .number(Double(turns)); replaceState(next)
+    }
+
     /// Done applies the crop, and any rotation while cropping, as one undo
     /// step. Cancel restores the rotation and keeps the previous crop.
     func endCrop(apply: Bool) {
@@ -866,10 +988,7 @@ import UserNotifications
     nonisolated static let rawExtensions = ["dng", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "ptx", "srw", "x3f", "iiq", "3fr", "ari", "bay", "crw", "dcr", "drf", "erf", "fff", "k25", "kdc", "mef", "mos", "mrw", "rwl"]
 
     func openPanel() {
-        let panel = NSOpenPanel()
-        panel.title = "Open Photograph"
-        panel.allowedContentTypes = [.png, .tiff, .jpeg, .rawImage] + Self.rawExtensions.compactMap { UTType(filenameExtension: $0) }
-        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        let panel = Self.makeOpenPanel()
         if let source {
             // A file URL reveals and selects the file; a parent URL only opens its folder.
             panel.directoryURL = source
@@ -879,7 +998,32 @@ import UserNotifications
         }
     }
 
+    /// ⌘O's panel: a photograph, or a folder of them (§6.1).
+    static func makeOpenPanel() -> NSOpenPanel {
+        let panel = NSOpenPanel()
+        panel.title = "Open"
+        panel.allowedContentTypes = [.png, .tiff, .jpeg, .rawImage] + Self.rawExtensions.compactMap { UTType(filenameExtension: $0) }
+        panel.canChooseFiles = true; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
+        return panel
+    }
+
+    /// A folder's first photograph in name order, or nil if it has none
+    /// (or isn't a folder Negs can read).
+    nonisolated static func firstPhotograph(in folder: URL) -> URL? {
+        (try? PhotoFolder.images(in: folder))?.first
+    }
+
     func open(_ url: URL) {
+        // A folder opens on its first photograph, in the grid.
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            guard let first = Self.firstPhotograph(in: url) else {
+                error = "“\(url.lastPathComponent)” has no photographs Negs can open."
+                return
+            }
+            open(first)
+            if source == first { showGrid() }
+            return
+        }
         explicitOpenRequested = true
         mode = .photo
         // During launch it undoes a restore at launch; later it supersedes it.
@@ -897,6 +1041,9 @@ import UserNotifications
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
+        // A stock being tried is kept, as by a click outside the tray.
+        endTray(keep: true)
+        trialImage = nil
         // The previous photograph's last edits go to its sidecar first, and
         // the preview on screen becomes its edited thumbnail.
         flushSidecar()
@@ -907,7 +1054,7 @@ import UserNotifications
         let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         sourceDeleted = false
-        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
+        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -918,6 +1065,11 @@ import UserNotifications
         sourceGeneration += 1
         let generation = sourceGeneration
         customFilmFormat = false
+        photoFacts = nil
+        Task.detached(priority: .utility) { [weak self] in
+            let facts = PhotoFacts.read(url)
+            await self?.adopt(facts, generation: generation)
+        }
         // A schema 2 session restores its edits as before; otherwise the
         // photograph's sidecar has them, read at launch with the session.
         adoptEdits(for: url, restore: session?.sidecar ?? readSidecar(url, variant: item.variantID), legacy: session?.state, previous: previous,
@@ -1029,6 +1181,10 @@ import UserNotifications
         placeholderSize = size; placeholder = render; standIn = nil
         updateFilmStrip()
         return true
+    }
+
+    private func adopt(_ facts: PhotoFacts?, generation: Int) {
+        if generation == sourceGeneration { photoFacts = facts }
     }
 
     private func showStandIn(_ thumbnail: CGImage, generation: Int) {
@@ -1504,10 +1660,9 @@ import UserNotifications
         else { selection.select(photo) }
     }
 
-    /// The arrow keys. In the edit view ← and → open the next photograph; in
-    /// the grid the current photograph moves without developing, a row at a
-    /// time up and down (`offset` ± `gridColumns`). With ⇧ the selection
-    /// grows or shrinks instead and the current photograph stays.
+    /// ← and →. In the edit view they open the next photograph; in the grid
+    /// the current photograph moves without developing. With ⇧ the
+    /// selection grows or shrinks instead and the current photograph stays.
     func move(by offset: Int, extending: Bool) {
         guard !cropping else { return }
         let order = shownPhotos.map(\.url)
@@ -1517,11 +1672,25 @@ import UserNotifications
             if let first = order.first { selection.select(first) }
             return
         }
-        var to = index + offset
-        // Down from the row above a short last row lands on its last photograph, as in Finder.
-        if to >= order.count, offset > 1, index / offset < (order.count - 1) / offset { to = order.count - 1 }
-        guard order.indices.contains(to) else { return }
-        selection.select(order[to])
+        guard order.indices.contains(index + offset) else { return }
+        selection.select(order[index + offset])
+    }
+
+    /// ↑ and ↓ in the grid: the photograph a row up or down, the one
+    /// nearest across (`SheetLayout.vertical`). With ⇧ the selection grows
+    /// or shrinks to it.
+    func moveRow(by rows: Int, extending: Bool) {
+        guard !cropping, mode == .grid else { return }
+        let order = shownPhotos.map(\.url)
+        // ⇧ moves the selection's moving end, as ⇧← and ⇧→ do.
+        let from = extending ? selection.lead ?? selection.current : selection.current
+        guard let from, let index = order.firstIndex(of: from) else {
+            if let first = order.first, !extending { selection.select(first) }
+            return
+        }
+        guard let layout = gridLayout, layout.frames.count == order.count,
+              let to = layout.vertical(from: index, by: rows) else { return }
+        if extending { selection.extend(by: to - index, in: order) } else { selection.select(order[to]) }
     }
 
     /// ⌘A: every photograph shown.
@@ -1534,6 +1703,7 @@ import UserNotifications
     func showGrid() {
         guard let source = sourceItem, !cropping, mode != .grid else { return }
         holdOriginal(false)
+        endTray(keep: true)
         // The grid shows the open photograph as edited.
         flushSidecar()
         saveOpenThumbnail()
@@ -1592,6 +1762,22 @@ import UserNotifications
     /// alone, as in Finder.
     func contextTargets(_ item: URL) -> [URL] {
         selection.selected.contains(item) ? selection.ordered(shownPhotos.map(\.url)) : [item]
+    }
+
+    /// Photo › Copy Edits…: the groups to copy as tick boxes in the alert
+    /// sheet, the last choice ticked. Copy remembers the choice and copies.
+    func copyEditsChoosing() {
+        let chosen = copyGroups
+        Task {
+            let answer = await ask(AppAlert(
+                title: "Copy Edits", detail: "Choose the edits Paste Edits applies.",
+                buttons: [.init(title: "Copy"), .init(title: "Cancel", role: .cancel)],
+                choices: EditGroup.allCases.map { AppAlert.Choice(title: $0.title, on: chosen.contains($0)) }))
+            guard answer.button == 0 else { return }
+            let groups = Set(zip(EditGroup.allCases, answer.choices).filter(\.1).map(\.0))
+            copyGroups = groups
+            copyEdits(groups: groups)
+        }
     }
 
     func copyEdits(from item: URL? = nil, groups: Set<EditGroup> = EditGroup.standard) {
@@ -1883,9 +2069,11 @@ import UserNotifications
                 let round = self.prefetchRound
                 for (file, size, edited) in await self.prefetchTargets() {
                     guard self.prefetchRound == round, !Task.isCancelled else { break }
-                    _ = await Task.detached(priority: .utility) {
+                    let image = await Task.detached(priority: .utility) {
                         await PhotoThumbnails.shared.image(for: file, size: size, look: edited?.look, edited: edited?.store, ahead: true)
                     }.value
+                    // Its frame takes the shape of what will be shown.
+                    if let image { self.aspects.note(file.url, image: image) }
                 }
                 guard self.prefetchRound != round else { break }
                 // While scrolling, a round at most every 30 ms.
@@ -2251,19 +2439,11 @@ import UserNotifications
         let permanent = !plan.files.isEmpty && !trash.available(folder)
         guard asking || permanent else { return delete(plan) }
         let question = plan.question(name: library.name(of:), permanent: permanent)
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = question.message
-        alert.informativeText = question.information
-        alert.addButton(withTitle: question.button).hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
-        let answered = { [weak self] (response: NSApplication.ModalResponse) in
-            if response == .alertFirstButtonReturn { self?.delete(plan, permanent: permanent) }
-        }
-        if let window = NSApp.keyWindow as? EditorWindow {
-            alert.beginSheetModal(for: window) { response in MainActor.assumeIsolated { answered(response) } }
-        } else {
-            answered(alert.runModal())
+        let alert = AppAlert(title: question.message, detail: question.information,
+                             buttons: [.init(title: question.button, role: .destructive), .init(title: "Cancel", role: .cancel)])
+        Task { [weak self] in
+            guard await self?.ask(alert).button == 0 else { return }
+            self?.delete(plan, permanent: permanent)
         }
     }
 
@@ -2549,12 +2729,18 @@ import UserNotifications
         changed()
     }
 
+    /// Try Again, after a develop failed: the same edit, developed again.
+    func retryDevelop() {
+        guard renderFailed else { return }
+        changed(invalidateCache: false)
+    }
+
     private func changed(invalidateCache: Bool = true) {
         heldPreview = nil
         scheduleToneCurve()
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
-        if renderFailed { renderFailed = false }
+        if developFailure != nil { developFailure = nil }
         // Dims the thumbnails now, or blanks them for a new photograph.
         pumpPreviews()
         guard ready, source != nil, !closing else { return }
@@ -2693,6 +2879,7 @@ import UserNotifications
                 showingInteractiveFrame = interactiveScale != nil
                 quickFrame = quick ? frame : nil
                 image = developed; placeholder = nil; standIn = nil
+                if revision == currentRevision { trialImage = nil }
                 updateHistogram()
                 let film = FilmHistogram(result["film_histogram"])
                 if film != filmHistogram { filmHistogram = film }
@@ -2730,7 +2917,8 @@ import UserNotifications
             // A failed quick frame leaves the error to the export-size render that follows.
             if step.isQuick { return }
             if currentRevision == revision, generation == sourceGeneration, !closing {
-                renderFailed = true; hideActivity(); report(error)
+                // Said on the canvas and in the status line, not in an alert (§6.10).
+                developFailure = error.localizedDescription; hideActivity()
             }
         }
     }
@@ -2808,6 +2996,8 @@ import UserNotifications
         guard activityTimer == nil, !showsActivity else { return }
         activityTimer = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
+            // A tried stock's tile is up: the tag only once the develop runs long.
+            if self?.trialImage != nil { try? await Task.sleep(for: .milliseconds(1100)) }
             guard let self, !Task.isCancelled else { return }
             self.activityTimer = nil
             if !self.previewCurrent, !self.showingCachedPreview, !self.interacting, !self.renderFailed, self.source != nil {
@@ -2826,6 +3016,7 @@ import UserNotifications
     /// the plain preset list, and frees the thumbnails here and in the helper.
     func setPreviews(_ enabled: Bool) {
         guard enabled != previews.enabled else { return }
+        if !enabled { endTray(keep: true) }
         previews.enabled = enabled
         if enabled { pumpPreviews(); return }
         if previews.clear(), let engine {
@@ -3415,7 +3606,7 @@ import UserNotifications
     private var exportsSingle: Bool {
         mode == .photo || (!sourceDeleted && sourceItem.map { exportTargets == [$0] } ?? false)
     }
-    /// The menu also needs no crop being drawn; the toolbar shows crop's own items then.
+    /// The menu also needs no crop being drawn; crop has its own Return and Esc then.
     var canExport: Bool {
         guard ready, !exporting, !saving, !batchRunning else { return false }
         return exportsSingle ? source != nil : !exportTargets.isEmpty && hasCatalog && engine != nil
@@ -3738,24 +3929,23 @@ import UserNotifications
 
     /// Whether the popover is open: it clears a finished batch when it closes.
     @ObservationIgnored var batchPopoverShown = false
+    /// Shows the batch's popover under a view; set by the window controller.
+    @ObservationIgnored var presentBatch: (NSView) -> Void = { _ in }
 
     /// A batch the last session didn't finish, offered once launch has settled.
-    func offerBatchResume(in window: NSWindow?) {
+    func offerBatchResume() {
         guard batch == nil, !closing else { return }
         let url = batchJournalURL
         Task { [weak self] in
             guard let journal = await Task.detached(priority: .utility, operation: { BatchJournal.read(from: url) }).value else { return }
             guard let self, !self.closing, self.batch == nil else { return }
             guard journal.remaining > 0 else { return BatchJournal.remove(at: url) }
-            let alert = NSAlert()
             let count = journal.remaining
-            alert.messageText = "Resume exporting \(count == 1 ? "1 photograph" : "\(count) photographs") to “\(journal.destination.lastPathComponent)”?"
-            alert.informativeText = "Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export."
-            alert.addButton(withTitle: "Resume")
-            alert.addButton(withTitle: "Discard")
-            let answer: NSApplication.ModalResponse
-            if let window { answer = await alert.beginSheetModal(for: window) } else { answer = alert.runModal() }
-            guard answer == .alertFirstButtonReturn else { return BatchJournal.remove(at: url) }
+            let answer = await self.ask(AppAlert(
+                title: "Resume exporting \(count == 1 ? "1 photograph" : "\(count) photographs") to “\(journal.destination.lastPathComponent)”?",
+                detail: "Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export.",
+                buttons: [.init(title: "Resume"), .init(title: "Discard")]))
+            guard answer.button == 0 else { return BatchJournal.remove(at: url) }
             // Started now, without the open photograph's state.
             if self.startBatch(journal) == nil { self.error = "The export couldn’t resume yet. Try again once Negs has started." }
         }
@@ -3782,7 +3972,7 @@ import UserNotifications
     }
     // MARK: Presets
 
-    /// The toolbar's Adjustments and Presets buttons: show that panel, or
+    /// The pane header's Adjustments and Presets words, ⌥⌘I and ⌥⌘P: show that panel, or
     /// hide the column if it already shows it.
     func togglePane(_ pane: InspectorPane) {
         if inspectorVisible && inspectorPane == pane { inspectorVisible = false } else { inspectorPane = pane; inspectorVisible = true }
@@ -3837,6 +4027,7 @@ import UserNotifications
                     var next = state
                     next.film = film; next.paper = paper; next.params = result["params"]
                     apply(next, action: "Apply Preset “\(preset.name)”")
+                    notePresetApplied(preset.url)
                     status = "Applied preset “\(preset.name)”"
                     return
                 }
@@ -3852,12 +4043,14 @@ import UserNotifications
     func newPreset() {
         guard canChangePresets, let engine else { return }
         showPane(.presets)
-        let snapshot = state, name = PresetName.from(fileName: filmName)
+        let snapshot = state, name = PresetName.from(fileName: filmName), snapshotItem = sourceItem
         Task {
             do {
                 let (_, result) = try await engine.request(["command": .string("preset_export"), "film": .string(snapshot.film),
                                                             "paper": .string(snapshot.paper), "params": snapshot.params])
                 let file = try await presetLibrary.add(Data(result["text"].string.utf8), name: name)
+                // The photograph's settings are this preset's: it's the one ringed.
+                notePresetApplied(file.url, to: snapshotItem)
                 await refreshPresets()
                 unnamedPreset = file.url
                 renamingPreset = file.url
@@ -3932,6 +4125,7 @@ import UserNotifications
         renamingPreset = nil
         guard preset.url == unnamedPreset else { return }
         unnamedPreset = nil
+        forgetApplied(preset.url)
         Task {
             do { try await presetLibrary.delete(preset) } catch { report(error) }
             await refreshPresets()
@@ -3945,6 +4139,7 @@ import UserNotifications
         Task {
             do {
                 let renamed = try await presetLibrary.rename(preset, to: name)
+                appliedPresets = appliedPresets.mapValues { $0 == preset.url ? renamed.url : $0 }
                 // Same file, same thumbnail: no blank tile while it's renamed.
                 previews.moveTile(preset: preset.url, to: renamed.url)
             } catch { report(error) }
@@ -3952,16 +4147,28 @@ import UserNotifications
         }
     }
 
+    /// Notes `preset` as the one applied last to `item` (the photograph on
+    /// screen when nil).
+    func notePresetApplied(_ preset: URL, to item: URL? = nil) {
+        guard let item = item ?? sourceItem else { return }
+        appliedPresets[item] = preset
+    }
+
+    private func forgetApplied(_ preset: URL) {
+        appliedPresets = appliedPresets.filter { $0.value != preset }
+    }
+
     func deletePreset(_ preset: PresetFile) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Delete the preset “\(preset.name)”?"
-        alert.informativeText = "This can’t be undone. Photographs edited with it keep their settings."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task {
-            do { try await presetLibrary.delete(preset) } catch { report(error) }
+            let answer = await ask(AppAlert(
+                title: "Delete the preset “\(preset.name)”?",
+                detail: "This can’t be undone. Photographs edited with it keep their settings.",
+                buttons: [.init(title: "Delete", role: .destructive), .init(title: "Cancel", role: .cancel)]))
+            guard answer.button == 0 else { return }
+            do {
+                try await presetLibrary.delete(preset)
+                forgetApplied(preset.url)
+            } catch { report(error) }
             await refreshPresets()
         }
     }

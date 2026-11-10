@@ -326,8 +326,9 @@ final class BorderLayers {
     }
 }
 
-/// Small drawn samples to pick a style from. Styles that don't fit the
-/// photograph are disabled.
+/// Four drawn samples to pick a style from, 66 × 46; the chosen one ringed
+/// in pencil with its name in 600 `paper` (§4.9). Styles that don't fit the
+/// photograph fade and can't be chosen.
 struct BorderStylePicker: View {
     @Binding var selection: BorderStyle
     var photo: CGSize?
@@ -335,29 +336,35 @@ struct BorderStylePicker: View {
     var colors = (mat: BorderColor.white, line: BorderColor.black)
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(BorderStyle.allCases) { style in
+        HStack(spacing: 0) {
+            ForEach(Array(BorderStyle.allCases.enumerated()), id: \.element) { index, style in
+                if index > 0 { Spacer(minLength: 8) }
+                let chosen = selection == style
                 Button { selection = style } label: {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 7) {
                         BorderSwatch(style: style, colors: colors)
-                            .frame(width: 50, height: 36)
-                            .padding(3)
+                            .frame(width: 66, height: 46)
                             .overlay {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(selection == style ? Color.accentColor : .clear, lineWidth: 2)
+                                if chosen {
+                                    PencilRing().pencil(width: PencilRing.lineWidth)
+                                        .padding(.horizontal, -PencilRing.outset.width).padding(.vertical, -PencilRing.outset.height)
+                                        .rotationEffect(PencilRing.tilt)
+                                }
                             }
-                        Text(style.title).font(.caption)
-                            .foregroundStyle(selection == style ? Color.accentColor : .secondary)
+                        Text(style.title).font(Theme.serif(13, weight: chosen ? 600 : 400))
+                            .foregroundStyle(chosen ? Theme.paper : Theme.dim)
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(InkPressStyle())
                 .disabled(photo.map { !style.fits($0) } ?? false)
+                .inkFocus { if photo.map(style.fits) ?? true { selection = style } }
                 .help(style.help)
                 .accessibilityLabel("\(style.title) border")
-                .accessibilityAddTraits(selection == style ? .isSelected : [])
+                .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
             }
         }
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
     }
 }
@@ -389,7 +396,7 @@ private struct BorderSwatch: View {
                 }
             }
         }
-        .overlay(Rectangle().strokeBorder(.separator, lineWidth: 0.5))
+        .overlay(Rectangle().strokeBorder(Theme.track, lineWidth: 0.5))
         .opacity(enabled ? 1 : 0.35)
         .accessibilityHidden(true)
     }

@@ -22,7 +22,7 @@ import XCTest
         defer { model.shutdown() }
         let controller = EditorWindowController(model: model)
         let window = try XCTUnwrap(controller.window)
-        let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+        let split = try XCTUnwrap((window.contentViewController as? EditorFrame)?.split)
         let columns = split.splitViewItems.map(\.minimumThickness).reduce(0, +) + split.splitView.dividerThickness
         func content() -> NSSize { window.contentRect(forFrameRect: window.frame).size }
 
