@@ -42,11 +42,11 @@ need (about 240 ms each for a 24 MP NEF on an M1 Pro), except to solve a match
 that's stored. A new default film or paper, or turning the match for new
 photographs on or off, develops the unedited photographs again; edited ones stay.
 Until a thumbnail is ready the camera's preview shows. Thumbnails are kept in
-`~/Library/Caches` (up to about 500 MB, the least recently used go first) and are
-safe to delete. They're about 48 KB each (Z 6 NEFs with the default film, grain and
-halation: 17–92 KB, 72 KB for nine in ten), so 500 MB holds about 10,000 and a
+`~/Library/Caches` (up to 1 GB, the least recently used go first) and are safe to
+delete. They're about 48 KB each (Z 6 NEFs with the default film, grain and
+halation: 17–92 KB, 72 KB for nine in ten), so 1 GB holds about 21,000 and a
 folder of 1,000 takes about 50 MB. Past the limit the cache is cut to three
-quarters, about 8,000. After a new default film the old unedited thumbnails are
+quarters, about 16,000. After a new default film the old unedited thumbnails are
 never shown again, so they're the first to go.
 
 ## Edits per photograph

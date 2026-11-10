@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 final class EditedThumbnailStore: @unchecked Sendable {
     /// The thumbnail's long side, border included.
     static let longSide: CGFloat = 512
-    static let limit = 500 * 1024 * 1024
+    static let limit = 1024 * 1024 * 1024
     /// The app's; under XCTest a temporary folder, never the user's Caches.
     static let shared = NSClassFromString("XCTestCase") != nil
         ? EditedThumbnailStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("negs-thumbnails-\(UUID().uuidString)", isDirectory: true))
