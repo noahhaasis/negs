@@ -6,9 +6,9 @@ import SwiftUI
 /// holds the filter; the photographs are packed in rows at their own
 /// proportions, without captions; the foot counts them and sizes the rows.
 /// Like the strip it shows embedded previews or developed thumbnails, so it
-/// never develops a RAW. A click opens a photograph and folds the grid;
-/// ⌘- and ⇧-clicks, the arrow keys and the rubber band select without
-/// opening, for the context menu.
+/// never develops a RAW. A click selects a photograph and a double-click
+/// opens it and folds the grid; ⌘- and ⇧-clicks, the arrow keys and the
+/// rubber band select too, for the context menu.
 struct GridSheet: View {
     let model: EditorModel
 
@@ -328,10 +328,11 @@ private struct SheetGrid: View {
                 } click: {
                     focused = true
                     let modifiers = NSEvent.modifierFlags
-                    let command = modifiers.contains(.command), shift = modifiers.contains(.shift)
-                    model.click(url, command: command, shift: shift)
-                    // A plain click opens it and folds the grid.
-                    if !command && !shift { model.editCurrent() }
+                    model.click(url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
+                } open: {
+                    // A double-click opens it and folds the grid.
+                    model.click(url)
+                    model.editCurrent()
                 }
                 .contextMenu { LibraryContextMenu(model: model, item: url) }
             }
@@ -404,6 +405,7 @@ private struct SheetCell: View {
     let loaded: (CGImage) -> Void
     let placed: (ThumbnailPlaces.Place?) -> Void
     let click: () -> Void
+    let open: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
 
@@ -425,12 +427,15 @@ private struct SheetCell: View {
         .opacity(waiting ? 0 : 1)
         .offset(y: waiting ? 14 : 0)
         .contentShape(Rectangle())
-        .onTapGesture(perform: click)
+        // A click selects at once; the second of a double-click opens.
+        .onTapGesture(count: 2, perform: open)
+        .simultaneousGesture(TapGesture().onEnded(click))
         .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
         .accessibilityAddTraits(ringed ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction { click() }
+        .accessibilityAction(named: "Edit", open)
         .onAppear { visible = true; shown(true) }
         .onDisappear { visible = false; image = nil; shown(false) }
         .task(id: visible ? Load(file: file, size: thumbnail, edited: edited) : nil) {
