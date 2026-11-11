@@ -399,8 +399,12 @@ impl Editor {
         location.set_xalign(0.);
         location.add_css_class("caption");
         b.append(&location);
+        // Without natural-height propagation the dialog sizes itself to the
+        // scroller's minimum and shows one row (issue #12); this way it is as
+        // tall as its settings, up to what the window allows, then scrolls.
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
             .child(&b)
             .build();
         toolbar.set_content(Some(&scroll));
