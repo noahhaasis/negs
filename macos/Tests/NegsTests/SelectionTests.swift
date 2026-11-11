@@ -136,6 +136,12 @@ final class SelectionTests: XCTestCase {
         let gap = CGRect(x: 0, y: layout.frames[0].maxY + 2, width: 1000, height: 2)
         XCTAssertEqual(layout.indices(in: gap), [], "between rows touches none")
         XCTAssertEqual(layout.indices(in: CGRect(x: 0, y: 0, width: 1000, height: 2000)), Array(0..<5))
+        // The grid builds the photographs of the rows reaching into its view.
+        XCTAssertEqual(layout.indices(from: 0, to: 10), 0..<0, "above the first row")
+        XCTAssertEqual(layout.indices(from: 0, to: 30), layout.rows[0].range)
+        XCTAssertEqual(layout.indices(from: 0, to: layout.rows[1].y), 0..<5)
+        XCTAssertEqual(layout.indices(from: layout.rows[1].y, to: 5000), layout.rows[1].range)
+        XCTAssertEqual(layout.indices(from: 5000, to: 6000), 0..<0)
 
         // A panorama wider than the sheet has a row to itself, shrunk to fit.
         let wide = SheetLayout(ratios: [10, 1.5], width: 500, target: 176)
