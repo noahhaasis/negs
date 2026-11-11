@@ -27,6 +27,9 @@ pub fn catalog(data: &Path, stocks: impl IntoIterator<Item = String>) -> Result<
             "paper": p.info.support == "paper" || p.info.stage == "printing",
             "positive": p.is_positive(), "bw": p.is_bw(),
             "target_print": p.info.target_print, "development_times": p.data.development_time,
+            // Where the profile comes from, for Settings' Fotufilm films choice.
+            "fotufilm": p.metadata.version.starts_with("fotufilm-port"),
+            "manufacturer_data": p.metadata.manufacturer_data,
             "grain": {
                 "rms_granularity": grain.rms_granularity, "density_min": grain.density_min,
                 "uniformity": grain.uniformity, "particle_scale_sublayers": grain.particle_scale_sublayers,

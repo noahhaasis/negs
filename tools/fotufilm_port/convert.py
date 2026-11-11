@@ -1,7 +1,7 @@
 """Convert a Fotufilm stock profile (CC BY-SA 4.0, MUAStudio Inc.) to a Negs/spektrafilm profile.
 
 Usage: uv run python convert.py <fotufilm-stock.json> <out.json> [--id ID] [--name NAME]
-       [--target-print STOCK] [--approximate] [--report report.json]
+       [--target-print STOCK] [--approximate] [--sampled] [--report report.json]
 
 Mapping (both engines use the 380-780 nm / 5 nm grid and log10 exposure with mid-grey at 0):
 
@@ -387,6 +387,7 @@ def convert(stock, provenance, args):
         "citation": "Fotufilm, https://fotufilm.com, https://github.com/DhaliwalX/fotufilm-engine",
         "datasource": provenance,
         "approximate": bool(args.approximate),
+        **({"manufacturer_data": False} if args.sampled else {}),
     }
     data = {
         "wavelengths": WL.tolist(),
@@ -410,6 +411,8 @@ def main():
     ap.add_argument("--id", required=True); ap.add_argument("--name")
     ap.add_argument("--target-print", default="kodak_portra_endura")
     ap.add_argument("--approximate", action="store_true")
+    # Modelled from sample photographs, not the manufacturer's data (Settings hides it on request).
+    ap.add_argument("--sampled", action="store_true")
     ap.add_argument("--assets", default="/home/noah/Work/Negs-fotufilm/research/fotufilm/upstream/SOURCE_ASSETS.json")
     ap.add_argument("--report")
     ap.add_argument("--components", type=int, default=3, help="norm_cdfs sub-layers (Negs ships 3)")

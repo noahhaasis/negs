@@ -58,6 +58,9 @@ see FOTUFILM_LICENSE.txt):
   Lomography Color 100, Phoenix 200, Aerochrome and Infrared Color are marked
   approximate in their metadata, as Fotufilm models them from samples;
   Superia 200 is too, as it renders further from Fotufilm than the others.
+  The seven modelled from samples, and CineStill 800T (which cites no
+  datasheet), also say "manufacturer_data": false, for Settings › Fotufilm
+  films.
   LomoChrome Purple is held back (it renders about a stop darker than
   Fotufilm; cause not yet found).
 - profiles/: 5 black-and-white films from the same commit: HP5 Plus,

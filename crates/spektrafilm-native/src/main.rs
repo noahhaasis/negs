@@ -1170,6 +1170,20 @@ mod tests {
         assert_eq!(stock("kodak_trix")["positive"], true);
     }
     #[test]
+    fn catalog_marks_fotufilm_ports_and_their_sampled_films() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let result = catalog(&data).unwrap();
+        let profiles = result["profiles"].as_array().unwrap();
+        let provenance = |p: &Value| (p["fotufilm"].as_bool().unwrap(), p["manufacturer_data"].as_bool().unwrap());
+        let fotufilm: Vec<_> = profiles.iter().filter(|p| provenance(p).0).collect();
+        let sampled: Vec<_> = fotufilm.iter().filter(|p| !provenance(p).1).map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(fotufilm.len(), 29);
+        assert_eq!(sampled.len(), 8, "{sampled:?}");
+        assert!(sampled.contains(&"cinestill_400d") && !sampled.contains(&"fujifilm_superia_200"));
+        // Spektrafilm's own profiles are from manufacturer data.
+        assert!(profiles.iter().filter(|p| !provenance(p).0).all(|p| provenance(p).1));
+    }
+    #[test]
     fn presets_import_over_the_current_params_and_export() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
         let mut session = Session::default();

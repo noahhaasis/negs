@@ -26,6 +26,14 @@ pub struct ProfileMetadata {
     pub citation: String,
     #[serde(default)]
     pub datasource: String,
+    /// False where the profile is modelled from sample photographs rather
+    /// than the manufacturer's published data (some Fotufilm ports).
+    #[serde(default = "default_true")]
+    pub manufacturer_data: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -64,6 +64,11 @@ BW = {
 }
 BW_PAPER = "ilford_mgrc_deluxe_grade2"
 MANIFEST = {**NEG, **POS}
+# Modelled from sample photographs rather than manufacturer data: their profiles say
+# "manufacturer_data": false. Superia 200 is approximate for another reason (it renders further
+# from Fotufilm) and keeps its datasheet; CineStill 800T cites no datasheet.
+SAMPLED = {"cinestill400d", "cinestill800t", "lomochromemetropolis", "lomochrometurquoise", "lomocolor100",
+           "phoenix200", "aerochrome1443", "infraredcolor"}
 # Already in Negs under its own data; ported only as test fixtures for comparison pages.
 DUPLICATES = {"superia400": "fujifilm_xtra_400", "ektachromee100": "kodak_ektachrome_100", "gold200": "kodak_gold_200",
               "portra400": "kodak_portra_400", "ektar100": "kodak_ektar_100", "ultramax400": "kodak_ultramax_400",
@@ -86,6 +91,8 @@ def port(fid, data_dir):
         cmd += ["--target-print", target]
     if approx:
         cmd += ["--approximate"]
+    if fid in SAMPLED:
+        cmd += ["--sampled"]
     run(cmd)
     positive = fid in POS
     fit = ["uv", "run", "python", "fit_window.py", nid, "--data-dir", str(data_dir), "--prior-weight", "0.002",

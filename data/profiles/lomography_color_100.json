@@ -6,7 +6,8 @@
   "license": "Fotufilm film profile by MUAStudio Inc., https://fotufilm.com, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Modified: converted to the spektrafilm/Negs profile format (sensitivity rebalanced, curves resampled, norm_cdfs sub-layers fitted); see data/CHANGELOG.txt. Spectral data for stocks also in spektrafilm closely match Andrea Volpato's spektrafilm profiles (CC BY-SA 4.0, https://github.com/andreavolpato/spektrafilm), credited as a likely shared source. Adaptations remain CC BY-SA 4.0. Marked APPROXIMATE: the source profile is not a direct datasheet transcription.",
   "citation": "Fotufilm, https://fotufilm.com, https://github.com/DhaliwalX/fotufilm-engine",
   "datasource": "Fotufilm runtime film profile by MUAStudio Inc.; released under CC BY-SA 4.0. Contains rendering parameters and spectral samples only. See licenses/FILM-PROFILES.txt. Edge inscriptions and approximate physical placement follow the manufacturer documents and developed-film photographs in edgePrinting.sources; see docs/print-frame-model.md.",
-  "approximate": true
+  "approximate": true,
+  "manufacturer_data": false
  },
  "info": {
   "stock": "lomography_color_100",
