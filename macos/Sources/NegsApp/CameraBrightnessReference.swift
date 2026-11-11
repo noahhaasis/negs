@@ -29,6 +29,11 @@ enum CameraBrightnessReference {
     /// and Lightroom make sRGB previews unless set otherwise), and any other
     /// colour space is refused.
     static func png(from url: URL, expectedSize: CGSize, declared: PreviewColourSpace? = nil) throws -> Data {
+        try png(preview: preview(from: url), expectedSize: expectedSize, declared: declared)
+    }
+
+    /// The RAW's camera preview, as ImageIO reads it (most of the cost).
+    static func preview(from url: URL) throws -> CGImage {
         guard let source = CGImageSourceCreateWithURL(url as CFURL,
             [kCGImageSourceShouldCache: false] as CFDictionary),
               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -40,6 +45,11 @@ enum CameraBrightnessReference {
               ] as CFDictionary) else {
             throw CameraPreviewUnusable(message: "This RAW has no camera preview to match.")
         }
+        return thumbnail
+    }
+
+    /// `png(from:)` once the preview is read.
+    static func png(preview thumbnail: CGImage, expectedSize: CGSize, declared: PreviewColourSpace?) throws -> Data {
         guard thumbnail.width >= 64, thumbnail.height >= 64,
               expectedSize.width > 0, expectedSize.height > 0 else {
             throw CameraPreviewUnusable(message: "The camera preview is too small to match.")
@@ -68,6 +78,30 @@ enum CameraBrightnessReference {
             preview = tagged
         }
         return try encoded(preview, unusable: "The camera preview couldn’t be read.")
+    }
+
+    /// A RAW's reference read before the photograph's size and the preview's
+    /// declared colour space are known, while the helper decodes: the
+    /// preview, and its PNG for the usual case (sRGB or nothing declared,
+    /// the photograph's shape), which `png(from:)` then makes the same.
+    struct Prepared: Sendable {
+        private let preview: Result<CGImage, Error>
+        private let usual: Data?
+
+        init(from url: URL) {
+            preview = Result { try CameraBrightnessReference.preview(from: url) }
+            usual = (try? preview.get()).flatMap { image in
+                try? CameraBrightnessReference.png(preview: image, expectedSize: CGSize(width: image.width, height: image.height), declared: .srgb)
+            }
+        }
+
+        /// What `png(from:expectedSize:declared:)` gives.
+        func png(expectedSize: CGSize, declared: PreviewColourSpace?) throws -> Data {
+            let image = try preview.get()
+            if let usual, declared == nil || declared == .srgb, expectedSize.width > 0, expectedSize.height > 0,
+               sameShape(Double(image.width) / Double(image.height), expectedSize.width / expectedSize.height) { return usual }
+            return try CameraBrightnessReference.png(preview: image, expectedSize: expectedSize, declared: declared)
+        }
     }
 
     /// A JPEG, PNG or TIFF as its own brightness reference: the file is what

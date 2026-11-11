@@ -149,8 +149,9 @@ impl DecodedRaw {
 
 /// Ordered compatibility attempts. Every failure is retained if all versions
 /// decline; fatal errors stop immediately rather than hiding damaged input or
-/// an exhausted allocation behind a different decoder.
-#[cfg(any(test, all(target_os = "macos", feature = "apple-raw")))]
+/// an exhausted allocation behind a different decoder. `AppleRawDecoder`
+/// follows this order for RAW 9 and 8 from one filter.
+#[cfg(test)]
 fn decode_compatible(
     decoders: &[&dyn RawDecoder],
     path: &Path,
@@ -507,6 +508,34 @@ mod tests {
             )?;
             assert!(wide.reduced_from.is_none());
             assert!(wide.image.data == full.data);
+        }
+        Ok(())
+    }
+
+    /// Ticket 39: choosing RAW 9 or 8 from one filter decodes each file as
+    /// trying 9 and then 8 did: the same generation, pixels and facts.
+    #[cfg(all(target_os = "macos", feature = "apple-raw"))]
+    #[test]
+    #[ignore = "requires local camera RAW files in SPEKTRAFILM_TEST_RAWS"]
+    fn apple_raw_chooses_the_generation_trying_9_then_8_did() -> Result<()> {
+        let paths = std::env::var_os("SPEKTRAFILM_TEST_RAWS").context("set SPEKTRAFILM_TEST_RAWS")?;
+        for path in std::env::split_paths(&paths) {
+            for options in [
+                RawDecodeOptions::default(),
+                RawDecodeOptions { lens_correction: LensCorrection { enabled: true }, max_long_side: 1200, ..Default::default() },
+            ] {
+                let started = std::time::Instant::now();
+                let tried = decode_compatible(&[&apple::AppleRawVersion(9), &apple::AppleRawVersion(8)], &path, options)?;
+                let tried_time = started.elapsed();
+                let started = std::time::Instant::now();
+                let chosen = AppleRawDecoder.decode(&path, options)?;
+                eprintln!("{}: {:?}, tried 9 then 8 {tried_time:?}, chosen {:?}", path.display(), chosen.decoder_version, started.elapsed());
+                assert_eq!(chosen.decoder_version, tried.decoder_version, "{}", path.display());
+                assert_eq!((chosen.image.width, chosen.image.height), (tried.image.width, tried.image.height));
+                assert!(chosen.image.data == tried.image.data, "{}", path.display());
+                assert_eq!(chosen.reduced_from, tried.reduced_from);
+                assert_eq!(chosen.lens_correction_supported, tried.lens_correction_supported);
+            }
         }
         Ok(())
     }

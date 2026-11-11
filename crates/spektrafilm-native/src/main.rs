@@ -524,8 +524,13 @@ impl Session {
             if params.camera.auto_exposure && self.metering.is_none() {
                 self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
             }
-            let dimensions = within(dimensions, source);
-            let working = working_source(source, &mut self.thumbnail_source, dimensions, downsample_area).clone();
+            // A decode alone develops nothing, so it has no frame to shrink.
+            let working = if decode_only {
+                ImageBuf::from_data(1, 1, vec![Default::default(); 3])
+            } else {
+                let dimensions = within(dimensions, source);
+                working_source(source, &mut self.thumbnail_source, dimensions, downsample_area).clone()
+            };
             (working, self.metering.clone())
         };
         let resampled = started.elapsed();
@@ -541,6 +546,7 @@ impl Session {
         if decode_only {
             return Ok(json!({
                 "source_width": full.0, "source_height": full.1, "reduced_decode": reduced,
+                "raw": spektrafilm_io::is_raw(&input),
                 "preview_colour_space": declared.flatten(), "elapsed_ms": ms(started.elapsed()), "cached_pipeline": cached,
             }));
         }
@@ -1328,6 +1334,60 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Ticket 39: the editor solves a new photograph's match on a whole
+    /// decode alone, before any render. The match is the one solved after
+    /// the settled render, as before, with and without auto exposure.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires a local camera RAW: set SPEKTRAFILM_RAW_TEST_FILE"]
+    fn the_editors_match_before_the_first_render_is_the_same() {
+        let input = PathBuf::from(std::env::var_os("SPEKTRAFILM_RAW_TEST_FILE").expect("SPEKTRAFILM_RAW_TEST_FILE"));
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-match-first-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reference = dir.join("reference.png");
+        for auto_exposure in [true, false] {
+            let mut params = RuntimeParams::default();
+            params.camera.auto_exposure = auto_exposure;
+            let placed = |decode_first: bool| {
+                let mut session = Session::default();
+                let (width, height) = if decode_first {
+                    let decoded = session.handle(Request { id: 1, command: Command::Thumbnail {
+                        input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
+                        paper: "kodak_supra_endura".into(), params: Box::new(params.clone()), long_side: 16,
+                        preview_path: dir.join("decode.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: true,
+                        preview_colour_space: true,
+                    } }, &data).unwrap();
+                    assert_eq!(decoded["raw"].as_bool(), Some(true));
+                    (decoded["source_width"].as_u64().unwrap() as u32, decoded["source_height"].as_u64().unwrap() as u32)
+                } else {
+                    let rendered = session.handle(Request { id: 1, command: Command::Render {
+                        input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
+                        paper: "kodak_supra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
+                        preview_path: dir.join("render.rgba"), interactive_scale: None, crop: None,
+                    } }, &data).unwrap();
+                    (rendered["source_width"].as_u64().unwrap() as u32, rendered["source_height"].as_u64().unwrap() as u32)
+                };
+                if !reference.exists() {
+                    session.handle(Request { id: 2, command: Command::BrightnessReference {
+                        input: input.clone(), reference_path: reference.clone(), expected_width: width, expected_height: height,
+                    } }, &data).unwrap();
+                }
+                let placed = session.handle(Request { id: 3, command: Command::PlaceExposure {
+                    input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(), paper: "kodak_supra_endura".into(),
+                    params: Box::new(params.clone()), reference_path: reference.clone(),
+                } }, &data).unwrap();
+                ((width, height), placed)
+            };
+            let (size, rendered) = placed(false);
+            let (decoded_size, decoded) = placed(true);
+            assert_eq!(size, decoded_size);
+            assert_eq!(rendered["exposure_ev"], decoded["exposure_ev"], "auto exposure {auto_exposure}");
+            assert_eq!(rendered["highlight_limited"], decoded["highlight_limited"]);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// A reduced read reports the whole photograph's size, and anything that
     /// needs more of it decodes again; a whole source serves a reduced request.
     #[cfg(target_os = "macos")]
@@ -1530,6 +1590,55 @@ mod tests {
         let (after_quick, after_quick_display) = settled(true);
         assert!(direct == after_quick, "the settled render differs after a quick frame");
         assert!(direct_display == after_quick_display, "the display buffer differs after a quick frame");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Ticket 39: a photograph's first frame comes after a decode alone (the
+    /// whole photograph) and a quick frame. Its settled render matches the
+    /// one a fresh helper renders straight away, in the kept output and the
+    /// display buffer, and the decode reports the size and RAW-ness the
+    /// render does.
+    #[test]
+    fn a_first_frame_after_a_decode_alone_and_a_quick_frame_is_unchanged() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-decode-first-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (input, preview) = (dir.join("input.png"), dir.join("preview.rgba"));
+        let pixels = (0..96 * 64 * 3).map(|i| ((i * 53) % 255) as spektrafilm_math::Scalar / 255.0).collect();
+        spektrafilm_io::save_image(&ImageBuf::from_data(96, 64, pixels), &input, None).unwrap();
+        let command = |interactive_scale: Option<f32>| {
+            let Command::Render { mut params, .. } = render(&input, &preview, None, None, None) else { unreachable!() };
+            params.settings.serial_grain = false;
+            Command::Render {
+                input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(), paper: "kodak_portra_endura".into(),
+                params, limit_preview: false, preview_path: preview.clone(), interactive_scale, crop: None,
+            }
+        };
+        let settled = |decode_first: bool| {
+            let mut session = Session::default();
+            if decode_first {
+                let Command::Render { params, .. } = command(None) else { unreachable!() };
+                let decoded = session.handle(Request { id: 1, command: Command::Thumbnail {
+                    input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
+                    paper: "kodak_portra_endura".into(), params, long_side: 16,
+                    preview_path: dir.join("decode.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: true,
+                    preview_colour_space: false,
+                } }, &data).unwrap();
+                assert_eq!((decoded["source_width"].as_u64(), decoded["source_height"].as_u64()), (Some(96), Some(64)));
+                assert_eq!(decoded["raw"].as_bool(), Some(false));
+                assert!(session.thumbnail_source.is_none(), "a decode alone shrinks nothing");
+                session.handle(Request { id: 2, command: command(Some(0.5)) }, &data).unwrap();
+            }
+            let response = session.handle(Request { id: 3, command: command(None) }, &data).unwrap();
+            assert_eq!(response["export_resolution"].as_bool(), Some(true));
+            assert_eq!(response["raw"].as_bool(), Some(false));
+            (session.output.unwrap().image.data, std::fs::read(&preview).unwrap(), response["film_histogram"].clone())
+        };
+        let (direct, direct_display, direct_histogram) = settled(false);
+        let (after, after_display, after_histogram) = settled(true);
+        assert!(direct == after, "the settled render differs after a decode alone");
+        assert!(direct_display == after_display, "the display buffer differs after a decode alone");
+        assert_eq!(direct_histogram, after_histogram);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

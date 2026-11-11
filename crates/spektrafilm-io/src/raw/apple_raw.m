@@ -17,6 +17,11 @@ typedef struct {
     // The size a whole read would have, in the pixels' own orientation; the
     // same as width and height unless the read was reduced.
     uint32_t full_width, full_height;
+    // The generation decoded with (9 or 8), 0 if the file failed before one
+    // was chosen. With `decoder_major` 0 and no RAW 9 for this file, `declined`
+    // says why, as asking for 9 alone would have failed.
+    int32_t major;
+    char declined[768];
     char version[32];
     char error[768];
 } SFAppleRaw;
@@ -63,7 +68,9 @@ static NSArray<CIRAWDecoderVersion> *decoder_versions(int major) {
 // pixels, including on exceptions. No exception crosses the C ABI.
 // `defer_orientation` leaves a file Apple cannot lens-correct unoriented, so the
 // caller can correct it in sensor coordinates first and orient it afterwards.
-// `decoder_major` (9 or 8) selects that Core Image decoder generation.
+// `decoder_major` (9 or 8) selects that Core Image decoder generation; 0 takes 9
+// if this file's filter offers it, else 8, from the one filter (no second open
+// of the file just to find 9 missing).
 // `max_long_side`, when not 0, has Apple develop no larger than that on the long
 // side, through the same processing, which is far quicker for a small copy. A file
 // Apple can't lens-correct while Negs has a profile for it (`own_lens_profile`) is
@@ -81,17 +88,30 @@ int sf_apple_raw_decode(const char *path, int decoder_major, int orient, int as_
             if (!raw) return fail(out, 1, @"Apple RAW does not support this file on this macOS version");
             // Query this file, not an extension/camera allowlist. DNG uses its
             // own version identifiers, selected from the filter's actual list.
-            NSArray<CIRAWDecoderVersion> *candidates = decoder_versions(decoder_major);
+            int major = decoder_major ? decoder_major : 9;
             CIRAWDecoderVersion selected = nil;
-            for (CIRAWDecoderVersion candidate in candidates) {
+            for (CIRAWDecoderVersion candidate in decoder_versions(major)) {
                 if ([raw.supportedDecoderVersions containsObject:candidate]) {
                     selected = candidate;
                     break;
                 }
             }
+            if (!selected && decoder_major == 0) {
+                snprintf(out->declined, sizeof(out->declined), "%s", [NSString stringWithFormat:
+                    @"Apple RAW %d is not supported for this file (available: %@)",
+                    major, [raw.supportedDecoderVersions componentsJoinedByString:@", "]].UTF8String ?: "Unknown Apple RAW error");
+                major = 8;
+                for (CIRAWDecoderVersion candidate in decoder_versions(major)) {
+                    if ([raw.supportedDecoderVersions containsObject:candidate]) {
+                        selected = candidate;
+                        break;
+                    }
+                }
+            }
+            out->major = major;
             if (!selected) return fail(out, 1, [NSString stringWithFormat:
                 @"Apple RAW %d is not supported for this file (available: %@)",
-                decoder_major, [raw.supportedDecoderVersions componentsJoinedByString:@", "]]);
+                major, [raw.supportedDecoderVersions componentsJoinedByString:@", "]]);
             raw.decoderVersion = selected;
             if (![raw.decoderVersion isEqualToString:selected])
                 return fail(out, 1, @"Apple RAW did not accept the requested decoder version");
