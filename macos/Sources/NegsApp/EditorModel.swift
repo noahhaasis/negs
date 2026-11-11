@@ -1780,10 +1780,12 @@ import UserNotifications
 
     /// A click on a photograph in the strip or the grid. ⌘ adds or removes
     /// it and ⇧ selects a range, changing only the selection; a plain click
-    /// makes it current, which in the edit view opens it.
+    /// makes it current, which in the edit view opens it. ⌘ on the grid's
+    /// current photograph hands current on to the next one selected; in the
+    /// edit view that would open it, so there it stays.
     func click(_ photo: URL, command: Bool = false, shift: Bool = false) {
         guard !cropping else { return }
-        if command { selection.toggle(photo) }
+        if command { selection.toggle(photo, in: mode == .grid ? shownPhotos.map(\.url) : nil) }
         else if shift { selection.extend(to: photo, in: shownPhotos.map(\.url)) }
         else if mode == .photo, photo != sourceItem { open(photo) }
         else { selection.select(photo) }

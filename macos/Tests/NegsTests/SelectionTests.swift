@@ -28,6 +28,25 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(selection.selected, [photos[4]])
     }
 
+    /// ⌘ on the current photograph in the grid passes current on: to the
+    /// next selected to its right, else the nearest to its left.
+    func testCommandClickingTheCurrentPhotograph() {
+        var selection = LibrarySelection()
+        selection.select(photos[2])
+        selection.selectAll(photos)
+        selection.toggle(photos[2], in: photos)
+        XCTAssertEqual(selection.selected, Set([0, 1, 3, 4, 5].map { photos[$0] }))
+        XCTAssertEqual(selection.current, photos[3])
+        selection.select(photos[4])
+        selection.toggle(photos[1], in: photos)
+        selection.toggle(photos[4], in: photos)
+        XCTAssertEqual(selection.selected, [photos[1]])
+        XCTAssertEqual(selection.current, photos[1], "none to the right: the nearest to the left")
+        selection.toggle(photos[1], in: photos)
+        XCTAssertEqual(selection.selected, [photos[1]], "the only one selected stays")
+        XCTAssertEqual(selection.current, photos[1])
+    }
+
     func testKeys() {
         var selection = LibrarySelection()
         selection.select(photos[2])

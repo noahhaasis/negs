@@ -30,10 +30,20 @@ struct LibrarySelection: Equatable, Sendable {
         selected = Set(photos); base = selected
     }
 
-    /// ⌘-click: adds or removes `photo`. The current photograph stays.
-    mutating func toggle(_ photo: URL) {
-        guard current != nil else { return select(photo) }
-        guard photo != current else { return }
+    /// ⌘-click: adds or removes `photo`. The current photograph stays,
+    /// unless it's the one removed and `order` is given (the grid): then
+    /// the next selected photograph to its right becomes current, or the
+    /// nearest to its left. The only one selected stays.
+    mutating func toggle(_ photo: URL, in order: [URL]? = nil) {
+        guard let current else { return select(photo) }
+        guard photo != current else {
+            guard let order, let index = order.firstIndex(of: current),
+                  let next = order[(index + 1)...].first(where: selected.contains)
+                    ?? order[..<index].last(where: selected.contains) else { return }
+            selected.remove(current); self.current = next
+            anchor = next; lead = next; base = selected
+            return
+        }
         if selected.contains(photo) { selected.remove(photo) } else { selected.insert(photo) }
         anchor = photo; lead = photo; base = selected
     }
