@@ -170,6 +170,10 @@ struct PhotoBrowser: View {
     /// Brings the current frame back to the middle once the window has
     /// stopped changing size.
     @State private var settling = StripSettling()
+    /// Where the strip is scrolled to: which frames are built.
+    @State private var watch = ScrollWatch()
+    /// The strip's width, once it has one.
+    @State private var viewWidth: CGFloat?
 
     /// The pencil under the current frame: as heavy as the grid's yellow
     /// box, so it still reads under a pick's box (round 21). It sits 3 pt
@@ -179,39 +183,56 @@ struct PhotoBrowser: View {
     /// The picture's height: the strip less its top padding and rebate.
     static let pictureHeight = Theme.Size.strip - Theme.Size.stripTopPadding - Theme.Size.stripRebate
 
-    private static func centre(_ item: URL?, _ scroller: ScrollViewProxy) {
-        if let item { scroller.scrollTo(item, anchor: .center) }
-    }
+    /// Frames are built this far either side of the strip's view, so a
+    /// scroll finds the next ones there already.
+    static let margin: CGFloat = 400
 
     /// A frame's width: the picture's height at its photograph's proportions.
     static func frameWidth(_ file: PhotoFile, ratios: [URL: CGFloat]) -> CGFloat {
         (pictureHeight * (ratios[file.url] ?? PhotoAspects.fallback)).rounded()
     }
 
+    /// The photographs the strip shows, and their frames laid out.
+    static func row(_ model: EditorModel) -> (shown: [PhotoFile], layout: StripLayout) {
+        let shown = model.library.filtering ? [] : model.shownPhotos
+        let ratios = model.aspects.ratios
+        return (shown, StripLayout(widths: shown.map { frameWidth($0, ratios: ratios) }))
+    }
+
+    /// The scroll offset that puts the current frame in the middle, as far
+    /// as the row's ends let it; nil without one or before the strip has a width.
+    private static func centred(_ model: EditorModel, in watch: ScrollWatch) -> CGFloat? {
+        let (shown, layout) = row(model)
+        guard let item = model.sourceItem, let visible = watch.visible, visible.width > 0,
+              let index = shown.firstIndex(where: { $0.url == item }) else { return nil }
+        return StripSettling.target(middle: layout.middle(of: index), visible: visible.width, content: layout.width)
+    }
+
+    /// Puts the current frame in the middle at once.
+    private static func centre(_ model: EditorModel, in watch: ScrollWatch) {
+        if let target = centred(model, in: watch) { watch.scroll(x: target) }
+    }
+
     /// After a resize: the current frame glides back to the middle, in one
     /// movement, unless it's there already (or as near as the row's ends
     /// let it). Not while the grid covers the strip or folds back into it.
-    private static func recentre(model: EditorModel, in settling: StripSettling) {
-        let scrollView = settling.scrollView
-        guard let item = model.sourceItem, model.mode == .photo, !model.sheetFolding, !model.library.filtering,
-              let scrollView, let document = scrollView.documentView else { return }
-        let clip = scrollView.contentView
-        let offset = clip.bounds.origin.x
-        let middle: CGFloat
-        if let place = model.places.strip[item] {
-            // Where it's drawn now, from the strip's left edge.
-            middle = offset + place.rect.midX
-        } else {
-            // Out of view: where the row lays it.
-            let shown = model.shownPhotos
-            guard let index = shown.firstIndex(where: { $0.url == item }) else { return }
-            let ratios = model.aspects.ratios
-            let before = shown[..<index].map { frameWidth($0, ratios: ratios) }
-            middle = rowWidth(before) + (before.isEmpty ? 0 : Theme.Size.stripGap) + frameWidth(shown[index], ratios: ratios) / 2
-        }
-        let target = StripSettling.target(middle: middle, visible: clip.bounds.width, content: document.frame.width)
-        guard abs(target - offset) >= 1 else { return }
+    private static func recentre(model: EditorModel, in settling: StripSettling, watch: ScrollWatch) {
+        guard model.mode == .photo, !model.sheetFolding, let visible = watch.visible,
+              let target = centred(model, in: watch), abs(target - visible.minX) >= 1 else { return }
         settling.glide(to: target)
+    }
+
+    /// The row was laid out anew from the same photographs, as their shapes
+    /// were read: the current frame, or the one in the middle if it's out
+    /// of view, stays where it is on screen, rather than the row sliding
+    /// under it.
+    private static func hold(_ model: EditorModel, from old: StripLayout, to new: StripLayout, in watch: ScrollWatch) {
+        guard old.count == new.count, let visible = watch.visible, visible.width > 0 else { return }
+        let current = model.sourceItem.flatMap { item in model.shownPhotos.firstIndex { $0.url == item } }
+        let shown = current.map { old.xs[$0] < visible.maxX && old.xs[$0] + old.widths[$0] > visible.minX } ?? false
+        guard let index = shown ? current : old.index(at: visible.midX) else { return }
+        let x = visible.minX + new.middle(of: index) - old.middle(of: index)
+        watch.scroll(x: min(max(x, 0), max(new.width - visible.width, 0)))
     }
 
     /// The row of frames `widths` wide, edge to edge but for the gaps.
@@ -221,75 +242,78 @@ struct PhotoBrowser: View {
 
     var body: some View {
         let library = model.library
-        let shown = library.filtering ? [] : model.shownPhotos
         let selected = model.selection.selected
         let aspects = model.aspects
-        // Read here, so a shape learnt redraws the strip.
-        let ratios = aspects.ratios
-        let width = { (file: PhotoFile) -> CGFloat in Self.frameWidth(file, ratios: ratios) }
-        ScrollViewReader { scroller in
-            ScrollView(.horizontal) {
-                ZStack(alignment: .topLeading) {
-                    LazyHStack(spacing: Theme.Size.stripGap) {
-                        ForEach(shown, id: \.url) { file in
-                            StripFrame(file: file, width: width(file),
-                                       current: file.url == model.sourceItem, selected: selected.contains(file.url),
-                                       summary: library.summary(for: file.url), readOnly: library.readOnly,
-                                       edited: model.editedThumbnail(for: file.url)) { visible in
-                                model.thumbnailShown(file, visible)
-                            } loaded: { image in
-                                aspects.note(file.url, image: image)
-                            } placed: { place in
-                                model.places.strip[file.url] = place
-                            } open: {
-                                let modifiers = NSEvent.modifierFlags
-                                focused = true
-                                model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
-                            }
-                            .contextMenu { LibraryContextMenu(model: model, item: file.url) }
-                            .id(file.url)
+        // Reads the shapes, so a shape learnt redraws the strip.
+        let (shown, layout) = Self.row(model)
+        // Only the frames in or near view are built, each where the row puts it.
+        let left = watch.origin.x - Self.margin
+        let built = layout.indices(from: left, to: left + Self.margin * 2 + ScrollWatch.step + (viewWidth ?? 1600))
+        let frames = built.map { (index: $0, file: shown[$0]) }
+        ScrollView(.horizontal) {
+            ZStack(alignment: .topLeading) {
+                ForEach(frames, id: \.file.url) { frame in
+                    let file = frame.file
+                    StripFrame(file: file, width: layout.widths[frame.index],
+                               current: file.url == model.sourceItem, selected: selected.contains(file.url),
+                               summary: library.summary(for: file.url), readOnly: library.readOnly,
+                               edited: model.editedThumbnail(for: file.url)) { visible in
+                        model.thumbnailShown(file, visible)
+                    } loaded: { image in
+                        aspects.note(file.url, image: image)
+                    } placed: { place in
+                        model.places.strip[file.url] = place
+                    } open: {
+                        let modifiers = NSEvent.modifierFlags
+                        focused = true
+                        model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
+                    }
+                    .contextMenu { LibraryContextMenu(model: model, item: file.url) }
+                    .offset(x: layout.xs[frame.index])
+                }
+                // A pick's box reaches past its frame, over the gap and the
+                // frames beside it, so the boxes are drawn above every frame,
+                // placed as the frames are (as the grid draws its own).
+                ForEach(frames, id: \.file.url) { frame in
+                    ZStack {
+                        if library.summary(for: frame.file.url).flag == .pick {
+                            BoxInk(name: frame.file.name, picked: true, inStrip: true)
                         }
                     }
-                    // A pick's box reaches past its frame, over the gap and the
-                    // frames beside it, so the boxes are drawn above every frame,
-                    // laid out as the frames are (as the grid draws its own).
-                    LazyHStack(alignment: .top, spacing: Theme.Size.stripGap) {
-                        ForEach(shown, id: \.url) { file in
-                            ZStack {
-                                if library.summary(for: file.url).flag == .pick {
-                                    BoxInk(name: file.name, picked: true, inStrip: true)
-                                }
-                            }
-                            .frame(width: width(file), height: Self.pictureHeight)
-                        }
-                    }
+                    .frame(width: layout.widths[frame.index], height: Self.pictureHeight)
+                    .offset(x: layout.xs[frame.index])
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
-                // The row's exact width, from the frames' own. Left to the lazy
-                // stacks it's an estimate that changes as frames come into view:
-                // a wider window (full screen) made it shrink and grow again,
-                // and the row jumped back and forth as it was clamped to each.
-                .frame(width: Self.rowWidth(shown.map(width)), alignment: .topLeading)
-                // Inside the scroll view, so the boxes' tops show in it.
-                .padding(.top, Theme.Size.stripTopPadding)
-                .background(EnclosingScrollView { settling.scrollView = $0 })
             }
-            .scrollIndicators(.never)
-            // Centred when it changes, not held there: a scroll position held
-            // on the current frame was found again on every resize, from the
-            // lazy stack's guesses at the frames out of view, so entering and
-            // leaving full screen moved the row two or three times. A resize
-            // keeps the row where it is; once it's over, the current frame
-            // glides back to the middle (`StripSettling`).
-            .onChange(of: model.sourceItem) { _, source in Self.centre(source, scroller) }
-            .onChange(of: library.loading) { _, loading in if !loading { Self.centre(model.sourceItem, scroller) } }
-            .onChange(of: library.filtering) { _, filtering in if !filtering { Self.centre(model.sourceItem, scroller) } }
-            .onAppear {
-                Self.centre(model.sourceItem, scroller)
-                settling.settle = { [model, settling] in Self.recentre(model: model, in: settling) }
-            }
-            .onGeometryChange(for: CGFloat.self, of: \.size.width) { settling.widthChanged($0) }
+            // The row's exact width, from the frames' own.
+            .frame(width: layout.width, alignment: .topLeading)
+            // Inside the scroll view, so the boxes' tops show in it.
+            .padding(.top, Theme.Size.stripTopPadding)
+            .background(EnclosingScrollView { [model, watch] scrollView in
+                settling.scrollView = scrollView
+                watch.attach(scrollView)
+                Self.centre(model, in: watch)
+            })
+        }
+        .scrollIndicators(.never)
+        // Centred when it changes, not held there. A resize keeps the row
+        // where it is; once it's over, the current frame glides back to the
+        // middle (`StripSettling`).
+        .onChange(of: model.sourceItem) { _, _ in Self.centre(model, in: watch) }
+        .onChange(of: library.loading) { _, loading in if !loading { Self.centre(model, in: watch) } }
+        .onChange(of: library.filtering) { _, filtering in if !filtering { Self.centre(model, in: watch) } }
+        .onChange(of: layout) { old, new in Self.hold(model, from: old, to: new, in: watch) }
+        .onAppear {
+            Self.centre(model, in: watch)
+            settling.settle = { [model, settling, watch] in Self.recentre(model: model, in: settling, watch: watch) }
+        }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { width in
+            let first = viewWidth == nil
+            viewWidth = width
+            settling.widthChanged(width)
+            // The strip appearing: centred once it has a width.
+            if first { Self.centre(model, in: watch) }
         }
         .focusable()
         .focusEffectDisabled()

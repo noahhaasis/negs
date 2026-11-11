@@ -241,12 +241,32 @@ final class PhotoBrowserTests: XCTestCase {
         }
     }
 
-    /// The strip's row is as wide as its frames and the gaps between them,
-    /// so its width doesn't change as the lazy stack brings frames into view.
+    /// The strip's row is as wide as its frames and the gaps between them.
     func testStripRowWidthIsTheFramesAndGaps() {
         XCTAssertEqual(PhotoBrowser.rowWidth([]), 0)
         XCTAssertEqual(PhotoBrowser.rowWidth([210]), 210)
         XCTAssertEqual(PhotoBrowser.rowWidth([210, 105, 158]), 473 + 2 * Theme.Size.stripGap)
+    }
+
+    /// Each frame is placed after the ones before it and their gaps, and
+    /// the strip builds those reaching into its view.
+    func testStripLayoutPlacesFramesAndFindsThoseInView() {
+        let gap = Theme.Size.stripGap
+        let layout = StripLayout(widths: [210, 105, 158, 210])
+        XCTAssertEqual(layout.xs, [0, 210 + gap, 315 + 2 * gap, 473 + 3 * gap])
+        XCTAssertEqual(layout.width, PhotoBrowser.rowWidth([210, 105, 158, 210]))
+        XCTAssertEqual(layout.middle(of: 1), 210 + gap + 52.5)
+        XCTAssertEqual(layout.indices(from: 0, to: 100), 0..<1)
+        // A gap reaches neither frame beside it; an edge counts.
+        XCTAssertEqual(layout.indices(from: 211, to: 212), 1..<1)
+        XCTAssertEqual(layout.indices(from: 210, to: 210 + gap), 0..<2)
+        XCTAssertEqual(layout.indices(from: 300, to: 400), 1..<3)
+        XCTAssertEqual(layout.indices(from: -500, to: 5000), 0..<4)
+        XCTAssertEqual(layout.indices(from: 5000, to: 6000), 4..<4)
+        XCTAssertEqual(layout.index(at: 400), 2)
+        XCTAssertEqual(layout.index(at: 9000), 3)
+        XCTAssertNil(StripLayout(widths: []).index(at: 0))
+        XCTAssertEqual(StripLayout(widths: []).indices(from: 0, to: 100), 0..<0)
     }
 
     /// After a resize the current frame glides to the middle, as far as the

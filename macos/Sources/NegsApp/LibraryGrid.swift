@@ -245,136 +245,121 @@ private struct SheetGrid: View {
         .accessibilityLabel("Photographs")
     }
 
+    /// Cells are built this far above and below the grid's view.
+    static let margin: CGFloat = 300
+
     private func grid(layout: SheetLayout, shown: [PhotoFile], size: PhotoThumbnails.Size, viewport: CGSize) -> some View {
         let selection = model.selection
         let currentIndex = selection.current.flatMap { current in shown.firstIndex { $0.url == current } }
         let currentRow = currentIndex.flatMap(layout.row(of:))
-        return ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                ZStack(alignment: .topLeading) {
-                    SheetScrollHook(scroller: scroller)
-                        .frame(width: viewport.width, height: max(layout.height, viewport.height))
-                    // Empty space: a click selects only the current
-                    // photograph, a drag draws a rubber band.
-                    Color.clear
-                        .frame(width: viewport.width, height: max(layout.height, viewport.height))
-                        .contentShape(Rectangle())
-                        .gesture(bandGesture(layout, shown))
-                        .onTapGesture {
-                            focused = true
-                            if NSEvent.modifierFlags.isDisjoint(with: [.command, .shift]) { model.deselectAll() }
-                        }
-                    LazyVStack(alignment: .leading, spacing: SheetLayout.gap) {
-                        ForEach(layout.rows.indices, id: \.self) { index in
-                            row(layout.rows[index], layout: layout, shown: shown, size: size)
-                                .id(index)
-                        }
+        // Only the cells in or near view are built, each where the layout puts it.
+        let top = scroller.watch.origin.y - Self.margin
+        let cells = layout.indices(from: top, to: top + Self.margin * 2 + ScrollWatch.step + viewport.height)
+            .map { (index: $0, file: shown[$0]) }
+        return ScrollView(.vertical) {
+            ZStack(alignment: .topLeading) {
+                SheetScrollHook(scroller: scroller)
+                    .frame(width: viewport.width, height: max(layout.height, viewport.height))
+                // Empty space: a click selects only the current
+                // photograph, a drag draws a rubber band.
+                Color.clear
+                    .frame(width: viewport.width, height: max(layout.height, viewport.height))
+                    .contentShape(Rectangle())
+                    .gesture(bandGesture(layout, shown))
+                    .onTapGesture {
+                        focused = true
+                        if NSEvent.modifierFlags.isDisjoint(with: [.command, .shift]) { model.deselectAll() }
                     }
-                    .padding(.leading, SheetLayout.side)
-                    .padding(.top, SheetLayout.top)
-                    .padding(.bottom, SheetLayout.bottom)
-                    // The boxes (a pick's cream one, selection's yellow one)
-                    // reach past their pictures, over the 6 pt gaps and the
-                    // thumbnails beside them, so they're drawn above every
-                    // thumbnail, laid out as the rows are. Not by raising the
-                    // boxed cells: that would move them to the end for VoiceOver.
-                    LazyVStack(alignment: .leading, spacing: SheetLayout.gap) {
-                        ForEach(layout.rows.indices, id: \.self) { index in
-                            boxes(layout.rows[index], layout: layout, shown: shown)
-                        }
-                    }
-                    .padding(.leading, SheetLayout.side)
-                    .padding(.top, SheetLayout.top)
-                    .padding(.bottom, SheetLayout.bottom)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                    if let band {
-                        Rectangle()
-                            .fill(Theme.paper.opacity(0.06))
-                            .overlay(Rectangle().strokeBorder(Theme.label.opacity(0.7), lineWidth: 1))
-                            .frame(width: band.width, height: band.height)
-                            .offset(x: band.minX, y: band.minY)
-                            .allowsHitTesting(false)
-                    }
+                ForEach(cells, id: \.file.url) { cell in
+                    self.cell(cell.file, frame: layout.frames[cell.index], size: size)
+                }
+                // The boxes (a pick's cream one, selection's yellow one)
+                // reach past their pictures, over the 6 pt gaps and the
+                // thumbnails beside them, so they're drawn above every
+                // thumbnail, placed as the cells are. Not by raising the
+                // boxed cells: that would move them to the end for VoiceOver.
+                ForEach(cells, id: \.file.url) { cell in
+                    box(cell.file, frame: layout.frames[cell.index])
+                }
+                if let band {
+                    Rectangle()
+                        .fill(Theme.paper.opacity(0.06))
+                        .overlay(Rectangle().strokeBorder(Theme.label.opacity(0.7), lineWidth: 1))
+                        .frame(width: band.width, height: band.height)
+                        .offset(x: band.minX, y: band.minY)
+                        .allowsHitTesting(false)
                 }
             }
-            .scrollIndicators(.automatic)
-            .onAppear {
-                model.gridLayout = layout
-                model.gridThumbnailSize = size
-                scroller.layout = layout
-                scroller.magnify = { phase, magnification, point in magnify(phase, magnification, at: point) }
-                // Opens on the current photograph.
-                if let currentRow { proxy.scrollTo(currentRow, anchor: .center) }
+        }
+        .scrollIndicators(.automatic)
+        .onAppear {
+            model.gridLayout = layout
+            model.gridThumbnailSize = size
+            scroller.layout = layout
+            scroller.magnify = { phase, magnification, point in magnify(phase, magnification, at: point) }
+            // Opens on the current photograph.
+            if let currentRow { scroller.centre(layout.rows[currentRow], in: layout, viewport: viewport.height) }
+        }
+        .onChange(of: layout) { old, layout in
+            model.gridLayout = layout
+            scroller.layoutChanged(from: old, to: layout, holding: currentIndex)
+        }
+        .onChange(of: size) { _, size in model.gridThumbnailSize = size; model.prefetchThumbnails() }
+        .onChange(of: selection.current) { _, _ in
+            guard band == nil, let currentIndex, let currentRow else { return }
+            // Far enough that its whole yellow box shows, which reaches
+            // past the picture and its row; else as near as the row.
+            if !scroller.reveal(layout.selectionBox(currentIndex, name: shown[currentIndex].name)) {
+                scroller.centre(layout.rows[currentRow], in: layout, viewport: viewport.height)
             }
-            .onChange(of: layout) { _, layout in
-                model.gridLayout = layout
-                scroller.layout = layout
-                scroller.keepAnchor()
-            }
-            .onChange(of: size) { _, size in model.gridThumbnailSize = size; model.prefetchThumbnails() }
-            .onChange(of: selection.current) { _, _ in
-                guard band == nil, let currentIndex, let currentRow else { return }
-                // Far enough that its whole yellow box shows, which reaches
-                // past the picture and its row; else as near as the row.
-                if !scroller.reveal(layout.selectionBox(currentIndex, name: shown[currentIndex].name)) { proxy.scrollTo(currentRow) }
-            }
-            .onChange(of: model.library.filtering) { _, filtering in
-                if !filtering, let currentRow { proxy.scrollTo(currentRow, anchor: .center) }
-            }
+        }
+        .onChange(of: model.library.filtering) { _, filtering in
+            if !filtering, let currentRow { scroller.centre(layout.rows[currentRow], in: layout, viewport: viewport.height) }
         }
     }
 
-    private func row(_ row: SheetLayout.Row, layout: SheetLayout, shown: [PhotoFile], size: PhotoThumbnails.Size) -> some View {
+    private func cell(_ file: PhotoFile, frame: CGRect, size: PhotoThumbnails.Size) -> some View {
         let selection = model.selection, library = model.library
-        return HStack(spacing: SheetLayout.gap) {
-            ForEach(row.range.map { (index: $0, file: shown[$0]) }, id: \.file.url) { cell in
-                let url = cell.file.url
-                SheetCell(file: cell.file, size: layout.frames[cell.index].size, thumbnail: size,
-                          waiting: model.sheetWaiting.contains(url),
-                          selected: SheetLayout.drawnSelected(url, selection: selection),
-                          current: url == selection.current, summary: library.summary(for: url),
-                          readOnly: library.readOnly, edited: model.editedThumbnail(for: url)) { visible in
-                    model.thumbnailShown(cell.file, visible)
-                } loaded: { image in
-                    model.aspects.note(url, image: image)
-                } placed: { place in
-                    model.places.sheet[url] = place
-                } click: {
-                    focused = true
-                    let modifiers = NSEvent.modifierFlags
-                    model.click(url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
-                } open: {
-                    // A double-click opens it and folds the grid.
-                    model.click(url)
-                    model.editCurrent()
-                }
-                .contextMenu { LibraryContextMenu(model: model, item: url) }
-            }
+        let url = file.url
+        return SheetCell(file: file, size: frame.size, thumbnail: size,
+                         waiting: model.sheetWaiting.contains(url),
+                         selected: SheetLayout.drawnSelected(url, selection: selection),
+                         current: url == selection.current, summary: library.summary(for: url),
+                         readOnly: library.readOnly, edited: model.editedThumbnail(for: url)) { visible in
+            model.thumbnailShown(file, visible)
+        } loaded: { image in
+            model.aspects.note(url, image: image)
+        } placed: { place in
+            model.places.sheet[url] = place
+        } click: {
+            focused = true
+            let modifiers = NSEvent.modifierFlags
+            model.click(url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
+        } open: {
+            // A double-click opens it and folds the grid.
+            model.click(url)
+            model.editCurrent()
         }
-        .frame(height: row.height)
+        .contextMenu { LibraryContextMenu(model: model, item: url) }
+        .offset(x: frame.minX, y: frame.minY)
     }
 
-    /// A row's boxes, each where its cell is, rising with it as the grid
+    /// A cell's boxes, where its cell is, rising with it as the grid
     /// opens: a pick's in cream, and selection's in yellow over it.
-    private func boxes(_ row: SheetLayout.Row, layout: SheetLayout, shown: [PhotoFile]) -> some View {
-        let selection = model.selection, library = model.library
-        return HStack(spacing: SheetLayout.gap) {
-            ForEach(row.range.map { (index: $0, file: shown[$0]) }, id: \.file.url) { cell in
-                let url = cell.file.url
-                let waiting = model.sheetWaiting.contains(url)
-                let picked = library.summary(for: url).flag == .pick, selected = SheetLayout.drawnSelected(url, selection: selection)
-                ZStack {
-                    if picked || selected {
-                        BoxInk(name: cell.file.name, picked: picked, selected: selected)
-                    }
-                }
-                .frame(width: layout.frames[cell.index].width, height: layout.frames[cell.index].height)
-                .opacity(waiting ? 0 : 1)
-                .offset(y: waiting ? 14 : 0)
+    private func box(_ file: PhotoFile, frame: CGRect) -> some View {
+        let url = file.url
+        let waiting = model.sheetWaiting.contains(url)
+        let picked = model.library.summary(for: url).flag == .pick, selected = SheetLayout.drawnSelected(url, selection: model.selection)
+        return ZStack {
+            if picked || selected {
+                BoxInk(name: file.name, picked: picked, selected: selected)
             }
         }
-        .frame(height: row.height)
+        .frame(width: frame.width, height: frame.height)
+        .opacity(waiting ? 0 : 1)
+        .offset(x: frame.minX, y: frame.minY + (waiting ? 14 : 0))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     /// A pinch over the grid sizes its rows, as the foot's Size does, and
@@ -437,6 +422,8 @@ extension SheetLayout {
 /// grid's coordinates, through a view as big as the grid (`SheetScrollHook`).
 @MainActor final class SheetScroller {
     fileprivate weak var view: SheetScrollView?
+    /// Where the grid is scrolled to: which cells are built.
+    let watch = ScrollWatch()
     /// The grid as laid out now.
     var layout: SheetLayout?
     /// Told of each pinch over the grid: its phase, how much it scaled, and
@@ -449,6 +436,9 @@ extension SheetLayout {
     /// The photograph held under a pinch: how far down its picture, and how
     /// far from the top of the view, the fingers were.
     private var anchor: (index: Int, down: CGFloat, fromTop: CGFloat)?
+    /// The photograph held in place while the grid is laid out anew
+    /// without a pinch, in the same terms.
+    private var held: (index: Int, down: CGFloat, fromTop: CGFloat)?
 
     /// Scrolls up or down as little as shows `rect` whole. False before the
     /// grid is on screen.
@@ -460,6 +450,37 @@ extension SheetLayout {
     }
 
     var pinching: Bool { pinch != nil }
+
+    /// Scrolls so `row` is in the middle of a view `viewport` high, as far
+    /// as the grid's ends let it; before the grid is on screen, once it is.
+    func centre(_ row: SheetLayout.Row, in layout: SheetLayout, viewport: CGFloat) {
+        let y = row.y + row.height / 2 - viewport / 2
+        watch.scroll(y: min(max(y, 0), max(layout.height - viewport, 0)))
+    }
+
+    /// The grid was laid out anew. In a pinch the photograph under the
+    /// fingers stays put; otherwise, when the photographs are the same (their
+    /// shapes were read, the window was resized), the current photograph
+    /// stays where it is on screen, or if it's out of view the one in the
+    /// middle, rather than the rows sliding under the view.
+    func layoutChanged(from old: SheetLayout, to new: SheetLayout, holding current: Int?) {
+        layout = new
+        if pinching { return keepAnchor() }
+        guard old.frames.count == new.frames.count, let view else { return }
+        let visible = view.visibleRect
+        guard visible.height > 0 else { return }
+        let index = current.flatMap { old.frames.indices.contains($0) && old.frames[$0].intersects(visible) ? $0 : nil }
+            ?? old.nearest(to: CGPoint(x: visible.midX, y: visible.midY))
+        guard let index else { return }
+        let frame = old.frames[index]
+        held = (index, 0.5, frame.midY - visible.minY)
+        keepAnchor()
+        // Again once the grid's height has followed, then let go.
+        DispatchQueue.main.async { [weak self] in
+            self?.keepAnchor()
+            self?.held = nil
+        }
+    }
 
     /// A pinch starts at `point`, the rows `size` high: the photograph under
     /// it is held there.
@@ -489,7 +510,7 @@ extension SheetLayout {
     /// Scrolls so the held photograph is where it was under the fingers:
     /// for each new layout, and again once the grid's height has followed.
     func keepAnchor() {
-        guard let anchor, let view, let layout, layout.frames.indices.contains(anchor.index) else { return }
+        guard let anchor = anchor ?? held, let view, let layout, layout.frames.indices.contains(anchor.index) else { return }
         let frame = layout.frames[anchor.index]
         let top = frame.minY + anchor.down * frame.height - anchor.fromTop
         let visible = view.visibleRect
@@ -545,6 +566,7 @@ private final class SheetScrollView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        scroller?.watch.attach(window == nil ? nil : enclosingScrollView)
         guard window != nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [weak self] event in
             MainActor.assumeIsolated { self?.pinched(event) == true } ? nil : event
