@@ -39,5 +39,8 @@ enum ViewerBackground {
     /// caption and label are inked for the dark sheet and can't be read on a
     /// light colour (FEEDBACK.md, 2026-11-10). A stored choice is kept under
     /// `customKey` and `colorKey` for when it comes back.
-    static var canvas: Color { Theme.bg }
+    static var canvas: Color { Theme.color(sheet) }
+    /// The backdrop as 0xRRGGBB, for the light table's contrast check
+    /// (`LightTable`). A custom colour must come through here too.
+    static var sheet: UInt32 { Theme.Hex.bg }
 }

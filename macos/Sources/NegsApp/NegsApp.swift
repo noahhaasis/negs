@@ -347,6 +347,7 @@ struct CanvasArea: View {
                 EmptyCanvas(model: model, dropping: dropping)
             } else {
                 let failure = model.developFailure
+                if failure == nil, !dropping { lightTable }
                 VStack(spacing: 0) {
                     Color.clear.frame(height: Self.captionBand)
                     // Couldn't develop: the last develop, faded and greyed.
@@ -380,6 +381,29 @@ struct CanvasArea: View {
     /// The print's place on the canvas, once it's laid out.
     private var shownPrint: CGRect? {
         geometry.print.width > 0 ? geometry.print.offsetBy(dx: 0, dy: Self.captionBand) : nil
+    }
+
+    /// The border on screen, as `photograph` passes it to the preview.
+    private var shownBorder: BorderSettings? {
+        if model.original == nil, let trial = model.trialImage {
+            return model.border.shown(for: Self.standInSize(trial, photo: model.photoSize))
+        } else if model.image != nil {
+            return model.border.shown(for: model.crop.size(of: model.imageSize))
+        } else if model.standIn != nil {
+            return nil
+        } else if model.placeholder != nil {
+            return model.border.shown(for: model.crop.size(of: model.placeholderSize))
+        }
+        return nil
+    }
+
+    /// A light under the print when its border's edge sinks into the sheet
+    /// (`LightTable`). Fitted only: zoomed in, the print has no edges on screen.
+    @ViewBuilder private var lightTable: some View {
+        if !geometry.zoomed, let print = shownPrint,
+           let light = LightTable.light(sheet: ViewerBackground.sheet, edge: LightTable.edge(of: shownBorder)) {
+            LightTableGlow(print: print, color: light)
+        }
     }
 
     /// Developing or Updating, at the top centre of the photograph's visible part.

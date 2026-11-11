@@ -78,13 +78,14 @@ enum Theme {
 
     /// The WCAG 2 contrast ratio between two sRGB colours, 1…21.
     static func contrast(_ a: UInt32, _ b: UInt32) -> Double {
-        func luminance(_ hex: UInt32) -> Double {
-            let (r, g, b) = components(hex)
-            func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
-            return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
-        }
         let (hi, lo) = (max(luminance(a), luminance(b)), min(luminance(a), luminance(b)))
         return (hi + 0.05) / (lo + 0.05)
+    }
+    /// The WCAG 2 relative luminance of an sRGB colour, 0…1.
+    static func luminance(_ hex: UInt32) -> Double {
+        let (r, g, b) = components(hex)
+        func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
     }
 
     // MARK: Layout (§2.3), points
