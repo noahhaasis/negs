@@ -649,7 +649,7 @@ extension AdjustmentInspector {
         InspectorSection.allCases.map { count($0, model) }.reduce(0, +)
     }
     static func outputTabCount(_ model: EditorModel) -> Int {
-        (model.isModified(ImageSize.targetPath) ? 1 : 0) + (model.border != BorderSettings() ? 1 : 0)
+        (model.isModified(ImageSize.targetPath) ? 1 : 0) + (model.border.enabled ? 1 : 0)
     }
     static func count(_ tab: InspectorTab, _ model: EditorModel) -> Int {
         switch tab {
@@ -1117,7 +1117,7 @@ struct AdjustmentInspector: View {
     /// live in Prep, before the film, where nothing has clipped yet.
     @ViewBuilder private var output: some View {
         ImageSizeSection(model: model)
-        InkSection(title: "Border", edited: model.border != BorderSettings()) {
+        InkSection(title: "Border", edited: model.border.enabled) {
             TickRow(title: "Add border", isOn: model.border(\.enabled), changed: model.border.enabled,
                     help: "Frames the photograph in a mat or a film frame. The preview always shows it; Include in export decides whether files get it.")
             Group {
