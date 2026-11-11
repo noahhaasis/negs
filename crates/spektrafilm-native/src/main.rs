@@ -160,6 +160,9 @@ enum Command {
     },
     /// Frees the thumbnails' caches (the previews were turned off).
     ReleaseThumbnails,
+    /// Frees the GPU's kept film sides (ticket 41): the editor closed or
+    /// memory is short. Safe at any time; the next render just misses.
+    ReleaseFilmCache,
     /// The tone graph's curve: `count` greys through film → print → scan
     /// (`spektrafilm_core::tone_curve`). Image-independent.
     ToneCurve {
@@ -667,6 +670,10 @@ impl Session {
                 self.pipelines.release_unpinned();
                 self.thumbnail_wb_sources = Vec::new();
                 Ok(json!({}))
+            }
+            Command::ReleaseFilmCache => {
+                let bytes = self.backend.as_ref().map_or(0, |backend| backend.release_film_cache());
+                Ok(json!({"released_bytes": bytes}))
             }
             Command::PreviewColourSpace { input } => Ok(json!({ "colour_space": declared_preview_colour_space(&input)? })),
             Command::BrightnessReference { input, reference_path, expected_width, expected_height } => {

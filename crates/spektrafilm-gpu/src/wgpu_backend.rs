@@ -2340,6 +2340,11 @@ impl WgpuBackend {
         self.film_cache_hits.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// The bytes the kept film sides hold now, against `film_cache_budget`.
+    pub fn film_cache_bytes(&self) -> u64 {
+        self.film_cache.lock().unwrap().iter().map(|e| e.buffer.size()).sum()
+    }
+
     /// The input with `key` on the GPU, uploaded from `data` if it isn't
     /// there. The last two keys stay: a slider's interactive frames and the
     /// settled frame after it.
@@ -3935,10 +3940,13 @@ impl ComputeBackend for WgpuBackend {
         self.capacity.working_set(bytes)
     }
 
-    fn release_film_cache(&self) {
+    fn release_film_cache(&self) -> u64 {
+        let mut bytes = 0;
         for entry in self.film_cache.lock().unwrap().drain(..) {
+            bytes += entry.buffer.size();
             release(&entry.buffer);
         }
+        bytes
     }
 
     fn resident_chain_applies_post_scan(&self) -> bool {

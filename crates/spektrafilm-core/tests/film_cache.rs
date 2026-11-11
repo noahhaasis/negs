@@ -118,9 +118,20 @@ fn a_kept_film_side_renders_what_the_whole_chain_renders() {
         assert_eq!(hit, step.hit, "{}: hit {hit}, expected {}", step.what, step.hit);
     }
 
-    // Another photograph: nothing is kept.
-    gpu.release_film_cache();
+    // Released (another photograph, the editor closed, memory pressure):
+    // nothing is kept, and the next render misses and renders the same.
+    let held = gpu.film_cache_bytes();
+    assert_eq!(held, (80 * 64 + 96 * 64) * 12, "slot 0 at 80×64 and slot 1 at 96×64 are kept");
+    assert_eq!(gpu.release_film_cache(), held);
+    assert_eq!(gpu.film_cache_bytes(), 0, "every kept film side is gone");
+    assert_eq!(gpu.release_film_cache(), 0, "releasing again is harmless");
     let source = image(80, 64);
-    pipeline("kodak_gold_200", &params).with_film_cache(0, 2).process_resident_borrowed(&source, &gpu).unwrap();
+    let render = || pipeline("kodak_gold_200", &params).with_film_cache(0, 2).process_resident_borrowed(&source, &gpu).unwrap();
+    let after = render();
     assert_eq!(gpu.film_cache_hits(), hits, "a released film side was reused");
+    let whole = pipeline("kodak_gold_200", &params).process_resident_borrowed(&source, &gpu).unwrap();
+    assert!(bits(&after) == bits(&whole), "the render after a release renders differently");
+    assert_eq!(gpu.film_cache_bytes(), 80 * 64 * 12, "kept again");
+    assert!(bits(&render()) == bits(&whole));
+    assert_eq!(gpu.film_cache_hits(), hits + 1, "and reused");
 }

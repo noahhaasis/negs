@@ -191,8 +191,12 @@ pub trait ComputeBackend: MaybeSendSync {
     }
 
     /// Drop the film sides kept for [`FilmChainParams::film_cache`] (another
-    /// photograph opened). Backends that keep none do nothing.
-    fn release_film_cache(&self) {}
+    /// photograph opened, the editor closed, memory pressure) and return the
+    /// bytes they held. Safe at any time: the next chain just misses.
+    /// Backends that keep none do nothing.
+    fn release_film_cache(&self) -> u64 {
+        0
+    }
 
     /// True for f32 GPU backends where effects may trade exactness for
     /// speed (the diffusion filter uses a downsampled sum-of-Gaussians

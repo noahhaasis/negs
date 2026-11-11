@@ -246,6 +246,7 @@ import UserNotifications
     @ObservationIgnored private var catalog: JSONValue = .null
     @ObservationIgnored private var catalogRequest: Task<(Int, JSONValue), Error>?
     @ObservationIgnored private var engine: EngineClient?
+    @ObservationIgnored private(set) lazy var filmCacheRelease = FilmCacheRelease { [weak self] in self?.engine }
     @ObservationIgnored private var exportJob: ExportJob?
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var sourceGeneration = 0
@@ -457,6 +458,7 @@ import UserNotifications
         do {
             let engine = try EngineClient(paths: paths ?? EnginePaths.locate())
             self.engine = engine
+            filmCacheRelease.watchMemoryPressure()
             catalogRequest = Task.detached { try await engine.request(["command": .string("catalog")]) }
             let data = engine.paths.data
             Task.detached(priority: .utility) { [weak self] in
@@ -1840,6 +1842,7 @@ import UserNotifications
         saveOpenRender()
         if selection.current == nil { selection.select(source) }
         mode = .grid
+        filmCacheRelease.release(.editorClosed)
     }
 
     /// Back to the edit view, on the grid's current photograph. With none,
