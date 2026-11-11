@@ -278,8 +278,13 @@ private struct SheetGrid: View {
                 // thumbnails beside them, so they're drawn above every
                 // thumbnail, placed as the cells are. Not by raising the
                 // boxed cells: that would move them to the end for VoiceOver.
+                // All the cream boxes first, then all the yellow ones, so a
+                // selected photograph's box is over a neighbour's pick box.
                 ForEach(cells, id: \.file.url) { cell in
-                    box(cell.file, frame: layout.frames[cell.index])
+                    box(cell.file, frame: layout.frames[cell.index], selection: false)
+                }
+                ForEach(cells, id: \.file.url) { cell in
+                    box(cell.file, frame: layout.frames[cell.index], selection: true)
                 }
                 if let band {
                     Rectangle()
@@ -346,13 +351,13 @@ private struct SheetGrid: View {
 
     /// A cell's boxes, where its cell is, rising with it as the grid
     /// opens: a pick's in cream, and selection's in yellow over it.
-    private func box(_ file: PhotoFile, frame: CGRect) -> some View {
+    private func box(_ file: PhotoFile, frame: CGRect, selection layer: Bool) -> some View {
         let url = file.url
         let waiting = model.sheetWaiting.contains(url)
         let picked = model.library.summary(for: url).flag == .pick, selected = SheetLayout.drawnSelected(url, selection: model.selection)
         return ZStack {
-            if picked || selected {
-                BoxInk(name: file.name, picked: picked, selected: selected)
+            if layer ? selected : picked {
+                BoxInk(name: file.name, picked: !layer, selected: layer)
             }
         }
         .frame(width: frame.width, height: frame.height)
