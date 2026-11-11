@@ -25,6 +25,9 @@ final class InkSliderView: NSView, InkFocusTarget {
     var onChange: (Double) -> Void = { _ in }
     var onEditing: (Bool) -> Void = { _ in }
     var onReset: () -> Void = {}
+    /// A double-click's reset, when it differs: its first click has already
+    /// moved the value to the pointer (and a linked slider with it).
+    var onDoubleClickReset: (() -> Void)?
     /// Return with keyboard focus: type a value.
     var onType: () -> Void = {}
     var enabled = true
@@ -109,7 +112,11 @@ final class InkSliderView: NSView, InkFocusTarget {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
         guard enabled else { return }
-        if event.clickCount == 2 || event.modifierFlags.contains(.option) {
+        if event.clickCount == 2 {
+            (onDoubleClickReset ?? onReset)()
+            return
+        }
+        if event.modifierFlags.contains(.option) {
             onReset()
             return
         }
@@ -171,6 +178,7 @@ struct InkSlider: NSViewRepresentable {
     var type: () -> Void = {}
     var toolTip: String? = nil
     var showsNeutral = true
+    var resetAfterClick: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> InkSliderView {
         let slider = InkSliderView()
@@ -198,6 +206,7 @@ struct InkSlider: NSViewRepresentable {
         }
         slider.onEditing = editing
         slider.onReset = reset
+        slider.onDoubleClickReset = resetAfterClick
         slider.onType = type
     }
 }
@@ -218,6 +227,8 @@ struct LabeledSlider: View {
     let editing: (Bool) -> Void
     /// The tooltip of the title and the slider.
     var help: String? = nil
+    /// A double-click on the track's reset, when it differs from `reset`.
+    var resetAfterClick: (() -> Void)? = nil
 
     @State private var typing = false
     @State private var hovered = false
@@ -254,7 +265,7 @@ struct LabeledSlider: View {
                     .onTapGesture(count: 2) { reset() }
                     .tooltip(help)
                 InkSlider(title: title, value: value, range: range, step: step, neutral: defaultValue, changed: modified, hovered: hovered,
-                          editing: editing, reset: reset, type: { typing = true }, toolTip: help)
+                          editing: editing, reset: reset, type: { typing = true }, toolTip: help, resetAfterClick: resetAfterClick)
                     .frame(height: Theme.Size.row)
                 valueView.frame(width: Theme.Size.valueWidth, alignment: .trailing)
                 resetButton.frame(width: 18).padding(.trailing, -8)

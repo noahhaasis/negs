@@ -34,6 +34,7 @@ final class EngineTests: XCTestCase {
         for group in adjustmentGroups {
             for control in group.controls {
                 if case .balancePrint = control { continue }
+                if case .filterLink = control { continue }
                 if case .stockSlider(_, let path, let index, let range, _, _) = control {
                     // Null until edited; every film's preset fills the lane.
                     XCTAssertEqual(defaults[path], .null, path)
@@ -50,7 +51,7 @@ final class EngineTests: XCTestCase {
                 case .slider(_, _, let range, _): XCTAssertTrue(range.contains(defaults[control.id].double), control.id)
                 case .toggle: if case .bool = defaults[control.id] {} else { XCTFail(control.id) }
                 case .choice(_, _, let options): XCTAssertTrue(options.contains(defaults[control.id].string), control.id)
-                case .stockSlider, .balancePrint: break
+                case .stockSlider, .balancePrint, .filterLink: break
                 }
             }
         }

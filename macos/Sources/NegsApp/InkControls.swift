@@ -121,7 +121,9 @@ final class FocusAnchorView: NSView, InkFocusTarget {
     }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var acceptsFirstResponder: Bool { enabled }
-    override func becomeFirstResponder() -> Bool { box.isHidden = false; return true }
+    /// The box only for the keyboard: a window can hand its first control the
+    /// keys when it opens (a popover does), and that is no reason to draw it.
+    override func becomeFirstResponder() -> Bool { box.isHidden = !InputMode.shared.keyboard; return true }
     override func resignFirstResponder() -> Bool { box.isHidden = true; return true }
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {

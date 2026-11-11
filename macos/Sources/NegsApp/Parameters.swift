@@ -121,6 +121,43 @@ struct Stock: Identifiable, Sendable {
     }
 }
 
+/// Enlarger › Shifts move: how the magenta and yellow shift sliders move
+/// each other (bazdesh's three-way switch, forum #111). Together is the
+/// red↔cyan axis (tiban, #106). Linked, they also reset together. A preference of the app, not of the edit:
+/// the edit still holds just the two shifts, so presets are unchanged.
+enum FilterLink: String, CaseIterable {
+    case separate, together, opposite
+    static let key = "filterShiftLink"
+    static let magenta = "enlarger.m_filter_shift"
+    static let yellow = "enlarger.y_filter_shift"
+    static let range: ClosedRange<Double> = -50...50
+
+    var title: String {
+        switch self {
+        case .separate: "Separately"
+        case .together: "Together"
+        case .opposite: "Opposite ways"
+        }
+    }
+
+    /// The two shifts after moving `path` to `value` (already snapped). The
+    /// other moves by the same change, so their gap (Together) or sum
+    /// (Opposite) holds, with no jump on switching; at either end of the
+    /// range both stop.
+    func shifts(moving path: String, to value: Double, magenta: Double, yellow: Double) -> (magenta: Double, yellow: Double) {
+        let movingMagenta = path == Self.magenta
+        let (current, other) = movingMagenta ? (magenta, yellow) : (yellow, magenta)
+        guard self != .separate else { return movingMagenta ? (value, yellow) : (magenta, value) }
+        let sign: Double = self == .together ? 1 : -1
+        // The other's room to move, in the moving slider's direction.
+        let (low, high) = sign > 0 ? (Self.range.lowerBound - other, Self.range.upperBound - other)
+                                   : (other - Self.range.upperBound, other - Self.range.lowerBound)
+        let delta = min(max(value - current, min(low, 0)), max(high, 0))
+        let (moved, followed) = (current + delta, other + sign * delta)
+        return movingMagenta ? (moved, followed) : (followed, moved)
+    }
+}
+
 /// Settings › Fotufilm films: which of the films ported from Fotufilm the
 /// film menus and the tray list. Only the lists: an edit, a preset or a
 /// thumbnail with a hidden film keeps it.

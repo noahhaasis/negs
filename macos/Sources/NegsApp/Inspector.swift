@@ -10,12 +10,15 @@ enum Adjustment: Identifiable {
     case stockSlider(String, String, Int, ClosedRange<Double>, Double, bw: String?)
     /// A button that solves for parameters: title, help.
     case balancePrint(String, String)
+    /// How the enlarger's magenta and yellow shifts move each other: help.
+    case filterLink(String)
 
     var id: String {
         switch self {
         case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _): return path
         case .stockSlider(_, let path, let index, _, _, _): return "\(path).\(index)"
         case .balancePrint(let title, _): return title
+        case .filterLink: return FilterLink.key
         }
     }
 }
@@ -116,10 +119,11 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Magenta", "film_render.base.magenta", 0...2, 0.01),
         .slider("Yellow", "film_render.base.yellow", 0...2, 0.01)
     ]),
-    .init(title: "Enlarger", symbol: "light.overhead.left", section: .print, basic: 4, controls: [
+    .init(title: "Enlarger", symbol: "light.overhead.left", section: .print, basic: 5, controls: [
         .slider("Print exposure", "enlarger.print_exposure", 0.1...5, 0.01),
         .slider("Magenta shift", "enlarger.m_filter_shift", -50...50, 0.1),
         .slider("Yellow shift", "enlarger.y_filter_shift", -50...50, 0.1),
+        .filterLink("How the magenta and yellow shifts move. Together moves both the same way: more of both makes the print more cyan, less of both redder. Opposite ways moves one up as the other goes down. Linked, resetting either resets both. Each keeps its own value, so presets are unchanged."),
         .balancePrint("Balance Print", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base."),
         .toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
         .slider("Preflash exposure", "enlarger.preflash_exposure", 0...0.5, 0.01),
@@ -209,6 +213,9 @@ struct AdjustmentControl: View {
             }
             .padding(.horizontal, Theme.Size.gutter)
             .padding(.vertical, 4)
+        case .filterLink(let help):
+            ChoiceRow(title: "Shifts move", items: FilterLink.allCases.map { .option($0.title, tag: $0.rawValue) },
+                      selection: model.filterLink.rawValue, help: help) { model.filterLink = FilterLink(rawValue: $0) ?? .separate }
         }
     }
 }
@@ -221,11 +228,14 @@ struct SliderRow: View {
     let step: Double
 
     var body: some View {
-        LabeledSlider(title: title, value: model.number(path, range: range, step: step), range: range, step: step,
+        let linked = path == FilterLink.magenta || path == FilterLink.yellow
+        LabeledSlider(title: title, value: linked ? model.filterShift(path, step: step) : model.number(path, range: range, step: step),
+                      range: range, step: step,
                       defaultValue: model.defaultValue(path).double, modified: model.isModified(path),
-                      reset: { model.resetValue(path) },
+                      reset: { linked ? model.resetFilterShift(path) : model.resetValue(path) },
                       editing: { $0 ? model.beginInteraction() : model.endInteraction() },
-                      help: ControlHelp.text(path))
+                      help: ControlHelp.text(path),
+                      resetAfterClick: linked ? { model.resetFilterShiftAfterClick(path) } : nil)
     }
 }
 
@@ -594,7 +604,7 @@ extension AdjustmentInspector {
         switch adjustment {
         case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _): model.isModified(path)
         case .stockSlider(_, let path, let index, _, _, _): model.isStockModified(path, index)
-        case .balancePrint: false
+        case .balancePrint, .filterLink: false
         }
     }
     static func count(_ group: AdjustmentGroup, _ model: EditorModel) -> Int {
@@ -715,7 +725,8 @@ struct InspectorTabs: View {
     @Binding var tab: InspectorTab
 
     var body: some View {
-        TabRow(counts: Dictionary(uniqueKeysWithValues: InspectorTab.allCases.map { ($0, InspectorEdits.count($0, model)) }), tab: $tab)
+        TabRow(counts: Dictionary(uniqueKeysWithValues: InspectorTab.allCases.map { ($0, InspectorEdits.count($0, model)) }), tab: $tab,
+               edits: { item, dismiss in AnyView(TabEditsList(model: model, tab: item, dismiss: dismiss)) })
     }
 }
 
@@ -725,13 +736,15 @@ struct InspectorTabs: View {
 struct TabRow: View {
     let counts: [InspectorTab: Int]
     @Binding var tab: InspectorTab
+    /// What a click on a tab's count shows: its edits, with ↺ and Reset.
+    var edits: ((InspectorTab, @escaping () -> Void) -> AnyView)? = nil
 
     var body: some View {
         // Top-aligned: every title starts at its word's top and nothing in
         // a word reaches above it, so the titles share one baseline.
         HStack(alignment: .top, spacing: TabWord.gap) {
             ForEach(InspectorTab.allCases, id: \.self) { item in
-                TabWord(title: item.rawValue, chosen: tab == item, count: counts[item] ?? 0) { tab = item }
+                TabWord(title: item.rawValue, chosen: tab == item, count: counts[item] ?? 0, edits: edits.map { make in { dismiss in make(item, dismiss) } }) { tab = item }
             }
             Spacer(minLength: 0)
         }
@@ -751,8 +764,11 @@ struct TabWord: View {
     let title: String
     let chosen: Bool
     var count = 0
+    /// The list a click on the count opens; none, and the count is a mark.
+    var edits: ((@escaping () -> Void) -> AnyView)? = nil
     let choose: () -> Void
     @State private var hovered = false
+    @State private var listShown = false
 
     /// The space between one word (its count, if any) and the next.
     static let gap: CGFloat = 24
@@ -783,8 +799,8 @@ struct TabWord: View {
     }
 
     var body: some View {
-        Button(action: choose) {
-            HStack(alignment: .top, spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
+            Button(action: choose) {
                 // Both weights' widths, so the word is the same size chosen or not.
                 ZStack(alignment: .leading) {
                     Text(title).font(Theme.serif(Self.size, weight: 700)).tracking(Self.tracking(title, chosen: true)).hidden()
@@ -794,22 +810,34 @@ struct TabWord: View {
                 }
                 .padding(.bottom, 5)
                 .pencilUnderline(chosen, height: 6, offset: 0)
-                // In the flow, so the gap after a tab with edits starts at its
-                // count. Hangs from the title's top, never above it.
-                if count > 0 {
-                    HStack(alignment: .top, spacing: 0) {
-                        EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
-                        Text("\(count)").font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
-                    }
-                    .accessibilityHidden(true)
-                }
+            }
+            .buttonStyle(InkPressStyle())
+            .onHover { hovered = $0 }
+            .inkFocus(activate: choose)
+            .accessibilityLabel(count > 0 ? "\(title), \(count) \(count == 1 ? "edit" : "edits")" : title)
+            .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
+            // In the flow, so the gap after a tab with edits starts at its
+            // count. Hangs from the title's top, never above it.
+            if count > 0 {
+                countMark
             }
         }
-        .buttonStyle(InkPressStyle())
-        .onHover { hovered = $0 }
-        .inkFocus(activate: choose)
-        .accessibilityLabel(count > 0 ? "\(title), \(count) \(count == 1 ? "edit" : "edits")" : title)
-        .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
+    }
+
+    @ViewBuilder private var countMark: some View {
+        let mark = HStack(alignment: .top, spacing: 0) {
+            EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
+            Text("\(count)").font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
+        }
+        if let edits {
+            Button { listShown.toggle() } label: { mark }
+                .buttonStyle(InkPressStyle())
+                .popover(isPresented: $listShown, arrowEdge: .bottom) { edits { listShown = false } }
+                .tooltip("Show the \(count == 1 ? "edit" : "edits") on \(title)")
+                .accessibilityLabel("\(count) \(count == 1 ? "edit" : "edits") on \(title)")
+        } else {
+            mark.accessibilityHidden(true)
+        }
     }
 }
 

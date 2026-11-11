@@ -135,6 +135,10 @@ import UserNotifications
             pumpPreviews()
         }
     }
+    /// Enlarger › Shifts move.
+    var filterLink = FilterLink(rawValue: UserDefaults.standard.string(forKey: FilterLink.key) ?? "") ?? .separate {
+        didSet { UserDefaults.standard.set(filterLink.rawValue, forKey: FilterLink.key) }
+    }
     static let newPhotoFilmKey = "newPhotoFilm"
     static let newPhotoPaperKey = "newPhotoPaper"
     /// Settings › New photographs, as chosen: nil until a choice is made.
@@ -689,6 +693,40 @@ import UserNotifications
     func number(_ path: String, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
         Binding(get: { self.value(path).double }, set: { self.set(path, .number(Self.snap($0, to: range, step: step))) })
     }
+    /// The enlarger's magenta or yellow shift, moving the other as Shifts
+    /// move says; both change in one step. Reset stays per slider.
+    func filterShift(_ path: String, step: Double) -> Binding<Double> {
+        Binding(get: { self.value(path).double }, set: { newValue in
+            let snapped = Self.snap(newValue, to: FilterLink.range, step: step)
+            guard self.filterLink != .separate else { return self.set(path, .number(snapped)) }
+            let (m, y) = self.filterLink.shifts(moving: path, to: snapped,
+                                                magenta: self.value(FilterLink.magenta).double, yellow: self.value(FilterLink.yellow).double)
+            var next = self.state
+            next.params[FilterLink.magenta] = .number(m)
+            next.params[FilterLink.yellow] = .number(y)
+            self.apply(next, action: "Change Adjustment")
+        })
+    }
+    /// The last drag or click that changed the edit: before and after.
+    @ObservationIgnored private var lastInteraction: (start: EditState, end: EditState)?
+    /// Resets a shift; linked (Together, Opposite ways), both reset, as
+    /// they move, in one step.
+    func resetFilterShift(_ path: String) {
+        guard filterLink != .separate else { return resetValue(path) }
+        var next = state
+        for shift in [FilterLink.magenta, FilterLink.yellow] { next.params[shift] = defaults[shift] }
+        apply(next, action: "Change Adjustment")
+    }
+    /// A double-click on a shift's track. Its first click moved the shift to
+    /// the pointer, and a linked one with it: that click is undone first,
+    /// exactly, so the reset is one step from before it.
+    func resetFilterShiftAfterClick(_ path: String) {
+        if let last = lastInteraction, last.end == state, undoManager?.canUndo == true {
+            undoManager?.undo()
+        }
+        lastInteraction = nil
+        resetFilterShift(path)
+    }
     /// Grain arrays (`film_render.grain.<field>`) are null until edited: the
     /// engine then uses the film's preset, which the catalog resolves.
     var filmIsBW: Bool { films.first { $0.id == film }?.bw ?? false }
@@ -769,6 +807,7 @@ import UserNotifications
     func endInteraction(action: String = "Change Adjustment") {
         guard let start = interactionStart else { return }
         interactionStart = nil
+        lastInteraction = start != state ? (start, state) : nil
         if start != state { registerUndo(restoring: start, action: action) }
         // The drag frames were canvas-size already: letting go settles.
         quickStep = FrameID(revision: revision, generation: sourceGeneration)
@@ -894,6 +933,54 @@ import UserNotifications
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
         customFilmFormat = false
         apply(next, action: "Reset Adjustments")
+    }
+    /// Puts the controls `targets` name back to their defaults, in one undo
+    /// step (the ↺ on a tab's list of edits, and Reset on the tab).
+    func resetEdits(_ targets: [ResetTarget], action: String) {
+        guard !cropping, !targets.isEmpty else { return }
+        var next = state
+        var lanes: [String: [Int]] = [:]
+        var space = false
+        // Exposure first: turning matching on after it sets Exposure to 0.
+        if targets.contains(.exposure) { next.params["prep.exposure_ev"] = .number(matchedEV) }
+        for target in targets {
+            switch target {
+            case .param(let path): next.params[path] = defaults[path]
+            case .stock(let path, let index): lanes[path, default: []].append(index)
+            case .exposure: break
+            case .matchBrightness:
+                if autoPlaceNewImages {
+                    next.brightnessMatch = BrightnessMatch()
+                    next.params["prep.exposure_ev"] = .number(0)
+                } else {
+                    next.brightnessMatch = nil
+                }
+            case .scanFilm: next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+            case .previewSpace: space = true
+            case .border: next.border = BorderSettings()
+            case .filmFormat:
+                next.params[FilmFormatPicker.path] = defaults[FilmFormatPicker.path]
+                customFilmFormat = false
+            }
+        }
+        for (path, indices) in lanes {
+            var values = stockValues(path)
+            for index in indices where values.indices.contains(index) { values[index] = stockDefault(path, index) }
+            let preset = stockDefaults(path)
+            let atPreset = values.count == preset.count && zip(values, preset).allSatisfy { abs($0 - $1) <= 1e-6 * max(1, abs($1)) }
+            next.params[path] = atPreset ? .null : .array(values.map(JSONValue.number))
+        }
+        apply(next, action: action)
+        if space { choosePreviewSpace(SaveSettings.colorSpaces[0]) }
+    }
+    /// Reset on one tab: every control the tab's count stands for.
+    func resetEdits(tab: InspectorTab) {
+        resetEdits(InspectorEdits.edits(tab, self).map(\.target), action: "Reset \(tab.rawValue)")
+    }
+    /// A lane of a grain array, the film's preset while it is untouched.
+    func stockValue(_ path: String, _ index: Int) -> Double {
+        let values = stockValues(path)
+        return values.indices.contains(index) ? values[index] : 0
     }
     private func apply(_ next: EditState, action: String) {
         guard next != state else { return }
