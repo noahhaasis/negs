@@ -581,6 +581,10 @@ struct Encoding {
     /// Set while the controls are being brought in line, so their
     /// selection events don't count as choices.
     updating: Cell<bool>,
+    /// The size and JPEG quality edit boxes as they stood when Save was
+    /// pressed. Read while the dialog is still open: once it has closed,
+    /// the edit boxes may give back the text they started with.
+    typed: Cell<Option<(ExportSize, u32)>>,
 }
 
 impl Encoding {
@@ -593,7 +597,11 @@ impl Encoding {
     }
     fn settings(&self, customize: &IFileDialogCustomize) -> SaveSettings {
         let bit_depth = self.depth();
-        SaveSettings { bit_depth, color_space: SaveSettings::effective_space(self.chosen_space.get(), bit_depth), jpeg_quality: read_quality(customize) }
+        let jpeg_quality = self.typed.get().map_or_else(|| read_quality(customize), |(_, quality)| quality);
+        SaveSettings { bit_depth, color_space: SaveSettings::effective_space(self.chosen_space.get(), bit_depth), jpeg_quality }
+    }
+    fn size(&self, customize: &IFileDialogCustomize) -> ExportSize {
+        self.typed.get().map_or_else(|| read_size(customize), |(size, _)| size)
     }
 }
 
@@ -683,7 +691,11 @@ fn read_size(customize: &IFileDialogCustomize) -> ExportSize {
 }
 
 impl IFileDialogEvents_Impl for SaveEvents_Impl {
-    fn OnFileOk(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+    /// Keeps what was typed before the dialog closes.
+    fn OnFileOk(&self, dialog: Option<&IFileDialog>) -> windows::core::Result<()> {
+        if let Some(customize) = dialog.and_then(|d| d.cast::<IFileDialogCustomize>().ok()) {
+            self.encoding.typed.set(Some((read_size(&customize), read_quality(&customize))));
+        }
         Ok(())
     }
     fn OnFolderChanging(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<()> {
@@ -820,6 +832,7 @@ pub fn save(app: &mut App, export: bool) {
         png_depth: Cell::new(depth(prefs.png_bit_depth)),
         tiff_depth: Cell::new(depth(prefs.tiff_bit_depth)),
         updating: Cell::new(false),
+        typed: Cell::new(None),
     });
     let quality = prefs.jpeg_quality.clamp(QUALITY_RANGE.0, QUALITY_RANGE.1);
     let events: IFileDialogEvents = SaveEvents {
@@ -915,7 +928,7 @@ pub fn save(app: &mut App, export: bool) {
             let index = dialog.GetFileTypeIndex().unwrap_or(1).clamp(1, 3);
             let chosen_engine = if export && customize.GetSelectedControlItem(ENGINE).unwrap_or(1) == 0 { ExportEngine::Reference } else { ExportEngine::Fast };
             encoding.format.set(OutputFormat::ALL[index as usize - 1]);
-            Some((path, OutputFormat::ALL[index as usize - 1], chosen_engine, read_size(&customize), encoding.settings(&customize)))
+            Some((path, OutputFormat::ALL[index as usize - 1], chosen_engine, encoding.size(&customize), encoding.settings(&customize)))
         })()
     };
     let Some((path, format, chosen_engine, size, settings)) = chosen else { return };
