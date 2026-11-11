@@ -67,6 +67,45 @@ import XCTest
         }
     }
 
+    /// The slider row's columns are fitted, not generous (round 26): every
+    /// label leaves 8 pt before the track, and every value the slider can
+    /// show, in bold and in the reader's locale, fits the value column. A
+    /// new longer label or a wider range fails here, not as a cut label.
+    func testSliderColumnsFitEveryLabelAndValue() {
+        _ = NSApplication.shared
+        XCTAssertTrue(Theme.Fonts.load(), "Newsreader")
+        struct Spec { let title: String, range: ClosedRange<Double>, step: Double; var unit = "" }
+        let controls = prepToneControls + prepColorControls + prepDetailControls + adjustmentGroups.flatMap(\.controls)
+        var specs: [Spec] = controls.flatMap { control -> [Spec] in
+            switch control {
+            case .slider(let title, _, let range, let step): return [Spec(title: title, range: range, step: step)]
+            case .stockSlider(let title, _, _, let range, let step, let bw):
+                return [title, bw].compactMap { $0 }.map { Spec(title: $0, range: range, step: step) }
+            default: return []
+            }
+        }
+        // The rows built by hand. Exposure's range moves with the matched EV,
+        // within ±3, so ±6 covers it.
+        specs += [Spec(title: "Exposure (EV)", range: -6...6, step: 0.05),
+                  Spec(title: "Angle", range: -CropSettings.maxAngle...CropSettings.maxAngle, step: 0.1, unit: "°"),
+                  Spec(title: "Width", range: 0...15, step: 0.1, unit: "%"),
+                  Spec(title: "Line width", range: 0.05...2, step: 0.05, unit: "%")]
+        XCTAssertGreaterThan(specs.count, 60)
+
+        let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        let valueFont = Theme.serifFont(14.5, weight: 700) as NSFont
+        func width(_ text: String, _ font: NSFont) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+        for spec in specs {
+            XCTAssertLessThanOrEqual(width(spec.title, labelFont) + 8, Theme.Size.sliderLabel, spec.title)
+            let format = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...LabeledSlider.decimals(spec.step)))
+            let (low, high) = (spec.range.lowerBound, spec.range.upperBound)
+            for value in [low, low + spec.step, high - spec.step, high] {
+                let text = "\(value.formatted(format))\(spec.unit)"
+                XCTAssertLessThanOrEqual(width(text, valueFont), Theme.Size.valueWidth, "\(spec.title): \(text)")
+            }
+        }
+    }
+
     /// Exercise the real form and helper through a reduced drag frame and
     /// the settled render.
     private func checkInspectorLayout(limited: Bool) async throws {

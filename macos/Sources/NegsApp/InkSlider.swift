@@ -202,7 +202,7 @@ struct InkSlider: NSViewRepresentable {
     }
 }
 
-/// A slider row: the label in a 142 pt column, the track, the value in the
+/// A slider row: the label in a column fitted to the longest label, the track, the value in the
 /// serif (click it to type one), and ↺ once it's changed (§4.9). A number
 /// typed past either end is set to the end, with a note under the row.
 struct LabeledSlider: View {

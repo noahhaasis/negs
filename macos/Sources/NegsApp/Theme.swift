@@ -96,8 +96,11 @@ enum Theme {
         static let inspectorSmallest: CGFloat = 340
         static let gutter: CGFloat = 22
         static let row: CGFloat = 29
-        static let sliderLabel: CGFloat = 142
-        static let valueWidth: CGFloat = 50
+        /// Fitted to the longest slider label (“Developer exhaustion”, 122 pt)
+        /// and the widest value in bold, so the track gets the rest (round 26);
+        /// `InspectorLayoutTests` checks every slider still fits.
+        static let sliderLabel: CGFloat = 132
+        static let valueWidth: CGFloat = 46
         static let strip: CGFloat = 158
         static let stripTopPadding: CGFloat = 6
         static let stripRebate: CGFloat = 12
