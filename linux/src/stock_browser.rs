@@ -122,6 +122,19 @@ fn request(ui: &Editor, stock: &Stock) -> Option<(u64, serde_json::Value, String
     Some((r.source_generation, command, key))
 }
 
+/// Opens the film or paper grid (UI validation scenes).
+pub fn expand(ui: &Editor, paper: bool) {
+    if let Some(grid) = ui
+        .stock_browser
+        .grids
+        .borrow()
+        .iter()
+        .find(|g| g.paper == paper)
+    {
+        grid.row.set_expanded(true);
+    }
+}
+
 /// The film or paper control: a menu and a preview grid, one of them shown.
 pub fn rows(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool, menu: gtk::Widget) -> gtk::Widget {
     let grid = row(ui, list, paper);
@@ -422,6 +435,105 @@ fn scroll_to_result(ui: &Editor, grid: &Grid) {
     }
 }
 
+/// The open grid's default height: about two rows of tiles.
+pub const TRAY_HEIGHT: f64 = 290.;
+const TRAY_MIN: f64 = 120.;
+const TRAY_MAX: f64 = 1200.;
+
+pub fn tray_height(value: f64) -> i32 {
+    if value.is_finite() {
+        value.round().clamp(TRAY_MIN, TRAY_MAX) as i32
+    } else {
+        TRAY_HEIGHT as i32
+    }
+}
+
+fn set_height(scroll: &gtk::ScrolledWindow, height: i32) {
+    // GTK rejects a minimum above the maximum, so move them in that order.
+    if height > scroll.max_content_height() {
+        scroll.set_max_content_height(height);
+        scroll.set_min_content_height(height);
+    } else {
+        scroll.set_min_content_height(height);
+        scroll.set_max_content_height(height);
+    }
+}
+
+/// Sets both grids' height. A drag stops short of crowding out the tabs:
+/// at most 60 % of the sidebar's height.
+fn resize_trays(ui: &Editor, value: f64) {
+    let room = f64::from(ui.inspector.height()) * 0.6;
+    let value = if room > TRAY_MIN {
+        value.min(room)
+    } else {
+        value
+    };
+    let height = tray_height(value);
+    ui.preferences.borrow_mut().tray_height = height as f64;
+    for grid in ui.stock_browser.grids.borrow().iter() {
+        set_height(&grid.scroll, height);
+    }
+}
+
+/// The handle under an open grid, as under the scope.
+fn grip(ui: &Rc<Editor>, paper: bool) -> gtk::Button {
+    let grip = gtk::Button::with_label("↕");
+    grip.add_css_class("flat");
+    grip.set_cursor_from_name(Some("ns-resize"));
+    grip.set_tooltip_text(Some(crate::help::TRAY_RESIZE));
+    grip.update_property(&[gtk::accessible::Property::Label(if paper {
+        "Resize paper previews"
+    } else {
+        "Resize film previews"
+    })]);
+    let origin = Rc::new(Cell::new(TRAY_HEIGHT));
+    let drag = gtk::GestureDrag::new();
+    drag.connect_drag_begin(glib::clone!(
+        #[weak]
+        ui,
+        #[strong]
+        origin,
+        move |_, _, _| {
+            origin.set(ui.preferences.borrow().tray_height);
+        }
+    ));
+    drag.connect_drag_update(glib::clone!(
+        #[weak]
+        ui,
+        move |_, _, dy| resize_trays(&ui, origin.get() + dy)
+    ));
+    grip.add_controller(drag);
+    let double = gtk::GestureClick::new();
+    double.connect_pressed(glib::clone!(
+        #[weak]
+        ui,
+        move |_, count, _, _| if count == 2 {
+            resize_trays(&ui, TRAY_HEIGHT);
+        }
+    ));
+    grip.add_controller(double);
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(glib::clone!(
+        #[weak]
+        ui,
+        #[upgrade_or]
+        glib::Propagation::Proceed,
+        move |_, key, _, _| {
+            let current = ui.preferences.borrow().tray_height;
+            let next = match key {
+                gdk::Key::Up => current - 16.,
+                gdk::Key::Down => current + 16.,
+                gdk::Key::Home => TRAY_HEIGHT,
+                _ => return glib::Propagation::Proceed,
+            };
+            resize_trays(&ui, next);
+            glib::Propagation::Stop
+        }
+    ));
+    grip.add_controller(keys);
+    grip
+}
+
 fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
     let row = adw::ExpanderRow::builder()
         .title(if paper { "Paper" } else { "Film" })
@@ -522,12 +634,15 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
     let viewport = gtk::Viewport::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
     viewport.set_scroll_to_focus(true);
     viewport.set_child(Some(&body));
+    // A fixed height rather than a natural height with a maximum: GTK 4.16
+    // (the AppImage's) otherwise squeezed the open grid to a sliver above the
+    // tabs (issues #13, #14). The grip below resizes it.
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .propagate_natural_height(true)
-        .max_content_height(290)
         .child(&viewport)
         .build();
+    set_height(&scroll, tray_height(ui.preferences.borrow().tray_height));
     let holder = gtk::ListBoxRow::new();
     holder.set_activatable(false);
     holder.set_selectable(false);
@@ -543,6 +658,7 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
         entry
     });
     content.append(&scroll);
+    content.append(&grip(ui, paper));
     holder.set_child(Some(&content));
     row.add_row(&holder);
     let grid = Rc::new(Grid {
@@ -1006,6 +1122,19 @@ mod tests {
     }
 
     #[test]
+    fn tray_height_is_bounded() {
+        assert_eq!(
+            (
+                tray_height(f64::NAN),
+                tray_height(0.),
+                tray_height(333.4),
+                tray_height(1e9)
+            ),
+            (290, 120, 333, 1200)
+        );
+    }
+
+    #[test]
     #[ignore = "Requires a desktop and isolated NEGS_PROFILE_DIR; run separately with --ignored --test-threads=1"]
     fn film_search_filters_without_editing_and_keeps_tiles() {
         assert!(std::env::var_os("NEGS_PROFILE_DIR").is_some());
@@ -1134,6 +1263,17 @@ mod tests {
         film.row.set_expanded(true);
         assert!(film.row.is_expanded() && !paper.row.is_expanded());
         assert!(film.row.is_focusable() && paper.row.is_focusable());
+        // Open grids hold a fixed, shared height that the grip changes.
+        let heights = || {
+            [&film, &paper].map(|g| (g.scroll.min_content_height(), g.scroll.max_content_height()))
+        };
+        assert_eq!(heights(), [(290, 290); 2]);
+        resize_trays(&ui, 400.);
+        assert_eq!(heights(), [(400, 400); 2]);
+        assert_eq!(ui.preferences.borrow().tray_height, 400.);
+        resize_trays(&ui, 5.);
+        assert_eq!(heights(), [(120, 120); 2]);
+        resize_trays(&ui, TRAY_HEIGHT);
         let before = ui.history.borrow().state.clone();
         let current = crate::catalog::selected(&before, false).id.clone();
         let tile = film

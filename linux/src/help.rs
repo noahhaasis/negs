@@ -473,6 +473,7 @@ pub const MATCH: &str = "Keeps the developed photograph about as bright as the c
 pub const SCOPE: &str = "Shows the developed photograph’s RGB histogram or its RGB levels from left to right. Crop and rotation follow the photograph; borders are excluded.";
 pub const SCOPE_RESIZE: &str =
     "Drag to resize the scope. Double-click to reset its height; use Up and Down when focused.";
+pub const TRAY_RESIZE: &str = "Drag to resize the previews. Double-click to reset their height; use Up and Down when focused.";
 pub const TONE_GRAPH: &str = "Drag the middle handle sideways for Print exposure, the side handles vertically for Slow/Fast gamma, or the curve for Gamma. Double-click a handle to reset it.";
 pub const ALL_CONTROLS: &str = "Shows every Lab control. Off, the basic controls and any advanced controls you changed remain visible.";
 pub const FAVORITE: &str =

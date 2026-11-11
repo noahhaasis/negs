@@ -50,6 +50,16 @@ pub fn schedule(ui: &Rc<Editor>) {
                                 &ui.window, "win.crop", None,
                             );
                         }
+                        "film-tray" | "paper-tray" => {
+                            crate::stock_browser::expand(&ui, scene == "paper-tray");
+                        }
+                        "settings" => {
+                            let _ = gtk::prelude::WidgetExt::activate_action(
+                                &ui.window,
+                                "win.settings",
+                                None,
+                            );
+                        }
                         "export" => {
                             let _ = gtk::prelude::WidgetExt::activate_action(
                                 &ui.window,
