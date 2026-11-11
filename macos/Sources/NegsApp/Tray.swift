@@ -163,7 +163,11 @@ struct StockTray: View {
         let sections = Self.sections(model: model, visit: visit)
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
+                // A row of its own each visit: its tiles are made once with
+                // the visit, so the paper's name clicked in the film tray
+                // would otherwise keep the film tiles under the papers' foot.
                 TrayRow(model: model, visit: visit, sections: sections, scroll: scroll)
+                    .id(ObjectIdentifier(visit))
                 if sections.isEmpty {
                     Text(StockTrayRules.noMatch(visit.query, paper: visit.paper))
                         .font(Theme.serif(16, italic: true)).foregroundStyle(Theme.dim)
@@ -318,7 +322,7 @@ final class TrayScrollView: NSScrollView {
 }
 
 /// The groups of tiles, each with its name written up its left side.
-private struct TrayTiles: View {
+struct TrayTiles: View {
     let model: EditorModel
     let visit: TrayVisit
 

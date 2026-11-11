@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -276,6 +277,79 @@ import XCTest
         model.endTray(keep: false)
         if !model.previewCurrent { XCTAssertNil(model.trialImage) }
         model.previews.filmShown = false
+    }
+
+    /// The paper's name clicked while the film tray is open: the tray in
+    /// the window becomes the paper tray, tiles and all. It used to keep the
+    /// film tiles under the papers' foot, so a click on one printed the
+    /// photograph on a film ("printed on kodak_gold_200").
+    func testTheOtherStocksNameShowsItsOwnTiles() async throws {
+        let (model, _, fixture) = try await opened()
+        defer { model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
+        _ = NSApplication.shared
+        // Where the window puts the tray (NegsApp's body).
+        struct Slot: View {
+            let model: EditorModel
+            var body: some View {
+                if let tray = model.tray { StockTray(model: model, visit: tray) } else { Color.clear }
+            }
+        }
+        let host = NSHostingView(rootView: Slot(model: model).frame(width: 900, height: Theme.Size.tray))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: Theme.Size.tray), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+
+        func tiles() -> [NSHostingView<TrayTiles>] {
+            func walk(_ view: NSView) -> [NSHostingView<TrayTiles>] {
+                (view as? NSHostingView<TrayTiles>).map { [$0] } ?? view.subviews.flatMap(walk)
+            }
+            return walk(host)
+        }
+        func settle() async throws {
+            for _ in 0..<5 { host.layoutSubtreeIfNeeded(); try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+
+        model.openTray(paper: false)
+        try await settle()
+        let films = try XCTUnwrap(tiles().first, "The film tray's tiles are in the window")
+        XCTAssertFalse(films.rootView.visit.paper)
+        XCTAssertTrue(model.previews.filmShown)
+
+        model.openTray(paper: true)
+        try await settle()
+        let visit = try XCTUnwrap(model.tray)
+        XCTAssertTrue(visit.paper)
+        let shown = tiles()
+        XCTAssertEqual(shown.count, 1)
+        let papers = try XCTUnwrap(shown.first)
+        XCTAssertTrue(papers.rootView.visit === visit, "The tiles are the paper visit's, not the film visit's")
+        let ids = Set(StockTray.sections(model: model, visit: papers.rootView.visit).flatMap(\.stocks).map(\.id))
+        XCTAssertTrue(ids.isSubset(of: Set(model.papers.map(\.id))), "Only papers under the papers' foot")
+        XCTAssertTrue(model.previews.paperShown, "The paper tiles develop")
+        XCTAssertFalse(model.previews.filmShown, "The film tiles stop developing")
+    }
+
+    /// A film's ID can't be tried as the paper, or a paper's as the film,
+    /// whatever asks for it.
+    func testATrayTriesOnlyItsOwnKind() async throws {
+        let (model, _, fixture) = try await opened()
+        defer { model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
+        let before = model.state
+        let film = try XCTUnwrap(others(model, count: 1).first)
+        let paper = try XCTUnwrap(model.papers.first { $0.id != model.paper }).id
+
+        model.openTray(paper: true)
+        model.tryStock(film)
+        XCTAssertEqual(model.state, before, "A film isn't a paper")
+        model.tryStock(paper)
+        XCTAssertEqual(model.paper, paper)
+        model.endTray(keep: false)
+
+        model.openTray(paper: false)
+        model.tryStock(paper)
+        XCTAssertEqual(model.state, before, "A paper isn't a film")
+        model.endTray(keep: false)
     }
 
     private func waitUntil(seconds: TimeInterval = 20, _ predicate: () -> Bool) async throws {

@@ -809,6 +809,8 @@ import UserNotifications
     /// undo steps: keeping one is (`endTray`).
     func tryStock(_ id: String) {
         guard let tray, let source else { return }
+        // Only the tray's own kind: a film is never printed on as a paper.
+        guard stocks.contains(where: { $0.paper == tray.paper && $0.id == id }) else { return }
         let next = PreviewRules.choosing(id, paper: tray.paper, keepPaper: previews.keepPaper, in: state, stocks: stocks)
         guard next != state else { return }
         replaceState(next)
