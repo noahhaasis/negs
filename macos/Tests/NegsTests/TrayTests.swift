@@ -76,7 +76,8 @@ import XCTest
         let sections = [StockTrayRules.Section(title: "Favourites", stocks: [stock("b", "B")], favorites: true),
                         StockTrayRules.Section(title: "A", stocks: [stock("a", "A"), stock("b", "B")], favorites: false)]
         // 8 inset; a section is its title (18), 9, then 212-wide tiles 8 apart; sections 20 apart.
-        XCTAssertEqual(StockTrayRules.starts(sections), [8, 8 + 18 + 9 + 212 + 20])
+        let starts: [CGFloat] = [8, 8 + 18 + 9 + 212 + 20]
+        XCTAssertEqual(StockTrayRules.starts(sections), starts)
         let first: CGFloat = 18 + 9 + 212, second: CGFloat = 18 + 9 + 2 * 212 + 8
         XCTAssertEqual(StockTrayRules.contentWidth(sections), 8 + first + 20 + second + 8)
         XCTAssertEqual(StockTrayRules.tileX("b", in: 1, of: sections), 267 + 27 + 220)
