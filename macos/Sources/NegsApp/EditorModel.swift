@@ -3082,10 +3082,12 @@ import UserNotifications
             settleQuickFrame()
         }
         do {
-            let cacheKey = await Task.detached(priority: .utility) {
-                interactiveScale == nil ? RenderedPreviewCache.key(source: source, state: snapshot, paths: engine.paths) : nil
-            }.value
-            guard shouldShow(currentRevision, generation) else { return }
+            // The cache's name stats the helper's data (~18 ms): worked out
+            // while the helper renders, not before (ticket 39).
+            let cacheKeyTask = interactiveScale == nil ? Task.detached(priority: .utility) {
+                RenderedPreviewCache.key(source: source, state: snapshot, paths: engine.paths)
+            } : nil
+            guard shouldShow(currentRevision, generation) else { cacheKeyTask?.cancel(); return }
             // The helper replaces its kept output with each render, and keeps
             // none if this one fails.
             helperOutput = nil
@@ -3104,6 +3106,7 @@ import UserNotifications
             let developed = try await Task.detached(priority: .userInitiated) {
                 try Self.readPreview(buffer, width: width, height: height, displaySpace: display)
             }.value
+            let cacheKey = await cacheKeyTask?.value ?? nil
             guard showable() else { return }
             // The brightness match reads these; the rest waits for the frame.
             sourceSize = CGSize(width: result["source_width"].double, height: result["source_height"].double)
