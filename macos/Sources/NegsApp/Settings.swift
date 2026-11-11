@@ -128,7 +128,8 @@ struct SettingsView: View {
     @ViewBuilder private var photographs: some View {
         let slide = model.films.first { $0.id == model.newPhotoFilm }?.positive ?? false
         InkSection(title: "New photographs") {
-            ChoiceRow(title: "Film", items: Self.items(model.filmGroups), selection: model.newPhotoFilm) { model.setNewPhotoFilm($0) }
+            ChoiceRow(title: "Film", items: Self.items(StockGroup.films(model.listedFilms(keeping: [model.newPhotoFilm]), papers: model.papers)),
+                      selection: model.newPhotoFilm) { model.setNewPhotoFilm($0) }
                 .inkDisabled(model.films.isEmpty)
             if slide {
                 // A slide is scanned, without a paper: struck through, as under the photograph.
@@ -142,6 +143,11 @@ struct SettingsView: View {
             TickRow(title: "Match to camera brightness", isOn: Binding(
                 get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))
             HintText("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.")
+        }
+        InkSection(title: "Films") {
+            ChoiceRow(title: "Fotufilm films", items: FotufilmFilms.allCases.map { .option($0.title, tag: $0.rawValue) },
+                      selection: model.fotufilmFilms.rawValue) { model.fotufilmFilms = FotufilmFilms(rawValue: $0) ?? .all }
+            HintText("Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.")
         }
         InkSection(title: "Changing film") {
             TickRow(title: "Keep paper when changing film", isOn: Binding(

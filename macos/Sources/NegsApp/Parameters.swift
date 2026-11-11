@@ -93,6 +93,10 @@ struct Stock: Identifiable, Sendable {
     let times: [Double]
     /// The resolved grain preset, per field of `Stock.grainFields`.
     let grain: JSONValue
+    /// Ported from Fotufilm; and, for those, whether from the manufacturer's
+    /// data rather than modelled from sample photographs (Settings › Fotufilm films).
+    let fotufilm: Bool
+    let manufacturerData: Bool
     static let grainFields = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"]
     /// The DIR gammas and halation baseline the film's presets fill while the
     /// edit leaves them unset (`null`).
@@ -111,6 +115,33 @@ struct Stock: Identifiable, Sendable {
         target = value["target_print"].string
         times = value["development_times"].array.map(\.double)
         grain = value["grain"]
+        // A catalog from before these fields lists every film.
+        fotufilm = value["fotufilm"].bool
+        manufacturerData = value["manufacturer_data"] != .bool(false)
+    }
+}
+
+/// Settings › Fotufilm films: which of the films ported from Fotufilm the
+/// film menus and the tray list. Only the lists: an edit, a preset or a
+/// thumbnail with a hidden film keeps it.
+enum FotufilmFilms: String, CaseIterable {
+    case all, datasheets, off
+    static let key = "fotufilmFilms"
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .datasheets: "From datasheets"
+        case .off: "None"
+        }
+    }
+
+    func lists(_ stock: Stock) -> Bool {
+        switch self {
+        case .all: true
+        case .datasheets: !stock.fotufilm || stock.manufacturerData
+        case .off: !stock.fotufilm
+        }
     }
 }
 

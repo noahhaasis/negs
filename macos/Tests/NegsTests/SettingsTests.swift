@@ -57,4 +57,20 @@ import XCTest
             .header("Color Slide"), .option("Velvia", tag: "velvia"),
         ])
     }
+
+    func testFotufilmFilmsListsByProvenance() {
+        let stock = { (id: String, provenance: [String: JSONValue]) in
+            Stock(.object(["id": .string(id), "name": .string(id), "paper": .bool(false), "positive": .bool(false), "bw": .bool(false),
+                           "target_print": .string("endura"), "development_times": .array([])].merging(provenance) { $1 }))
+        }
+        let spektrafilm = stock("portra", ["fotufilm": .bool(false), "manufacturer_data": .bool(true)])
+        let datasheet = stock("velvia", ["fotufilm": .bool(true), "manufacturer_data": .bool(true)])
+        let sampled = stock("lomochrome", ["fotufilm": .bool(true), "manufacturer_data": .bool(false)])
+        let listed = { (choice: FotufilmFilms) in [spektrafilm, datasheet, sampled].filter(choice.lists).map(\.id) }
+        XCTAssertEqual(listed(.all), ["portra", "velvia", "lomochrome"])
+        XCTAssertEqual(listed(.datasheets), ["portra", "velvia"])
+        XCTAssertEqual(listed(.off), ["portra"])
+        // A catalog cached before these fields lists everything.
+        XCTAssertTrue(FotufilmFilms.off.lists(stock("old", [:])))
+    }
 }

@@ -184,7 +184,7 @@ struct StockTray: View {
     static func sections(model: EditorModel, visit: TrayVisit) -> [StockTrayRules.Section] {
         let paper = visit.paper
         return StockTrayRules.sections(paper ? model.paperGroups : model.filmGroups,
-                                       favorites: model.previews.favorites(in: paper ? model.papers : model.films, paper: paper),
+                                       favorites: model.previews.favorites(in: paper ? model.papers : model.listedFilms, paper: paper),
                                        query: visit.query)
     }
 }

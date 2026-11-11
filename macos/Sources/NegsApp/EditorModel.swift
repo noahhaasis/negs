@@ -128,6 +128,13 @@ import UserNotifications
             refreshUneditedLook()
         }
     }
+    /// Settings › Fotufilm films.
+    var fotufilmFilms = FotufilmFilms(rawValue: UserDefaults.standard.string(forKey: FotufilmFilms.key) ?? "") ?? .all {
+        didSet {
+            UserDefaults.standard.set(fotufilmFilms.rawValue, forKey: FotufilmFilms.key)
+            pumpPreviews()
+        }
+    }
     static let newPhotoFilmKey = "newPhotoFilm"
     static let newPhotoPaperKey = "newPhotoPaper"
     /// Settings › New photographs, as chosen: nil until a choice is made.
@@ -349,7 +356,14 @@ import UserNotifications
     var hasCatalog: Bool { !stocks.isEmpty }
     var films: [Stock] { stocks.filter { !$0.paper } }
     var papers: [Stock] { stocks.filter(\.paper) }
-    var filmGroups: [StockGroup] { StockGroup.films(films, papers: papers) }
+    /// The films the menus and the tray list (Settings › Fotufilm films).
+    /// A hidden film in use stays listed, so a menu always shows its choice:
+    /// the photograph's, and while the tray is open the one it opened on.
+    var listedFilms: [Stock] { listedFilms(keeping: [film, tray?.before.film].compactMap { $0 }) }
+    func listedFilms(keeping kept: [String]) -> [Stock] {
+        films.filter { fotufilmFilms.lists($0) || kept.contains($0.id) }
+    }
+    var filmGroups: [StockGroup] { StockGroup.films(listedFilms, papers: papers) }
     var paperGroups: [StockGroup] { StockGroup.papers(papers) }
     var filmName: String { films.first { $0.id == film }?.name ?? film }
     var paperName: String { papers.first { $0.id == paper }?.name ?? paper }
@@ -812,7 +826,7 @@ import UserNotifications
     func stepTray(by offset: Int) {
         guard let tray else { return }
         let sections = StockTrayRules.sections(tray.paper ? paperGroups : filmGroups,
-                                               favorites: previews.favorites(in: tray.paper ? papers : films, paper: tray.paper), query: tray.query)
+                                               favorites: previews.favorites(in: tray.paper ? papers : listedFilms, paper: tray.paper), query: tray.query)
         guard let place = StockTrayRules.step(from: tray.paper ? paper : film, inFavourites: tray.inFavourites, by: offset,
                                               in: StockTrayRules.places(sections)) else { return }
         tray.inFavourites = place.favourite
@@ -3291,7 +3305,10 @@ import UserNotifications
         // Each wanted tile: its look's key, the request, and a name for logs.
         var wanted: [(tile: PreviewTile, key: PreviewTile.Key, command: [String: JSONValue], name: String)] = []
         var entries: [StockEntry] = []
-        if previews.filmOpen, previews.filmShown { entries += previews.filmsFavoritesFirst }
+        if previews.filmOpen, previews.filmShown {
+            let listed = Set(listedFilms.map(\.id))
+            entries += previews.filmsFavoritesFirst.filter { listed.contains($0.stock.id) }
+        }
         if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papersFavoritesFirst }
         for entry in entries {
             let command = PreviewRules.request(for: entry.stock, keepPaper: previews.keepPaper, state: rendered, stocks: stocks,
