@@ -268,6 +268,12 @@ window.NEGS_I18N.dict = {
   "Film and paper previews": "胶片与相纸预览",
   "Show each film and paper on your photograph. They use about 100 MB, and turn off if Negs runs out of memory.":
     "在你的照片上预览每种胶片和相纸。大约占用 100 MB，内存不足时会自动关闭。",
+  "Fotufilm films": "Fotufilm 胶片",
+  "All": "全部",
+  "From datasheets": "仅限数据表",
+  "None": "不显示",
+  "Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.":
+    "从 Fotufilm 移植的胶片。“仅限数据表”会隐藏其中八款根据样片而非厂商数据建模的胶片。已在使用被隐藏胶片的照片会保留它。",
   "Match new RAWs to camera brightness": "新 RAW 匹配相机亮度",
   "Start each RAW you open as bright as the camera showed it (Prep › Match camera brightness).":
     "打开的每张 RAW 都以相机呈现的亮度起步（预处理 › 匹配相机亮度）。",

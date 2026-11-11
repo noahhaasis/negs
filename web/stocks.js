@@ -34,6 +34,9 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
   let favorites = [];
   // The search field's words; while there are any, no favourites.
   let query = "";
+  // Ids left out of the grid, favourites' copies too (Settings › Fotufilm films).
+  let hidden = new Set();
+  const anyFavorite = () => favorites.some((id) => tiles.has(id) && !hidden.has(id));
   // A tile's cell: the button that chooses, and the star over its corner,
   // outside it so a click stars rather than chooses.
   const cell = (tile) => {
@@ -97,9 +100,10 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
         t.copy.button.className = t.button.className;
         copyPicture(t);
       }
+      t.copy.root.hidden = hidden.has(id);
       favoriteGrid.append(t.copy.root);
     }
-    favoriteGrid.hidden = !favoriteGrid.childElementCount || !!query.trim();
+    favoriteGrid.hidden = !anyFavorite() || !!query.trim();
     markStars();
   };
   const toggle = (id) => {
@@ -130,17 +134,17 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
   body.append(empty);
   const matches = (query) => {
     const words = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    return sections.flatMap((s) => s.tiles).filter((t) => words.every((w) => t.text.includes(w)));
+    return sections.flatMap((s) => s.tiles).filter((t) => !hidden.has(t.id) && words.every((w) => t.text.includes(w)));
   };
   const filter = (text) => {
     query = text;
     const searching = !!query.trim();
-    const hits = new Set(searching ? matches(query) : tiles.values());
+    const hits = new Set(searching ? matches(query) : [...tiles.values()].filter((t) => !hidden.has(t.id)));
     for (const s of sections) {
       for (const t of s.tiles) t.root.hidden = !hits.has(t);
       s.heading.hidden = s.grid.hidden = !s.tiles.some((t) => hits.has(t));
     }
-    favoriteGrid.hidden = searching || !favoriteGrid.childElementCount;
+    favoriteGrid.hidden = searching || !anyFavorite();
     empty.hidden = !searching || hits.size > 0;
     empty.textContent = tr("No {what} match “{query}”", { what: tr(`${title.toLowerCase()}s`), query: query.trim() });
     if (searching) body.scrollTop = 0; else center();
@@ -171,11 +175,17 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
     // grid order; none while folded or hidden.
     onScreen: () => {
       if (!details.open || !details.isConnected) return [];
-      const on = (t) => visible.has(t.button) || (t.copy && visible.has(t.copy.button));
+      const on = (t) => !hidden.has(t.id) && (visible.has(t.button) || (t.copy && visible.has(t.copy.button)));
       const first = favorites.map((id) => tiles.get(id)).filter((t) => t && on(t));
       return [...first, ...[...tiles.values()].filter((t) => on(t) && !favorites.includes(t.id))];
     },
     favorites: () => favorites.filter((id) => tiles.has(id)),
+    // Leaves `ids` out of the grid and its search; the others come back.
+    hide(ids) {
+      hidden = new Set(ids);
+      layOut();
+      filter(query);
+    },
     select(id) {
       current.textContent = tiles.get(id)?.name ?? "";
       for (const t of tiles.values()) for (const view of [t, t.copy].filter(Boolean)) view.button.classList.toggle("selected", t.id === id);
