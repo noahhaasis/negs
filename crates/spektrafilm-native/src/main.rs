@@ -160,6 +160,9 @@ enum Command {
     },
     /// Frees the thumbnails' caches (the previews were turned off).
     ReleaseThumbnails,
+    /// Frees the GPU's kept film sides (ticket 41): the editor closed or
+    /// memory is short. Safe at any time; the next render just misses.
+    ReleaseFilmCache,
     /// The tone graph's curve: `count` greys through film → print → scan
     /// (`spektrafilm_core::tone_curve`). Image-independent.
     ToneCurve {
@@ -228,6 +231,9 @@ struct Session {
     /// The metering frame's film exposure in stops for the tone graph's
     /// histogram, keyed by the source and the render pipeline.
     film_stops: Option<(String, Vec<[f32; 3]>)>,
+    /// Counts the sources decoded: with a slot and a size it names a working
+    /// frame's pixels for the backend's film-side cache (ticket 41).
+    source_loads: u64,
 }
 
 /// The source decoded with another RAW white balance, reduced to the largest
@@ -391,6 +397,10 @@ impl Session {
             self.thumbnail_source = None;
             self.thumbnail_wb_sources = Vec::new();
             self.film_stops = None;
+            self.source_loads += 1;
+            if let Some(backend) = &self.backend {
+                backend.release_film_cache();
+            }
             let loaded = spektrafilm_io::load_image_colour_limited(
                 input,
                 spektrafilm_io::Formats::Any,
@@ -661,6 +671,10 @@ impl Session {
                 self.thumbnail_wb_sources = Vec::new();
                 Ok(json!({}))
             }
+            Command::ReleaseFilmCache => {
+                let bytes = self.backend.as_ref().map_or(0, |backend| backend.release_film_cache());
+                Ok(json!({"released_bytes": bytes}))
+            }
             Command::PreviewColourSpace { input } => Ok(json!({ "colour_space": declared_preview_colour_space(&input)? })),
             Command::BrightnessReference { input, reference_path, expected_width, expected_height } => {
                 ensure!(expected_width > 0 && expected_height > 0,
@@ -922,7 +936,7 @@ impl Session {
                     json!({"stops": spektrafilm_core::tone_curve::STOPS, "ev": ev, "counts": counts})
                 };
                 let working = if dimensions == photo_dimensions {
-                    pipeline = pipeline.with_prepared_frame(self.prepared_photo.clone());
+                    pipeline = pipeline.with_prepared_frame(self.prepared_photo.clone()).with_film_cache(0, self.source_loads);
                     working_source(
                         source,
                         &mut self.scaled,
@@ -930,7 +944,7 @@ impl Session {
                         rescale_preview_input_fast,
                     )
                 } else {
-                    pipeline = pipeline.with_prepared_frame(self.prepared_interactive.clone());
+                    pipeline = pipeline.with_prepared_frame(self.prepared_interactive.clone()).with_film_cache(1, self.source_loads);
                     working_source(source, &mut self.interactive, dimensions, downsample_area)
                 };
                 let backend = self

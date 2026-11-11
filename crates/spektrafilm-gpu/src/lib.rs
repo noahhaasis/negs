@@ -190,6 +190,14 @@ pub trait ComputeBackend: MaybeSendSync {
         false
     }
 
+    /// Drop the film sides kept for [`FilmChainParams::film_cache`] (another
+    /// photograph opened, the editor closed, memory pressure) and return the
+    /// bytes they held. Safe at any time: the next chain just misses.
+    /// Backends that keep none do nothing.
+    fn release_film_cache(&self) -> u64 {
+        0
+    }
+
     /// True for f32 GPU backends where effects may trade exactness for
     /// speed (the diffusion filter uses a downsampled sum-of-Gaussians
     /// instead of the exact FFT convolution). CPU keeps the exact path.
@@ -255,6 +263,10 @@ pub struct FilmChainParams<'a> {
     /// The caller's name for `image`'s pixels, if it renders them again: a
     /// backend may keep them uploaded for the next chain with the same key.
     pub image_key: Option<u64>,
+    /// Keep the film side of this chain on the GPU, and reuse it while
+    /// nothing upstream of it changes (ticket 41). `None` neither uses nor
+    /// disturbs what is kept.
+    pub film_cache: Option<FilmCacheSlot>,
     /// RGB → film-raw front pass (the configured upsampler).
     pub front: FrontPass<'a>,
     pub film_log_exposure: &'a [f64],
@@ -358,6 +370,23 @@ impl FilmChainParams<'_> {
             })
         })
     }
+}
+
+/// Where a chain's film side is kept ([`FilmChainParams::film_cache`]): the
+/// developed film density after DIR couplers and grain, the input of print
+/// spectral (or of the scan, scanning the film). A backend that keeps it
+/// reuses it only when every input of the stages before it is bit for bit
+/// the same, and otherwise renders as without the cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilmCacheSlot {
+    /// One kept film side per slot, e.g. the photograph-size frame and the
+    /// interactive one, so a slider's drag frames don't push out the
+    /// settled frame's.
+    pub slot: u32,
+    /// Names `image`'s pixels exactly: the caller's name for its frame,
+    /// followed by whatever turned that frame into `image` (input decoding,
+    /// Prep). The caller promises that equal bytes mean equal pixels.
+    pub image: Vec<u8>,
 }
 
 /// RGB → film-raw front pass of the GPU-resident chain. It is homogeneous in

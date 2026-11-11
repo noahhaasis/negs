@@ -343,6 +343,22 @@ pub struct WgpuBackend {
     /// limit: past it the glow is made from a smaller copy of the image
     /// (`set_diffusion_grid_budget`).
     diffusion_grid_budget: std::sync::atomic::AtomicU64,
+    /// Kept film sides (`FilmChainParams::film_cache`), at most one per slot.
+    film_cache: std::sync::Mutex<Vec<FilmCacheEntry>>,
+    /// The most the kept film sides may take together, in bytes; 0 keeps
+    /// none (see `film_cache_budget`).
+    film_cache_budget: u64,
+    /// Chains that reused a kept film side, for tests and diagnostics.
+    film_cache_hits: std::sync::atomic::AtomicU64,
+}
+
+/// One kept film side: the film density after grain of the last chain
+/// with this slot, and the exact inputs it was made from.
+#[cfg(feature = "wgpu-backend")]
+struct FilmCacheEntry {
+    slot: u32,
+    signature: Vec<u8>,
+    buffer: wgpu::Buffer,
 }
 
 /// Frees `buffer`'s memory now in browsers. There, dropping a buffer does
@@ -358,6 +374,233 @@ fn release(buffer: &wgpu::Buffer) {
     buffer.destroy();
     #[cfg(not(target_arch = "wasm32"))]
     let _ = buffer;
+}
+
+/// The most the kept film sides (ticket 41) may take, in bytes: an eighth of
+/// what Metal recommends this process keeps on the GPU at most (on Apple
+/// silicon, memory it shares with the system: about 2/3 of RAM on a 16 GB
+/// Mac, so ~1.3 GB, and ~0.7 GB on an 8 GB one, which then keeps no 60 MP
+/// frame). None elsewhere for now. `SPEKTRAFILM_FILM_CACHE=0` (or `off`)
+/// turns the cache off; a number sets the budget in MiB, on any platform.
+#[cfg(feature = "wgpu-backend")]
+fn film_cache_budget(device: &wgpu::Device) -> u64 {
+    if let Ok(value) = std::env::var("SPEKTRAFILM_FILM_CACHE") {
+        return value.trim().parse::<u64>().map_or(0, |mib| mib << 20);
+    }
+    #[cfg(target_os = "macos")]
+    return metal_threadgroups::raw_device(device).map_or(0, |raw| raw.recommended_max_working_set_size() / 8);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = device;
+        0
+    }
+}
+
+/// Every input of the resident chain's stages up to grain, the film side,
+/// as exact bytes: equal bytes, equal film density. Destructured in full,
+/// so a new field must be sorted into the film side or after it. Floats by
+/// their bits (so -0.0 and 0.0 differ, which only costs a miss).
+#[cfg(feature = "wgpu-backend")]
+fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffusion_grid_budget: u64) -> Vec<u8> {
+    let crate::FilmChainParams {
+        image,
+        // How the input is uploaded, not what it is.
+        image_key: _,
+        film_cache: _,
+        front,
+        film_log_exposure,
+        film_density_curves_normalized,
+        halation,
+        dir_couplers,
+        grain,
+        camera_lens_blur_px,
+        highlight_boost,
+        diffusion,
+        // Print, scan and after: read only after the film side.
+        film_channel_density: _,
+        film_base_density: _,
+        print_illuminant: _,
+        print_sensitivity: _,
+        print_normalization_factor: _,
+        print_log_exposure: _,
+        print_density_curves: _,
+        print_channel_density: _,
+        print_base_density: _,
+        preflash: _,
+        viewing_illuminant: _,
+        scan_normalization: _,
+        scan_xyz_to_rgb: _,
+        bw_xyz_remap: _,
+        scan_film: _,
+        glare: _,
+        gamut: _,
+        unsharp: _,
+        scanner_lens_blur_px: _,
+        enlarger_diffusion: _,
+        print_exposure_scale: _,
+        output_cctf_encoding: _,
+        output_encode_matrix: _,
+    } = p;
+    let mut s = Signature::default();
+    s.bytes(b"film side 1");
+    s.bytes(image_name);
+    s.u64(image.width as u64);
+    s.u64(image.height as u64);
+    s.u64(image.data.len() as u64);
+    match front {
+        crate::FrontPass::Hanatos2025 { tc_lut, rgb_to_adapted_xyz, guard } => {
+            let spektrafilm_math::spectral::TcLut { size, channels, data } = tc_lut;
+            s.u64(*size as u64);
+            s.u64(*channels as u64);
+            s.f64s(data);
+            s.f64s(rgb_to_adapted_xyz.as_flattened());
+            s.bool(*guard);
+        }
+    }
+    s.f64s(film_log_exposure);
+    s.f64s(film_density_curves_normalized.as_flattened());
+    s.bool(highlight_boost.is_some());
+    if let Some(crate::HighlightBoostGpuParams { boost_ev, boost_range, protect_ev }) = highlight_boost {
+        s.f32s(&[*boost_ev, *boost_range, *protect_ev]);
+    }
+    s.bool(diffusion.is_some());
+    if let Some(crate::DiffusionGpuPlan { d, small_w, small_h, p_s, sigmas, coeffs, psf }) = diffusion {
+        s.u64(*d as u64);
+        s.u64(*small_w as u64);
+        s.u64(*small_h as u64);
+        s.f32s(&[*p_s]);
+        s.f32s(sigmas);
+        s.f32s(coeffs.as_flattened());
+        let crate::DiffusionPsf { radius, components } = psf;
+        s.u64(*radius as u64);
+        for channel in components {
+            s.u64(channel.len() as u64);
+            for &(lambda, amplitude) in channel {
+                s.f64s(&[lambda, amplitude]);
+            }
+        }
+        // Past it the glow is made from a reduced copy (`build_diffusion_state`).
+        s.u64(diffusion_grid_budget);
+    }
+    s.bool(camera_lens_blur_px.is_some());
+    if let Some(sigma) = camera_lens_blur_px {
+        s.f32s(&[*sigma]);
+    }
+    s.bool(halation.is_some());
+    if let Some(crate::HalationGpuParams {
+        scatter_amount,
+        scatter_core_px,
+        scatter_tail_px,
+        scatter_tail_weight,
+        halation_amount,
+        halation_a_tot,
+        halation_first_sigma_px,
+        halation_n_bounces,
+        halation_bounce_decay,
+        halation_renormalize,
+    }) = halation
+    {
+        s.f32s(&[*scatter_amount, *halation_amount, *halation_bounce_decay]);
+        s.f32s(scatter_core_px);
+        s.f32s(scatter_tail_px);
+        s.f32s(scatter_tail_weight);
+        s.f32s(halation_a_tot);
+        s.f64s(halation_first_sigma_px);
+        s.u64(*halation_n_bounces as u64);
+        s.bool(*halation_renormalize);
+    }
+    s.bool(dir_couplers.is_some());
+    if let Some(crate::DirCouplersGpuParams {
+        couplers_matrix_scaled,
+        density_max,
+        is_positive,
+        donor,
+        receiver,
+        diffusion_size_px,
+        diffusion_tail_px,
+        diffusion_tail_weight,
+        density_curves_0,
+        log_exposure,
+    }) = dir_couplers
+    {
+        s.f32s(couplers_matrix_scaled.as_flattened());
+        s.f32s(density_max);
+        s.bool(*is_positive);
+        for langmuir in [donor, receiver] {
+            s.bool(langmuir.is_some());
+            if let Some(crate::LangmuirGpuParams { k, x_ref, saturating }) = langmuir {
+                s.f32s(k);
+                s.f32s(x_ref);
+                saturating.iter().for_each(|&b| s.bool(b));
+            }
+        }
+        s.f32s(&[*diffusion_size_px, *diffusion_tail_px, *diffusion_tail_weight]);
+        s.f64s(density_curves_0.as_flattened());
+        s.f64s(log_exposure);
+    }
+    s.bool(grain.is_some());
+    if let Some(crate::GrainGpuParams {
+        interp_x,
+        positive,
+        interp_inv_dx,
+        curves_layers,
+        density_min_layers,
+        density_max_layers,
+        n_particles_per_pixel,
+        dye_cloud_sigma_px,
+        grain_uniformity,
+        density_min,
+        micro_structure,
+        blur_px,
+        mult_usm,
+        base_seed,
+        monochrome,
+    }) = grain
+    {
+        for rows in [interp_x, interp_inv_dx, curves_layers, density_min_layers, density_max_layers, n_particles_per_pixel, dye_cloud_sigma_px] {
+            s.f32s(rows.as_flattened());
+        }
+        s.bool(*positive);
+        s.f32s(grain_uniformity);
+        s.f32s(density_min);
+        for pair in [micro_structure, mult_usm] {
+            s.bool(pair.is_some());
+            if let Some(pair) = pair {
+                s.f32s(pair);
+            }
+        }
+        s.f32s(&[*blur_px]);
+        s.u64(*base_seed as u64);
+        s.bool(*monochrome);
+    }
+    s.0
+}
+
+/// Exact bytes of a film side's inputs; slices carry their lengths.
+#[cfg(feature = "wgpu-backend")]
+#[derive(Default)]
+struct Signature(Vec<u8>);
+
+#[cfg(feature = "wgpu-backend")]
+impl Signature {
+    fn bytes(&mut self, v: &[u8]) {
+        self.u64(v.len() as u64);
+        self.0.extend_from_slice(v);
+    }
+    fn u64(&mut self, v: u64) {
+        self.0.extend_from_slice(&v.to_le_bytes());
+    }
+    fn bool(&mut self, v: bool) {
+        self.0.push(v as u8);
+    }
+    fn f32s(&mut self, v: &[f32]) {
+        self.u64(v.len() as u64);
+        v.iter().for_each(|x| self.0.extend_from_slice(&x.to_bits().to_le_bytes()));
+    }
+    fn f64s(&mut self, v: &[f64]) {
+        self.u64(v.len() as u64);
+        v.iter().for_each(|x| self.0.extend_from_slice(&x.to_bits().to_le_bytes()));
+    }
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -494,10 +737,12 @@ impl WgpuBackend {
                 || std::env::var_os("SPEKTRAFILM_WGPU_PROBE_WORKGROUPS").is_some()
         });
 
+        let film_cache_budget = film_cache_budget(&device);
         tracing::info!(
             adapter = adapter_info.name,
             backend = ?adapter_info.backend,
             max_workgroup_size,
+            film_cache_budget,
             "wgpu backend initialized"
         );
 
@@ -520,6 +765,9 @@ impl WgpuBackend {
             diffusion_grid_budget: std::sync::atomic::AtomicU64::new(
                 std::env::var("SPEKTRAFILM_DIFFUSION_GRID_BUDGET").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
             ),
+            film_cache: std::sync::Mutex::new(Vec::new()),
+            film_cache_budget,
+            film_cache_hits: std::sync::atomic::AtomicU64::new(0),
             #[cfg(target_arch = "wasm32")]
             canvas: std::sync::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -914,17 +1162,23 @@ impl WgpuBackend {
         let n_pixels = image.pixel_count() as u32;
         let img_bytes = n_pixels as usize * 3 * 4;
 
+        // The film side kept from an earlier chain with the same inputs
+        // (`kept_film`): the stages up to grain are skipped and print spectral
+        // (or the film scan) reads it instead of buf_a. Otherwise `film_store`
+        // is where this chain's film side is kept, copied from buf_a.
+        let (kept_film, film_store) = self.film_cache_lookup(p, img_bytes as u64);
+        let film_side = kept_film.is_none();
+
         // Effects share up to two full-image scratch buffers. Plan these
         // before taking the pool: a render already too large to retain must
         // evict old sizes BEFORE allocating its buffers, not after its peak.
-        let scratch_count = if p.dir_couplers.is_some()
-            || p.halation.is_some()
+        let scratch_count = if (film_side
+            && (p.dir_couplers.is_some() || p.halation.is_some() || p.grain.is_some()))
             || p.unsharp.is_some()
-            || p.grain.is_some()
         {
             2
         } else if p.glare.is_some()
-            || p.diffusion.is_some()
+            || (film_side && p.diffusion.is_some())
             || (!p.scan_film && p.enlarger_diffusion.is_some())
         {
             1
@@ -957,7 +1211,10 @@ impl WgpuBackend {
         // A keyed input stays uploaded for the next chain with its key, and
         // is copied to buf_a on the GPU first thing (see `input_copy`).
         let mut resident_input = None;
-        let buf_a = if mappable {
+        let buf_a = if !film_side {
+            // A kept film side needs no input.
+            make_img_buf("img_a")
+        } else if mappable {
             let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("img_a"),
                 size: img_bytes as u64,
@@ -1388,6 +1645,8 @@ impl WgpuBackend {
                 }, // density_cmy
             ],
         });
+        // The developed film density, the print's (or the film scan's) input.
+        let film_density = kept_film.as_ref().unwrap_or(&buf_a);
         let bg_print = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bg_print"),
             layout: &print_pipe.layout,
@@ -1398,7 +1657,7 @@ impl WgpuBackend {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: buf_a.as_entire_binding(),
+                    resource: film_density.as_entire_binding(),
                 }, // density_cmy
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -1458,8 +1717,8 @@ impl WgpuBackend {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: buf_a.as_entire_binding(),
-                }, // density_print
+                    resource: if p.scan_film { film_density } else { &buf_a }.as_entire_binding(),
+                }, // density_print, or the film's
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: scan_cd_buf.as_entire_binding(),
@@ -1516,7 +1775,7 @@ impl WgpuBackend {
         // The two ping-pong buffers are reused as blur input/mid; shared
         // `buf_c` and `buf_d` hold the scatter outputs and the halation
         // accumulator. None of this is touched when `p.halation` is `None`.
-        let halation_state = p.halation.as_ref().map(|hp| {
+        let halation_state = p.halation.as_ref().filter(|_| film_side).map(|hp| {
             build_halation_state(
                 &self.device,
                 hp,
@@ -1534,12 +1793,13 @@ impl WgpuBackend {
         let highlight_state = p
             .highlight_boost
             .as_ref()
+            .filter(|_| film_side)
             .map(|hp| build_highlight_boost_state(&self.device, hp, n_pixels, &buf_b, self));
 
         // ── Camera diffusion filter state ────────────────────────────────
         // Applied on the raw film exposure (buf_b) right after hanatos and
         // before halation, matching the CPU filming order.
-        let diffusion_state = p.diffusion.as_ref().map(|plan| {
+        let diffusion_state = p.diffusion.as_ref().filter(|_| film_side).map(|plan| {
             build_diffusion_state(
                 &self.device,
                 plan,
@@ -1552,7 +1812,7 @@ impl WgpuBackend {
             )
         });
 
-        let camera_lens_blur_state = p.camera_lens_blur_px.and_then(|sigma| {
+        let camera_lens_blur_state = p.camera_lens_blur_px.filter(|_| film_side).and_then(|sigma| {
             (sigma > 0.0).then(|| {
                 build_simple_blur_state(
                     &self.device,
@@ -1632,7 +1892,7 @@ impl WgpuBackend {
         // Applied to buf_a (density_cmy) after DIR couplers, before
         // print_spectral. Uses buf_b (log_raw_corrected is no longer needed
         // after DIR's final density_curve_0) and both scratch buffers.
-        let grain_state = p.grain.as_ref().map(|gp| {
+        let grain_state = p.grain.as_ref().filter(|_| film_side).map(|gp| {
             build_grain_state(
                 &self.device,
                 gp,
@@ -1654,7 +1914,7 @@ impl WgpuBackend {
         // shared scratch buffers (correction, gaussian). After matmul
         // consumes density_cmy, buf_a serves as blur mid and then as the
         // weighted mix destination. The final density curve overwrites it.
-        let dir_state = p.dir_couplers.as_ref().map(|dp| {
+        let dir_state = p.dir_couplers.as_ref().filter(|_| film_side).map(|dp| {
             build_dir_state(
                 &self.device,
                 dp,
@@ -1721,57 +1981,64 @@ impl WgpuBackend {
         }
         let mut profiler = GpuStageProfiler::new(&self.device, &self.queue);
         profiler.mark("upload", &mut encoder);
-        // 1. Front pass (tc LUT lookup): buf_a (rgb in) → buf_b (raw), after
-        // the spectral boundary guard in place on buf_a.
-        if let Some((pipe, bg)) = guard_pass.as_ref() {
-            dispatch(&mut encoder, pipe, bg, n_pixels);
-        }
-        dispatch(&mut encoder, &front_pipe, &bg_front, n_pixels);
-        profiler.mark("front", &mut encoder);
-        // 1a. Highlight boost on raw, before optical scatter.
-        if let Some(hs) = highlight_state.as_ref() {
-            hs.encode_passes(&mut encoder);
-            profiler.mark("highlight_boost", &mut encoder);
-        }
-        // 1a. Camera diffusion filter in-place on buf_b (raw), before
-        //     halation — mirrors the CPU filming order.
-        if let Some(ds) = diffusion_state.as_ref() {
-            ds.encode_passes(&mut encoder, &buf_b);
-            profiler.mark("camera_diffusion", &mut encoder);
-        }
-        // 1b. Camera lens blur on raw, after camera diffusion and before halation.
-        if let Some(bs) = camera_lens_blur_state.as_ref() {
-            bs.encode_passes(&mut encoder);
-            profiler.mark("camera_lens_blur", &mut encoder);
-        }
-        // 1b. Halation in-place on buf_b. Uses buf_a as blur scratch (the
-        //     input RGB image is no longer needed), buf_c / buf_d for the
-        //     scatter outputs and halation accumulator.
-        if let Some(hs) = halation_state.as_ref() {
-            hs.encode_passes(&mut encoder, n_pixels);
-            profiler.mark("halation", &mut encoder);
-        }
-        // 2. log10 in-place on buf_b: raw → log_raw (3 channels per thread).
-        let (log10_pipe, log10_bg, _keepalive) = &bg_log10;
-        dispatch(&mut encoder, &log10_pipe, log10_bg, n_pixels);
-        // 3. Density curve (film, normalized): buf_b (log_raw) → buf_a (density_cmy)
-        dispatch(
-            &mut encoder,
-            &density_pipe,
-            &bg_density_film,
-            n_pixels,
-        );
-        profiler.mark("log10_density", &mut encoder);
-        // 3b. DIR couplers (operates on buf_a, mutates buf_b → log_raw_corrected,
-        //     re-interps density curve back into buf_a).
-        if let Some(ds) = dir_state.as_ref() {
-            ds.encode_passes(&mut encoder, n_pixels);
-            profiler.mark("dir_couplers", &mut encoder);
-        }
-        // 3c. Grain (buf_a in and out, via buf_b and both scratch buffers).
-        if let Some(gs) = grain_state.as_ref() {
-            gs.encode_passes(&mut encoder);
-            profiler.mark("grain", &mut encoder);
+        if film_side {
+            // 1. Front pass (tc LUT lookup): buf_a (rgb in) → buf_b (raw), after
+            // the spectral boundary guard in place on buf_a.
+            if let Some((pipe, bg)) = guard_pass.as_ref() {
+                dispatch(&mut encoder, pipe, bg, n_pixels);
+            }
+            dispatch(&mut encoder, &front_pipe, &bg_front, n_pixels);
+            profiler.mark("front", &mut encoder);
+            // 1a. Highlight boost on raw, before optical scatter.
+            if let Some(hs) = highlight_state.as_ref() {
+                hs.encode_passes(&mut encoder);
+                profiler.mark("highlight_boost", &mut encoder);
+            }
+            // 1a. Camera diffusion filter in-place on buf_b (raw), before
+            //     halation — mirrors the CPU filming order.
+            if let Some(ds) = diffusion_state.as_ref() {
+                ds.encode_passes(&mut encoder, &buf_b);
+                profiler.mark("camera_diffusion", &mut encoder);
+            }
+            // 1b. Camera lens blur on raw, after camera diffusion and before halation.
+            if let Some(bs) = camera_lens_blur_state.as_ref() {
+                bs.encode_passes(&mut encoder);
+                profiler.mark("camera_lens_blur", &mut encoder);
+            }
+            // 1b. Halation in-place on buf_b. Uses buf_a as blur scratch (the
+            //     input RGB image is no longer needed), buf_c / buf_d for the
+            //     scatter outputs and halation accumulator.
+            if let Some(hs) = halation_state.as_ref() {
+                hs.encode_passes(&mut encoder, n_pixels);
+                profiler.mark("halation", &mut encoder);
+            }
+            // 2. log10 in-place on buf_b: raw → log_raw (3 channels per thread).
+            let (log10_pipe, log10_bg, _keepalive) = &bg_log10;
+            dispatch(&mut encoder, &log10_pipe, log10_bg, n_pixels);
+            // 3. Density curve (film, normalized): buf_b (log_raw) → buf_a (density_cmy)
+            dispatch(
+                &mut encoder,
+                &density_pipe,
+                &bg_density_film,
+                n_pixels,
+            );
+            profiler.mark("log10_density", &mut encoder);
+            // 3b. DIR couplers (operates on buf_a, mutates buf_b → log_raw_corrected,
+            //     re-interps density curve back into buf_a).
+            if let Some(ds) = dir_state.as_ref() {
+                ds.encode_passes(&mut encoder, n_pixels);
+                profiler.mark("dir_couplers", &mut encoder);
+            }
+            // 3c. Grain (buf_a in and out, via buf_b and both scratch buffers).
+            if let Some(gs) = grain_state.as_ref() {
+                gs.encode_passes(&mut encoder);
+                profiler.mark("grain", &mut encoder);
+            }
+            // 3d. Keep the film side for the next chain with these inputs.
+            if let Some(entry) = film_store.as_ref() {
+                encoder.copy_buffer_to_buffer(&buf_a, 0, &entry.buffer, 0, img_bytes as u64);
+                profiler.mark("film_cache_store", &mut encoder);
+            }
         }
         // 4 + 5. Printing: print_spectral (buf_a → buf_b) then the print
         //     density curve (buf_b → buf_a). Skipped for scan_film — the
@@ -1873,6 +2140,9 @@ impl WgpuBackend {
         let cpu_setup_ms = t_start.elapsed().as_secs_f32() * 1000.0;
         self.queue.submit(Some(encoder.finish()));
         self.release_transient();
+        if let Some(entry) = film_store {
+            self.film_cache.lock().unwrap().push(entry);
+        }
 
         profiler.report();
         // Persist only when new pipelines were compiled. The helper can be
@@ -2014,6 +2284,65 @@ impl WgpuBackend {
         _post: Option<&crate::DisplayPost>,
     ) -> Option<wgpu::SurfaceTexture> {
         None
+    }
+
+    /// The kept film side for `p`, if its inputs are the ones it was made
+    /// from; otherwise where to keep `p`'s, when it fits the budget. The
+    /// slot's old film side is let go either way (its buffer reused when it
+    /// is the same size), so a failed chain leaves nothing stale behind.
+    fn film_cache_lookup(&self, p: &crate::FilmChainParams<'_>, bytes: u64) -> (Option<wgpu::Buffer>, Option<FilmCacheEntry>) {
+        let Some(request) = p.film_cache.as_ref().filter(|_| self.film_cache_budget > 0) else {
+            return (None, None);
+        };
+        let grid_budget = self.diffusion_grid_budget.load(std::sync::atomic::Ordering::Relaxed);
+        let signature = film_side_signature(p, &request.image, grid_budget);
+        let mut kept = self.film_cache.lock().unwrap();
+        let old = kept.iter().position(|e| e.slot == request.slot).map(|i| kept.remove(i));
+        if let Some(entry) = old.as_ref()
+            && entry.signature == signature
+            && entry.buffer.size() == bytes
+        {
+            let buffer = entry.buffer.clone();
+            kept.extend(old);
+            self.film_cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tracing::debug!(slot = request.slot, "film cache hit");
+            return (Some(buffer), None);
+        }
+        let others: u64 = kept.iter().map(|e| e.buffer.size()).sum();
+        if bytes + others > self.film_cache_budget {
+            if let Some(old) = old {
+                release(&old.buffer);
+            }
+            tracing::debug!(slot = request.slot, bytes, "film cache: over budget, not kept");
+            return (None, None);
+        }
+        let buffer = match old {
+            Some(old) if old.buffer.size() == bytes => old.buffer,
+            old => {
+                if let Some(old) = old {
+                    release(&old.buffer);
+                }
+                // Only ever a copy destination, so wgpu doesn't clear it.
+                self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("film_cache"),
+                    size: bytes,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            }
+        };
+        tracing::debug!(slot = request.slot, "film cache miss");
+        (None, Some(FilmCacheEntry { slot: request.slot, signature, buffer }))
+    }
+
+    /// How many chains reused a kept film side (ticket 41).
+    pub fn film_cache_hits(&self) -> u64 {
+        self.film_cache_hits.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The bytes the kept film sides hold now, against `film_cache_budget`.
+    pub fn film_cache_bytes(&self) -> u64 {
+        self.film_cache.lock().unwrap().iter().map(|e| e.buffer.size()).sum()
     }
 
     /// The input with `key` on the GPU, uploaded from `data` if it isn't
@@ -3609,6 +3938,15 @@ impl ComputeBackend for WgpuBackend {
                 .ok_or("FFT working-set overflow")?;
         }
         self.capacity.working_set(bytes)
+    }
+
+    fn release_film_cache(&self) -> u64 {
+        let mut bytes = 0;
+        for entry in self.film_cache.lock().unwrap().drain(..) {
+            bytes += entry.buffer.size();
+            release(&entry.buffer);
+        }
+        bytes
     }
 
     fn resident_chain_applies_post_scan(&self) -> bool {
@@ -7217,5 +7555,210 @@ mod grain_tests {
                 "channel {c}: variance {var} vs expected {expected_var}"
             );
         }
+    }
+}
+
+#[cfg(all(test, feature = "wgpu-backend"))]
+mod film_cache_tests {
+    use super::*;
+    use spektrafilm_math::spectral::TcLut;
+
+    fn leak<T>(v: T) -> &'static T {
+        Box::leak(Box::new(v))
+    }
+
+    /// Every optional stage on, so each input has something to change.
+    fn params() -> crate::FilmChainParams<'static> {
+        let rows = |n: usize, x: f64| -> &'static [[f64; 3]] { leak(vec![[x, x + 0.1, x + 0.2]; n]).as_slice() };
+        let values = |n: usize, x: f64| -> &'static [f64] { leak((0..n).map(|i| x + i as f64).collect::<Vec<_>>()).as_slice() };
+        let langmuir = crate::LangmuirGpuParams { k: [1.0, 2.0, 3.0], x_ref: [0.5; 3], saturating: [true, true, false] };
+        crate::FilmChainParams {
+            image: leak(ImageBuf::new(4, 2)),
+            image_key: None,
+            film_cache: None,
+            front: crate::FrontPass::Hanatos2025 {
+                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25; 12] }),
+                rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
+                guard: false,
+            },
+            film_log_exposure: values(5, -2.0),
+            film_density_curves_normalized: rows(5, 0.1),
+            film_channel_density: rows(81, 0.3),
+            film_base_density: values(81, 0.05),
+            print_illuminant: values(81, 1.0),
+            print_sensitivity: rows(81, 0.2),
+            print_normalization_factor: 1.5,
+            print_log_exposure: values(5, -1.0),
+            print_density_curves: rows(5, 0.4),
+            print_channel_density: rows(81, 0.6),
+            print_base_density: values(81, 0.02),
+            preflash: [0.0; 3],
+            viewing_illuminant: values(81, 2.0),
+            scan_normalization: 100.0,
+            scan_xyz_to_rgb: leak([[3.2, -1.5, -0.5], [-1.0, 1.9, 0.0], [0.05, -0.2, 1.05]]),
+            bw_xyz_remap: None,
+            scan_film: false,
+            halation: Some(crate::HalationGpuParams {
+                scatter_amount: 1.0,
+                scatter_core_px: [1.0, 1.1, 1.2],
+                scatter_tail_px: [2.0, 2.1, 2.2],
+                scatter_tail_weight: [0.7, 0.6, 0.6],
+                halation_amount: 1.0,
+                halation_a_tot: [0.03, 0.01, 0.0],
+                halation_first_sigma_px: [10.0, 11.0, 12.0],
+                halation_n_bounces: 3,
+                halation_bounce_decay: 0.5,
+                halation_renormalize: true,
+            }),
+            dir_couplers: Some(crate::DirCouplersGpuParams {
+                couplers_matrix_scaled: [[0.3, 0.1, 0.0], [0.1, 0.3, 0.1], [0.0, 0.1, 0.3]],
+                density_max: [2.0, 2.1, 2.2],
+                is_positive: false,
+                donor: Some(langmuir),
+                receiver: None,
+                diffusion_size_px: 5.0,
+                diffusion_tail_px: 20.0,
+                diffusion_tail_weight: 0.2,
+                density_curves_0: rows(5, 0.15),
+                log_exposure: values(5, -2.0),
+            }),
+            grain: Some(crate::GrainGpuParams {
+                interp_x: vec![[0.0; 3], [1.0; 3]],
+                positive: false,
+                interp_inv_dx: vec![[1.0; 3], [0.0; 3]],
+                curves_layers: vec![[0.5; 3]; 6],
+                density_min_layers: vec![[0.0; 3]; 3],
+                density_max_layers: vec![[1.0; 3]; 3],
+                n_particles_per_pixel: vec![[100.0; 3]; 3],
+                dye_cloud_sigma_px: vec![[0.5; 3]; 3],
+                grain_uniformity: [0.98; 3],
+                density_min: [0.03; 3],
+                micro_structure: Some([0.1, 0.5]),
+                blur_px: 0.6,
+                mult_usm: None,
+                base_seed: 7,
+                monochrome: false,
+            }),
+            glare: Some(crate::GlareGpuParams { mu: -3.0, sigma: 0.5, blur_px: 0.5, base_seed: 42, rgb_offset: [0.01; 3] }),
+            gamut: None,
+            unsharp: Some(crate::UnsharpGpuParams { sigma_px: 0.7, amount: 0.7 }),
+            camera_lens_blur_px: Some(1.5),
+            scanner_lens_blur_px: None,
+            highlight_boost: Some(crate::HighlightBoostGpuParams { boost_ev: 0.5, boost_range: 0.3, protect_ev: 1.0 }),
+            diffusion: Some(crate::DiffusionGpuPlan {
+                d: 2,
+                small_w: 2,
+                small_h: 1,
+                p_s: 0.1,
+                sigmas: vec![1.0, 2.0],
+                coeffs: vec![[0.1; 3], [0.2; 3]],
+                psf: crate::DiffusionPsf { radius: 4, components: [vec![(1.0, 0.5)], vec![(1.1, 0.5)], vec![(1.2, 0.5)]] },
+            }),
+            enlarger_diffusion: None,
+            print_exposure_scale: 1.0,
+            output_cctf_encoding: true,
+            output_encode_matrix: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        }
+    }
+
+    type Edit = fn(&mut crate::FilmChainParams<'static>);
+
+    #[test]
+    fn film_side_signature_changes_with_every_film_input_and_nothing_after() {
+        let signature = |p: &crate::FilmChainParams<'_>| film_side_signature(p, b"frame 1", 0);
+        let base = signature(&params());
+        assert_eq!(base, signature(&params()), "the signature is deterministic");
+        assert_ne!(base, film_side_signature(&params(), b"frame 2", 0), "the image's name");
+
+        let film: &[(&str, Edit)] = &[
+            ("image size", |p| p.image = leak(ImageBuf::new(2, 4))),
+            ("tc LUT", |p| p.front = crate::FrontPass::Hanatos2025 {
+                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25000001; 12] }),
+                rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
+                guard: false,
+            }),
+            ("exposure (front matrix)", |p| p.front = crate::FrontPass::Hanatos2025 {
+                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25; 12] }),
+                rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0000001]],
+                guard: false,
+            }),
+            ("spectral guard", |p| p.front = crate::FrontPass::Hanatos2025 {
+                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25; 12] }),
+                rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
+                guard: true,
+            }),
+            ("film log exposure", |p| p.film_log_exposure = leak(vec![-2.0, -1.0, 0.0, 1.0, 2.5]).as_slice()),
+            ("film curves", |p| p.film_density_curves_normalized = leak(vec![[0.1, 0.2, 0.3]; 6]).as_slice()),
+            ("highlight boost off", |p| p.highlight_boost = None),
+            ("highlight boost", |p| p.highlight_boost.as_mut().unwrap().protect_ev = 1.5),
+            ("camera diffusion off", |p| p.diffusion = None),
+            ("camera diffusion", |p| p.diffusion.as_mut().unwrap().psf.components[2][0].1 = 0.6),
+            ("camera diffusion factor", |p| p.diffusion.as_mut().unwrap().d = 3),
+            ("camera lens blur off", |p| p.camera_lens_blur_px = None),
+            ("camera lens blur", |p| p.camera_lens_blur_px = Some(1.6)),
+            ("halation off", |p| p.halation = None),
+            ("scatter", |p| p.halation.as_mut().unwrap().scatter_amount = 0.9),
+            ("scatter tail", |p| p.halation.as_mut().unwrap().scatter_tail_px[2] = 2.3),
+            ("halation strength", |p| p.halation.as_mut().unwrap().halation_a_tot[0] = 0.04),
+            ("halation sigma", |p| p.halation.as_mut().unwrap().halation_first_sigma_px[1] = 11.5),
+            ("halation bounces", |p| p.halation.as_mut().unwrap().halation_n_bounces = 4),
+            ("halation renormalize", |p| p.halation.as_mut().unwrap().halation_renormalize = false),
+            ("DIR off", |p| p.dir_couplers = None),
+            ("DIR matrix", |p| p.dir_couplers.as_mut().unwrap().couplers_matrix_scaled[1][0] = 0.2),
+            ("DIR donor", |p| p.dir_couplers.as_mut().unwrap().donor = None),
+            ("DIR receiver", |p| p.dir_couplers.as_mut().unwrap().receiver = Some(crate::LangmuirGpuParams { k: [1.0; 3], x_ref: [1.0; 3], saturating: [true; 3] })),
+            ("DIR diffusion", |p| p.dir_couplers.as_mut().unwrap().diffusion_size_px = 6.0),
+            ("DIR curves", |p| p.dir_couplers.as_mut().unwrap().density_curves_0 = leak(vec![[0.15, 0.25, 0.36]; 5]).as_slice()),
+            ("grain off", |p| p.grain = None),
+            ("grain seed", |p| p.grain.as_mut().unwrap().base_seed = 8),
+            ("grain particles", |p| p.grain.as_mut().unwrap().n_particles_per_pixel[1][2] = 101.0),
+            ("grain blur", |p| p.grain.as_mut().unwrap().blur_px = 0.7),
+            ("grain micro-structure", |p| p.grain.as_mut().unwrap().micro_structure = None),
+            ("grain unsharp", |p| p.grain.as_mut().unwrap().mult_usm = Some([1.0, 0.2])),
+            ("grain monochrome", |p| p.grain.as_mut().unwrap().monochrome = true),
+            ("grain uniformity", |p| p.grain.as_mut().unwrap().grain_uniformity[0] = 0.97),
+            ("grain layers", |p| p.grain.as_mut().unwrap().curves_layers.push([0.5; 3])),
+        ];
+        for (what, edit) in film {
+            let mut p = params();
+            edit(&mut p);
+            assert_ne!(signature(&p), base, "{what} must change the film side's signature");
+        }
+
+        let after: &[(&str, Edit)] = &[
+            ("upload key", |p| p.image_key = Some(3)),
+            ("film spectral densities (print input)", |p| p.film_channel_density = leak(vec![[0.4; 3]; 81]).as_slice()),
+            ("film base (print input)", |p| p.film_base_density = leak(vec![0.06; 81]).as_slice()),
+            ("enlarger filters", |p| p.print_illuminant = leak(vec![1.5; 81]).as_slice()),
+            ("paper", |p| p.print_sensitivity = leak(vec![[0.3; 3]; 81]).as_slice()),
+            ("print exposure", |p| p.print_normalization_factor = 1.6),
+            ("print exposure scale", |p| p.print_exposure_scale = 1.2),
+            ("print curves", |p| p.print_density_curves = leak(vec![[0.5; 3]; 5]).as_slice()),
+            ("paper densities", |p| p.print_channel_density = leak(vec![[0.7; 3]; 81]).as_slice()),
+            ("preflash", |p| p.preflash = [0.01; 3]),
+            ("viewing light", |p| p.viewing_illuminant = leak(vec![3.0; 81]).as_slice()),
+            ("scan normalization", |p| p.scan_normalization = 101.0),
+            ("output space", |p| p.scan_xyz_to_rgb = leak([[3.0, -1.5, -0.5], [-1.0, 1.9, 0.0], [0.05, -0.2, 1.05]])),
+            ("B&W remap", |p| p.bw_xyz_remap = Some((1.1, 0.0))),
+            ("scan the film", |p| p.scan_film = true),
+            ("glare off", |p| p.glare = None),
+            ("glare seed", |p| p.glare.as_mut().unwrap().base_seed = 43),
+            ("unsharp", |p| p.unsharp = None),
+            ("scanner lens blur", |p| p.scanner_lens_blur_px = Some(0.5)),
+            ("enlarger diffusion", |p| p.enlarger_diffusion = p.diffusion.clone()),
+            ("output encoding", |p| p.output_cctf_encoding = false),
+            ("output matrix", |p| p.output_encode_matrix[0][0] = 1.00001),
+        ];
+        for (what, edit) in after {
+            let mut p = params();
+            edit(&mut p);
+            assert_eq!(signature(&p), base, "{what} must not change the film side's signature");
+        }
+
+        // The diffusion grid budget matters only with camera diffusion on.
+        assert_ne!(film_side_signature(&params(), b"frame 1", 1 << 20), base, "diffusion grid budget");
+        let mut p = params();
+        p.diffusion = None;
+        assert_eq!(film_side_signature(&p, b"frame 1", 1 << 20), film_side_signature(&p, b"frame 1", 0));
     }
 }

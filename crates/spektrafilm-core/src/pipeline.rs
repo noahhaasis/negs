@@ -191,6 +191,9 @@ pub struct Pipeline {
     /// The caller's slot for this frame's Prep output; see
     /// [`Self::with_prepared_frame`].
     prepared_frame: Option<crate::prep::PreparedFrame>,
+    /// The backend slot and the caller's frame name for keeping the film
+    /// side; see [`Self::with_film_cache`].
+    film_cache: Option<(u32, u64)>,
 }
 
 impl Pipeline {
@@ -313,6 +316,18 @@ impl Pipeline {
     /// own (`1 << 63` and up: the caller's image keys stay below).
     pub fn with_prepared_frame(mut self, frame: crate::prep::PreparedFrame) -> Self {
         self.prepared_frame = Some(frame);
+        self
+    }
+
+    /// Let [`Self::process_resident_borrowed`] keep its film side (the film
+    /// density after grain) in the backend's `slot` and reuse it while every
+    /// input of the film stages is the same (ticket 41). `frame` names the
+    /// image's pixels: the caller promises that every image it renders with
+    /// one `frame` and size has the same pixels, as for
+    /// [`Self::with_prepared_frame`]. The input decoding and Prep join the
+    /// name here; the backend compares the film stages' inputs itself.
+    pub fn with_film_cache(mut self, slot: u32, frame: u64) -> Self {
+        self.film_cache = Some((slot, frame));
         self
     }
 
@@ -457,6 +472,7 @@ impl Pipeline {
             metering_preview: None,
             autoexposure_ev: None,
             prepared_frame: None,
+            film_cache: None,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -650,6 +666,7 @@ impl Pipeline {
             metering_preview: None,
             autoexposure_ev: None,
             prepared_frame: None,
+            film_cache: None,
         };
         // The enlarger illuminant with its dichroic filters, and the preflash.
         pipeline.filter_enlarger();
@@ -863,7 +880,7 @@ impl Pipeline {
         // implement the resident chain return `None` and fall through.
         if self.tc_lut.is_some() {
             let run = |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.try_run_film_chain(params);
-            match self.try_gpu_resident(&image, None, backend, &color_ref, autoexposure_ev, run) {
+            match self.try_gpu_resident(&image, None, false, backend, &color_ref, autoexposure_ev, run) {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
                     return Ok((self.finish_resident(out, backend), backend.name()));
@@ -1040,7 +1057,7 @@ impl Pipeline {
         backend: &dyn ComputeBackend,
     ) -> Option<ImageBuf> {
         let run = |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.try_run_film_chain(params);
-        let out = self.borrowed_resident(image, None, backend, run)?;
+        let out = self.borrowed_resident(image, None, true, backend, run)?;
         let out = self.finish_resident(out, backend);
         Some(self.apply_post(out))
     }
@@ -1061,7 +1078,7 @@ impl Pipeline {
     ) -> Option<Box<dyn spektrafilm_gpu::PendingFilmChain>> {
         let submit =
             |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.submit_film_chain(params, output, on_mapped);
-        self.borrowed_resident(image, image_key, backend, submit)
+        self.borrowed_resident(image, image_key, false, backend, submit)
     }
 
     /// The finished chain: a scan finished as `process_resident_borrowed`
@@ -1104,6 +1121,7 @@ impl Pipeline {
         &self,
         image: &ImageBuf,
         image_key: Option<u64>,
+        film_cache: bool,
         backend: &dyn ComputeBackend,
         run: impl FnOnce(&spektrafilm_gpu::FilmChainParams<'_>) -> Option<T>,
     ) -> Option<T> {
@@ -1126,7 +1144,7 @@ impl Pipeline {
             self.preflash_raw,
         );
         let autoexposure_ev = self.frame_autoexposure_ev(image);
-        self.try_gpu_resident(image, image_key, backend, &color_ref, autoexposure_ev, run).ok()?
+        self.try_gpu_resident(image, image_key, film_cache, backend, &color_ref, autoexposure_ev, run).ok()?
     }
 
     /// Resize the working image to the requested size, mirroring Python's
@@ -1147,6 +1165,7 @@ impl Pipeline {
         &self,
         image: &ImageBuf,
         image_key: Option<u64>,
+        film_cache: bool,
         backend: &dyn ComputeBackend,
         color_ref: &crate::color_reference::ColorReference,
         autoexposure_ev: f64,
@@ -1188,6 +1207,20 @@ impl Pipeline {
         if !prep_active && let Some(frame) = &self.prepared_frame {
             frame.clear(); // neutral Prep needs no copy of the frame
         }
+        // The uploaded pixels' name for the film-side cache: the caller's
+        // frame, then what made `image` of it (as `PreparedKey`, and more).
+        let film_cache = self.film_cache.filter(|_| film_cache).map(|(slot, frame)| {
+            let mut name = frame.to_le_bytes().to_vec();
+            name.push(self.params.io.input_cctf_decoding as u8);
+            name.extend(self.params.io.input_color_space.as_bytes());
+            name.push(0);
+            if prep_active {
+                name.extend(autoexposure_ev.to_bits().to_le_bytes());
+                name.extend(self.params.camera.exposure_compensation_ev.to_bits().to_le_bytes());
+                name.extend(format!("{:?}", self.params.prep).as_bytes());
+            }
+            spektrafilm_gpu::FilmCacheSlot { slot, image: name }
+        });
         // Bake the exposure scale (auto-exposure × manual EV compensation ×
         // an exposure-only Prep)
         // into the front-pass matrix. The upsampler is homogeneous in the
@@ -1563,6 +1596,7 @@ impl Pipeline {
         let params = spektrafilm_gpu::FilmChainParams {
             image,
             image_key,
+            film_cache,
             front,
             film_log_exposure: &film_log_exp,
             film_density_curves_normalized: &film_curves_norm,
