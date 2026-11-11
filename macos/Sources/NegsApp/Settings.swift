@@ -91,6 +91,7 @@ struct SettingsView: View {
     /// Called with the page's height, for the window to fit it.
     var resize: (CGFloat) -> Void = { _ in }
     @AppStorage("settingsTab") private var tab = SettingsTab.photographs
+    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.darkroom
     @State private var thumbnailBytes: Int?
     @State private var emptyingThumbnails = false
 
@@ -122,7 +123,7 @@ struct SettingsView: View {
         .environment(\.colorScheme, .dark)
     }
 
-    // MARK: Photographs: what a new photograph starts with
+    // MARK: Photographs: what a new photograph starts with, and what it lies on
 
     @ViewBuilder private var photographs: some View {
         let slide = model.films.first { $0.id == model.newPhotoFilm }?.positive ?? false
@@ -153,6 +154,11 @@ struct SettingsView: View {
             HintText(model.sidecarsEnabled
                      ? "Each photo remembers its own edits in a small file beside it, such as IMG_0412.CR3.negs, which travels with the folder. A photo you haven’t edited starts with the film and paper above, default Prep and Lab settings and no border; the Image Size and output colour stay."
                      : "Ratings and edits won’t be saved. Reopening a photo starts from the defaults.")
+        }
+        InkSection(title: "Viewer") {
+            ChoiceRow(title: "Sheet", items: ViewerSheet.allCases.map { .option($0.title, tag: $0.rawValue) },
+                      selection: sheet.rawValue) { sheet = ViewerSheet(rawValue: $0) ?? .darkroom }
+            HintText("The colour behind the photograph. The caption and the label under it change their ink to suit; the panels stay dark.")
         }
     }
 

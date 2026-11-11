@@ -336,6 +336,8 @@ struct CanvasArea: View {
     @State private var geometry = CanvasGeometry()
     /// The pointer is over the photograph, which brightens the trim marks.
     @State private var overPrint = false
+    /// Settings › Photographs › Viewer.
+    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.darkroom
 
     /// Above the photograph, for the caption; below it, for the label's two rows (§2.3).
     static let captionBand: CGFloat = 54
@@ -343,7 +345,7 @@ struct CanvasArea: View {
 
     var body: some View {
         ZStack {
-            ViewerBackground.canvas
+            sheet.color
             if let session = model.cropSession, let image = model.image {
                 CropEditor(model: model, session: session, image: image)
             } else if model.source == nil, model.image == nil, model.standIn == nil, model.placeholder == nil {
@@ -373,6 +375,8 @@ struct CanvasArea: View {
                 }
             }
         }
+        .environment(\.sheetInk, sheet.ink)
+        // On its own dark plate, so it reads on any sheet.
         .overlay(alignment: .topLeading) { developTag }
         .onContinuousHover { phase in
             let over: Bool
@@ -404,7 +408,7 @@ struct CanvasArea: View {
     /// (`LightTable`). Fitted only: zoomed in, the print has no edges on screen.
     @ViewBuilder private var lightTable: some View {
         if !geometry.zoomed, let print = shownPrint,
-           let light = LightTable.light(sheet: ViewerBackground.sheet, edge: LightTable.edge(of: shownBorder)) {
+           let light = LightTable.light(sheet: sheet.hex, edge: LightTable.edge(of: shownBorder)) {
             LightTableGlow(print: print, color: light)
         }
     }

@@ -85,6 +85,7 @@ struct PhotoCaption: View {
     let facts: PhotoFacts?
     let fileName: String
     let portrait: Bool
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         let items = facts?.items ?? []
@@ -95,7 +96,7 @@ struct PhotoCaption: View {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     line(items)
                     Spacer(minLength: 9)
-                    Text(fileName).font(Theme.serif(15)).foregroundStyle(Theme.dim).lineLimit(1).fixedSize()
+                    Text(fileName).font(Theme.serif(15)).foregroundStyle(ink.dim).lineLimit(1).fixedSize()
                 }
                 line(items).frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -105,8 +106,8 @@ struct PhotoCaption: View {
     private func line(_ items: [String]) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                if index > 0 { Text("·").font(Theme.serif(15)).foregroundStyle(Theme.track) }
-                Text(item).font(Theme.serif(15, italic: true)).foregroundStyle(Theme.label).lineLimit(1).fixedSize()
+                if index > 0 { Text("·").font(Theme.serif(15)).foregroundStyle(ink.track) }
+                Text(item).font(Theme.serif(15, italic: true)).foregroundStyle(ink.label).lineLimit(1).fixedSize()
             }
         }
         .accessibilityElement(children: .ignore)

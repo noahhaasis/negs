@@ -511,6 +511,7 @@ private struct CropOverlay: View {
     let photo: [CGPoint]
     let crop: CGRect
     let fine: Bool
+    @Environment(\.sheetInk) private var ink
 
     static let shade = Color(red: 8 / 255, green: 7 / 255, blue: 6 / 255).opacity(0.6)
 
@@ -539,6 +540,10 @@ private struct CropOverlay: View {
                 corners.addLine(to: CGPoint(x: x, y: y))
                 corners.addLine(to: CGPoint(x: x, y: y + dy * length))
             }
+            // Uncropped, the corners lie on the sheet: on a light one, edged in its ink.
+            if !ink.light {
+                context.stroke(corners, with: .color(ink.paper), style: StrokeStyle(lineWidth: width + 2, lineCap: .square))
+            }
             context.stroke(corners, with: .color(Theme.paper), style: StrokeStyle(lineWidth: width, lineCap: .square))
         }
         .allowsHitTesting(false)
@@ -559,6 +564,7 @@ struct StraightenDial: View {
     let turn: (Bool) -> Void
 
     @State private var start: Double?
+    @Environment(\.sheetInk) private var ink
     static let width: CGFloat = 362
     /// Points per degree: 61 ticks across the dial.
     static let spacing = (width - 2) / 60
@@ -580,7 +586,7 @@ struct StraightenDial: View {
         VStack(spacing: 4) {
             Text(Self.degrees(angle))
                 .font(Theme.serif(15)).monospacedDigit()
-                .foregroundStyle(Theme.paper)
+                .foregroundStyle(ink.paper)
                 .accessibilityHidden(true)
             Canvas { context, size in
                 for (degree, x) in Self.ticks(angle: angle) {
@@ -588,7 +594,7 @@ struct StraightenDial: View {
                     let rect = zero ? CGRect(x: x - 1, y: 0, width: 2, height: 17)
                         : CGRect(x: (x - 0.5).rounded(), y: 0, width: 1, height: major ? 11 : 6)
                     let shape = zero ? Path(roundedRect: rect, cornerRadius: 1) : Path(rect)
-                    context.fill(shape, with: .color(zero ? Theme.accent : major ? Theme.dim : Theme.track))
+                    context.fill(shape, with: .color(zero ? ink.accent : major ? ink.dim : ink.track))
                 }
             }
             .frame(width: Self.width, height: 18)
@@ -632,12 +638,13 @@ private struct QuarterTurn: View {
     let clockwise: Bool
     let action: () -> Void
     @State private var hovered = false
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         Button(action: action) {
             Image(systemName: clockwise ? "arrow.clockwise" : "arrow.counterclockwise")
                 .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(hovered ? Theme.paper : Theme.dim)
+                .foregroundStyle(hovered ? ink.paper : ink.dim)
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
         }

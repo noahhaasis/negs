@@ -5,9 +5,8 @@ import SwiftUI
 /// mat on the dark sheet (design/proposals/r24-black-border.html, idea 3).
 ///
 /// It comes on only when the edge's contrast with the sheet is too low, so it
-/// depends on both colours: a white mat on the dark sheet gets none. Once the
-/// sheet's colour can be chosen again, a light edge on a light sheet gets a
-/// soft shade instead of a light.
+/// depends on both colours: a white mat on the dark sheet gets none. On a
+/// light sheet (`ViewerSheet`), a light edge gets a soft shade instead.
 enum LightTable {
     /// The light comes on below this WCAG contrast between the print's outer
     /// edge and the sheet. A #333333 mat on `bg` is about 1.56, which reads;

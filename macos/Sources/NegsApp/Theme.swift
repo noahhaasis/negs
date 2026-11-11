@@ -257,9 +257,10 @@ struct PencilStroke: Shape {
 }
 
 extension Shape {
-    /// Strokes this shape as the pencil: 2.1 pt in `accent`, round caps.
-    func pencil(width: CGFloat = Theme.pencilWidth) -> some View {
-        stroke(Theme.accent, style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+    /// Strokes this shape as the pencil: 2.1 pt in `accent` (or the sheet's
+    /// pencil, on the canvas), round caps.
+    func pencil(_ color: Color = Theme.accent, width: CGFloat = Theme.pencilWidth) -> some View {
+        stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
     }
 }
 

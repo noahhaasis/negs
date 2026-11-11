@@ -39,7 +39,16 @@ final class LightTableTests: XCTestCase {
         XCTAssertNil(LightTable.light(sheet: sheet, edge: nil))
     }
 
-    /// For when the sheet's colour can be chosen again.
+    /// The sheets in Settings: Black lights a film border; 22% grey and
+    /// the light sheets set it off themselves.
+    func testChosenSheets() {
+        XCTAssertNotNil(LightTable.light(sheet: ViewerSheet.black.hex, edge: 0x000000))
+        for sheet in [ViewerSheet.grey22, .middleGrey, .lightGrey, .paper] {
+            XCTAssertNil(LightTable.light(sheet: sheet.hex, edge: 0x000000), sheet.title)
+        }
+        XCTAssertNotNil(LightTable.light(sheet: ViewerSheet.paper.hex, edge: 0xffffff), "a white mat on Paper gets a shade")
+    }
+
     func testLightSheetsShadeALightEdgeAndLeaveADarkOne() throws {
         let paperSheet: UInt32 = 0xece5d8
         let shade = try XCTUnwrap(LightTable.light(sheet: paperSheet, edge: 0xffffff))

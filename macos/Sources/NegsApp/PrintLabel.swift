@@ -14,6 +14,7 @@ struct PrintLabel: View {
     /// The widest the photograph allows (one row) and the canvas allows (two).
     let photoWidth: CGFloat
     let canvasWidth: CGFloat
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         let scanning = model.value("io.scan_film").bool
@@ -23,11 +24,11 @@ struct PrintLabel: View {
         let film = StockName(model: model, paper: false, name: model.filmName, size: 24, weight: 600,
                              strike: original ? .original : nil, opens: !original)
         let paper = HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner) {
-            Text(kind).font(Theme.serif(14, italic: true)).foregroundStyle(Theme.dim).lineLimit(1).fixedSize()
+            Text(kind).font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1).fixedSize()
             StockName(model: model, paper: true, name: model.paperName, size: 17.5, weight: 400,
                       strike: original ? .original : scanning ? .scanning : nil, opens: !original && !scanning)
             if original {
-                Text("the original").font(Theme.serif(16, italic: true)).foregroundStyle(Theme.paper).lineLimit(1).fixedSize()
+                Text("the original").font(Theme.serif(16, italic: true)).foregroundStyle(ink.paper).lineLimit(1).fixedSize()
                     .padding(.leading, 6 - PrintLabelLayout.inner)
             }
         }
@@ -98,6 +99,7 @@ private struct StockName: View {
     var opens = true
     @State private var hovered = false
     @State private var anchor = MenuAnchor()
+    @Environment(\.sheetInk) private var ink
 
     /// Its tray is open.
     private var open: Bool { model.tray?.paper == paper }
@@ -107,14 +109,14 @@ private struct StockName: View {
             Text(name)
                 .font(Theme.serif(size, weight: weight))
                 .tracking(paper ? 0 : -0.24)
-                .foregroundStyle(strike == nil ? Theme.paper : Theme.dim)
+                .foregroundStyle(strike == nil ? ink.paper : ink.dim)
                 .lineLimit(1).truncationMode(.tail)
                 .padding(.bottom, 5)
                 .overlay(alignment: .bottom) { underline }
                 .overlay { struck }
                 .background(AnchorView(anchor: anchor))
             if opens {
-                Text("⌄").font(.system(size: 13)).foregroundStyle(Theme.dim).fixedSize()
+                Text("⌄").font(.system(size: 13)).foregroundStyle(ink.dim).fixedSize()
             }
         }
         .contentShape(Rectangle())
@@ -133,9 +135,9 @@ private struct StockName: View {
     @ViewBuilder private var underline: some View {
         if strike == nil {
             if open {
-                PencilStroke().pencil().frame(height: 6).allowsHitTesting(false)
+                PencilStroke().pencil(ink.accent).frame(height: 6).allowsHitTesting(false)
             } else if hovered {
-                Rectangle().fill(Theme.track).frame(height: 1.5).offset(y: -1).allowsHitTesting(false)
+                Rectangle().fill(ink.track).frame(height: 1.5).offset(y: -1).allowsHitTesting(false)
             }
         }
     }
@@ -145,7 +147,7 @@ private struct StockName: View {
             // As CSS places it: `left 54% / 88% 6px` over the name and its 5 pt below.
             GeometryReader { proxy in
                 let width = proxy.size.width * strike.width
-                PencilStroke().pencil()
+                PencilStroke().pencil(ink.accent)
                     .frame(width: width, height: 6)
                     .position(x: width / 2, y: (proxy.size.height - 6) * strike.height + 3)
             }

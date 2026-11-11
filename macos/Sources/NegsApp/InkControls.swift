@@ -400,6 +400,8 @@ struct OutlinedButtonStyle: ButtonStyle {
         let configuration: Configuration
         let style: OutlinedButtonStyle
         @Environment(\.isEnabled) private var enabled
+        /// On the canvas, Try Again is inked for the sheet.
+        @Environment(\.sheetInk) private var ink
         @State private var hovered = false
 
         var body: some View {
@@ -407,9 +409,9 @@ struct OutlinedButtonStyle: ButtonStyle {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 configuration.label
                     .font(Theme.serif(13.5, weight: style.weight))
-                    .foregroundStyle(Theme.paper)
+                    .foregroundStyle(ink.paper)
                 if let mark = style.mark {
-                    Text(mark).font(Theme.ui(10.5)).foregroundStyle(Theme.dim).accessibilityHidden(true)
+                    Text(mark).font(Theme.ui(10.5)).foregroundStyle(ink.dim).accessibilityHidden(true)
                 }
             }
             // Newsreader's tall ascent sat the words 2 pt above the
@@ -417,8 +419,8 @@ struct OutlinedButtonStyle: ButtonStyle {
             // and the x-height).
             .padding(.horizontal, 12).padding(.top, 2)
             .frame(height: 23)
-            .background(Capsule().fill(Theme.paper.opacity(configuration.isPressed ? 0.09 : hovered ? 0.04 : 0)))
-            .overlay(Capsule().strokeBorder(hovered || configuration.isPressed ? (prominent ? Theme.label : Theme.dim) : prominent ? Theme.dim : Theme.track, lineWidth: 1))
+            .background(Capsule().fill(ink.paper.opacity(configuration.isPressed ? 0.09 : hovered ? 0.04 : 0)))
+            .overlay(Capsule().strokeBorder(hovered || configuration.isPressed ? (prominent ? ink.label : ink.dim) : prominent ? ink.dim : ink.track, lineWidth: 1))
             .contentShape(Capsule())
             .opacity(enabled ? 1 : Theme.disabledOpacity)
             .onHover { hovered = $0 && enabled }

@@ -50,6 +50,7 @@ struct EmptyCanvas: View {
     var dropping = false
     /// The print's place, if a photograph is on screen; else the empty one.
     var print: CGRect?
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         GeometryReader { proxy in
@@ -57,11 +58,11 @@ struct EmptyCanvas: View {
             ZStack(alignment: .topLeading) {
                 if dropping {
                     RoundedRectangle(cornerRadius: 4)
-                        .stroke(Theme.accent, lineWidth: 1.5)
+                        .stroke(ink.accent, lineWidth: 1.5)
                         .frame(width: place.width + 24, height: place.height + 24)
                         .offset(x: place.minX - 12, y: place.minY - 12)
                 } else {
-                    TrimMarks(print: place).fill(Theme.track)
+                    TrimMarks(print: place).fill(ink.track)
                     RecentFiles(model: model, width: proxy.size.width - place.minX - ImageScrollView.fitInset)
                         .offset(x: place.minX, y: place.maxY + 14)
                 }
@@ -73,7 +74,7 @@ struct EmptyCanvas: View {
 
     @ViewBuilder private var words: some View {
         if dropping {
-            Text("drop to open it").font(Theme.serif(22, italic: true)).foregroundStyle(Theme.paper)
+            Text("drop to open it").font(Theme.serif(22, italic: true)).foregroundStyle(ink.paper)
         } else {
             VStack(spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -81,12 +82,12 @@ struct EmptyCanvas: View {
                     Text(" a photograph or a folder")
                 }
                 .font(Theme.serif(26, weight: 600))
-                .foregroundStyle(Theme.paper)
+                .foregroundStyle(ink.paper)
                 Text("Explore film stocks, shape the print, and make it your own.")
-                    .font(Theme.serif(16, italic: true)).foregroundStyle(Theme.label)
+                    .font(Theme.serif(16, italic: true)).foregroundStyle(ink.label)
                     .padding(.bottom, 6)
                 Text("or drop a RAW, TIFF, PNG or JPEG file, or a folder of them, here")
-                    .font(Theme.serif(14, italic: true)).foregroundStyle(Theme.dim)
+                    .font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim)
             }
             .multilineTextAlignment(.center)
             .padding(.horizontal, 24)
@@ -98,12 +99,13 @@ struct EmptyCanvas: View {
 private struct OpenWord: View {
     let action: () -> Void
     @State private var hovered = false
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         Button(action: action) {
             Text("Open")
                 .overlay(alignment: .bottom) {
-                    Rectangle().fill(hovered ? Theme.dim : Theme.track).frame(height: 1.5).offset(y: 1)
+                    Rectangle().fill(hovered ? ink.dim : ink.track).frame(height: 1.5).offset(y: 1)
                 }
         }
         .buttonStyle(InkPressStyle())
@@ -119,6 +121,7 @@ private struct OpenWord: View {
 private struct RecentFiles: View {
     let model: EditorModel
     let width: CGFloat
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         let recent = Array(model.recentFiles.prefix(5))
@@ -134,7 +137,7 @@ private struct RecentFiles: View {
 
     private func row(_ files: [URL]) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 18) {
-            Text("Recent").font(Theme.serif(14, italic: true)).foregroundStyle(Theme.dim)
+            Text("Recent").font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim)
             ForEach(files, id: \.self) { url in RecentFile(url: url) { model.open(url) } }
         }
         .fixedSize()
@@ -145,14 +148,15 @@ private struct RecentFile: View {
     let url: URL
     let action: () -> Void
     @State private var hovered = false
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         Button(action: action) {
             Text(url.lastPathComponent)
                 .font(Theme.serif(17.5))
-                .foregroundStyle(hovered ? Theme.paper : Theme.label)
+                .foregroundStyle(hovered ? ink.paper : ink.label)
                 .overlay(alignment: .bottom) {
-                    if hovered { Rectangle().fill(Theme.track).frame(height: 1).offset(y: 1) }
+                    if hovered { Rectangle().fill(ink.track).frame(height: 1).offset(y: 1) }
                 }
         }
         .buttonStyle(InkPressStyle())
@@ -201,13 +205,14 @@ struct DevelopFailure: View {
     let name: String
     let reason: String
     let retry: () -> Void
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         VStack(spacing: 10) {
             Text("\(name) couldn’t be developed")
-                .font(Theme.serif(24, weight: 600)).foregroundStyle(Theme.paper)
+                .font(Theme.serif(24, weight: 600)).foregroundStyle(ink.paper)
             Text(reason)
-                .font(Theme.serif(16, italic: true)).foregroundStyle(Theme.label)
+                .font(Theme.serif(16, italic: true)).foregroundStyle(ink.label)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Try Again", action: retry)
                 .buttonStyle(OutlinedButtonStyle())
@@ -258,10 +263,11 @@ private struct TrimMark: View {
     let crop: () -> Void
     @State private var hovered = false
     @State private var started = false
+    @Environment(\.sheetInk) private var ink
 
     var body: some View {
         Rectangle()
-            .fill(hovered ? Theme.paper : lit ? Theme.label : Theme.track)
+            .fill(hovered ? ink.paper : lit ? ink.label : ink.track)
             .frame(width: TrimMarks.length, height: TrimMarks.weight)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
