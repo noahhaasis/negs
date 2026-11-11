@@ -17,6 +17,21 @@ import SwiftUI
     }
 }
 
+/// The columns' split view. Its 1 pt divider is a warm `line` rule, not the
+/// system's black, so the inspector has an edge against the sheet and the
+/// strip; the panel draws the same rule along its top (round 25 A).
+final class EdgeSplitView: NSSplitView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        isVertical = true
+        dividerStyle = .thin
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var dividerColor: NSColor { Theme.NS.line }
+}
+
 /// The editing window: the title band over the canvas and a trailing
 /// inspector column, with no toolbar (§3). The window, title band and
 /// columns are AppKit; the canvas and inspector contents are SwiftUI. They
@@ -88,6 +103,7 @@ import SwiftUI
         inspector.maximumThickness = 440
         inspector.isCollapsed = !model.inspectorVisible
         let split = NSSplitViewController()
+        split.splitView = EdgeSplitView()
         split.addSplitViewItem(canvasItem)
         split.addSplitViewItem(inspector)
         split.splitView.autosaveName = "editor"

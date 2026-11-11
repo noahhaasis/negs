@@ -303,6 +303,9 @@ struct InspectorPanel: View {
                 }
             }
         }
+        // With the divider's rule (`EdgeSplitView`), outlines the column
+        // where it meets the title band (round 25 A).
+        .overlay(alignment: .top) { Theme.line.frame(height: 1).allowsHitTesting(false) }
         .tint(Theme.paper)
         // Under the grid's sheet (§4.6).
         .accessibilityHidden(model.mode == .grid)
