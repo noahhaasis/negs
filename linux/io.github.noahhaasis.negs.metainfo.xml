@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.15.0" date="2026-11-11">
+      <description>
+        <p>Sharper Fuji X-Trans RAWs, a Settings dialog and film and paper previews that keep their height on the Linux AppImage, a Windows save dialog that keeps the JPEG quality you type, and a Chinese web app.</p>
+      </description>
+    </release>
     <release version="0.14.0" date="2026-11-07">
       <description>
         <p>A new Prep tab with tone, colour and detail controls and camera brightness matching, 29 new film stocks, a Print Curves graph, film search and favourites, and quicker previews when changing film or paper.</p>
