@@ -31,15 +31,27 @@ Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https:
 
 In your browser, or as a native app on Mac, Windows and Linux. Pick a film, pick a paper, drag a slider, and watch the picture change as you move.
 
-- Opens RAW files from most cameras, including Nikon HE★ (Mac only) and 60 MP medium format, plus JPEG, TIFF and PNG
-- Reads JPEG, PNG and TIFF colour profiles and previews in the chosen export colour space
-- Save, apply and share film and Lab presets, including Python spektrafilm community presets
-- Crop, straighten, and add borders with each stock's real edge print
+**Open and organise**
+- Opens RAW files from most cameras, including Nikon HE★ (Mac only) and 60 MP medium format, plus JPEG, TIFF and PNG. Reads JPEG, PNG and TIFF colour profiles
+- **Gallery (Mac):** open a folder and it is your library, with nothing to import. Browse it as a grid or a film strip, rate with stars, flag picks and rejects, filter, and see every photo developed, not as a grey thumbnail. Ratings and edits are kept in a small file beside each photo, and exports carry the rating as `xmp:Rating` for Bridge and Photo Mechanic
+- Batch export a rating, a filter or a selection in one go (Mac)
+
+**Develop**
+- Pick from about 60 film stocks and papers, with a preview of each on your own photo
+- **Prep:** highlights, shadows, contrast, lift and gain, colour boost and saturation, midtone detail, and *Match camera brightness*, which starts a RAW at the exposure your camera showed
+- **Lens corrections** in the Mac, Windows and Linux apps: distortion, vignetting and chromatic aberration are fixed from the data in the file, using Apple's decoder on Mac and the camera's own correction data for Sony, Fujifilm, OM/Olympus, Panasonic and DNG on Windows and Linux
+- RAW white balance: as shot, daylight, tungsten or a custom temperature and tint
 - Image Size enlarges a photo *before* the film, so grain and halation form at print size instead of being stretched afterwards
+- Crop, straighten, and add borders with each stock's real edge print
+- Save, apply and share film and Lab presets, including Python spektrafilm community presets
 - Undo, keyboard shortcuts, pinch to zoom: it feels at home on Mac, Windows and Linux
-- Exports PNG, TIFF or JPEG and keeps your camera's EXIF, at 8 or 16 bits per channel (JPEG with a quality slider), in sRGB, Display P3, Adobe RGB or ProPhoto RGB (16-bit only) with an embedded ICC profile
-- Export the current film and paper colors as a 33³ sRGB `.cube` LUT from File → Export LUT… on every platform. No photograph is needed; spatial effects and Post edits are excluded.
+
+**Export**
+- PNG, TIFF or JPEG (with a quality slider) that keeps your camera's EXIF, at 8 or 16 bits per channel, in sRGB, Display P3, Adobe RGB or ProPhoto RGB (16-bit only) with an embedded ICC profile
+- Fast export on the GPU or Reference export on the CPU in 64-bit, see [Speed](#speed)
+- Export the current film and paper colours as a 33³ sRGB `.cube` LUT from File → Export LUT… on every platform. No photograph is needed; spatial effects and Post edits are excluded
 - Live preview while you drag a slider, and what you see in the preview is what you export
+- The web app speaks English and Chinese (简体中文)
 
 https://github.com/user-attachments/assets/25c00097-e668-48b2-8903-3299668b538e
 
