@@ -41,10 +41,7 @@ In your browser, or as a native app on Mac, Windows and Linux. Pick a film, pick
 - Export the current film and paper colors as a 33³ sRGB `.cube` LUT from File → Export LUT… on every platform. No photograph is needed; spatial effects and Post edits are excluded.
 - Live preview while you drag a slider, and what you see in the preview is what you export
 
-
-
-https://github.com/user-attachments/assets/6c7997a9-04b6-45d2-9ff9-3b0b937627c9
-
+https://github.com/user-attachments/assets/25c00097-e668-48b2-8903-3299668b538e
 
 ## Chemistry, not a filter
 
