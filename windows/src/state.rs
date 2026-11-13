@@ -632,6 +632,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         basic: 0,
         controls: &[
             slider("Lens blur (px)", "scanner.lens_blur", 0.0, 5.0, 0.01),
+            slider("Color noise reduction", "scanner.chroma_noise_reduction", 0.0, 100.0, 1.0),
             slider("Unsharp radius (px)", "scanner.unsharp_mask.0", 0.0, 3.0, 0.01),
             slider("Unsharp amount", "scanner.unsharp_mask.1", 0.0, 2.0, 0.01),
             toggle("White correction", "scanner.white_correction"),

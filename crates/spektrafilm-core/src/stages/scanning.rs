@@ -200,6 +200,24 @@ pub(crate) fn scan_normalization_and_white(illuminant: &[f64], n_wl: usize) -> (
     (normalization, colorspace::xy_to_xyz_f64(vx, vy))
 }
 
+/// The scanner's colour noise reduction for a `width` × `height` scan, its
+/// radius taken from µm on the film. `None` when it's off. The CPU scan and
+/// the GPU chains both use it.
+pub fn chroma_denoise_params(
+    params: &RuntimeParams,
+    width: u32,
+    height: u32,
+) -> Option<spektrafilm_gpu::chroma_denoise::ChromaDenoiseParams> {
+    let scanner = &params.scanner;
+    let pix_um = crate::stages::filming::pixel_size_um(params.camera.film_format_mm, width, height);
+    let luma = RgbColourspace::output(&params.io.output_color_space).rgb_to_xyz[1].map(|v| v as f32);
+    spektrafilm_gpu::chroma_denoise::ChromaDenoiseParams::new(
+        scanner.chroma_noise_reduction,
+        scanner.chroma_noise_radius_um / pix_um,
+        luma,
+    )
+}
+
 pub fn scan(
     density_cmy: ImageBuf,
     profile: &Profile,
@@ -369,6 +387,11 @@ pub fn scan(
     // Lens blur
     if params.scanner.lens_blur > 0.0 {
         rgb = backend.gaussian_blur_owned(rgb, params.scanner.lens_blur);
+    }
+
+    // Colour noise reduction: the scanner software's, before it sharpens.
+    if let Some(chroma) = chroma_denoise_params(params, rgb.width, rgb.height) {
+        spektrafilm_gpu::chroma_denoise::apply(&mut rgb, &chroma);
     }
 
     // Unsharp mask

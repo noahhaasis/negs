@@ -330,6 +330,7 @@ fn deterministic(pipeline: &mut Pipeline) {
     pipeline.params.enlarger.lens_blur = 0.;
     pipeline.params.scanner.lens_blur = 0.;
     pipeline.params.scanner.unsharp_mask = [0., 0.];
+    pipeline.params.scanner.chroma_noise_reduction = 0.;
     // Keep the film's mean viewing glare, remove its random spatial field.
     pipeline.params.film_render.glare.roughness = 0.;
     pipeline.params.print_render.glare.roughness = 0.;

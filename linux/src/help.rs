@@ -373,6 +373,10 @@ const PATHS: &[(&str, &str)] = &[
         "Softness of the scanner’s lens, in pixels. 0 is off.",
     ),
     (
+        "scanner.chroma_noise_reduction",
+        "Takes the colour out of the grain, as a lab scanner’s software does: the grain keeps its texture, but its red, green and blue specks turn neutral. Colour edges stay put. 0 is off.",
+    ),
+    (
         "scanner.unsharp_mask.0",
         "The radius of the scanner’s sharpening, in pixels.",
     ),
@@ -455,7 +459,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("Glare", "Room light reflecting off the print’s surface."),
     (
         "Scanner",
-        "Scans the finished print: sharpness and black and white points.",
+        "Scans the finished print: sharpness, colour noise, and black and white points.",
     ),
     (
         "Color Management",

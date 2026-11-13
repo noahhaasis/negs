@@ -26,7 +26,13 @@ collapse, f32 controls) that isn't worth building yet.
 
 The format shared on pixls.us (threads 59686, 60317) is Python spektrafilm's GUI-state JSON,
 `spektrafilm_gui/persistence.py` at the pinned upstream `28bf883`. Presets are stored in that
-format, with no Negs extension. The file name (without `.json`) is the preset name.
+format. The file name (without `.json`) is the preset name.
+
+Negs-only settings (2026-11-12): the scanner's colour noise reduction,
+`scanner.chroma_noise_reduction` and `scanner.chroma_noise_radius_um`, are written into the
+file's `scanner` section next to Python's keys (`NEGS_EXTENSIONS` in `presets.rs`). Python's
+loader ignores keys it doesn't know, so the file still opens there, without the noise
+reduction; a file without them reads as off, at the default radius.
 
 Why it works:
 

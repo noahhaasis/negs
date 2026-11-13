@@ -176,6 +176,7 @@ export const SECTIONS = [
   { title: "Scan & Color", tab: "Scan", groups: [
     { title: "Scanner", controls: [
       slider("Lens blur (px)", "scanner.lens_blur", 0, 5, 0.01),
+      slider("Color noise reduction", "scanner.chroma_noise_reduction", 0, 100, 1),
       slider("Unsharp radius (px)", "scanner.unsharp_mask.0", 0, 3, 0.01),
       slider("Unsharp amount", "scanner.unsharp_mask.1", 0, 2, 0.01),
       toggle("White correction", "scanner.white_correction"),

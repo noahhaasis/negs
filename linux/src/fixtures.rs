@@ -141,6 +141,7 @@ pub const GROUPS: &[Group] = &[
         name: "Scanner",
         knobs: &[
             Knob("Lens blur", 0., 5., 0.01, 0., "px"),
+            Knob("Color noise reduction", 0., 100., 1., 0., ""),
             Knob("Unsharp radius", 0., 3., 0.01, 0.7, "px"),
             Knob("Unsharp amount", 0., 2., 0.01, 0., ""),
             Knob("White level", 0.5, 1., 0.01, 1., ""),

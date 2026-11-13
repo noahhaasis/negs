@@ -30,6 +30,7 @@ pub fn per_pixel_params(mut params: RuntimeParams) -> RuntimeParams {
     params.print_render.glare.active = false;
     params.scanner.lens_blur = 0.0;
     params.scanner.unsharp_mask = [0.0, 0.0];
+    params.scanner.chroma_noise_reduction = 0.0;
     params.scanner.white_correction = false;
     params.scanner.black_correction = false;
     // Per-image trims: representable in a LUT, but corrections for one

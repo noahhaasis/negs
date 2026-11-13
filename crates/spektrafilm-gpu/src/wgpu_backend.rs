@@ -435,6 +435,7 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
         glare: _,
         gamut: _,
         unsharp: _,
+        chroma_denoise: _,
         scanner_lens_blur_px: _,
         enlarger_diffusion: _,
         print_exposure_scale: _,
@@ -1888,6 +1889,21 @@ impl WgpuBackend {
             })
         });
 
+        // ── Colour noise reduction state ─────────────────────────────────
+        // In place on buf_b after the scanner lens blur, before unsharp.
+        // Its two grids are a fraction of the image (see ChromaDenoiseParams).
+        let chroma_denoise_state = p.chroma_denoise.as_ref().map(|cp| {
+            build_chroma_denoise_state(
+                &self.device,
+                cp,
+                image.width,
+                image.height,
+                &buf_b,
+                &mut |label, bytes| images.buffer(&self.device, label, bytes, wgpu::BufferUsages::STORAGE),
+                self,
+            )
+        });
+
         // ── Grain state ──────────────────────────────────────────────────
         // Applied to buf_a (density_cmy) after DIR couplers, before
         // print_spectral. Uses buf_b (log_raw_corrected is no longer needed
@@ -2084,6 +2100,11 @@ impl WgpuBackend {
         if let Some(bs) = scanner_lens_blur_state.as_ref() {
             bs.encode_passes(&mut encoder);
             profiler.mark("scanner_lens_blur", &mut encoder);
+        }
+        // 6d. Colour noise reduction (in place on buf_b), before unsharp.
+        if let Some(cs) = chroma_denoise_state.as_ref() {
+            cs.encode_passes(&mut encoder);
+            profiler.mark("chroma_denoise", &mut encoder);
         }
         // 6d. Unsharp mask — last in-flight pass. Writes the final image
         //     back to buf_b so the readback path below is unchanged.
@@ -3936,6 +3957,11 @@ impl ComputeBackend for WgpuBackend {
             self.capacity.buffer(grid.checked_mul(8).ok_or("FFT buffer overflow")?, "FFT grid")?;
             bytes = grid.checked_mul(20).and_then(|n| bytes.checked_add(n))
                 .ok_or("FFT working-set overflow")?;
+        }
+        if let Some(cp) = params.chroma_denoise.as_ref() {
+            let grid = cp.grid_bytes(params.image.width, params.image.height);
+            self.capacity.buffer(grid / 2, "colour noise grid")?;
+            bytes = bytes.checked_add(grid).ok_or("colour noise working-set overflow")?;
         }
         self.capacity.working_set(bytes)
     }
@@ -5958,6 +5984,108 @@ impl DirState {
     }
 }
 
+/// Pre-built scanner colour noise reduction: block means, the joint
+/// bilateral filter on the grid and the full-resolution joint bilateral
+/// upsampling, one dispatch each.
+///
+/// CPU reference: `crate::chroma_denoise::apply`.
+#[cfg(feature = "wgpu-backend")]
+struct ChromaDenoiseState {
+    passes: Vec<(DispatchJob, u32)>,
+}
+
+#[cfg(feature = "wgpu-backend")]
+fn build_chroma_denoise_state(
+    device: &wgpu::Device,
+    cp: &crate::chroma_denoise::ChromaDenoiseParams,
+    width: u32,
+    height: u32,
+    buf_b: &wgpu::Buffer,
+    make_buffer: &mut dyn FnMut(&str, u64) -> wgpu::Buffer,
+    backend: &WgpuBackend,
+) -> ChromaDenoiseState {
+    #[repr(C)]
+    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+    struct Params {
+        width: u32,
+        height: u32,
+        gw: u32,
+        gh: u32,
+        factor: u32,
+        radius: u32,
+        n: u32,
+        radius_cells: f32,
+        strength: f32,
+        range_k: f32,
+        upsample_k: f32,
+        log_offset: f32,
+        luma: [f32; 4],
+    }
+    let (gw, gh) = cp.grid(width, height);
+    let cells = gw * gh;
+    let grid_bytes = u64::from(cells) * 3 * 4;
+    let means = make_buffer("chroma_means", grid_bytes);
+    let filtered = make_buffer("chroma_filtered", grid_bytes);
+    let rw = wgpu::BufferBindingType::Storage { read_only: false };
+    let ro = wgpu::BufferBindingType::Storage { read_only: true };
+    let uniform = wgpu::BufferBindingType::Uniform;
+    let job = |source: &'static str, n: u32, src: &wgpu::Buffer, dst: &wgpu::Buffer| {
+        let pipeline = backend.cached_pipeline(source, &[uniform, ro, rw]);
+        let params = Params {
+            width,
+            height,
+            gw,
+            gh,
+            factor: cp.factor,
+            radius: cp.radius,
+            n,
+            radius_cells: cp.radius_cells,
+            strength: cp.strength,
+            range_k: cp.range_k,
+            upsample_k: cp.upsample_k,
+            log_offset: crate::chroma_denoise::LOG_OFFSET,
+            luma: [cp.luma[0], cp.luma[1], cp.luma[2], 0.0],
+        };
+        let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("chroma_denoise_params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("chroma_denoise_bg"),
+            layout: &pipeline.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: src.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: dst.as_entire_binding() },
+            ],
+        });
+        (DispatchJob { _params_buf: params_buf, pipeline, bg }, n)
+    };
+    ChromaDenoiseState {
+        passes: vec![
+            job(include_str!("../../spektrafilm-shaders/wgsl/chroma_denoise_down.wgsl"), cells, buf_b, &means),
+            job(include_str!("../../spektrafilm-shaders/wgsl/chroma_denoise_bilateral.wgsl"), cells, &means, &filtered),
+            job(include_str!("../../spektrafilm-shaders/wgsl/chroma_denoise_apply.wgsl"), width * height, &filtered, buf_b),
+        ],
+    }
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl ChromaDenoiseState {
+    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("chroma_denoise"),
+            timestamp_writes: None,
+        });
+        for (job, n) in &self.passes {
+            pass.set_pipeline(&job.pipeline.pipeline);
+            pass.set_bind_group(0, &job.bg, &[]);
+            dispatch_linear(&mut pass, *n, job.pipeline.workgroup_size);
+        }
+    }
+}
+
 /// Pre-built unsharp mask pass — owns the blur and the combine dispatch.
 ///
 /// CPU equivalent: `spektrafilm_model::diffusion::apply_unsharp_mask`.
@@ -7642,6 +7770,7 @@ mod film_cache_tests {
             glare: Some(crate::GlareGpuParams { mu: -3.0, sigma: 0.5, blur_px: 0.5, base_seed: 42, rgb_offset: [0.01; 3] }),
             gamut: None,
             unsharp: Some(crate::UnsharpGpuParams { sigma_px: 0.7, amount: 0.7 }),
+            chroma_denoise: None,
             camera_lens_blur_px: Some(1.5),
             scanner_lens_blur_px: None,
             highlight_boost: Some(crate::HighlightBoostGpuParams { boost_ev: 0.5, boost_range: 0.3, protect_ev: 1.0 }),

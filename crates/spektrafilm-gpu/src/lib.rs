@@ -1,3 +1,4 @@
+pub mod chroma_denoise;
 pub mod cpu_backend;
 #[cfg(feature = "cuda-backend")]
 pub mod cuda_backend;
@@ -323,6 +324,10 @@ pub struct FilmChainParams<'a> {
     /// before readback). Blur σ in pixels + amount scalar; both come
     /// from `scanner.unsharp_mask`.
     pub unsharp: Option<UnsharpGpuParams>,
+    /// Optional scanner colour noise reduction on the final RGB buffer,
+    /// after the scanner lens blur and before unsharp (the CPU scanning
+    /// order). CPU reference: [`chroma_denoise::apply`].
+    pub chroma_denoise: Option<chroma_denoise::ChromaDenoiseParams>,
     /// Optional camera lens Gaussian blur on the raw film exposure buffer,
     /// after camera diffusion and before halation.
     pub camera_lens_blur_px: Option<f32>,

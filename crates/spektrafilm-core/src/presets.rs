@@ -277,9 +277,28 @@ fn parse(text: &str) -> Result<Value, String> {
     serde_json::from_str(&json).map_err(|e| format!("The file isn't valid JSON ({e})."))
 }
 
+/// Negs-only settings a preset carries, as `(section, key)` in the GUI
+/// state, beside Python's keys in the section that holds their group.
+/// Python's loader ignores keys it doesn't know, so files Negs writes still
+/// open there (without these); files that lack them get Negs's defaults.
+const NEGS_EXTENSIONS: [(&str, &str); 2] = [
+    ("scanner", "chroma_noise_reduction"),
+    ("scanner", "chroma_noise_radius_um"),
+];
+
+/// The frozen Python GUI state with [`NEGS_EXTENSIONS`] at Negs's defaults.
 fn default_state() -> &'static Value {
     static STATE: OnceLock<Value> = OnceLock::new();
-    STATE.get_or_init(|| serde_json::from_str(DEFAULT_GUI_STATE).expect("the frozen GUI state is JSON"))
+    STATE.get_or_init(|| {
+        let mut state: Value = serde_json::from_str(DEFAULT_GUI_STATE).expect("the frozen GUI state is JSON");
+        let defaults = serde_json::to_value(RuntimeParams::default()).expect("RuntimeParams serializes");
+        for (section, key) in NEGS_EXTENSIONS {
+            let path = negs_path(&format!("{section}.{key}")).expect("extensions sit in mapped sections");
+            let value = get(&defaults, &path).expect("extensions are Negs params").clone();
+            state[section].as_object_mut().expect("extension sections exist").insert(key.into(), value);
+        }
+        state
+    })
 }
 
 /// The file merged onto the default GUI state as Python's loader does
@@ -751,6 +770,25 @@ mod tests {
         assert_eq!(p.film_render.dir_couplers.gamma_samelayer_rgb, Some([0.5159, 0.5934, 0.2829]));
         assert_eq!(p.film_render.halation.halation_first_sigma_um, Some([65.0; 3]));
         assert!(p.film_render.grain.rms_granularity.is_some());
+    }
+
+    #[test]
+    fn colour_noise_reduction_travels_in_the_scanner_section() {
+        let data = data_dir();
+        let mut params = RuntimeParams::default();
+        params.scanner.chroma_noise_reduction = 60.0;
+        params.scanner.chroma_noise_radius_um = 45.0;
+        let text = export("kodak_portra_400", "kodak_portra_endura", &params, &data).unwrap();
+        let file: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(file["scanner"]["chroma_noise_reduction"], 60.0);
+        let p = import(&text, &data).unwrap().params;
+        assert_eq!((p.scanner.chroma_noise_reduction, p.scanner.chroma_noise_radius_um), (60.0, 45.0));
+        // A Python file has none: off, at the default radius.
+        let p = import(r#"{"scanner": {"lens_blur": 0.5}}"#, &data).unwrap().params;
+        assert_eq!(p.scanner.chroma_noise_reduction, 0.0);
+        assert_eq!(p.scanner.chroma_noise_radius_um, RuntimeParams::default().scanner.chroma_noise_radius_um);
+        let error = import(r#"{"scanner": {"chroma_noise_reduction": "lots"}}"#, &data).unwrap_err();
+        assert!(error.contains("scanner.chroma_noise_reduction"), "{error}");
     }
 
     #[test]

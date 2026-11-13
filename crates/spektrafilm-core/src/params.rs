@@ -170,6 +170,16 @@ pub struct ScannerParams {
     pub black_level: f32,
     #[serde(default = "default_unsharp")]
     pub unsharp_mask: [f32; 2],
+    /// Colour noise reduction, 0 (off) to 100: how much of the colour in
+    /// the grain the scanner's software takes out, keeping the grain's
+    /// brightness pattern. Negs-only; runs after the lens blur and before
+    /// the unsharp mask, as scanner software does.
+    #[serde(default)]
+    pub chroma_noise_reduction: f32,
+    /// Its radius, in µm on the film, so it covers the same grain at any
+    /// render size and film format.
+    #[serde(default = "default_chroma_noise_radius_um")]
+    pub chroma_noise_radius_um: f32,
 }
 
 impl Default for ScannerParams {
@@ -181,6 +191,8 @@ impl Default for ScannerParams {
             white_level: 0.98,
             black_level: 0.01,
             unsharp_mask: [0.7, 0.7],
+            chroma_noise_reduction: 0.0,
+            chroma_noise_radius_um: default_chroma_noise_radius_um(),
         }
     }
 }
@@ -1057,6 +1069,13 @@ fn default_001() -> f32 {
 }
 fn default_unsharp() -> [f32; 2] {
     [0.7, 0.7]
+}
+/// 40 µm: on 400-speed grain at 24 MP it leaves about a fifth of the colour
+/// (`tests/chroma_denoise.rs`, `measure_grain`) without visible bleeding
+/// at colour edges; larger radii take more but grey small colourful
+/// details sooner.
+fn default_chroma_noise_radius_um() -> f32 {
+    40.0
 }
 fn default_03() -> f32 {
     0.3

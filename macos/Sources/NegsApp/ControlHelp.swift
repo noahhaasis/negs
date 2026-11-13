@@ -121,6 +121,7 @@ enum ControlHelp {
 
         // Scanner
         "scanner.lens_blur": "Softness of the scanner’s lens, in pixels. 0 is off.",
+        "scanner.chroma_noise_reduction": "Takes the colour out of the grain, as a lab scanner’s software does: the grain keeps its texture, but its red, green and blue specks turn neutral. Colour edges stay put. 0 is off.",
         "scanner.unsharp_mask.0": "The radius of the scanner’s sharpening, in pixels.",
         "scanner.unsharp_mask.1": "The strength of the scanner’s sharpening. 0 is off, for sharpening later in another app.",
         "scanner.white_correction": "Sets the scan’s lightest tone to White level. Off, the highlights stay where the paper puts them. Mostly for slides.",
@@ -146,7 +147,7 @@ enum ControlHelp {
         "Print Curves": "Shapes how the paper develops: its contrast, per layer and per colour.",
         "Print Base": "The colour and density of the paper itself, its whitest white.",
         "Glare": "Room light reflecting off the print’s surface.",
-        "Scanner": "Scans the finished print: sharpness and black and white points.",
+        "Scanner": "Scans the finished print: sharpness, colour noise, and black and white points.",
         "Color Management": "How colours enter and leave the spectral simulation.",
         "Input Colour": "How the file’s values are read: its colour space and curve.",
         "Output": "The colour space the preview develops in."

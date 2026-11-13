@@ -1621,6 +1621,7 @@ impl Pipeline {
             glare,
             gamut: self.output_gamut.gpu_params(),
             unsharp,
+            chroma_denoise: stages::scanning::chroma_denoise_params(&self.params, image.width, image.height),
             camera_lens_blur_px,
             scanner_lens_blur_px,
             highlight_boost,

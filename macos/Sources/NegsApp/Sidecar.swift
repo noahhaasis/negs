@@ -63,7 +63,7 @@ extension JSONValue {
 /// a new table and never edits an old one; `SidecarDefaultsTests` hashes each.
 struct SidecarDefaults: Equatable, Sendable {
     /// New sidecars get this version.
-    static let latest = 1
+    static let latest = 2
 
     let version: Int
     let film: String

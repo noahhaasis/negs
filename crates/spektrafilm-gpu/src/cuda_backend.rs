@@ -2809,6 +2809,11 @@ impl ComputeBackend for CudaBackend {
     }
 
     fn try_run_film_chain(&self, params: &FilmChainParams<'_>) -> Option<ImageBuf> {
+        // TODO(cuda): colour noise reduction isn't in the CUDA chain yet; the
+        // per-stage path renders it (on the CPU) instead.
+        if params.chroma_denoise.is_some() {
+            return None;
+        }
         match self.run_film_chain_resident(params) {
             Ok(out) => out,
             Err(e) => {

@@ -95,6 +95,7 @@ pub fn path(key: &str) -> Option<String> {
         ("Glare", "Roughness") => "print_render.glare.roughness",
         ("Glare", "Blur") => "print_render.glare.blur",
         ("Scanner", "Lens blur") => "scanner.lens_blur",
+        ("Scanner", "Color noise reduction") => "scanner.chroma_noise_reduction",
         ("Scanner", "Unsharp radius") => "scanner.unsharp_mask.0",
         ("Scanner", "Unsharp amount") => "scanner.unsharp_mask.1",
         ("Scanner", "White level") => "scanner.white_level",

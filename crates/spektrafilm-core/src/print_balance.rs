@@ -46,6 +46,7 @@ pub fn solve_neutral_filter_shifts(
     p.io.output_gamut_compress.algorithm = "off".into();
     p.io.output_gamut_compress.lightness_compression = None;
     p.film_render.grain.active = false;
+    p.scanner.chroma_noise_reduction = 0.0;
     p.film_render.glare.active = false;
     p.print_render.glare.active = false;
     p.io.crop = false;
