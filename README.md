@@ -1,5 +1,7 @@
 # Negs
 
+**English** · [简体中文](README.zh-CN.md)
+
 [![Downloads](https://img.shields.io/github/downloads/noahhaasis/negs/total)](https://github.com/noahhaasis/negs/releases)
 
 **Your photos, developed on film.**
