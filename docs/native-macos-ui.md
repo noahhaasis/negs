@@ -353,9 +353,9 @@ filter lets through. Click a thumbnail to open it with its own edits (from its
 sidecar, see [sidecar-format.md](sidecar-format.md)); ⌘- and ⇧-clicks only
 select. The toolbar's bottom-panel button and View > Show/Hide Film Strip (⌥⌘F)
 toggle it; visibility is remembered between launches. During crop editing the
-strip is disabled until Done or Cancel. The grid (G) shows the same photographs
-in place of the canvas. Ratings, flags, the filter, the grid and selection are
-described for users in [library.md](library.md).
+strip is disabled until Done or Cancel. The grid (G, and G again to hide it)
+shows the same photographs in place of the canvas. Ratings, flags, the filter,
+the grid and selection are described for users in [library.md](library.md).
 
 Folder enumeration runs off the main thread when the strip appears, the
 folder changes, or FSEvents reports external additions, removals, renames or

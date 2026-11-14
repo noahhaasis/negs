@@ -73,7 +73,7 @@ import SwiftUI
         // Plain keys, as in Lightroom, behind the same check as the rating keys.
         command(view, "Edit Photograph", #selector(editPhotograph), "e", [])
         hidden(view, #selector(editPhotograph), "\r")
-        command(view, "Show Grid", #selector(showGrid), "g", [])
+        command(view, "Show Grid", #selector(toggleGrid), "g", [])
         // Esc shows the grid too: `EditorWindowController.escapeToGrid`.
         command(view, "Larger Thumbnails", #selector(largerThumbnails), "+")
         hidden(view, #selector(largerThumbnails), "=", .command)
@@ -221,7 +221,7 @@ import SwiftUI
         guard NSApp.keyWindow is EditorWindow else { return }
         model.copyEditsChoosing()
     }
-    @objc private func showGrid() { model.showGrid() }
+    @objc private func toggleGrid() { model.mode == .grid ? model.editCurrent() : model.showGrid() }
     @objc private func largerThumbnails() { model.changeGridCellSize(larger: true) }
     @objc private func smallerThumbnails() { model.changeGridCellSize(larger: false) }
 
@@ -292,7 +292,12 @@ import SwiftUI
             return model.cropping || (model.image != nil && model.mode == .photo)
         case #selector(resetAdjustments): return model.hasCatalog && !model.cropping && model.mode == .photo
         case #selector(editPhotograph): return model.mode == .grid && model.selection.current != nil && Self.takesRatingKeys(NSApp.keyWindow)
-        case #selector(showGrid): return editing && !model.cropping && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(toggleGrid):
+            let grid = model.mode == .grid
+            item.title = grid ? "Hide Grid" : "Show Grid"
+            // In the grid it opens the current photograph, as E does.
+            let canToggle = grid ? model.selection.current != nil : editing && !model.cropping
+            return canToggle && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < SheetLayout.sizes.upperBound
         case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > SheetLayout.sizes.lowerBound
         case #selector(copyEdits), #selector(copyEditsChoosing):
