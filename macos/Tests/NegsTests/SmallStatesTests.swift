@@ -95,7 +95,7 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         try await waitUntil { model.renderFailed }
         XCTAssertNil(model.error, "said on the canvas, not in an alert")
         XCTAssertFalse(model.developFailure?.isEmpty ?? true, "with the app's reason")
-        XCTAssertNil(DevelopTagTitle.title(source: true, failed: model.renderFailed, developed: model.image != nil, slow: model.showsActivity))
+        XCTAssertNil(DevelopTagTitle.title(source: true, failed: model.renderFailed, developed: model.image != nil, slow: model.showsActivity, loadingOriginal: false))
 
         // Try Again develops it again, and it fails again the same way.
         model.retryDevelop()
@@ -113,11 +113,13 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
     // MARK: Words and places
 
     func testTheTagSaysDevelopingThenUpdatingOnlyWhenSlow() {
-        XCTAssertNil(DevelopTagTitle.title(source: false, failed: false, developed: false, slow: false), "nothing open")
-        XCTAssertEqual(DevelopTagTitle.title(source: true, failed: false, developed: false, slow: false), "Developing")
-        XCTAssertNil(DevelopTagTitle.title(source: true, failed: false, developed: true, slow: false))
-        XCTAssertEqual(DevelopTagTitle.title(source: true, failed: false, developed: true, slow: true), "Updating")
-        XCTAssertNil(DevelopTagTitle.title(source: true, failed: true, developed: true, slow: true), "a failure says itself")
+        XCTAssertNil(DevelopTagTitle.title(source: false, failed: false, developed: false, slow: false, loadingOriginal: false), "nothing open")
+        XCTAssertEqual(DevelopTagTitle.title(source: true, failed: false, developed: false, slow: false, loadingOriginal: false), "Developing")
+        XCTAssertNil(DevelopTagTitle.title(source: true, failed: false, developed: true, slow: false, loadingOriginal: false))
+        XCTAssertEqual(DevelopTagTitle.title(source: true, failed: false, developed: true, slow: true, loadingOriginal: false), "Updating")
+        XCTAssertEqual(DevelopTagTitle.title(source: true, failed: false, developed: true, slow: true, loadingOriginal: true), "Loading original",
+                       "a held original still decoding says so over an update")
+        XCTAssertNil(DevelopTagTitle.title(source: true, failed: true, developed: true, slow: true, loadingOriginal: false), "a failure says itself")
     }
 
     func testTrimMarksReachTwentySixPointsOutsideTheCorners() {
