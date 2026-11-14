@@ -1122,8 +1122,168 @@
       }
     },
     {
+      "id": "fujifilm_eterna_250",
+      "name": "Fujifilm Eterna 250",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          5.5,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_eterna_250d",
+      "name": "Fujifilm Eterna 250D",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          5.5,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_eterna_400",
+      "name": "Fujifilm Eterna 400",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.7,
+          5.8,
+          7.4
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "fujifilm_eterna_500",
       "name": "Fujifilm Eterna 500",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          5.5,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_eterna_vivid_160",
+      "name": "Fujifilm Eterna Vivid 160",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          5.5,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_eterna_vivid_250d",
+      "name": "Fujifilm Eterna Vivid 250D",
       "paper": false,
       "positive": false,
       "bw": false,

@@ -214,8 +214,9 @@ mod tests {
     fn complete_catalog_and_pairing_metadata() {
         let films = super::stocks(false);
         let papers = super::stocks(true);
-        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm.
-        assert_eq!(films.len(), 52);
+        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm and the
+        // 5 Fujifilm Eterna negatives prepared from Fujifilm's datasheets.
+        assert_eq!(films.len(), 57);
         assert_eq!(papers.len(), 10);
         assert!(
             films

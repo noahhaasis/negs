@@ -122,9 +122,34 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("fujifilm_astia_100f", Kind::Slide, EdgePrint::Still(&["FUJI RAP100F"])),
     ("fujifilm_c200", Kind::Negative, EdgePrint::Still(&["FUJI", "200", "CA24"])),
     (
+        "fujifilm_eterna_250",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8553", keykode: None },
+    ),
+    (
+        "fujifilm_eterna_250d",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8563", keykode: None },
+    ),
+    (
+        "fujifilm_eterna_400",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8583", keykode: None },
+    ),
+    (
         "fujifilm_eterna_500",
         Kind::Negative,
         EdgePrint::Cine { product: "8573", keykode: None },
+    ),
+    (
+        "fujifilm_eterna_vivid_160",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8543", keykode: None },
+    ),
+    (
+        "fujifilm_eterna_vivid_250d",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8546", keykode: None },
     ),
     (
         "fujifilm_eterna_vivid_500",

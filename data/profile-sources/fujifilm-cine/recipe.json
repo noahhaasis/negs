@@ -42,6 +42,109 @@
       "stock": "fujifilm_eterna_500",
       "name": "Fujifilm Eterna 500 (re-derived, calibration)",
       "reference_illuminant": "T"
+    },
+    "fujifilm_eterna_250d": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_250d",
+      "name": "Fujifilm Eterna 250D",
+      "reference_illuminant": "D55",
+      "product_35mm": "8563",
+      "rms_granularity_brochure": 3.5
+    },
+    "fujifilm_eterna_vivid_250d": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_vivid_250d",
+      "name": "Fujifilm Eterna Vivid 250D",
+      "reference_illuminant": "D55",
+      "product_35mm": "8546",
+      "notes": [
+        "the brochure caption's '5400K tungsten' is a typo for daylight: D55 (docs/adding-film-stocks.md E)"
+      ],
+      "rms_granularity_brochure": 3.5
+    },
+    "fujifilm_eterna_250": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_250",
+      "name": "Fujifilm Eterna 250",
+      "reference_illuminant": "T",
+      "product_35mm": "8553",
+      "rms_granularity_brochure": 3.5
+    },
+    "fujifilm_eterna_400": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_400",
+      "name": "Fujifilm Eterna 400",
+      "reference_illuminant": "T",
+      "product_35mm": "8583",
+      "rms_granularity_brochure": 3.7
+    },
+    "fujifilm_eterna_vivid_160": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_vivid_160",
+      "name": "Fujifilm Eterna Vivid 160",
+      "reference_illuminant": "T",
+      "product_35mm": "8543",
+      "rms_granularity_brochure": 3.5
     }
   },
   "extraction": {
@@ -1260,6 +1363,326 @@
                 0.9,
                 0.0,
                 0.07
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_vivid_160_manual": {
+      "second_trace_of": "fujifilm_eterna_vivid_160",
+      "info": "Fujifilm Eterna Vivid 160, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 8 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 7,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_250_manual": {
+      "second_trace_of": "fujifilm_eterna_250",
+      "info": "Fujifilm Eterna 250, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 10 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 9,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_400_manual": {
+      "second_trace_of": "fujifilm_eterna_400",
+      "info": "Fujifilm Eterna 400, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 12 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 11,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_250d_manual": {
+      "second_trace_of": "fujifilm_eterna_250d",
+      "info": "Fujifilm Eterna 250D, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 18 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 17,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
               ]
             }
           }

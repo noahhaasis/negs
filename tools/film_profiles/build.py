@@ -6,7 +6,8 @@
   step 9     Negs exposure convention (D5): raw midgray 1 per channel, log E re-zeroed
   window     hanatos2025 adaptation window (D6)
   step 10    grey-ramp refinement on the 28bf883 runtime (refine.py, run in its own env)
-  pick       the variant with the lowest grey-ramp neutrality error
+  pick       the variant with the lowest grey-ramp neutrality error among those whose
+             target-print filters fall in the shipped films' range (D8 check 8)
 
 Writes <out>/<stock>.json (the chosen profile, metadata from the recipe), every variant's
 intermediate profiles, report.json with each gate, and the reconstruction control plot.
@@ -32,7 +33,23 @@ VARIANTS = ("none", "green", "mid")
 LE = np.linspace(-3, 4, 256)
 
 
-def gates_after_creator(au, p8, params):
+def print_weighted(residual, dmid, paper_json):
+    """Check 6, print side: the reconstruction residual weighted, per print channel, by the
+    target print's sensitivity times a 3200 K lamp (TH-KG3-like) through the midscale
+    negative. Pass <= 0.01 D (docs/adding-film-stocks.md D8, Noah 2026-11-14)."""
+    import colour
+    paper = json.loads(Path(paper_json).read_text())
+    ls = np.array([[np.nan if v is None else v for v in r] for r in paper["data"]["log_sensitivity"]], float)
+    lamp = colour.sd_blackbody(3200, pl.SHAPE).values
+    ok = np.isfinite(residual) & np.isfinite(dmid)
+    out = []
+    for c in range(3):
+        w = np.where(ok, np.nan_to_num(10 ** ls[:, c]) * lamp * 10 ** (-np.nan_to_num(dmid)), 0)
+        out.append(float((w / w.sum() * np.nan_to_num(residual)).sum()))
+    return out
+
+
+def gates_after_creator(au, p8, params, paper_json):
     """D8 checks 4 and 6 on the creator output."""
     model = pl.model_from_params(params)
     dc, _ = pl.eval_model(model, p8.data.log_exposure)
@@ -42,12 +59,16 @@ def gates_after_creator(au, p8, params):
     cmy = dd[:, 0:3] * np.asarray(au.info.density_midscale_neutral)[None, :]
     band = (pl.WL >= 400) & (pl.WL <= 700)
     target = dd[:, 4] - dd[:, 3]
-    recon = np.abs(cmy.sum(1) - target)[band]
+    residual = cmy.sum(1) - target
+    recon = np.abs(residual)[band]
+    pw = print_weighted(residual, dd[:, 4], paper_json)
     M = up.compute_densitometer_crosstalk_matrix(up.load_densitometer_data(au.info.densitometer), dd[:, 0:3])
     off = M - np.diag(np.diag(M))
     return {"check4_curve_fit_max_D": fit_res, "check4_pass": fit_res <= 0.02,
             "check6_reconstruction_max_D_400_700": float(np.nanmax(recon)),
             "check6_pass": float(np.nanmax(recon)) <= 0.03,
+            "check6_worst_nm": float(pl.WL[band][np.nanargmax(recon)]),
+            "check6_print_weighted_rgb": pw, "check6_print_pass": max(abs(v) for v in pw) <= 0.01,
             "crosstalk_matrix": M.round(4).tolist(), "crosstalk_max_offdiag_over_diag": float(np.max(np.abs(off) / np.diag(M)[:, None]))}
 
 
@@ -92,7 +113,7 @@ def main():
     for variant in args.variants.split(","):
         au, p8, params = pl.steps_1_to_8(stock_dir, packet / "donors" / recipe["dye_density_cmy_donor"], recipe,
                                          variant, plot_path=out / "reconstruction.png" if au is None else None, au=au)
-        rep = gates_after_creator(au, p8, params)
+        rep = gates_after_creator(au, p8, params, Path(args.negs_data) / "profiles" / f"{args.target_print}.json")
         model = pl.model_from_params(params)
         ls, model, norm = pl.normalise(p8.data.log_sensitivity, model, lut, ill)
         model, zero9 = pl.rezero(model, LE)
@@ -118,7 +139,20 @@ def main():
         print(variant, "neutrality stage9 %.4f final %.4f" % (ref["before"]["mean_neutrality_error"],
                                                               final["before"]["mean_neutrality_error"]),
               "scale", np.round(ref["density_scale"], 4), "shift", np.round(ref["log_exposure_shift"], 4))
-    best = min(report["variants"], key=lambda v: report["variants"][v]["ramp_final"]["mean_neutrality_error"])
+    # D8 check 8 on the target print: the M and Y filters within the range the shipped films
+    # need on it. The pick is the lowest grey-ramp error among the variants that pass.
+    shipped = json.loads((Path(args.negs_data) / "filters/neutral_print_filters.json").read_text())
+    ours = set(json.loads(Path(args.recipe).read_text())["stocks"])  # the range is the other films'
+    rng = np.array([v for k, v in shipped[args.target_print]["TH-KG3"].items() if k not in ours], float)
+    lo, hi = rng.min(0), rng.max(0)
+    report["filter_range_target_print"] = {"M": [lo[1], hi[1]], "Y": [lo[2], hi[2]]}
+    for rep in report["variants"].values():
+        f = np.asarray(rep["filters_final_python"], float)
+        rep["check8_target_print_pass"] = bool(f[0] == 0 and lo[1] <= f[1] <= hi[1] and lo[2] <= f[2] <= hi[2])
+    passing = [v for v in report["variants"] if report["variants"][v]["check8_target_print_pass"]]
+    if not passing:
+        raise SystemExit("no variant passes the filter range on the target print: stop and report (D8)")
+    best = min(passing, key=lambda v: report["variants"][v]["ramp_final"]["mean_neutrality_error"])
     report["chosen_variant"] = best
     (out / f"{args.stock}.json").write_text((out / f"{best}_stage10.json").read_text())
     report["au_density_midscale_neutral"] = list(au.info.density_midscale_neutral)

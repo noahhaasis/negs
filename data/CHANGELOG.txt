@@ -100,3 +100,30 @@ see FOTUFILM_LICENSE.txt):
 - borders/35mm/: edge-print strips for the 24 ported colour films (product
   codes or names) and the 5 B&W films (Fotufilm's edge texts),
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-14: Fujifilm Eterna negatives prepared from Fujifilm's datasheets
+(CC BY-SA 4.0; method and generic dye spectra from spektrafilm by Andrea
+Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: 5 new colour negatives, fujifilm_eterna_250d,
+  fujifilm_eterna_vivid_250d, fujifilm_eterna_250, fujifilm_eterna_400 and
+  fujifilm_eterna_vivid_160, built by tools/film_profiles from the curves
+  in Fujifilm's brochures KB-0507ER, KB-1009E, KB-0506ER, KB-0508E and
+  KB-0701E (document, edition and SHA-256 in each profile's datasource and
+  in profile-sources/fujifilm-cine/recipe.json). Method: spektrafilm's
+  public-era profile creator (b2c7fe6, steps 1-8) with its generic_a dye
+  set, then Negs' exposure convention, spektrafilm's grey-ramp refinement
+  run on the 28bf883 runtime through kodak_2383, and a fitted hanatos2025
+  adaptation window (docs/adding-film-stocks.md). The extracted points,
+  axis calibration and calibration reports are in
+  profile-sources/fujifilm-cine/. No existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 5 new films
+  on every colour paper, from upstream's solver
+  (crates/spektrafilm-cli/src/bin/solve_neutral_filters.rs). Existing
+  entries unchanged.
+- presets/grain.toml: grain sections for the 5 new films, in a third
+  Negs-only block at the end ([3.5, 5.5, 7.0] x the brochure's RMS
+  granularity / 3.5). Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 5 new films (Fujifilm 35 mm
+  product codes 8563, 8546, 8553, 8583, 8543),
+  crates/spektrafilm-io/src/film35.rs.

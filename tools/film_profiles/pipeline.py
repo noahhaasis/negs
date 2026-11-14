@@ -171,12 +171,14 @@ PRIOR_WEIGHT = 0.002  # as tools/fotufilm_port/port_stocks.py used for every por
 
 def house_windows(negs_data):
     """The author's stored windows: every upstream spektrafilm colour film in Negs's data
-    (metadata version not a Fotufilm port, push variants left out)."""
+    (metadata version not a Fotufilm port nor a Negs preparation, which credit him for the
+    method; push variants left out)."""
     out = {}
     for f in sorted((Path(negs_data) / "profiles").glob("*.json")):
         d = json.loads(f.read_text())
         w = d["data"].get("hanatos2025_adaptation_window_params")
-        if w and not d["metadata"].get("version", "").startswith("fotufilm-port") \
+        version = d["metadata"].get("version", "")
+        if w and not version.startswith(("fotufilm-port", "negs-")) \
                 and not f.stem.endswith(("_push1", "_push2")) and "Andrea Volpato" in d["metadata"].get("copyright", ""):
             out[f.stem] = w
     return out

@@ -196,10 +196,10 @@ lifecycle_test! {
         assert_eq!(model.films().len(), 23, "the cached catalog fills in the stocks at launch");
         model.shutdown();
         let mut h = Harness::start(harness::prefs(false)).unwrap();
-        assert_eq!(h.model().films().len(), 52);
+        assert_eq!(h.model().films().len(), 57);
         assert_eq!(h.model().papers().len(), 10);
         let saved = crate::session::CatalogCache::load(&paths.helper, &paths.data).unwrap();
-        assert_eq!(film_count(&saved), 52, "the helper's catalog replaced the file");
+        assert_eq!(film_count(&saved), 57, "the helper's catalog replaced the file");
     }
 }
 
@@ -215,20 +215,20 @@ const FOTUFILM: [&str; 29] = [
 ];
 
 lifecycle_test! {
-    /// Fotufilm: the helper lists 52 films and 10 papers; every film lands in
+    /// Fotufilm: the helper lists 57 films (52 + the 5 datasheet Eternas) and 10 papers; every film lands in
     /// exactly one grid group; the 29 new films are there with their own 35mm
     /// strips (full and half frame), and every film's strip loads.
     fn the_catalog_has_the_fotufilm_films_grouped_with_their_borders() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         let m = h.model();
         let (films, papers) = (m.films(), m.papers());
-        assert_eq!((films.len(), papers.len()), (52, 10));
+        assert_eq!((films.len(), papers.len()), (57, 10));
         let groups = state::film_groups(&films, &papers);
         let grouped: Vec<&str> = groups.iter().flat_map(|g| g.stocks.iter().map(|s| s.id.as_str())).collect();
         let mut sorted = grouped.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!((grouped.len(), sorted.len()), (52, 52), "each film in exactly one group");
+        assert_eq!((grouped.len(), sorted.len()), (57, 57), "each film in exactly one group");
         for g in &groups {
             eprintln!("{}: {}", g.title, g.stocks.len());
         }
@@ -327,7 +327,7 @@ lifecycle_test! {
         h.idle();
         let thumbnails = h.command_names().iter().filter(|c| *c == "thumbnail").count();
         eprintln!("{thumbnails} film thumbnails in {:.1} s (debug or release test build, 3072 × 2048 photograph)", started.elapsed().as_secs_f64());
-        assert_eq!(thumbnails, 52);
+        assert_eq!(thumbnails, 57);
         h.clear_logs();
         h.edit(|m| m.set_previews(false));
         h.idle();

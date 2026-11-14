@@ -222,3 +222,24 @@ rms_granularity = [23.0, 23.0, 23.0]
 
 [fotufilm_infrared_color]
 rms_granularity = [8.5, 8.5, 8.5]
+
+# --- Negs only, not upstream: the Fujifilm Eterna negatives prepared from
+# Fujifilm's datasheets (tools/film_profiles, docs/adding-film-stocks.md D6).
+# rms_granularity = [3.5, 5.5, 7.0] x (the brochure's RMS granularity / 3.5),
+# the rule that reproduces the shipped Eterna 500, F-64D and Reala 500D
+# sections within 0.3, rounded to 0.1. RMS 3.5 for all but Eterna 400 (3.7).
+# The rest from upstream's colour defaults.
+[fujifilm_eterna_250d]
+rms_granularity = [3.5, 5.5, 7.0]
+
+[fujifilm_eterna_vivid_250d]
+rms_granularity = [3.5, 5.5, 7.0]
+
+[fujifilm_eterna_250]
+rms_granularity = [3.5, 5.5, 7.0]
+
+[fujifilm_eterna_400]
+rms_granularity = [3.7, 5.8, 7.4]
+
+[fujifilm_eterna_vivid_160]
+rms_granularity = [3.5, 5.5, 7.0]

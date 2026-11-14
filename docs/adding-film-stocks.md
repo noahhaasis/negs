@@ -308,7 +308,7 @@ Use the public creator functions (ported, §F) with these per-stock choices.
 **7. Choices for the alignment step.**
 
 - `align_midscale_neutral_exposures(reference_channel)` [V] (`correct.py:22`). Upstream Fuji used `'green'` (C200), `'mid'` (Pro 400H) or none (X-Tra 400). No rule is known [U].
-- **Rule [N]:** run all three variants through step 10 and keep the one with the lowest grey-ramp neutrality error. Record all three errors.
+- **Rule [N]:** run all three variants through step 10 and keep the one with the lowest grey-ramp neutrality error among those whose neutral filters on the target print fall in the shipped films' range (check 8). Record all three errors. (Added 2026-11-14: for Eterna 250D and Vivid 160 the unaligned variant was most neutral on the ramp but rendered grey 0.16–0.27 D less red than the datasheet's own midscale neutral and needed a magenta filter below every shipped film's.)
 
 **8. `densitometer_normalization` [V code, F/U use]** (`factory.py:446`).
 
@@ -416,12 +416,12 @@ The full checklist is in `negs-stock-integration.md` §3; the touch points are:
 
 | # | Check | Pass | If it fails |
 |---|---|---|---|
-| 1 | Axis calibration | tick residual ≤ 0.2 % of span; frame corners exact | re-pick the ticks; check the rotation and the axis swap |
+| 1 | Axis calibration | tick residual ≤ 0.2 % of span; frame corners exact | re-pick the ticks; check the rotation and the axis swap. A hand-drafted chart whose own gridlines are uneven may get a recorded per-axis exception (`gate` and `gate_reason` in the recipe) when a physical check bounds the error (Noah, 2026-11-14; the Eterna Vivid brochures, 0.4 %) |
 | 2 | Extraction against a precedent (calibration stock Eterna 500) | offset-free log S shape within 0.05 of the Fotufilm port over the common range; D-min within 0.02 D (400–700 nm); gross curves minus D-min within 0.03 D after aligning green at 0.2 over D-min | find which side is wrong by overlaying on the PDF render; the port is a trace, not ground truth |
 | 3 | Port of steps 1–7 (calibration stock C200, from `9428440/src/spectral_film_lab/data/film/negative/fujifilm_c200`) | log S and dyes equal to `work/creator-b2c7fe6/.../fujifilm_c200_REGEN_au.json` (≤ 1e-6 and ≤ 1e-4); curves ≤ 0.015 D | diff step by step against the b2c7fe6 run |
 | 4 | Curve-model fit | ≤ 0.02 D against the unmixed data in the digitised range | add starting points; never widen the bounds silently |
 | 5 | Normalisation | raw midgray 1 ± 0.0005 per channel | redo §D5 |
-| 6 | Reconstruction | Σcmy reproduces D-mid − D-min within 0.03 D (400–700 nm); the crosstalk matrix is near-diagonal | inspect the coupler band near 700 nm; try the §D3 fallback extension |
+| 6 | Reconstruction | Σcmy reproduces D-mid − D-min within 0.03 D (400–700 nm); the crosstalk matrix is near-diagonal | inspect the coupler band near 700 nm; try the §D3 fallback extension. If it still fails, it may still ship (Noah, 2026-11-14) when the residual weighted per print channel (target print sensitivity × 3200 K lamp through the D-mid, `build.py` `check6_print_weighted_rgb`) is ≤ 0.01 D; record the figure and the worst wavelength in `datasource` |
 | 7 | Grey ramp through `kodak_2383`, EV −2…+6 | neutral midtones (EV 0 \|R−G\|, \|B−G\| ≤ 0.005 in print RGB); mean neutrality error **not worse than the worst** of Vision3 250D/500T and the shipped Fuji upstream negatives on the same ramp; opposite drift in shadows and highlights | change `reference_channel`; lower trustability only to 0.1 (Crystal Archive precedent) and record it |
 | 8 | Neutral filters | per §D6 | as in #523: if refitting the filters fixes a cast, the stored filter was wrong |
 | 9 | Fold check | 0 backwards steps per channel at defaults | per-stock coupler table |

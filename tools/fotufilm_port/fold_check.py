@@ -7,7 +7,7 @@ import json, sys, tomllib
 from pathlib import Path
 import numpy as np
 from scipy.stats import norm
-ROOT = Path("/home/noah/Work/Negs-fotufilm")
+ROOT = Path(__file__).resolve().parents[2]  # the Negs checkout
 PRESETS = tomllib.loads((ROOT / "data/presets/couplers.toml").read_text())
 
 
@@ -23,7 +23,7 @@ def matrix(p):
     i = p["info"]; pos = i["type"] == "positive"
     g = PRESETS.get(i["stock"]) or PRESETS["defaults"]["color"]["positive" if pos else "negative"]
     if not pos and i.get("use") == "cine" and i["stock"] not in PRESETS:
-        g = PRESETS["defaults"]["color"]["negative"]["cine"]["tungsten" if "BB" in str(i.get("reference_illuminant")) else "daylight"]
+        g = PRESETS["defaults"]["color"]["negative"]["cine"]["tungsten" if str(i.get("reference_illuminant", "")).startswith("T") else "daylight"]
     s, r, gg, b = g["gamma_samelayer_rgb"], g["gamma_interlayer_r_to_gb"], g["gamma_interlayer_g_to_rb"], g["gamma_interlayer_b_to_rg"]
     return np.array([[s[0], r[0], r[1]], [gg[0], s[1], gg[1]], [b[0], b[1], s[2]]]), pos
 
