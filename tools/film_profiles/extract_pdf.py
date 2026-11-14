@@ -123,7 +123,15 @@ def fit_axis(spec, grid, frame):
         res["frame_residual"] = (np.array(res["frame_value"]) - fr).round(6).tolist()
         worst = max(worst, float(np.max(np.abs(np.array(res["frame_value"]) - fr))) / span)
     res["worst_over_span"] = worst
-    res["pass"] = worst <= 0.002
+    # "gate": a recorded exception for a hand-drafted chart whose own gridlines are
+    # uneven (no straight line reproduces them); it needs "gate_reason" and the physical
+    # check that justified it. Default is the method's 0.2 % of span.
+    gate = spec.get("gate", 0.002)
+    if gate != 0.002 and not spec.get("gate_reason"):
+        raise ValueError(f"axis on pdf {spec['pdf']}: a gate other than 0.2 % needs a gate_reason")
+    res["gate"], res["pass"] = gate, worst <= gate
+    if spec.get("gate_reason"):
+        res["gate_reason"] = spec["gate_reason"]
     return res
 
 

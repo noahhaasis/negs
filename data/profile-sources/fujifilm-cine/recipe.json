@@ -314,6 +314,951 @@
           }
         }
       }
+    },
+    "fujifilm_eterna_250d": {
+      "info": "Fujifilm Eterna 250D KB-0507ER 2005",
+      "source": {
+        "file": "eterna250d.pdf",
+        "sha256": "fa2280f6ca645249476415859ed088c1728151be054e88f1f41344628b4afe3b",
+        "document": "FUJIFILM ETERNA 250D brochure, Ref. No. KB-0507ER",
+        "edition": "(c) 2005 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            91.2,
+            837.9,
+            283.6,
+            987.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            91.2,
+            571.7,
+            224.2,
+            756.7
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            362.4,
+            571.9,
+            466.0,
+            756.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_250": {
+      "info": "Fujifilm Eterna 250 KB-0506ER 2005",
+      "source": {
+        "file": "eterna250.pdf",
+        "sha256": "ecbc4d988658caf8f9d37a345a7a48b2992aa236cb32eee02c46036c548efa59",
+        "document": "FUJIFILM ETERNA 250 brochure, Ref. No. KB-0506ER",
+        "edition": "(c) 2005 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            91.2,
+            837.9,
+            283.6,
+            987.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            91.2,
+            571.7,
+            224.2,
+            756.7
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            362.4,
+            571.9,
+            466.0,
+            756.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_400": {
+      "info": "Fujifilm Eterna 400 KB-0508E 2005",
+      "source": {
+        "file": "eterna400.pdf",
+        "sha256": "91f1461a4e40c370098d29abbbbe3b24f54ded18be17b17cbafa0aeea48f62ad",
+        "document": "FUJIFILM ETERNA 400 brochure, Ref. No. KB-0508E",
+        "edition": "(c) 2005 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            91.2,
+            837.9,
+            283.6,
+            987.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            91.2,
+            571.7,
+            224.2,
+            756.7
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            362.4,
+            571.9,
+            466.0,
+            756.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_vivid_160": {
+      "info": "Fujifilm Eterna Vivid 160 KB-0701E 2007",
+      "source": {
+        "file": "eterna_vivid160.pdf",
+        "sha256": "7c2b5c3527b2eff2ea56e8bbcfce6d624cf68759c7e5bd7b55cb82dc224727cb",
+        "document": "FUJIFILM ETERNA Vivid 160 brochure, Ref. No. KB-0701E",
+        "edition": "(c) 2007 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            73.2,
+            673.0,
+            227.5,
+            792.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.12
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.12
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            73.1,
+            459.4,
+            179.8,
+            607.9
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            290.7,
+            459.8,
+            373.6,
+            607.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_vivid_250d": {
+      "info": "Fujifilm Eterna Vivid 250D KB-1009E 2010",
+      "source": {
+        "file": "eterna_vivid250d.pdf",
+        "sha256": "54394f704d56f13864e2dec3ab4b39a627b4844cd0b0148600af6dc43f3828af",
+        "document": "FUJIFILM ETERNA Vivid 250D brochure, Ref. No. KB-1009E",
+        "edition": "(c) 2010 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            73.2,
+            673.0,
+            227.5,
+            792.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.09,
+                0.08
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.09,
+                0.08
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            73.1,
+            459.5,
+            179.8,
+            607.9
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.36,
+                0.67
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.6,
+                0.27
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.9,
+                0.0,
+                0.07
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            291.3,
+            459.8,
+            373.6,
+            607.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.36,
+                0.67
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.6,
+                0.27
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.9,
+                0.0,
+                0.07
+              ]
+            }
+          }
+        }
+      }
     }
   },
   "manual": {
