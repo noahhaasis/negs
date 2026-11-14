@@ -413,10 +413,11 @@ struct CanvasArea: View {
         }
     }
 
-    /// Developing or Updating, at the top centre of the photograph's visible part.
+    /// Developing, Updating or Loading original, at the top centre of the photograph's visible part.
     @ViewBuilder private var developTag: some View {
         let title = DevelopTagTitle.title(source: model.source != nil, failed: model.renderFailed,
-                                          developed: model.image != nil, slow: model.showsActivity)
+                                          developed: model.image != nil, slow: model.showsActivity,
+                                          loadingOriginal: model.holdingOriginal && model.original == nil)
         ZStack {
             if let title, !dropping, !model.cropping {
                 GeometryReader { proxy in
