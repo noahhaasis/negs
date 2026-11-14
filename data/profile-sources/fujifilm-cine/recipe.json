@@ -909,7 +909,9 @@
               "frame": [
                 700,
                 400
-              ]
+              ],
+              "gate": 0.004,
+              "gate_reason": "hand-drafted chart: its 500/600 nm gridlines sit unevenly against the 400/700 nm frame, so no straight line reproduces them (worst 0.39 % of span, ~1.2 nm). The tick labels are evenly spaced but sit up to 1.4 pt off the gridlines, so re-picking ticks does not help. Same layout and drafting as Vivid 250D (KB-1009E), whose identical-to-Eterna-250D dye chart shows this fit is accurate to ~0.4 nm. Exception approved by Noah 2026-11-14."
             },
             "y": {
               "pdf": "x",
@@ -1042,7 +1044,9 @@
               "frame": [
                 3.0,
                 0.0
-              ]
+              ],
+              "gate": 0.004,
+              "gate_reason": "hand-drafted chart: the 1.0/2.0 gridlines sit unevenly against the 0/3 frame (worst 0.26 % of span, ~0.008 log units). Same layout as Vivid 250D, whose sensitivity axes pass. Exception approved by Noah 2026-11-14."
             }
           },
           "curves": {
@@ -1098,7 +1102,9 @@
               "frame": [
                 700,
                 400
-              ]
+              ],
+              "gate": 0.004,
+              "gate_reason": "hand-drafted chart: its 500/600 nm gridlines sit unevenly against the 400/700 nm frame, so no straight line reproduces them (worst 0.33 % of span, ~1.0 nm). Physical check: this chart is the same dye curve as Eterna 250D's (KB-0507ER, passes at 0.003 %); with this least-squares grid+frame fit every extremum lands +0.36-0.40 nm from 250D's. Exception approved by Noah 2026-11-14."
             },
             "y": {
               "pdf": "x",

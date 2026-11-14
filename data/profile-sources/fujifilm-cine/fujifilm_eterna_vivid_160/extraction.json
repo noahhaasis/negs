@@ -1,0 +1,377 @@
+{
+ "stock": "fujifilm_eterna_vivid_160",
+ "source": {
+  "file": "eterna_vivid160.pdf",
+  "sha256": "7c2b5c3527b2eff2ea56e8bbcfce6d624cf68759c7e5bd7b55cb82dc224727cb",
+  "document": "FUJIFILM ETERNA Vivid 160 brochure, Ref. No. KB-0701E",
+  "edition": "(c) 2007 FUJIFILM Corporation"
+ },
+ "panels": {
+  "spectral_density": {
+   "page": 0,
+   "page_rotation": 90,
+   "frame_pdf": [
+    73.21200561523438,
+    672.9580078125,
+    227.48899841308594,
+    792.3880004882812
+   ],
+   "axes": {
+    "x": {
+     "pdf": "y",
+     "slope": -2.507671241582,
+     "offset": 2387.716158685689,
+     "span": 299.4911580154055,
+     "gridline_pdf": [
+      712.767,
+      753.238
+     ],
+     "gridline_residual": [
+      0.330932,
+      -1.157205
+     ],
+     "frame_pdf": [
+      672.9580078125,
+      792.3880004882812
+     ],
+     "frame_value": [
+      700.158715701968,
+      400.66755768656253
+     ],
+     "frame_residual": [
+      0.158716,
+      0.667558
+     ],
+     "worst_over_span": 0.0038639038522340903,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted chart: its 500/600 nm gridlines sit unevenly against the 400/700 nm frame, so no straight line reproduces them (worst 0.39 % of span, ~1.2 nm). The tick labels are evenly spaced but sit up to 1.4 pt off the gridlines, so re-picking ticks does not help. Same layout and drafting as Vivid 250D (KB-1009E), whose identical-to-Eterna-250D dye chart shows this fit is accurate to ~0.4 nm. Exception approved by Noah 2026-11-14."
+    },
+    "y": {
+     "pdf": "x",
+     "slope": -0.012968988031886008,
+     "offset": 2.949477518223852,
+     "span": 2.0008164731907008,
+     "gridline_pdf": [
+      111.701,
+      150.51,
+      188.68
+     ],
+     "gridline_residual": [
+      0.000829,
+      -0.002485,
+      0.002489
+     ],
+     "frame_pdf": [
+      73.21200561523438,
+      227.48899841308594
+     ],
+     "frame_value": [
+      1.9999918936095065,
+      -0.0008245795811943069
+     ],
+     "frame_residual": [
+      -8e-06,
+      -0.000825
+     ],
+     "worst_over_span": 0.0012439678444550776,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_mid": {
+     "paths": [
+      54
+     ],
+     "points": 757,
+     "x_range": [
+      402.11944790858684,
+      696.4974605890602
+     ],
+     "y_range": [
+      0.7032048461503093,
+      1.4958854894593805
+     ]
+    },
+    "dye_density_min": {
+     "paths": [
+      53
+     ],
+     "points": 694,
+     "x_range": [
+      401.89124125446097,
+      697.1820805514378
+     ],
+     "y_range": [
+      0.11808815400584605,
+      0.781905774755363
+     ]
+    }
+   }
+  },
+  "characteristic": {
+   "page": 0,
+   "page_rotation": 90,
+   "frame_pdf": [
+    73.1449966430664,
+    459.3919982910156,
+    179.80899047851562,
+    607.8989868164062
+   ],
+   "axes": {
+    "x": {
+     "pdf": "y",
+     "slope": -0.09426584788160842,
+     "offset": 50.30425283208833,
+     "span": 13.99913718969024,
+     "gridline_pdf": [
+      469.993,
+      480.601,
+      491.209,
+      501.817,
+      512.425,
+      523.034,
+      533.643,
+      544.251,
+      554.86,
+      565.467,
+      576.075,
+      586.684,
+      597.292
+     ],
+     "gridline_residual": [
+      -3.7e-05,
+      -9e-06,
+      1.9e-05,
+      4.6e-05,
+      7.1e-05,
+      1e-05,
+      -5.8e-05,
+      -2.7e-05,
+      -9.4e-05,
+      2.3e-05,
+      5.3e-05,
+      -1.4e-05,
+      1.7e-05
+     ],
+     "frame_pdf": [
+      459.3919982910156,
+      607.8989868164062
+     ],
+     "frame_value": [
+      6.999276603159338,
+      -6.999860586530907
+     ],
+     "worst_over_span": 6.724889702989674e-06,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "x",
+     "slope": -0.028124536858015317,
+     "offset": 5.0571632538598275,
+     "span": 2.9998754260482103,
+     "gridline_pdf": [
+      90.921,
+      108.7,
+      126.481,
+      144.258,
+      162.039
+     ],
+     "gridline_residual": [
+      5.2e-05,
+      2.6e-05,
+      -5.6e-05,
+      -2.6e-05,
+      -0.000109
+     ],
+     "frame_pdf": [
+      73.1449966430664,
+      179.80899047851562
+     ],
+     "frame_value": [
+      2.9999940997924996,
+      0.00011867374428931043
+     ],
+     "frame_residual": [
+      -6e-06,
+      0.000119
+     ],
+     "worst_over_span": 3.9559557459904754e-05,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": "stops_to_log10H",
+   "curves": {
+    "density_curve_b": {
+     "paths": [
+      115
+     ],
+     "points": 442,
+     "x_range": [
+      -1.953762624789555,
+      1.8125261463763245
+     ],
+     "y_range": [
+      0.6603981371735506,
+      2.3323455493781093
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      116
+     ],
+     "points": 190,
+     "x_range": [
+      -1.953762624789555,
+      1.8054042225635676
+     ],
+     "y_range": [
+      0.5153267344851757,
+      2.145964274518581
+     ]
+    },
+    "density_curve_r": {
+     "paths": [
+      117
+     ],
+     "points": 253,
+     "x_range": [
+      -1.953792068540725,
+      1.8050907332128596
+     ],
+     "y_range": [
+      0.2547016071674051,
+      1.608729230696761
+     ]
+    }
+   }
+  },
+  "sensitivity": {
+   "page": 0,
+   "page_rotation": 90,
+   "frame_pdf": [
+    290.718994140625,
+    459.75299072265625,
+    373.5509948730469,
+    607.489990234375
+   ],
+   "axes": {
+    "x": {
+     "pdf": "y",
+     "slope": -2.3022207776323005,
+     "offset": 1779.0264141444093,
+     "span": 340.12318990093195,
+     "gridline_pdf": [
+      468.519,
+      490.374,
+      512.228,
+      534.084,
+      555.699,
+      577.074,
+      598.929
+     ],
+     "gridline_residual": [
+      0.392209,
+      0.077219,
+      -0.235593,
+      -0.552832,
+      -0.315311,
+      0.47472,
+      0.159589
+     ],
+     "frame_pdf": [
+      459.75299072265625,
+      607.489990234375
+     ],
+     "frame_value": [
+      720.5735263241197,
+      380.45033642318776
+     ],
+     "worst_over_span": 0.0016253866268914217,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "x",
+     "slope": -0.03626681190646997,
+     "offset": 13.543926781188611,
+     "span": 3.004052590399327,
+     "gridline_pdf": [
+      318.433,
+      345.666
+     ],
+     "gridline_residual": [
+      -0.004622,
+      0.007724
+     ],
+     "frame_pdf": [
+      290.718994140625,
+      373.5509948730469
+     ],
+     "frame_value": [
+      3.0004757030524196,
+      -0.0035768873469077533
+     ],
+     "frame_residual": [
+      0.000476,
+      -0.003577
+     ],
+     "worst_over_span": 0.0025710324971593007,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted chart: the 1.0/2.0 gridlines sit unevenly against the 0/3 frame (worst 0.26 % of span, ~0.008 log units). Same layout as Vivid 250D, whose sensitivity axes pass. Exception approved by Noah 2026-11-14."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      59
+     ],
+     "points": 442,
+     "x_range": [
+      385.4853202430195,
+      518.4616148416858
+     ],
+     "y_range": [
+      0.21500237342679007,
+      2.1815361797374404
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      58
+     ],
+     "points": 568,
+     "x_range": [
+      479.97304741250446,
+      598.5650991923303
+     ],
+     "y_range": [
+      0.20611828836901402,
+      1.9599493529127585
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      57
+     ],
+     "points": 379,
+     "x_range": [
+      570.1396140989727,
+      663.7548046523257
+     ],
+     "y_range": [
+      0.3798355205228141,
+      1.3063301199183837
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}
