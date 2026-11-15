@@ -535,8 +535,10 @@ struct SplitLine: View {
                     Color.clear.contentShape(Rectangle())
                         .frame(width: print.width, height: print.height)
                         .offset(x: print.minX, y: print.minY)
-                        .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                            model.splitFraction = min(max((print.minX + drag.location.x) / width, 0), 1)
+                        // In the line's space, as the knob is: outside `.offset` the
+                        // local space already counts the print's left margin.
+                        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("splitLine")).onChanged { drag in
+                            model.splitFraction = min(max(drag.location.x / width, 0), 1)
                         })
                         .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
                 }
