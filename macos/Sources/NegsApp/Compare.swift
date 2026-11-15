@@ -244,7 +244,7 @@ extension PhotoLibrary {
 // MARK: The model's side
 
 extension EditorModel {
-    /// How the menu item and the grid word read for `targets`.
+    /// How the menu item and the Compare word read for `targets`.
     struct CompareOffer: Equatable {
         var title: String
         var enabled: Bool
@@ -272,13 +272,13 @@ extension EditorModel {
         return CompareOffer(title: "Compare with Original", enabled: canCompare && canCompareWithOriginal(item), withOriginal: true)
     }
 
-    /// The grid word, the C key and View › Compare: the two selected, in shown order.
+    /// The title bar's Compare word, the C key and View › Compare: the two selected, in shown order.
     var selectedPair: (URL, URL)? {
         let selected = selection.ordered(shownPhotos.map(\.url))
         return selected.count == 2 ? (selected[0], selected[1]) : nil
     }
 
-    /// The grid word's tooltip, and whether it acts.
+    /// The Compare word's tooltip, and whether it acts.
     var compareWord: (enabled: Bool, help: String) {
         let count = selection.ordered(shownPhotos.map(\.url)).count
         if let (first, second) = selectedPair, canCompare {
@@ -334,11 +334,13 @@ extension EditorModel {
     /// with the edited photograph open. The selection is as it was.
     func leaveCompare(toGrid: Bool? = nil) {
         guard let comparison else { return }
+        let grid = toGrid ?? (comparison.origin == .grid)
+        // The grid's sheet flies the two back to their cells from here.
+        places.leftCompare = grid ? places.compare.mapValues(\.rect) : [:]
         self.comparison = nil
         compareSteps?.cancel(); compareSteps = nil
         stopCompareDevelop()
         compareSides = [:]
-        let grid = toGrid ?? (comparison.origin == .grid)
         var restored = comparison.selection
         // The photo view's current photograph is the open one; the grid's
         // can be another, as it was.
@@ -483,7 +485,21 @@ extension EditorModel {
         guard let item = sourceItem else { return }
         let other = CompareOther(side: .photo(item))
         other.state = state; other.facts = photoFacts; other.filmStrip = filmStrip
-        if let image { other.show(image, size: imageSize, as: showsSettledFrame ? .developed : .kept) }
+        // Clicked away before its develop arrived: its stand-in, never nothing.
+        if let image {
+            other.show(image, size: imageSize, as: showsSettledFrame ? .developed : .kept)
+        } else if let standIn {
+            other.show(standIn, size: CanvasArea.standInSize(standIn, photo: placeholderSize), as: .thumbnail)
+        } else if let placeholder {
+            other.show(placeholder, size: placeholderSize, as: .embedded)
+        }
+        if other.facts == nil {
+            let photo = item.photoFile
+            Task { [weak other] in
+                let facts = await Task.detached(priority: .userInitiated) { PhotoFacts.read(photo) }.value
+                if other?.facts == nil { other?.facts = facts }
+            }
+        }
         compareSides[.photo(item)] = other
     }
 

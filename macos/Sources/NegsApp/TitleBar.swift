@@ -62,7 +62,7 @@ final class EditorFrameView: NSView {
 /// bar.
 final class TitleBand: NSView {
     let name = NSTextField(labelWithString: "Negs")
-    /// Compare's view switch at the right, while comparing (ticket 46).
+    /// The view switch at the right, Grid · Photo · Compare (ticket 46).
     private var views: NSView?
     /// Between the zoom button and the name (`.lights`' 14 pt padding).
     static let gap: CGFloat = 14

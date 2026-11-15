@@ -112,7 +112,7 @@ private struct ComparePane: View {
     var body: some View {
         let open = model.comparedIsOpen(side)
         ZStack(alignment: .topLeading) {
-            CompareCanvasPicture(model: model, picture: picture, open: open, link: link, frame: frame) { _ in
+            CompareCanvasPicture(model: model, side: side, picture: picture, open: open, link: link, frame: frame) { _ in
                 model.activateCompared(first: first)
             }
             CompareCaption(model: model, side: side, active: active, stacked: stacked, differences: differences) {
@@ -131,6 +131,7 @@ private struct ComparePane: View {
 /// The print itself, linked to the other's zoom and pan. A click makes it the active one.
 private struct CompareCanvasPicture: View {
     let model: EditorModel
+    let side: Comparison.Side
     let picture: ComparePicture?
     let open: Bool
     let link: ZoomLink
@@ -151,6 +152,14 @@ private struct CompareCanvasPicture: View {
             }
         }
         .frame(width: max(frame.width, 1), height: max(frame.height, 1))
+        // Hidden while its thumbnail flies here from the grid (`SheetFlight`).
+        .opacity(model.sheetWaiting.contains(side.item) && !side.isOriginal ? 0 : 1)
+        // Where that flight lands. Inside the offset: outside it, the
+        // frame reported is the one before the offset.
+        .modifier(PlaceReport(image: nil) { [model, side] place in
+            guard !side.isOriginal else { return }
+            model.places.compare[side.item] = place
+        })
         .offset(x: frame.minX, y: frame.minY)
     }
 }
@@ -329,13 +338,13 @@ private struct CompareSlider: View {
         let line = frame.width * split
         let differences = model.compareDifferences
         ZStack(alignment: .topLeading) {
-            CompareCanvasPicture(model: model, picture: a, open: model.comparedIsOpen(comparison.first), link: link, frame: frame) { _ in }
+            CompareCanvasPicture(model: model, side: comparison.first, picture: a, open: model.comparedIsOpen(comparison.first), link: link, frame: frame) { _ in }
             // The second, fitted into the first's frame: black where its proportions leave room.
             Color.black
                 .frame(width: max(frame.width - line, 0), height: frame.height)
                 .offset(x: frame.minX + line, y: frame.minY)
                 .allowsHitTesting(false)
-            CompareCanvasPicture(model: model, picture: b, open: model.comparedIsOpen(comparison.second), link: link, frame: frame) { x in
+            CompareCanvasPicture(model: model, side: comparison.second, picture: b, open: model.comparedIsOpen(comparison.second), link: link, frame: frame) { x in
                 model.activateCompared(first: x < split)
             }
             .mask(alignment: .topLeading) {
@@ -501,62 +510,57 @@ struct CompareEditingNote: View {
     }
 }
 
-/// The title bar's view switch while comparing: Grid · Photo · Compare,
-/// Compare chosen. Grid and Photo leave compare for them.
-struct CompareViewSwitch: View {
+/// The title bar's view switch, in every view with a photograph:
+/// Grid · Photo · Compare, the one shown in `paper` over the pencil. Compare
+/// acts with exactly two photographs selected and is faint otherwise, its
+/// tooltip saying why; Grid and Photo leave compare for them.
+struct ViewSwitch: View {
+    enum Place: Equatable { case grid, photo, compare }
     let model: EditorModel
 
+    static func place(of model: EditorModel) -> Place {
+        if model.comparison != nil, model.mode == .photo { return .compare }
+        return model.mode == .grid ? .grid : .photo
+    }
+
     var body: some View {
+        let place = Self.place(of: model)
+        let compare = model.compareWord
         HStack(spacing: 16) {
-            word("Grid", on: false, help: "Stop comparing and show all photographs (G)") { model.leaveCompare(toGrid: true) }
-            word("Photo", on: false, help: "Stop comparing and edit the photograph") { model.leaveCompare(toGrid: false) }
-            word("Compare", on: true, help: "Comparing two photographs") {}
+            word("Grid", on: place == .grid, help: place == .compare ? "Stop comparing and show all photographs (G)" : "All Photographs (G)") {
+                model.showGrid()
+            }
+            word("Photo", on: place == .photo, enabled: place != .grid || model.selection.current != nil,
+                 help: place == .compare ? "Stop comparing and edit the photograph" : "Edit Photograph (E)") {
+                switch place {
+                case .compare: model.leaveCompare(toGrid: false)
+                case .grid: model.editCurrent()
+                case .photo: break
+                }
+            }
+            word("Compare", on: place == .compare, enabled: place == .compare || compare.enabled,
+                 help: place == .compare ? "Comparing two photographs (C to leave)" : compare.help) {
+                if place != .compare { model.toggleCompare() }
+            }
         }
         .font(Theme.serif(17, italic: true))
         .padding(.trailing, 18)
         .frame(height: 28)
     }
 
-    private func word(_ title: String, on: Bool, help: String, action: @escaping () -> Void) -> some View {
+    private func word(_ title: String, on: Bool, enabled: Bool = true, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).foregroundStyle(on ? Theme.paper : Theme.dim)
                 .padding(.bottom, 3)
                 .overlay(alignment: .bottom) { if on { PencilStroke().pencil().frame(height: 5) } }
+                .opacity(enabled ? 1 : 0.38)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
+        // A disabled word still says why.
         .help(help)
         .accessibilityAddTraits(on ? .isSelected : [])
-    }
-}
-
-/// The grid header's Compare word, left of the arrow that folds the grid
-/// back: `paper` over the pencil with exactly two selected, else dim.
-struct GridCompareWord: View {
-    let model: EditorModel
-    @State private var hovered = false
-
-    var body: some View {
-        let word = model.compareWord
-        Button { model.toggleCompare() } label: {
-            Text("Compare")
-                .font(Theme.serif(17, italic: true))
-                .foregroundStyle(word.enabled ? (hovered ? Theme.paper : Theme.paper.opacity(0.92)) : Theme.dim)
-                .padding(.bottom, 2)
-                .overlay(alignment: .bottom) {
-                    if word.enabled { PencilStroke().pencil().frame(height: 5).offset(y: 3) }
-                }
-                .opacity(word.enabled ? 1 : 0.38)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!word.enabled)
-        // A disabled button still shows why.
-        .help(word.help)
-        .onHover { hovered = $0 }
-        .frame(height: 32)
-        .padding(.top, 7)
-        .accessibilityLabel("Compare")
-        .accessibilityHint(word.help)
+        .accessibilityHint(help)
     }
 }

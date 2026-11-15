@@ -152,7 +152,33 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         XCTAssertFalse(three.enabled)
     }
 
-    func testTheGridWordActsWithExactlyTwo() async throws {
+    /// Grid · Photo · Compare in the title bar, in every view: the one
+    /// shown chosen. Leaving compare for the grid hands the grid's sheet
+    /// the two photographs' places, to fly them back from.
+    func testTheViewSwitchFollowsTheViewAndLeavingHandsOverThePlaces() async throws {
+        let (model, photos) = try await model()
+        XCTAssertEqual(ViewSwitch.place(of: model), .photo)
+        model.showGrid()
+        XCTAssertEqual(ViewSwitch.place(of: model), .grid)
+        model.click(photos[1], command: true)
+        model.toggleCompare()
+        XCTAssertEqual(ViewSwitch.place(of: model), .compare)
+        let rect = CGRect(x: 10, y: 20, width: 300, height: 200)
+        model.places.compare[photos[1]] = ThumbnailPlaces.Place(rect: rect, image: nil)
+        model.showGrid()
+        XCTAssertNil(model.comparison)
+        XCTAssertEqual(ViewSwitch.place(of: model), .grid)
+        XCTAssertEqual(model.places.leftCompare[photos[1]], rect)
+        // Leaving for the photo view: nothing to fly.
+        model.places.leftCompare = [:]
+        model.toggleCompare()
+        model.places.compare[photos[1]] = ThumbnailPlaces.Place(rect: rect, image: nil)
+        model.leaveCompare(toGrid: false)
+        XCTAssertEqual(ViewSwitch.place(of: model), .photo)
+        XCTAssertTrue(model.places.leftCompare.isEmpty)
+    }
+
+    func testTheCompareWordActsWithExactlyTwo() async throws {
         let (model, photos) = try await model()
         model.showGrid()
         XCTAssertFalse(model.compareWord.enabled)

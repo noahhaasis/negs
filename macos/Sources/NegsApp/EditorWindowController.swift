@@ -72,8 +72,8 @@ final class EdgeSplitView: NSSplitView {
     private var turnKey: UInt16?
     /// The batch export popover.
     private var batchPopover: NSPopover?
-    /// Compare's view switch for the title band, made the first time.
-    private var compareSwitch: NSHostingView<CompareViewSwitch>?
+    /// The title band's view switch, made the first time it shows.
+    private var viewSwitch: NSHostingView<ViewSwitch>?
 
     init(model: EditorModel) {
         self.model = model
@@ -394,15 +394,16 @@ final class EdgeSplitView: NSSplitView {
         }
         if window.title != title { window.title = title }
         editorFrame.band.title = title
-        if model.comparison != nil, !grid {
-            if compareSwitch == nil {
-                let host = NSHostingView(rootView: CompareViewSwitch(model: model))
+        // Grid · Photo · Compare, whenever a photograph is open (ticket 46).
+        if model.source != nil {
+            if viewSwitch == nil {
+                let host = NSHostingView(rootView: ViewSwitch(model: model))
                 host.sizingOptions = [.intrinsicContentSize]
                 // In the title bar: no inset for it.
                 host.safeAreaRegions = []
-                compareSwitch = host
+                viewSwitch = host
             }
-            editorFrame.band.showViews(compareSwitch)
+            editorFrame.band.showViews(viewSwitch)
         } else {
             editorFrame.band.showViews(nil)
         }
