@@ -91,7 +91,11 @@ enum SheetWords {
         }
         let flags = FilterMenu.flagChoices.filter { filter.flags.contains($0.flag) }.map { $0.title.lowercased() }
         if !flags.isEmpty { parts.append(Part(lead: "", word: flags.joined(separator: " or "))) }
-        if filter.editedOnly { parts.append(Part(lead: "", word: "edited")) }
+        switch filter.edits {
+        case .any: break
+        case .edited: parts.append(Part(lead: "", word: "edited"))
+        case .unedited: parts.append(Part(lead: "", word: "unedited"))
+        }
         return parts
     }
 
@@ -133,7 +137,7 @@ private struct FilterWord: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help("Filter photographs by rating and flag")
+        .help("Filter photographs by rating, flag and edits")
         .accessibilityLabel("Filter: \(word)")
     }
 }
@@ -146,7 +150,7 @@ private struct ClearMark: View {
 }
 
 /// The filter menu, a native menu with today's items: Rating, Flags,
-/// Edited Only and Clear Filter (⌥⌘L).
+/// Edits and Clear Filter (⌥⌘L).
 @MainActor final class FilterMenu: NSObject {
     private let model: EditorModel
     init(model: EditorModel) { self.model = model }
@@ -182,7 +186,9 @@ private struct ClearMark: View {
             add(title, #selector(flag(_:)), on: filter.flags.contains(flag), tag: index)
         }
         menu.addItem(.separator())
-        add("Edited Only", #selector(edited), on: filter.editedOnly)
+        menu.addItem(.sectionHeader(title: "Edits"))
+        add("Edited", #selector(edits(_:)), on: filter.edits == .edited, tag: 1)
+        add("Unedited", #selector(edits(_:)), on: filter.edits == .unedited, tag: 2)
         menu.addItem(.separator())
         let clear = menu.addItem(withTitle: "Clear Filter", action: filter.active ? #selector(clear) : nil, keyEquivalent: "l")
         clear.keyEquivalentModifierMask = [.command, .option]; clear.target = self
@@ -195,7 +201,11 @@ private struct ClearMark: View {
         let flag = Self.flagChoices[item.tag].flag
         if model.library.filter.flags.contains(flag) { model.library.filter.flags.remove(flag) } else { model.library.filter.flags.insert(flag) }
     }
-    @objc private func edited() { model.library.filter.editedOnly.toggle() }
+    /// Edited and Unedited exclude each other; choosing the one that's on turns it off.
+    @objc private func edits(_ item: NSMenuItem) {
+        let choice: LibraryFilter.Edits = item.tag == 1 ? .edited : .unedited
+        model.library.filter.edits = model.library.filter.edits == choice ? .any : choice
+    }
     @objc private func clear() { model.library.filter = LibraryFilter() }
 }
 

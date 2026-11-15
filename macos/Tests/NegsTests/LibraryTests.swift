@@ -96,16 +96,20 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [true, false, false, false, true])
         filter = LibraryFilter(flags: [.pick, .unflagged])
         XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [true, true, true, false, true])
-        filter = LibraryFilter(editedOnly: true)
+        filter = LibraryFilter(edits: .edited)
         XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [false, false, false, false, true])
+        filter = LibraryFilter(edits: .unedited)
+        XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [true, true, true, true, false])
     }
 
     func testTheFilterIsRememberedForTheApp() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "negs-library-tests-\(UUID().uuidString)"))
         XCTAssertEqual(LibraryFilter.load(defaults), LibraryFilter())
-        let filter = LibraryFilter(rating: .atLeast(2), flags: [.reject], editedOnly: true)
+        let filter = LibraryFilter(rating: .atLeast(2), flags: [.reject], edits: .unedited)
         filter.save(defaults)
         XCTAssertEqual(LibraryFilter.load(defaults), filter)
+        defaults.set(Data(#"{"rating":{"any":{}},"flags":["pick"],"editedOnly":true}"#.utf8), forKey: LibraryFilter.defaultsKey)
+        XCTAssertEqual(LibraryFilter.load(defaults), LibraryFilter(flags: [.pick], edits: .edited), "filters saved before Unedited still read")
         LibraryFilter().save(defaults)
         XCTAssertNil(defaults.object(forKey: LibraryFilter.defaultsKey))
     }

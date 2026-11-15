@@ -86,11 +86,12 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         case unrated
     }
     enum Flag: String, Codable, CaseIterable, Sendable { case pick, unflagged, reject }
+    enum Edits: String, Codable, Sendable { case any, edited, unedited }
 
     var rating: Rating = .any
     /// The flags shown; empty shows every one.
     var flags: Set<Flag> = []
-    var editedOnly = false
+    var edits: Edits = .any
 
     var active: Bool { self != LibraryFilter() }
 
@@ -104,10 +105,36 @@ struct LibraryFilter: Codable, Equatable, Sendable {
             let flag: Flag = switch summary.flag { case .pick: .pick; case .reject: .reject; case nil: .unflagged }
             if !flags.contains(flag) { return false }
         }
-        return !editedOnly || summary.edited
+        switch edits {
+        case .any: return true
+        case .edited: return summary.edited
+        case .unedited: return !summary.edited
+        }
     }
 
     static let defaultsKey = "libraryFilter"
+
+    init(rating: Rating = .any, flags: Set<Flag> = [], edits: Edits = .any) {
+        self.rating = rating; self.flags = flags; self.edits = edits
+    }
+
+    private enum CodingKeys: String, CodingKey { case rating, flags, edits, editedOnly }
+
+    /// Reads filters saved before `edits`, which had only `editedOnly`.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rating = try container.decodeIfPresent(Rating.self, forKey: .rating) ?? .any
+        flags = try container.decodeIfPresent(Set<Flag>.self, forKey: .flags) ?? []
+        if let edits = try container.decodeIfPresent(Edits.self, forKey: .edits) { self.edits = edits }
+        else { edits = try container.decodeIfPresent(Bool.self, forKey: .editedOnly) == true ? .edited : .any }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rating, forKey: .rating)
+        try container.encode(flags, forKey: .flags)
+        try container.encode(edits, forKey: .edits)
+    }
 
     static func load(_ defaults: UserDefaults = .standard) -> LibraryFilter {
         defaults.data(forKey: defaultsKey).flatMap { try? JSONDecoder().decode(LibraryFilter.self, from: $0) } ?? LibraryFilter()
