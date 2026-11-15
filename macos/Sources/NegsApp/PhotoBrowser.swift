@@ -684,8 +684,13 @@ struct LibraryContextMenu: View {
         let targets = model.contextTargets(item)
         let several = targets.count > 1 ? " to \(targets.count) Photographs" : ""
         let editing = model.canChangeEdits
+        let compare = model.compareOffer(for: item)
         if model.mode == .grid {
             Button("Edit Photograph") { model.click(item); model.editCurrent() }
+            compareItem(compare)
+            Divider()
+        } else {
+            compareItem(compare)
             Divider()
         }
         Menu("Rating") {
@@ -711,5 +716,19 @@ struct LibraryContextMenu: View {
         }.disabled(!model.canDelete)
         Divider()
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(Array(Set(targets.map(\.photoFile)))) }
+    }
+
+    /// Compare 7 and 8, Compare with 7, or Compare with Original (ticket 46).
+    @ViewBuilder private func compareItem(_ offer: EditorModel.CompareOffer) -> some View {
+        let button = Button(offer.title) {
+            if let (first, second) = offer.pair { model.compare(first, second) } else if offer.withOriginal { model.compareWithOriginal() }
+        }
+        .disabled(!offer.enabled)
+        // The key compares the two selected.
+        if offer.pair != nil, model.contextTargets(item).count == 2 {
+            button.keyboardShortcut("c", modifiers: [])
+        } else {
+            button
+        }
     }
 }

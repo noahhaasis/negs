@@ -14,6 +14,9 @@ struct PrintLabel: View {
     /// The widest the photograph allows (one row) and the canvas allows (two).
     let photoWidth: CGFloat
     let canvasWidth: CGFloat
+    /// Compare: the film or paper differs from the other photograph's.
+    var markFilm = false
+    var markPaper = false
     @Environment(\.sheetInk) private var ink
 
     var body: some View {
@@ -22,11 +25,11 @@ struct PrintLabel: View {
         let kind = PrintLabelLayout.kind(scanning: scanning)
         let oneRow = PrintLabelLayout.fitsOneRow(film: model.filmName, paper: model.paperName, kind: kind, width: photoWidth)
         let film = StockName(model: model, paper: false, name: model.filmName, size: 24, weight: 600,
-                             strike: original ? .original : nil, opens: !original)
+                             strike: original ? .original : nil, opens: !original, marked: markFilm)
         let paper = HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner) {
             Text(kind).font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1).fixedSize()
             StockName(model: model, paper: true, name: model.paperName, size: 17.5, weight: 400,
-                      strike: original ? .original : scanning ? .scanning : nil, opens: !original && !scanning)
+                      strike: original ? .original : scanning ? .scanning : nil, opens: !original && !scanning, marked: markPaper)
             if original {
                 Text("the original").font(Theme.serif(16, italic: true)).foregroundStyle(ink.paper).lineLimit(1).fixedSize()
                     .padding(.leading, 6 - PrintLabelLayout.inner)
@@ -79,7 +82,7 @@ struct PrintLabel: View {
 
 /// A stock's name: a button that opens its tray. Pointing at it draws a
 /// faint `track` rule under it; while its tray is open, the pencil.
-private struct StockName: View {
+struct StockName: View {
     enum Strike {
         /// Scanning the film: the paper is struck through at about half its height.
         case scanning
@@ -97,6 +100,8 @@ private struct StockName: View {
     var strike: Strike?
     /// False while scanning (the paper) or holding Original: the name is only words.
     var opens = true
+    /// Compare: it differs from the other photograph's, so the pencil is under it.
+    var marked = false
     @State private var hovered = false
     @State private var anchor = MenuAnchor()
     @Environment(\.sheetInk) private var ink
@@ -138,6 +143,8 @@ private struct StockName: View {
                 PencilStroke().pencil(ink.accent).frame(height: 6).allowsHitTesting(false)
             } else if hovered {
                 Rectangle().fill(ink.track).frame(height: 1.5).offset(y: -1).allowsHitTesting(false)
+            } else if marked {
+                PencilStroke().pencil(ink.accent).frame(height: 5).allowsHitTesting(false)
             }
         }
     }

@@ -74,6 +74,8 @@ import SwiftUI
         command(view, "Edit Photograph", #selector(editPhotograph), "e", [])
         hidden(view, #selector(editPhotograph), "\r")
         command(view, "Show Grid", #selector(showGrid), "g", [])
+        // The two selected, side by side (ticket 46); C again stops.
+        command(view, "Compare", #selector(toggleCompare), "c", [])
         // Esc shows the grid too: `EditorWindowController.escapeToGrid`.
         command(view, "Larger Thumbnails", #selector(largerThumbnails), "+")
         hidden(view, #selector(largerThumbnails), "=", .command)
@@ -222,6 +224,7 @@ import SwiftUI
         model.copyEditsChoosing()
     }
     @objc private func showGrid() { model.showGrid() }
+    @objc private func toggleCompare() { model.toggleCompare() }
     @objc private func largerThumbnails() { model.changeGridCellSize(larger: true) }
     @objc private func smallerThumbnails() { model.changeGridCellSize(larger: false) }
 
@@ -293,6 +296,9 @@ import SwiftUI
         case #selector(resetAdjustments): return model.hasCatalog && !model.cropping && model.mode == .photo
         case #selector(editPhotograph): return model.mode == .grid && model.selection.current != nil && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(showGrid): return editing && !model.cropping && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(toggleCompare):
+            item.state = model.comparison != nil ? .on : .off
+            return model.canToggleCompare && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < SheetLayout.sizes.upperBound
         case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > SheetLayout.sizes.lowerBound
         case #selector(copyEdits), #selector(copyEditsChoosing):

@@ -202,6 +202,31 @@ import UserNotifications
     }
     /// The grid is folding back into the strip (§4.6).
     var sheetFolding = false
+    /// Two photographs on screen together (ticket 46), in the photo view:
+    /// the open one, which the panel edits, and another or its original.
+    var comparison: Comparison?
+    /// Each compared side the open photograph doesn't show.
+    var compareSides: [Comparison.Side: CompareOther] = [:]
+    /// Side by side as the canvas last laid it out: in a row or stacked.
+    var compareArrangement = CompareArrangement.row
+    @ObservationIgnored var compareDevelop: Task<Void, Never>?
+    /// The helper that develops the other photograph, stopped on leaving.
+    @ObservationIgnored var compareEngine: EngineClient?
+    @ObservationIgnored var compareGeneration = 0
+    /// ← → stepping the edited side: its open waits for the steps to stop.
+    @ObservationIgnored var compareSteps: Task<Void, Never>?
+    /// How long each other develop took, for tests and measurements.
+    @ObservationIgnored var compareTimings: [TimeInterval] = []
+    /// Original ⌄: what the Original word does.
+    var originalMode = OriginalMode.load() {
+        didSet { UserDefaults.standard.set(originalMode.rawValue, forKey: OriginalMode.key); if originalMode != .split { clearSplit() } }
+    }
+    /// Original ⌄ › Split line: the line is on; the original shows left of it.
+    private(set) var splitting = false
+    /// Where the split line is, as a fraction of the canvas's width.
+    var splitFraction: CGFloat = 0.5
+    /// The original under the split line, once decoded.
+    private(set) var splitOriginal: IOSurface?
     /// Grid thumbnails waiting while the grid opens or folds: a flyer is
     /// carrying them, or they fade in after.
     var sheetWaiting: Set<URL> = []
@@ -306,6 +331,7 @@ import UserNotifications
     /// Runs as each render starts, before it looks at anything, for tests.
     @ObservationIgnored var willRender: (() -> Void)?
     func killHelperForTesting() { engine?.killHelperForTesting() }
+    var compareEngineRunning: Bool { compareEngine != nil }
     var holdingFrameForMatch: Bool { heldPreview != nil }
     /// Brightness matches solved by the helper (not found in `matchCache`), for tests.
     @ObservationIgnored private(set) var matchSolves = 0
@@ -1096,8 +1122,9 @@ import UserNotifications
 
     /// Shows the whole developed photograph, without the border, to crop it.
     func beginCrop() {
-        guard !cropping, image != nil, imageSize != .zero else { return }
+        guard !cropping, image != nil, imageSize != .zero, comparison == nil else { return }
         holdOriginal(false)
+        clearSplit()
         holdUpsideDown(false)
         // Its tools are in the inspector and the status line.
         leaveImageOnly()
@@ -1176,6 +1203,7 @@ import UserNotifications
             return
         }
         explicitOpenRequested = true
+        if comparison != nil { leaveCompare(toGrid: false) }
         mode = .photo
         // During launch it undoes a restore at launch; later it supersedes it.
         if launching { discardLaunchRestore() } else { launchRestore = nil }
@@ -1213,6 +1241,7 @@ import UserNotifications
         updateHistogram()
         interactionStart = nil; cropSession = nil
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
+        splitting = false; splitOriginal = nil
         sourceGeneration += 1
         let generation = sourceGeneration
         customFilmFormat = false
@@ -1758,6 +1787,8 @@ import UserNotifications
     /// the one before at the end. With none left the grid shows that
     /// nothing matches, as it does for a filter nothing passes.
     private func moveOn(after targets: [URL], order: [URL]) {
+        // Compare keeps its two on screen, and doesn't advance.
+        guard comparison == nil else { return }
         let dropped = library.filter.active ? Set(targets.filter { !library.filter.includes(library.summary(for: $0)) }) : []
         if !dropped.isEmpty {
             let current = mode == .photo ? sourceItem : selection.current
@@ -1935,6 +1966,7 @@ import UserNotifications
     func band(_ photos: [URL], adding base: Set<URL>) { selection.band(photos, adding: base) }
 
     func showGrid() {
+        if comparison != nil { return leaveCompare(toGrid: true) }
         guard let source = sourceItem, !cropping, mode != .grid else { return }
         holdOriginal(false)
         holdUpsideDown(false)
@@ -2093,7 +2125,7 @@ import UserNotifications
     }
 
     /// A photograph without edits, not following any other.
-    private var plainState: EditState { newPhotoState(after: EditState()) }
+    var plainState: EditState { newPhotoState(after: EditState()) }
 
     /// After pasting `groups` from a photograph without edits: `pasted` has
     /// none either when everything else is as a photograph without edits
@@ -2500,7 +2532,7 @@ import UserNotifications
     /// developed, exported or saved in the window.
     private var thumbnailsMayRun: Bool {
         !closing && !interacting && !rendering && pendingRender == nil && !exporting && !batchRunning && !saving && !cropping && matchTask == nil
-            && (mode == .grid || source == nil || previewCurrent || renderFailed)
+            && comparison == nil && (mode == .grid || source == nil || previewCurrent || renderFailed)
     }
 
     /// Develops the next items without a current thumbnail, edited or not,
@@ -2785,6 +2817,8 @@ import UserNotifications
         flushSidecar()
         var gone = Set(plan.items)
         for file in plan.files { for id in library.duplicates[file] ?? [] { gone.insert(file.variant(id)) } }
+        // One of the two going to the Trash ends compare.
+        if let comparison, gone.contains(comparison.first.item) || gone.contains(comparison.second.item) { leaveCompare() }
         let current = mode == .grid ? selection.current : sourceItem
         let next = current.flatMap { current -> URL?? in
             guard gone.contains(current) else { return nil }
@@ -2996,7 +3030,7 @@ import UserNotifications
                 // Core Animation may still be compositing it for a frame.
                 Task { [weak self] in
                     try? await Task.sleep(for: .seconds(1))
-                    guard let self, !self.holdingOriginal, self.originalCache === shown else { return }
+                    guard let self, !self.holdingOriginal, !self.splitting, self.originalCache === shown else { return }
                     shown.makeVolatile()
                 }
             }
@@ -3028,6 +3062,7 @@ import UserNotifications
             self.originalLoad = nil
             self.originalLensCorrection = lensCorrection
             guard let surface else {
+                if self.splitting { self.splitting = false }
                 if self.holdingOriginal {
                     self.holdingOriginal = false
                     self.status = "The original of \(source.lastPathComponent) couldn’t be shown"
@@ -3035,9 +3070,66 @@ import UserNotifications
                 return
             }
             self.originalCache = surface
-            if self.holdingOriginal { self.original = surface } else { surface.makeVolatile() }
+            if self.holdingOriginal { self.original = surface }
+            if self.splitting { self.splitOriginal = surface }
+            if !self.holdingOriginal, !self.splitting { surface.makeVolatile() }
         }
     }
+
+    /// A click on Original, by Original ⌄'s choice: holding is the press
+    /// itself; Split line toggles the line; Side by side compares.
+    func clickOriginal() {
+        switch originalMode {
+        case .hold: break
+        case .split: splitting ? clearSplit() : startSplit()
+        case .sideBySide: compareWithOriginal()
+        }
+    }
+
+    /// The split line over the photograph, with the original left of it.
+    private func startSplit() {
+        guard canShowOriginal, comparison == nil, !splitting else { return }
+        splitting = true
+        dropStaleOriginal()
+        if let cached = originalCache {
+            if cached.makeNonVolatile() { splitOriginal = cached; return }
+            originalCache = nil
+        }
+        loadOriginal()
+    }
+
+    func clearSplit() {
+        guard splitting else { return }
+        splitting = false
+        let shown = splitOriginal
+        splitOriginal = nil
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, let shown, !self.holdingOriginal, !self.splitting, self.originalCache === shown else { return }
+            shown.makeVolatile()
+        }
+    }
+
+    // MARK: Compare (ticket 46): the model's own state Compare.swift reads
+
+    var enginePaths: EnginePaths? { engine?.paths }
+    var closingForCompare: Bool { closing }
+    var sourceDeletedForCompare: Bool { sourceDeleted }
+    /// The open photograph has settled: nothing renders, solves, saves or
+    /// exports, so the other photograph's develop can have the machine.
+    var editedSettled: Bool {
+        !rendering && pendingRender == nil && matchTask == nil && !interacting && !exporting && !saving && heldPreview == nil
+            && (previewCurrent || renderFailed || source == nil)
+    }
+    /// Opens `item` for editing in compare: the photo view, and its session.
+    func openForCompare(_ item: URL) {
+        if mode == .grid { mode = .photo }
+        open(item, restoring: nil)
+    }
+    func setPhotoMode() { mode = .photo }
+    func restoreSelection(_ restored: LibrarySelection) { if selection != restored { selection = restored } }
+    func pauseThumbnailsForCompare() {}
+    func resumeThumbnailsAfterCompare() { pumpThumbnails() }
 
     // MARK: Rendering
 
@@ -3714,7 +3806,7 @@ import UserNotifications
     }
 
     /// The match cache's name for solving `request` on `file` in the helper at `paths`.
-    private func matchCacheKey(_ file: URL, request: EditState, paths: EnginePaths) -> String? {
+    func matchCacheKey(_ file: URL, request: EditState, paths: EnginePaths) -> String? {
         if matchEngine?.helper != paths.helper || matchEngine?.data != paths.data {
             matchEngine = (paths.helper, paths.data, BrightnessMatchCache.engineStamp(paths))
         }
@@ -4685,6 +4777,7 @@ import UserNotifications
         matchCache.flush()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
+        stopCompareDevelop()
         if let powerStateObserver { NotificationCenter.default.removeObserver(powerStateObserver); self.powerStateObserver = nil }
         thumbnailTask?.cancel(); thumbnailIdle?.cancel()
         thumbnailsDeveloping.values.forEach { $0.task.cancel() }; thumbnailEngines.values.forEach { $0.stop() }

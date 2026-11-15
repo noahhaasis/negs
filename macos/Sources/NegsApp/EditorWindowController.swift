@@ -72,6 +72,8 @@ final class EdgeSplitView: NSSplitView {
     private var turnKey: UInt16?
     /// The batch export popover.
     private var batchPopover: NSPopover?
+    /// Compare's view switch for the title band, made the first time.
+    private var compareSwitch: NSHostingView<CompareViewSwitch>?
 
     init(model: EditorModel) {
         self.model = model
@@ -220,7 +222,7 @@ final class EdgeSplitView: NSSplitView {
     /// if the event was handled.
     func handleKey(_ event: NSEvent) -> Bool {
         alertKeys(event) || holdOriginal(event) || holdUpsideDown(event) || trayKeys(event) || cropKeys(event)
-            || enterInspector(event) || escapeToGrid(event) || arrowsToStep(event)
+            || enterInspector(event) || escapeToGrid(event) || compareKeys(event) || arrowsToStep(event)
     }
 
     /// A key let go in another window never reaches this one, so held keys
@@ -328,7 +330,24 @@ final class EdgeSplitView: NSSplitView {
         guard event.type == .keyDown, event.keyCode == 53, event.window === window,
               event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
               model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
-        if model.mode == .grid { model.editCurrent() } else if model.imageOnly { model.leaveImageOnly() } else { model.showGrid() }
+        if model.mode == .grid { model.editCurrent() } else if model.imageOnly { model.leaveImageOnly() }
+        else if model.comparison != nil { model.leaveCompare() } else { model.showGrid() }
+        return true
+    }
+
+    /// In compare: S switches side by side and the slider, and ← → step the
+    /// second photograph (the tray's keys win while it's open: `trayKeys`).
+    private func compareKeys(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, model.comparison != nil, model.mode == .photo,
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              !(window?.firstResponder is NSText) else { return false }
+        if let focused = window?.firstResponder as? NSView, InkKeyLoop.root(of: focused) != nil { return false }
+        switch event.keyCode {
+        case 123, 124: model.stepCompared(by: event.keyCode == 123 ? -1 : 1)
+        default:
+            guard event.charactersIgnoringModifiers?.lowercased() == "s", !event.modifierFlags.contains(.shift) else { return false }
+            model.toggleCompareLayout()
+        }
         return true
     }
 
@@ -365,9 +384,28 @@ final class EdgeSplitView: NSSplitView {
         guard let window else { return }
         let grid = model.mode == .grid
         // The file name, in the grid too; "Negs" with no photograph (§3).
-        let title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
+        // Comparing, both names, or the one with its original.
+        let title: String
+        if let comparison = model.comparison {
+            let first = model.library.name(of: comparison.first.item)
+            title = comparison.againstOriginal ? "\(first) with its original" : "\(first) and \(model.library.name(of: comparison.second.item))"
+        } else {
+            title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
+        }
         if window.title != title { window.title = title }
         editorFrame.band.title = title
+        if model.comparison != nil, !grid {
+            if compareSwitch == nil {
+                let host = NSHostingView(rootView: CompareViewSwitch(model: model))
+                host.sizingOptions = [.intrinsicContentSize]
+                // In the title bar: no inset for it.
+                host.safeAreaRegions = []
+                compareSwitch = host
+            }
+            editorFrame.band.showViews(compareSwitch)
+        } else {
+            editorFrame.band.showViews(nil)
+        }
         showSheet(grid)
         let alert = model.alert
         if alert != nil, alertPresenter == nil { alertPresenter = AlertPresenter(model: model, window: window, root: root) }

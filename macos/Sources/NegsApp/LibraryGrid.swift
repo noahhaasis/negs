@@ -24,7 +24,12 @@ struct GridSheet: View {
             .background(Theme.film)
             // Where the cells report their places (`SheetFlight`).
             .coordinateSpace(.named(ThumbnailPlaces.space))
-            .overlay(alignment: .topTrailing) { SheetHandle(model: model) }
+            .overlay(alignment: .topTrailing) {
+                HStack(alignment: .top, spacing: 2) {
+                    GridCompareWord(model: model)
+                    SheetHandle(model: model)
+                }
+            }
             .environment(\.colorScheme, .dark)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("All photographs")
