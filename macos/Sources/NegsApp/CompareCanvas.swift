@@ -356,15 +356,17 @@ private struct CompareSlider: View {
                     .contentShape(Rectangle())
                     .frame(width: frame.width, height: frame.height)
                     .offset(x: frame.minX, y: frame.minY)
-                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    // Measured in the slider's space, as the knob is: a gesture
+                    // outside `.offset` would count the photograph's left margin twice.
+                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("compareSlider"))
                         .onChanged { drag in
                             if abs(drag.translation.width) + abs(drag.translation.height) > 2 {
-                                model.moveSplit(to: drag.location.x / max(frame.width, 1))
+                                model.moveSplit(to: (drag.location.x - frame.minX) / max(frame.width, 1))
                             }
                         }
                         .onEnded { drag in
                             guard abs(drag.translation.width) + abs(drag.translation.height) <= 2 else { return }
-                            tapped(at: drag.location.x / max(frame.width, 1))
+                            tapped(at: (drag.location.x - frame.minX) / max(frame.width, 1))
                         })
                     .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             }
