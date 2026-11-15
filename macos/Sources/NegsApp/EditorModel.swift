@@ -1965,6 +1965,20 @@ import UserNotifications
         // once a filter shows it.
         if mode == .grid, selection.current == nil, let open = sourceItem, !sourceDeleted,
            library.shown(current: nil).contains(where: { $0.url == open }) { selection.select(open) }
+        // A filter that leaves out the grid's current photograph takes it
+        // away too: the nearest selected one still shown becomes current,
+        // or else the next one shown (the one before at the end).
+        if mode == .grid, let current = selection.current, !library.filter.includes(library.summary(for: current)) {
+            let order = library.items.map(\.url)
+            let gone = Set(order.filter { !library.filter.includes(library.summary(for: $0)) })
+            if selection.selected.contains(where: { $0 != current && !gone.contains($0) }) {
+                selection.toggle(current, in: order.filter { !gone.contains($0) || $0 == current })
+            } else if let next = Self.next(after: current, in: order, skipping: gone) {
+                selection.select(next)
+            } else {
+                selection = LibrarySelection()
+            }
+        }
         selection.prune(to: Set(library.shown(current: selection.current).map(\.url)))
     }
 

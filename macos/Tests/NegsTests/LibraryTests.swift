@@ -616,6 +616,31 @@ final class LibraryFormatTests: XCTestCase {
         model.library.filter = LibraryFilter()
         XCTAssertEqual(model.selection.current, a)
 
+        // A filter that leaves out the current photograph takes it away
+        // too: the next one shown becomes current, or the nearest
+        // selected one still shown.
+        model.click(b)
+        model.click(c, shift: true)
+        model.setRating(4)
+        model.click(a)
+        model.library.filter = LibraryFilter(rating: .atLeast(4))
+        XCTAssertEqual(model.selection.current, b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [b, c])
+        model.library.filter = LibraryFilter()
+        model.click(a)
+        model.click(c, command: true)
+        model.library.filter = LibraryFilter(rating: .atLeast(4))
+        XCTAssertEqual(model.selection.current, c)
+        XCTAssertEqual(model.selection.selected, [c])
+        model.library.filter = LibraryFilter(edits: .edited)
+        XCTAssertNil(model.selection.current, "nothing passes")
+        XCTAssertEqual(model.shownPhotos.map(\.url), [])
+        model.library.filter = LibraryFilter()
+        model.click(b)
+        model.click(c, shift: true)
+        model.setRating(0)
+        model.click(a)
+
         // Arrows: two to a row here (as the sheet lays them out); up and
         // down land on the nearest across, onto a short row too.
         model.gridLayout = SheetLayout(ratios: [1.5, 1.5, 1.5], width: 2 * 1.5 * 176 + SheetLayout.gap + 2 * SheetLayout.side, target: 176)

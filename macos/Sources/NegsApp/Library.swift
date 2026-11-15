@@ -288,9 +288,10 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     }
 
     /// The photographs the strip and grid show: those the filter lets
-    /// through, and always `current`, so a filter chosen while it's open
-    /// never hides it. A rating or flag that leaves it out moves on to the
-    /// next instead (`EditorModel.changeLibrary`).
+    /// through, and always `current`, so the open photograph never vanishes
+    /// under the edit view. In the grid a filter or a rating that leaves the
+    /// current one out moves on instead (`EditorModel.filterChanged`,
+    /// `EditorModel.moveOn`).
     func shown(current: URL?) -> [PhotoFile] {
         let items = items
         guard filter.active else { return items }
