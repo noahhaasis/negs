@@ -608,9 +608,12 @@ private struct StripFrameStyle: ButtonStyle {
     }
 }
 
-/// The grid's handle (§4.4): at the strip's right end the film rises into a
-/// tongue cut on the slant, like the start of a roll, with an arrow pointing
-/// up. It rises a little under the pointer. A click, or G, opens the grid.
+/// The strip's handle (§4.4): at the strip's right end the film rises into a
+/// tongue cut on the slant, like the start of a roll. It rises a little under
+/// the pointer. Its arrow points down while the strip shows and a click (or
+/// ⌥⌘F) hides it; with the strip hidden the tongue stands on the status line,
+/// its arrow pointing up, and a click brings the strip back. The view switch
+/// in the title bar opens the grid.
 struct StripLeader: View {
     let model: EditorModel
     @State private var hovered = false
@@ -623,7 +626,8 @@ struct StripLeader: View {
     static let slant: CGFloat = 28
 
     var body: some View {
-        Button { model.showGrid() } label: {
+        let shown = model.filmstripVisible
+        Button { model.toggleFilmstrip() } label: {
             LeaderShape()
                 .fill(Theme.film)
                 .frame(width: Self.width, height: hovered ? Self.raised : Self.height)
@@ -631,6 +635,7 @@ struct StripLeader: View {
                     LeaderArrow()
                         .stroke(hovered ? Theme.paper : Theme.label, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
                         .frame(width: 12.7, height: 6.4)
+                        .rotationEffect(.degrees(shown ? 180 : 0))
                         // The arrow's box: 9 pt square, 22 pt from the right, 10 from the top.
                         .padding(.trailing, 22 + 4.5 - 6.35)
                         .padding(.top, 10 + 4.5 - 6.36 - (hovered ? 1 : 0))
@@ -642,8 +647,8 @@ struct StripLeader: View {
         .onHover { over in
             withAnimation(reduceMotion ? nil : .timingCurve(0.3, 1.5, 0.5, 1, duration: 0.28)) { hovered = over }
         }
-        .help("Show all photographs (G)")
-        .accessibilityLabel("Show all photographs")
+        .help(shown ? "Hide Film Strip (⌥⌘F)" : "Show Film Strip (⌥⌘F)")
+        .accessibilityLabel(shown ? "Hide Film Strip" : "Show Film Strip")
     }
 }
 
