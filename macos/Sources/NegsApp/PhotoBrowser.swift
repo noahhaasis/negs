@@ -660,15 +660,13 @@ private struct LeaderShape: Shape {
     }
 }
 
-/// A chevron, its point at the top middle of the rect; turned over, it points down.
-struct LeaderArrow: Shape {
-    var down = false
+/// A chevron, its point at the top middle of the rect.
+private struct LeaderArrow: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let (top, bottom) = down ? (rect.maxY, rect.minY) : (rect.minY, rect.maxY)
-        path.move(to: CGPoint(x: rect.minX, y: bottom))
-        path.addLine(to: CGPoint(x: rect.midX, y: top))
-        path.addLine(to: CGPoint(x: rect.maxX, y: bottom))
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         return path
     }
 }
