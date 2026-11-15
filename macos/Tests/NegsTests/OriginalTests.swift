@@ -55,7 +55,9 @@ import XCTest
         // The badge says Loading Original until the decode arrives.
         XCTAssertTrue(model.holdingOriginal)
         XCTAssertNil(model.original)
+        XCTAssertTrue(model.loadingOriginal)
         try await waitUntil { model.original != nil }
+        XCTAssertFalse(model.loadingOriginal)
         XCTAssertEqual([model.original?.width, model.original?.height], [96, 64])
         model.holdOriginal(false)
         XCTAssertNil(model.original)

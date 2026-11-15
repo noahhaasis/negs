@@ -167,7 +167,7 @@ private struct RecentFile: View {
     }
 }
 
-/// The Developing or Updating tag at the top centre of the photograph,
+/// The Developing, Updating or Loading original tag at the top centre of the photograph,
 /// 16 pt below its top edge (§4.14): the sheet's dark, the word in italic
 /// `paper`, and a short yellow mark running along a line under it.
 struct DevelopTag: View {
@@ -190,11 +190,13 @@ struct DevelopTag: View {
 }
 
 /// What the tag says: Developing until the photograph's first develop is
-/// in, Updating once an edit takes long enough to notice, else nothing.
+/// in, Loading original while a held original is still being decoded,
+/// Updating once an edit takes long enough to notice, else nothing.
 enum DevelopTagTitle {
-    static func title(source: Bool, failed: Bool, developed: Bool, slow: Bool) -> String? {
+    static func title(source: Bool, failed: Bool, developed: Bool, slow: Bool, loadingOriginal: Bool) -> String? {
         guard source, !failed else { return nil }
         if !developed { return "Developing" }
+        if loadingOriginal { return "Loading original" }
         return slow ? "Updating" : nil
     }
 }

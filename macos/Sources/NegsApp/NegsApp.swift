@@ -231,10 +231,16 @@ struct EditorCanvas: View {
 
     var body: some View {
         let grid = model.mode == .grid
+        // Compare has no strip: its height goes to the photographs.
+        let comparing = model.comparison != nil && !grid
         VStack(spacing: 0) {
             // The grid's sheet covers it (`GridSheet`), so coming back to
             // the same photograph is instant and keeps its zoom.
-            CanvasArea(model: model, dropping: dropTargeted)
+            if comparing {
+                CompareCanvas(model: model)
+            } else {
+                CanvasArea(model: model, dropping: dropTargeted)
+            }
             // The tray takes the strip's and the status line's place (§4.5),
             // in Image Only too, which comes back when it closes.
             if let tray = model.tray, !grid {
@@ -242,7 +248,7 @@ struct EditorCanvas: View {
             } else if !dropTargeted, !model.imageOnly {
                 VStack(spacing: 0) {
                     // It stays under the grid's sheet, which folds back into it.
-                    if model.stripShown, model.source != nil {
+                    if model.stripShown, model.source != nil, !comparing {
                         PhotoBrowser(model: model)
                     }
                     // None in the empty window (§4.14).
@@ -257,7 +263,7 @@ struct EditorCanvas: View {
                 // stands on that edge, over the canvas: an `alignmentGuide`
                 // to its bottom was ignored and left it covering the frame.
                 .overlay(alignment: .topTrailing) {
-                    if model.source != nil, !grid, !model.cropping {
+                    if model.source != nil, !grid, !model.cropping, !comparing {
                         StripLeader(model: model).offset(y: -StripLeader.raised)
                     }
                 }
@@ -294,12 +300,20 @@ struct InspectorPanel: View {
             if !built { Color.clear }
             else if let session = model.cropSession { CropInspector(model: model, session: session) }
             else {
+                // Compare against the original, with the original active:
+                // the panel dims, as nothing on it applies.
+                let original = model.comparison?.originalActive == true
                 VStack(spacing: 0) {
                     PaneHeader(model: model)
-                    if model.inspectorPane == .presets { PresetInspector(model: model) }
-                    // The sections aren't built until a photograph opens.
-                    else if model.source == nil { InspectorEmptyLine() }
-                    else { AdjustmentInspector(model: model) }
+                    if let comparison = model.comparison { CompareEditingNote(model: model, comparison: comparison) }
+                    Group {
+                        if model.inspectorPane == .presets { PresetInspector(model: model) }
+                        // The sections aren't built until a photograph opens.
+                        else if model.source == nil { InspectorEmptyLine() }
+                        else { AdjustmentInspector(model: model) }
+                    }
+                    .opacity(original ? 0.45 : 1)
+                    .disabled(original)
                 }
             }
         }
@@ -366,6 +380,9 @@ struct CanvasArea: View {
                         GeometryReader { proxy in marks(in: proxy.size) }
                     }
                 }
+                if model.splitting, !dropping, failure == nil, let print = shownPrint {
+                    SplitLine(model: model, print: print, zoomed: geometry.zoomed)
+                }
                 if dropping {
                     EmptyCanvas(model: model, dropping: true, print: shownPrint)
                 } else if let failure {
@@ -413,10 +430,11 @@ struct CanvasArea: View {
         }
     }
 
-    /// Developing or Updating, at the top centre of the photograph's visible part.
+    /// Developing, Updating or Loading original, at the top centre of the photograph's visible part.
     @ViewBuilder private var developTag: some View {
         let title = DevelopTagTitle.title(source: model.source != nil, failed: model.renderFailed,
-                                          developed: model.image != nil, slow: model.showsActivity)
+                                          developed: model.image != nil, slow: model.showsActivity,
+                                          loadingOriginal: model.loadingOriginal)
         ZStack {
             if let title, !dropping, !model.cropping {
                 GeometryReader { proxy in
@@ -492,6 +510,66 @@ struct CanvasArea: View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale, geometry: geometry,
                       upsideDown: model.upsideDown, settled: model.original != nil || model.showsSettledFrame,
-                      doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+                      doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) },
+                      split: model.original == nil ? model.splitOriginal.map { ($0, model.splitFraction) } : nil)
+    }
+}
+
+/// Original ⌄ › Split line (ticket 46): the line over the photograph, the
+/// original left of it, "Original" and "Developed" at the print's top
+/// corners. Fitted, a drag anywhere on the print moves it; zoomed in, its
+/// knob does, and a drag elsewhere pans. It stays put on screen while the
+/// photograph pans or zooms: it's a fraction of the canvas's width.
+struct SplitLine: View {
+    let model: EditorModel
+    /// The print's place on the canvas.
+    let print: CGRect
+    let zoomed: Bool
+    @Environment(\.sheetInk) private var ink
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width, 1)
+            let x = width * model.splitFraction
+            ZStack(alignment: .topLeading) {
+                if !zoomed {
+                    Color.clear.contentShape(Rectangle())
+                        .frame(width: print.width, height: print.height)
+                        .offset(x: print.minX, y: print.minY)
+                        // In the line's space, as the knob is: outside `.offset` the
+                        // local space already counts the print's left margin.
+                        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("splitLine")).onChanged { drag in
+                            model.splitFraction = min(max(drag.location.x / width, 0), 1)
+                        })
+                        .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+                }
+                if x >= print.minX, x <= print.maxX {
+                    Rectangle().fill(ink.paper).frame(width: 1.5, height: print.height)
+                        .offset(x: x - 0.75, y: print.minY)
+                        .allowsHitTesting(false)
+                    Text("‹›").font(Theme.serif(14, weight: 600)).tracking(3).foregroundStyle(ink.paper)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color(red: 12 / 255, green: 11 / 255, blue: 10 / 255).opacity(0.85)))
+                        .overlay(Circle().strokeBorder(ink.paper, lineWidth: 1.5))
+                        .contentShape(Circle())
+                        .offset(x: x - 16, y: print.midY - 16)
+                        .gesture(DragGesture(coordinateSpace: .named("splitLine")).onChanged { drag in
+                            model.splitFraction = min(max(drag.location.x / width, 0), 1)
+                        })
+                        .allowsHitTesting(zoomed)
+                        .accessibilityLabel("Split line")
+                }
+                tag("Original").offset(x: print.minX + 10, y: print.minY + 10)
+                tag("Developed").frame(width: print.width - 20, alignment: .trailing).offset(x: print.minX + 10, y: print.minY + 10)
+            }
+            .coordinateSpace(.named("splitLine"))
+        }
+    }
+
+    private func tag(_ text: String) -> some View {
+        Text(text).font(Theme.ui(11)).foregroundStyle(Theme.paper)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: 3).fill(Color.black.opacity(0.55)))
+            .allowsHitTesting(false)
     }
 }

@@ -608,9 +608,12 @@ private struct StripFrameStyle: ButtonStyle {
     }
 }
 
-/// The grid's handle (§4.4): at the strip's right end the film rises into a
-/// tongue cut on the slant, like the start of a roll, with an arrow pointing
-/// up. It rises a little under the pointer. A click, or G, opens the grid.
+/// The strip's handle (§4.4): at the strip's right end the film rises into a
+/// tongue cut on the slant, like the start of a roll. It rises a little under
+/// the pointer. Its arrow points down while the strip shows and a click (or
+/// ⌥⌘F) hides it; with the strip hidden the tongue stands on the status line,
+/// its arrow pointing up, and a click brings the strip back. The view switch
+/// in the title bar opens the grid.
 struct StripLeader: View {
     let model: EditorModel
     @State private var hovered = false
@@ -623,7 +626,8 @@ struct StripLeader: View {
     static let slant: CGFloat = 28
 
     var body: some View {
-        Button { model.showGrid() } label: {
+        let shown = model.filmstripVisible
+        Button { model.toggleFilmstrip() } label: {
             LeaderShape()
                 .fill(Theme.film)
                 .frame(width: Self.width, height: hovered ? Self.raised : Self.height)
@@ -631,6 +635,7 @@ struct StripLeader: View {
                     LeaderArrow()
                         .stroke(hovered ? Theme.paper : Theme.label, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
                         .frame(width: 12.7, height: 6.4)
+                        .rotationEffect(.degrees(shown ? 180 : 0))
                         // The arrow's box: 9 pt square, 22 pt from the right, 10 from the top.
                         .padding(.trailing, 22 + 4.5 - 6.35)
                         .padding(.top, 10 + 4.5 - 6.36 - (hovered ? 1 : 0))
@@ -642,8 +647,8 @@ struct StripLeader: View {
         .onHover { over in
             withAnimation(reduceMotion ? nil : .timingCurve(0.3, 1.5, 0.5, 1, duration: 0.28)) { hovered = over }
         }
-        .help("Show all photographs (G)")
-        .accessibilityLabel("Show all photographs")
+        .help(shown ? "Hide Film Strip (⌥⌘F)" : "Show Film Strip (⌥⌘F)")
+        .accessibilityLabel(shown ? "Hide Film Strip" : "Show Film Strip")
     }
 }
 
@@ -660,15 +665,13 @@ private struct LeaderShape: Shape {
     }
 }
 
-/// A chevron, its point at the top middle of the rect; turned over, it points down.
-struct LeaderArrow: Shape {
-    var down = false
+/// A chevron, its point at the top middle of the rect.
+private struct LeaderArrow: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let (top, bottom) = down ? (rect.maxY, rect.minY) : (rect.minY, rect.maxY)
-        path.move(to: CGPoint(x: rect.minX, y: bottom))
-        path.addLine(to: CGPoint(x: rect.midX, y: top))
-        path.addLine(to: CGPoint(x: rect.maxX, y: bottom))
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         return path
     }
 }
@@ -684,8 +687,13 @@ struct LibraryContextMenu: View {
         let targets = model.contextTargets(item)
         let several = targets.count > 1 ? " to \(targets.count) Photographs" : ""
         let editing = model.canChangeEdits
+        let compare = model.compareOffer(for: item)
         if model.mode == .grid {
             Button("Edit Photograph") { model.click(item); model.editCurrent() }
+            compareItem(compare)
+            Divider()
+        } else {
+            compareItem(compare)
             Divider()
         }
         Menu("Rating") {
@@ -711,5 +719,19 @@ struct LibraryContextMenu: View {
         }.disabled(!model.canDelete)
         Divider()
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(Array(Set(targets.map(\.photoFile)))) }
+    }
+
+    /// Compare 7 and 8, Compare with 7, or Compare with Original (ticket 46).
+    @ViewBuilder private func compareItem(_ offer: EditorModel.CompareOffer) -> some View {
+        let button = Button(offer.title) {
+            if let (first, second) = offer.pair { model.compare(first, second) } else if offer.withOriginal { model.compareWithOriginal() }
+        }
+        .disabled(!offer.enabled)
+        // The key compares the two selected.
+        if offer.pair != nil, model.contextTargets(item).count == 2 {
+            button.keyboardShortcut("c", modifiers: [])
+        } else {
+            button
+        }
     }
 }

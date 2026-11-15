@@ -24,7 +24,6 @@ struct GridSheet: View {
             .background(Theme.film)
             // Where the cells report their places (`SheetFlight`).
             .coordinateSpace(.named(ThumbnailPlaces.space))
-            .overlay(alignment: .topTrailing) { SheetHandle(model: model) }
             .environment(\.colorScheme, .dark)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("All photographs")
@@ -671,7 +670,7 @@ private struct SheetCell: View {
     }
 }
 
-// MARK: The foot and the handle
+// MARK: The foot
 
 /// "12 photographs · 1 selected" on the left, and the rows' Size on the right.
 private struct SheetFoot: View {
@@ -699,31 +698,5 @@ private struct SheetFoot: View {
         .foregroundStyle(Theme.dim)
         .padding(.horizontal, 18)
         .frame(height: Theme.Size.statusLine)
-    }
-}
-
-/// The grid's handle: just the arrow, pointing down, at the top right, 14 pt
-/// from the edge and 7 below the title bar. A click (or E, Return or Esc)
-/// folds the grid back to the photograph.
-private struct SheetHandle: View {
-    let model: EditorModel
-    @State private var hovered = false
-
-    var body: some View {
-        Button { model.editCurrent() } label: {
-            // A 7 pt chevron with 1.5 pt strokes, turned to point down.
-            LeaderArrow(down: true)
-                .stroke(Theme.dim, style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
-                .frame(width: 9.9, height: 4.95)
-                .offset(x: 0.5, y: hovered ? -0.5 : -3.5)
-                .frame(width: 36, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { over in withAnimation(.easeOut(duration: 0.3)) { hovered = over } }
-        .padding(.trailing, 14)
-        .padding(.top, 7)
-        .help("Edit Photograph (E)")
-        .accessibilityLabel("Edit Photograph")
     }
 }
