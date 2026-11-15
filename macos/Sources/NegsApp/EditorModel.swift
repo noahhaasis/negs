@@ -3020,6 +3020,12 @@ import UserNotifications
         if originalLensCorrection != value(Self.lensCorrectionPath).bool { originalCache = nil }
     }
 
+    /// The original is asked for, held or split, and still being decoded:
+    /// the photograph's tag says Loading original meanwhile.
+    var loadingOriginal: Bool {
+        (holdingOriginal && original == nil) || (splitting && splitOriginal == nil)
+    }
+
     /// Shows the original in place of the developed photograph while held.
     /// The canvas keeps its crop, rotation, and border.
     func holdOriginal(_ held: Bool) {

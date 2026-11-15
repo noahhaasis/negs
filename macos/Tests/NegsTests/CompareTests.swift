@@ -297,7 +297,9 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         try await waitUntil { model.image != nil }
         model.clickOriginal()
         XCTAssertTrue(model.splitting)
+        XCTAssertTrue(model.loadingOriginal, "the tag says Loading original until the line's original is in")
         try await waitUntil { model.splitOriginal != nil }
+        XCTAssertFalse(model.loadingOriginal)
         model.clickOriginal()
         XCTAssertFalse(model.splitting)
         XCTAssertNil(model.splitOriginal)
