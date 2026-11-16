@@ -256,6 +256,13 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(mixed.question(name: name, permanent: false).message, "Move 1 photograph to the Trash and remove 1 duplicate?")
         XCTAssertEqual(mixed.question(name: name, permanent: true).message, "Delete 1 photograph permanently and remove 1 duplicate?")
         XCTAssertEqual(mixed.withoutFiles.items, [b.variant("b2")])
+        // A RAW's camera JPEG goes with it, and the question says so.
+        let jpeg = URL(fileURLWithPath: "/photos/a.JPG")
+        let pair = DeletePlan([a, b], duplicates: { _ in [] }, companion: { $0 == a ? jpeg : nil })
+        XCTAssertEqual(pair.companions, [a: jpeg])
+        XCTAssertEqual(pair.question(name: name, permanent: false).information,
+                       "The photograph files, their camera JPEGs and their Negs ratings and edits are moved to the Trash. You can put them back with Undo or from the Trash.")
+        XCTAssertTrue(pair.withoutFiles.companions.isEmpty)
         XCTAssertEqual(EditorModel.next(after: photos[2], in: photos, skipping: [photos[2], photos[3]]), photos[4])
         XCTAssertEqual(EditorModel.next(after: photos[5], in: photos, skipping: [photos[4], photos[5]]), photos[3], "the last goes back")
         XCTAssertNil(EditorModel.next(after: photos[0], in: [photos[0]], skipping: [photos[0]]))

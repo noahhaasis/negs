@@ -388,7 +388,7 @@ final class EdgeSplitView: NSSplitView {
         let title: String
         if let comparison = model.comparison {
             let first = model.library.name(of: comparison.first.item)
-            title = comparison.againstOriginal ? "\(first) with its original" : "\(first) and \(model.library.name(of: comparison.second.item))"
+            title = comparison.againstOriginal ? "\(first) with its \(model.originalPhrase)" : "\(first) and \(model.library.name(of: comparison.second.item))"
         } else {
             title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
         }

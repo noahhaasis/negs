@@ -434,7 +434,8 @@ struct CanvasArea: View {
     @ViewBuilder private var developTag: some View {
         let title = DevelopTagTitle.title(source: model.source != nil, failed: model.renderFailed,
                                           developed: model.image != nil, slow: model.showsActivity,
-                                          loadingOriginal: model.loadingOriginal)
+                                          loadingOriginal: model.loadingOriginal,
+                                          original: model.originalPhrase)
         ZStack {
             if let title, !dropping, !model.cropping {
                 GeometryReader { proxy in

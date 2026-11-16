@@ -23,7 +23,7 @@ struct PhotoTrash: Sendable {
 }
 
 /// What a delete does. Photographs go to the Trash with their sidecars, and
-/// so with all their duplicates. A duplicate of a photograph that stays is
+/// so with all their duplicates, and a RAW with its camera JPEG. A duplicate of a photograph that stays is
 /// removed from the sidecar, and the file stays.
 struct DeletePlan: Equatable, Sendable {
     /// Everything chosen, in order: what Undo selects again.
@@ -32,11 +32,13 @@ struct DeletePlan: Equatable, Sendable {
     private(set) var duplicates: [URL] = []
     /// Duplicates that go with their photographs without being chosen.
     private(set) var following = 0
+    /// The camera JPEGs that go with `files`, by file.
+    private(set) var companions: [URL: URL] = [:]
 
     var isEmpty: Bool { items.isEmpty }
 
     /// `duplicates` gives a photograph's duplicates by variant id.
-    init(_ chosen: [URL], duplicates ids: (URL) -> [String] = { _ in [] }) {
+    init(_ chosen: [URL], duplicates ids: (URL) -> [String] = { _ in [] }, companion: (URL) -> URL? = { _ in nil }) {
         var seen = Set<URL>()
         let chosen = chosen.filter { seen.insert($0).inserted }
         files = chosen.filter { $0.variantID == nil }
@@ -44,13 +46,14 @@ struct DeletePlan: Equatable, Sendable {
         duplicates = chosen.filter { $0.variantID != nil && !trashed.contains($0.photoFile) }
         items = chosen.filter { $0.variantID == nil || !trashed.contains($0.photoFile) }
         following = files.reduce(0) { count, file in count + ids(file).filter { !seen.contains(file.variant($0)) }.count }
+        for file in files { if let picture = companion(file) { companions[file] = picture } }
     }
 
     /// The same plan without its files: after a permanent delete, only the
     /// duplicates can come back and go again.
     var withoutFiles: DeletePlan {
         var plan = self
-        plan.files = []; plan.following = 0; plan.items = duplicates
+        plan.files = []; plan.following = 0; plan.items = duplicates; plan.companions = [:]
         return plan
     }
 
@@ -73,8 +76,10 @@ struct DeletePlan: Equatable, Sendable {
         let with = following == 0 ? "" : photos == 1
             ? (following == 1 ? ", with its duplicate" : ", with its \(following) duplicates")
             : ", with \(count(following, "duplicate"))"
-        let filesGo = photos == 1 ? "the photograph’s file and its Negs rating and edits"
-            : "the photograph files and their Negs ratings and edits"
+        let filesGo = companions.isEmpty
+            ? (photos == 1 ? "the photograph’s file and its Negs rating and edits" : "the photograph files and their Negs ratings and edits")
+            : (photos == 1 ? "the photograph’s file, its camera JPEG and its Negs rating and edits"
+                : "the photograph files, their camera JPEGs and their Negs ratings and edits")
         let copiesGo = copies == 1 ? "The duplicate’s rating and edits are removed from its .negs file; the photograph stays."
             : "The duplicates’ ratings and edits are removed from their .negs files; the photographs stay."
         if photos == 0 {

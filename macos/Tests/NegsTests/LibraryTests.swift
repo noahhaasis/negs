@@ -126,6 +126,28 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try PhotoFolder.snapshot(in: dir).map(\.name), ["a2.png", "a10.png", "b.jpg"])
     }
 
+    /// RAW+JPEG: a RAW's camera JPEG (or HEIF) of the same name goes with
+    /// it, unless it has a sidecar of its own; pairing off lists both.
+    func testCameraJPEGsGoWithTheirRAWs() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for name in ["DSCF1.RAF", "DSCF1.JPG", "dscf2.raf", "DSCF2.jpeg", "DSCF3.JPG", "DSCF4.CR3", "DSCF4.HIF",
+                     "DSCF5.NEF", "DSCF5.JPG", "DSCF5.JPG.negs", "DSCF6.png", "DSCF6.dng", "DSCF7.heic"] {
+            try Data("x".utf8).write(to: dir.appendingPathComponent(name))
+        }
+        let paired = try PhotoFolder.listing(in: dir, pairing: true)
+        XCTAssertEqual(paired.photos.map(\.name), ["DSCF1.RAF", "dscf2.raf", "DSCF3.JPG", "DSCF4.CR3", "DSCF5.JPG", "DSCF5.NEF", "DSCF6.dng", "DSCF6.png"],
+                       "a JPEG without a RAW, a rated one and a PNG stay; HEIF is never a photograph")
+        XCTAssertEqual(paired.companions.mapValues(\.lastPathComponent), [
+            dir.appendingPathComponent("DSCF1.RAF"): "DSCF1.JPG",
+            dir.appendingPathComponent("dscf2.raf"): "DSCF2.jpeg",
+            dir.appendingPathComponent("DSCF4.CR3"): "DSCF4.HIF"
+        ])
+        let separate = try PhotoFolder.listing(in: dir, pairing: false)
+        XCTAssertEqual(separate.photos.count, 10, "HEIF is not listed when not paired")
+        XCTAssertTrue(separate.companions.isEmpty)
+    }
+
     @MainActor func testRatingKeysAreIgnoredWhileTyping() {
         let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
         let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 200, height: 24))

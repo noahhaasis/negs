@@ -229,6 +229,22 @@ enum OriginalMode: String, CaseIterable {
     }
 }
 
+/// What Original shows of a RAW shot as RAW+JPEG (Original ⌄), remembered:
+/// the RAW as macOS develops it, or the camera's own JPEG. A photograph
+/// without a camera JPEG always shows the RAW.
+enum OriginalReference: String, CaseIterable {
+    case raw
+    case cameraJPEG
+
+    static let key = "originalReference"
+    var title: String {
+        switch self { case .raw: "Show the RAW"; case .cameraJPEG: "Show the camera JPEG" }
+    }
+    static func load(_ defaults: UserDefaults = .standard) -> OriginalReference {
+        defaults.string(forKey: key).flatMap(OriginalReference.init(rawValue:)) ?? .raw
+    }
+}
+
 extension PhotoLibrary {
     /// The number a photograph is known by on the roll: its place in the
     /// folder, counted from 1, and a duplicate's letter after it (7a, 7b).
@@ -269,7 +285,7 @@ extension EditorModel {
         if let current, current != item {
             return CompareOffer(title: "Compare with \(library.frameNumber(of: current))", enabled: canCompare, pair: (current, item))
         }
-        return CompareOffer(title: "Compare with Original", enabled: canCompare && canCompareWithOriginal(item), withOriginal: true)
+        return CompareOffer(title: "Compare with \(originalWord)", enabled: canCompare && canCompareWithOriginal(item), withOriginal: true)
     }
 
     /// The title bar's Compare word, the C key and View › Compare: the two selected, in shown order.
@@ -428,7 +444,7 @@ extension EditorModel {
     var compareSummary: String {
         guard let comparison else { return "" }
         let first = compareNumber(comparison.first)
-        if comparison.againstOriginal { return "Comparing \(first) with its original" }
+        if comparison.againstOriginal { return "Comparing \(first) with its \(originalPhrase)" }
         let differences = compareDifferences
         return "Comparing \(first) and \(compareNumber(comparison.second))" + (differences.isEmpty ? "" : " · differ in \(differences.words)")
     }
@@ -538,17 +554,19 @@ extension EditorModel {
         other.filmStrip = FilmStrip.load(data: data, film: state.film, format: format)
     }
 
+    /// Show the RAW / Show the camera JPEG changed while comparing with the original.
+    func reloadComparedOriginal() {
+        guard let comparison, comparison.againstOriginal else { return }
+        if let other = compareSides[comparison.first.isOriginal ? comparison.first : comparison.second] { loadComparedOriginal(other) }
+    }
+
     /// The original at the developed preview's resolution, as Original shows it.
     private func loadComparedOriginal(_ other: CompareOther) {
-        guard let source, let image else { return }
-        let sourceLong = Int(max(sourceSize.width, sourceSize.height))
-        let maxPixels = sourceLong > 0 ? min(max(image.width, image.height), sourceLong) : max(image.width, image.height)
-        let raw = isRaw, lensCorrection = value(Self.lensCorrectionPath).bool, size = imageSize
+        guard let load = originalLoader() else { return }
+        let size = imageSize, word = originalPhrase
         Task { [weak other] in
-            let surface = await Task.detached(priority: .userInitiated) {
-                OriginalImage.load(source, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels)
-            }.value
-            if let surface { other?.show(surface, size: size, as: .original) } else { other?.failure = "The original couldn’t be shown." }
+            let surface = await Task.detached(priority: .userInitiated, operation: load).value
+            if let surface { other?.show(surface, size: size, as: .original) } else { other?.failure = "The \(word) couldn’t be shown." }
         }
     }
 

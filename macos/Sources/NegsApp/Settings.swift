@@ -149,6 +149,13 @@ struct SettingsView: View {
                       selection: model.fotufilmFilms.rawValue) { model.fotufilmFilms = FotufilmFilms(rawValue: $0) ?? .all }
             HintText("Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.")
         }
+        InkSection(title: "RAW + JPEG") {
+            TickRow(title: "Show camera JPEGs separately", isOn: Binding(
+                get: { model.separateCameraJPEGs }, set: { model.separateCameraJPEGs = $0 }))
+            HintText(model.separateCameraJPEGs
+                     ? "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are two photos."
+                     : "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are one photo: the RAW develops, the JPEG goes to the Trash with it, and Original can show it. A JPEG you’ve already rated or edited stays a photo of its own.")
+        }
         InkSection(title: "Changing film") {
             TickRow(title: "Keep paper when changing film", isOn: Binding(
                 get: { model.previews.keepPaper }, set: { model.setKeepPaper($0) }))
