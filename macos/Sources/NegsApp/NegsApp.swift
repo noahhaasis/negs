@@ -81,6 +81,13 @@ import SwiftUI
         #endif
         updates.schedule(afterStartupOf: model)
         offerBatchResume()
+        // Which Lightroom is installed, and its copies' cleanup: off the
+        // main actor, after launch has settled (ticket 48).
+        model.refreshLightroom(delay: .seconds(2))
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Not at launch: that look is already scheduled.
+        if model.lightroomDetected != nil { model.refreshLightroom() }
     }
 
     /// An export the last session didn't finish is offered once launch has

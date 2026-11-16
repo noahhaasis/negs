@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import XCTest
 @testable import NegsApp
 
@@ -1330,6 +1331,67 @@ final class LibraryFormatTests: XCTestCase {
         let skipped = try XCTUnwrap(skipping)
         await skipped.task?.value
         XCTAssertEqual(skipped.items.first?.status, .skipped)
+        await model.flushSidecars()
+    }
+
+    /// Open in Lightroom's batch: 16-bit TIFFs in the export settings'
+    /// colour space with the rating, named `a-Negs.tif`; never opened here.
+    func testOpenInLightroomDevelopsSixteenBitTIFFsWithTheirRatings() async throws {
+        let dir = try folder(), out = try folder()
+        defer { for url in [dir, out] { try? FileManager.default.removeItem(at: url) } }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png")
+        let defaults = UserDefaults.standard
+        let savedSpace = defaults.object(forKey: "colorSpace"), savedEngine = defaults.object(forKey: "exportEngine")
+        defer { defaults.set(savedSpace, forKey: "colorSpace"); defaults.set(savedEngine, forKey: "exportEngine") }
+        SaveSettings.chosenSpace = 1  // Display P3
+        ExportEngine.selected = .reference  // Fast needs the CLI beside the app
+        let model = try await model(store: SidecarStore())
+        model.batchJournalURL = out.appendingPathComponent("journal/active-export.json")
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 2 && model.previewCurrent }
+        model.setRating(2)
+        model.showGrid()
+        model.selectAll()
+
+        model.lightroomApps = LightroomApps()
+        XCTAssertEqual(model.lightroomKinds, [], "hidden without Lightroom")
+        XCTAssertFalse(model.canOpenInLightroom(.cloud, targets: model.exportTargets))
+        model.lightroomApps = LightroomApps(cloud: URL(fileURLWithPath: "/Applications/Adobe Lightroom.app"))
+        XCTAssertEqual(model.lightroomKinds, [.cloud])
+        model.lightroomApps = LightroomApps(cloud: URL(fileURLWithPath: "/Applications/Adobe Lightroom.app"),
+                                            classic: URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app"))
+        XCTAssertEqual(model.lightroomKinds, [.cloud, .classic], "both installed: two items")
+        model.lightroomApps = LightroomApps(classic: URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app"))
+        XCTAssertEqual(model.lightroomKinds, [.classic])
+        model.lightroomApps = LightroomApps(cloud: URL(fileURLWithPath: "/Applications/Adobe Lightroom.app"))
+        XCTAssertTrue(model.canOpenInLightroom(.cloud, targets: model.exportTargets))
+        XCTAssertTrue(model.canExport([b]))
+
+        let options = model.lightroomOptions(.cloud)
+        XCTAssertEqual(options.outputFormat, .tiff)
+        XCTAssertEqual(options.bitDepth, 16)
+        XCTAssertEqual(options.size, ExportSize.full)
+        // Finishing hands nothing to a Lightroom that has since gone.
+        model.lightroomApps = LightroomApps()
+        let started = await model.exportBatch(model.exportTargets, to: out, options: options)
+        let run = try XCTUnwrap(started)
+        XCTAssertEqual(StatusText.exporting(run.finished, of: run.total, to: run.journal.options.lightroom), "Sending 1 of 2 photographs to Lightroom")
+        XCTAssertTrue(model.lightroomSending, "no cleanup while its TIFFs are written: a photograph sent again has Lightroom's copy's name and size")
+        await run.task?.value
+        XCTAssertFalse(model.lightroomSending)
+        XCTAssertEqual(run.items.map(\.status), [.done, .done], "\(run.items.map { $0.reason ?? "" })")
+        XCTAssertEqual(model.status, "Lightroom isn’t installed any more")
+        let files = ["a-Negs.tif", "b-Negs.tif"].map { out.appendingPathComponent($0) }
+        XCTAssertEqual(files.map(ExportRating.read), [2, nil])
+        for file in files {
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(file as CFURL, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+            XCTAssertEqual(properties[kCGImagePropertyDepth] as? Int, 16, file.lastPathComponent)
+            XCTAssertEqual(properties[kCGImagePropertyProfileName] as? String, "Display P3", file.lastPathComponent)
+            XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 96, "full size")
+        }
         await model.flushSidecars()
     }
 

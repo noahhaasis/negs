@@ -682,6 +682,11 @@ private struct SheetFoot: View {
             // A rating or flag note takes the count's place for a moment (§4.7).
             if let note = model.libraryNote {
                 NoteWords(note: note)
+            } else if let run = model.batch, run.running {
+                // A batch started here shows its progress here too.
+                BatchProgress(run: run)
+            } else if let words = model.lightroomWords {
+                Text(words).foregroundStyle(Theme.label)
             } else {
                 Text(SheetWords.count(shown: model.shownPhotos.count, total: model.library.items.count,
                                       selected: model.selection.selected.count, filtered: model.library.filter.active))

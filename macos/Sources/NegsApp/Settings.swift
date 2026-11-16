@@ -94,6 +94,9 @@ struct SettingsView: View {
     @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.darkroom
     @State private var thumbnailBytes: Int?
     @State private var emptyingThumbnails = false
+    /// The sent copies' sizes, read when Upkeep opens; nil for no folder.
+    @State private var lightroomBytes: [LightroomKind: Int] = [:]
+    @State private var deletingSent = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -233,6 +236,7 @@ struct SettingsView: View {
             HintText("The strip and grid show each photograph as developed; the least recently shown are removed first. Emptied, the open folder’s are developed again in the background.")
         }
         .task { thumbnailBytes = await model.thumbnailCacheSize() }
+        lightroom
         InkSection(title: "App data") {
             ButtonRow {
                 EmptyView()
@@ -246,6 +250,56 @@ struct SettingsView: View {
                 HintText("Finish or close the update dialog before removing app data.", reason: true)
             }
             HintText("Removes settings, the saved editing session, and caches. Your original photographs and exported images are kept.")
+        }
+    }
+
+    /// Ticket 48: the copies sent to Lightroom, with their size and a button
+    /// to delete them. Shown with Lightroom installed or copies left.
+    @ViewBuilder private var lightroom: some View {
+        let kinds = LightroomKind.allCases.filter { model.lightroomKinds.contains($0) || (lightroomBytes[$0] ?? 0) > 0 }
+        if !kinds.isEmpty {
+            InkSection(title: "Lightroom") {
+                ForEach(kinds, id: \.self) { kind in
+                    let bytes = lightroomBytes[kind]
+                    ButtonRow {
+                        FigureText(lead: kinds.count > 1 ? kind.title : nil,
+                                   figure: bytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "…",
+                                   trail: "sent")
+                    } button: {
+                        Button(kind == .cloud ? "Delete Sent Copies" : "Delete Copies…") { deleteSent(kind) }
+                            .buttonStyle(OutlinedButtonStyle())
+                            .inkDisabled(deletingSent || (bytes ?? 0) == 0 || model.batch?.running == true)
+                    }
+                    HintText(kind == .cloud
+                             ? "Open in Lightroom sends full-size 16-bit TIFFs. Each is deleted once Lightroom has copied it into its library, or after a week."
+                             : "Lightroom Classic adds the TIFFs in “Negs for Lightroom” in Pictures where they are, so Negs never deletes them. Delete them only once Classic no longer needs them.",
+                             warning: kind == .classic)
+                }
+            }
+            .task { await measureSent() }
+        }
+    }
+
+    private func measureSent() async {
+        let sizes = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: LightroomKind.allCases.compactMap { kind in Lightroom.size(of: kind.folder).map { (kind, $0) } })
+        }.value
+        lightroomBytes = sizes
+    }
+
+    private func deleteSent(_ kind: LightroomKind) {
+        Task {
+            if kind == .classic {
+                let answer = await model.ask(AppAlert(
+                    title: "Delete the TIFFs sent to Lightroom Classic?",
+                    detail: "Lightroom Classic may still use them: photos it added from “Negs for Lightroom” go missing there.",
+                    buttons: [.init(title: "Delete", role: .destructive), .init(title: "Cancel", role: .cancel)]))
+                guard answer.button == 0 else { return }
+            }
+            deletingSent = true
+            await Task.detached(priority: .userInitiated) { Lightroom.deleteSent(in: kind.folder) }.value
+            await measureSent()
+            deletingSent = false
         }
     }
 

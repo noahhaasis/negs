@@ -45,11 +45,9 @@ private struct StatusWords: View {
         if let note = model.libraryNote {
             NoteWords(note: note)
         } else if let run = model.batch, run.running {
-            HStack(spacing: 14) {
-                Text(StatusText.exporting(run.finished, of: run.total))
-                ProgressRule(fraction: run.fraction)
-            }
-            .foregroundStyle(Theme.label)
+            BatchProgress(run: run)
+        } else if let words = model.lightroomWords {
+            Text(words).foregroundStyle(Theme.label)
         } else if let run = model.batch, run.needsAttention {
             BatchOutcome(model: model, run: run)
         } else if model.exporting {
@@ -72,9 +70,11 @@ private struct StatusWords: View {
 
 /// The status line's words, apart from the views so they can be tested.
 enum StatusText {
-    /// "Exporting 5 of 12 photographs": the one under way, counted from 1.
-    static func exporting(_ finished: Int, of total: Int) -> String {
-        "Exporting \(min(finished + 1, total)) of \(total) " + (total == 1 ? "photograph" : "photographs")
+    /// "Exporting 5 of 12 photographs": the one under way, counted from 1;
+    /// "Sending 5 of 12 photographs to Lightroom" for Open in Lightroom.
+    static func exporting(_ finished: Int, of total: Int, to lightroom: LightroomKind? = nil) -> String {
+        (lightroom == nil ? "Exporting " : "Sending ") + "\(min(finished + 1, total)) of \(total) " + (total == 1 ? "photograph" : "photographs")
+            + (lightroom.map { " to \($0.title)" } ?? "")
     }
 
     /// "Cropping · 3:2 · 3936 × 2624 px".
@@ -151,6 +151,20 @@ private struct BatchOutcome: View {
                 if let view = anchor.view { model.presentBatch(view) }
             }
             .background(AnchorView(anchor: anchor))
+        }
+        .foregroundStyle(Theme.label)
+    }
+}
+
+/// "Exporting 5 of 12 photographs" and the rule, in the status line and
+/// the grid's foot.
+struct BatchProgress: View {
+    let run: BatchRun
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(StatusText.exporting(run.finished, of: run.total, to: run.journal.options.lightroom))
+            ProgressRule(fraction: run.fraction)
         }
         .foregroundStyle(Theme.label)
     }
