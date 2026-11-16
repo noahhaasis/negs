@@ -447,6 +447,7 @@ function buildRow(c) {
     syncs.push(() => { sw.checked = !!state.match; row.hidden = !photo?.raw; });
     return row;
   }
+  if (c.kind === "filters") return buildColorFilters(c);
   if (c.kind === "note") {
     const note = el("p", { className: "hint" });
     const row = el("div", { className: "ctl" }, note);
@@ -581,6 +582,85 @@ function buildStyles(c) {
     }
   });
   return row;
+}
+
+// The camera's colour filter (macOS ColorFilterPicker): a glass disc for
+// each in the catalog's order after None, then the chosen one's name and
+// glass, what it does, and the light it takes on this film. A radio group,
+// arrow keys moving the choice.
+let lastColorFilter = "hoya_y2";
+const colorFilterOn = () => (get("camera.color_filter") ?? "none") !== "none";
+function setColorFilter(key) {
+  if (key !== "none") lastColorFilter = key;
+  set("camera.color_filter", key);
+  sync();
+  schedule("settled");
+}
+function buildColorFilters(c) {
+  const texts = c.filters;
+  const name = el("span", { className: "filter-name" });
+  const glass = el("span", { className: "filter-glass" });
+  const hint = el("p", { className: "hint" });
+  const warning = el("p", { className: "hint warning", textContent: tr("Taking filters are made for black-and-white film. On colour film this one tints the whole photograph.") });
+  const discs = el("div", { className: "discs", role: "radiogroup" });
+  discs.setAttribute("aria-label", tr(c.label));
+  let built = "";
+  const keys = () => ["none", ...(catalog.color_filters ?? []).map((f) => f.key)];
+  function build() {
+    discs.replaceChildren(...keys().map((key) => {
+      const filter = catalog.color_filters?.find((f) => f.key === key);
+      const disc = el("span", { className: "disc" });
+      if (filter) disc.style.setProperty("--glass", filter.colour);
+      const button = el("button", { type: "button", className: `filter${filter ? "" : " none"}`, role: "radio" },
+        disc, el("span", { textContent: tr(texts[key]?.name ?? filter?.name ?? key) }));
+      button.dataset.key = key;
+      button.title = filter ? `${tr(texts[key]?.name ?? filter.name)} · ${filter.glass}. ${tr(texts[key]?.effect ?? "")}` : tr("No glass in front of the lens.");
+      button.addEventListener("click", () => { if (get(c.path) !== key) setColorFilter(key); });
+      return button;
+    }));
+  }
+  discs.addEventListener("keydown", (ev) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
+    if (!step) return;
+    ev.preventDefault();
+    const all = keys(), at = Math.max(0, all.indexOf(get(c.path) ?? "none"));
+    const next = all[(at + step + all.length) % all.length];
+    setColorFilter(next);
+    discs.querySelector(`[data-key="${next}"]`)?.focus();
+  });
+  const row = el("div", { className: "ctl filters" }, discs,
+    el("div", { className: "filter-title" }, name, glass), hint, warning);
+  syncs.push(() => {
+    const list = keys().join();
+    if (list !== built) { built = list; build(); }
+    const current = get(c.path) ?? "none";
+    const filter = catalog.color_filters?.find((f) => f.key === current);
+    for (const button of discs.children) {
+      const on = button.dataset.key === (filter ? current : "none");
+      button.setAttribute("aria-checked", on);
+      button.tabIndex = on ? 0 : -1;
+    }
+    name.textContent = tr(texts[filter?.key ?? "none"]?.name ?? filter?.name ?? "None");
+    glass.textContent = filter?.glass ?? "";
+    hint.textContent = colorFilterHint(filter, texts);
+    warning.hidden = !filter || filmIsBW();
+  });
+  return row;
+}
+// "… Takes 1.3 stops on Ilford HP5 Plus; auto exposure gives it."
+function colorFilterHint(filter, texts) {
+  const effect = tr(texts[filter?.key ?? "none"]?.effect ?? "");
+  const stops = filter && stock(state.film)?.color_filter_stops?.[filter.key];
+  if (stops == null) return effect;
+  const film = stock(state.film)?.name ?? state.film;
+  const number = formatValue(stops, 0.1);
+  const metered = get("camera.auto_exposure") || matchActive();
+  const one = Math.abs(stops - 1) < 0.05;
+  const cost = metered
+    ? (one ? tr("Takes {stops} stop on {film}; auto exposure gives it.", { stops: number, film })
+      : tr("Takes {stops} stops on {film}; auto exposure gives it.", { stops: number, film }))
+    : (one ? tr("Takes {stops} stop on {film}.", { stops: number, film }) : tr("Takes {stops} stops on {film}.", { stops: number, film }));
+  return `${effect} ${cost}`;
 }
 
 // macOS BorderSwatch, 50 × 36.
@@ -741,6 +821,19 @@ function buildControls() {
         syncs.push(() => {
           sw.checked = get(group.enable);
           controls.disabled = !sw.checked;
+        });
+        summary.append(sw);
+      }
+      if (group.colorFilter) {
+        // On brings back the last glass chosen, off takes it away (macOS
+        // EditorModel.setColorFilter); only B&W films offer it.
+        const sw = el("input", { type: "checkbox", className: "switch", title: tr("{title} on or off", { title: tr(group.title) }) });
+        sw.setAttribute("aria-label", tr(group.title));
+        sw.addEventListener("click", (ev) => ev.stopPropagation());
+        sw.addEventListener("change", () => setColorFilter(sw.checked ? lastColorFilter : "none"));
+        syncs.push(() => {
+          sw.checked = colorFilterOn();
+          details.hidden = !catalog.color_filters?.length || !(filmIsBW() || colorFilterOn());
         });
         summary.append(sw);
       }

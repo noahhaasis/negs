@@ -118,6 +118,12 @@ window.NEGS_I18N.dict = {
   "Negative exposure (EV)": "负片曝光 (EV)",
   "Film format (mm)": "胶片规格 (mm)",
   "Lens blur (µm)": "镜头模糊 (µm)",
+  "Color Filter": "滤色镜",
+  "Color filter": "滤色镜",
+  "Green": "绿",
+  "Yellow-green": "黄绿",
+  "Orange": "橙",
+  "Red": "红",
   "Lens Diffusion": "镜头柔光",
   "Filter": "滤镜",
   "Strength": "强度",
@@ -272,7 +278,7 @@ window.NEGS_I18N.dict = {
   "Fotufilm films": "Fotufilm 胶片",
   "All": "全部",
   "From datasheets": "仅限数据表",
-  "None": "不显示",
+  "None": "无",
   "Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.":
     "从 Fotufilm 移植的胶片。“仅限数据表”会隐藏其中八款根据样片而非厂商数据建模的胶片。已在使用被隐藏胶片的照片会保留它。",
   "Match new RAWs to camera brightness": "新 RAW 匹配相机亮度",
@@ -724,6 +730,22 @@ window.NEGS_I18N.dict = {
 
   // ---- Prep › Exposure 的两种说明（app.js helpFor）----------------------------------
 
+  "No glass in front of the lens.": "镜头前不加滤镜。",
+  "Lightens foliage; darkens red lips and skin a little, for a tanned look.": "提亮树叶；红唇和皮肤略微变深，像晒过太阳。",
+  "Lightens foliage and darkens the sky a little. Kind to skin outdoors.": "提亮树叶，天空略微变暗。户外人像肤色自然。",
+  "Darkens blue sky a touch so clouds stand out. The everyday filter.": "蓝天略微变暗，云朵更突出。最常用的滤色镜。",
+  "Darker sky, stronger clouds, less haze. Hides freckles and blemishes.": "天空更暗，云层更醒目，雾霭更少。能淡化雀斑和瑕疵。",
+  "Near-black blue sky, bright red and brick, pale skin and lips. Cuts haze hard.": "蓝天近乎全黑，红色和砖墙变亮，皮肤和嘴唇发白。强力穿透雾霭。",
+  "Taking filters are made for black-and-white film. On colour film this one tints the whole photograph.":
+    "拍摄用滤色镜是为黑白胶片设计的。用在彩色胶片上，它会让整张照片偏色。",
+  "Takes {stops} stop on {film}; auto exposure gives it.": "在 {film} 上损失 {stops} 挡光；自动曝光会补回。",
+  "Takes {stops} stops on {film}; auto exposure gives it.": "在 {film} 上损失 {stops} 挡光；自动曝光会补回。",
+  "Takes {stops} stop on {film}.": "在 {film} 上损失 {stops} 挡光。",
+  "Takes {stops} stops on {film}.": "在 {film} 上损失 {stops} 挡光。",
+  "Which colours the glass holds back. The film’s own spectral sensitivity decides how much lighter or darker each turns grey.":
+    "滤色镜挡住哪些颜色。每种颜色变成多浅或多深的灰，由胶片自身的光谱感光度决定。",
+  "A coloured glass in front of the lens for black-and-white film. It changes which colours turn light or dark grey, from the film’s own spectral sensitivity, not as a tint.":
+    "黑白胶片用的镜头前彩色玻璃。它按胶片自身的光谱感光度，改变哪些颜色变成浅灰或深灰，而不是给照片染色。",
   "Brighter or darker than the match, in stops. It stays when the match changes with the film, paper or a preset.":
     "相对匹配亮度的增减，以挡为单位。随胶片、相纸或预设改变匹配时，它会保留。",
   "Brightens or darkens the scene before the film, in stops. Unlike Negative exposure, the print doesn’t make up for it.":

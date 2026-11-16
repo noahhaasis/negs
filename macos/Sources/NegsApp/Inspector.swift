@@ -614,7 +614,7 @@ extension AdjustmentInspector {
     static func count(_ section: InspectorSection, _ model: EditorModel) -> Int {
         var count = adjustmentGroups.filter { $0.section == section }.map { Self.count($0, model) }.reduce(0, +)
         switch section {
-        case .camera: count += ["camera.exposure_compensation_ev", FilmFormatPicker.path, "camera.lens_blur_um"].filter(model.isModified).count
+        case .camera: count += ["camera.exposure_compensation_ev", FilmFormatPicker.path, "camera.lens_blur_um", ColorFilter.path].filter(model.isModified).count
         case .film: count += model.isModified(filmDevelopmentPath) ? 1 : 0
         case .print: count += (scanFilmModified(model) ? 1 : 0) + (model.isModified(printDevelopmentPath) ? 1 : 0)
         case .scan: count += outputCount(model)
@@ -972,6 +972,7 @@ struct AdjustmentInspector: View {
             FilmFormatPicker(model: model)
             let lensBlur = shows("camera.lens_blur_um", section: .camera)
             if lensBlur { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
+            colorFilterModule
             modules(.camera, ruledFirst: true)
             moreLine(.camera, loose: model.isModified("camera.lens_blur_um") ? [] : ["Lens blur"])
         }
@@ -1075,7 +1076,7 @@ struct AdjustmentInspector: View {
 
     private func module<Content: View>(_ title: String, help: String?, enabled: Binding<Bool>? = nil, summary: String?, edited: Bool,
                                        skipped: Bool = false, ruled: Bool = true, more: Int = 0, showMore: @escaping () -> Void = {},
-                                       fewer: Int = 0, showFewer: @escaping () -> Void = {},
+                                       fewer: Int = 0, showFewer: @escaping () -> Void = {}, disablesContent: Bool = true,
                                        @ViewBuilder content: @escaping () -> Content) -> some View {
         let open = Binding(
             get: { expanded.split(separator: ",").contains(Substring(title)) },
@@ -1085,7 +1086,24 @@ struct AdjustmentInspector: View {
                 expanded = titles.joined(separator: ",")
             })
         return InkModule(title: title, help: help, enabled: enabled, summary: summary, edited: edited, skipped: skipped, ruled: ruled,
-                         open: open, more: more, showMore: showMore, fewer: fewer, showFewer: showFewer, content: content)
+                         open: open, more: more, showMore: showMore, fewer: fewer, showFewer: showFewer,
+                         disablesContent: disablesContent, content: content)
+    }
+
+    /// Color Filter (issue #21): a taking filter for black-and-white film,
+    /// as glass discs. A colour film shows it only while one is set (by a
+    /// preset, or kept from a B&W film), with a warning.
+    @ViewBuilder private var colorFilterModule: some View {
+        let current = model.colorFilter
+        if !model.colorFilters.isEmpty, model.filmIsBW || current != ColorFilter.none {
+            let enabled = Binding(get: { model.colorFilter != ColorFilter.none },
+                                  set: { model.setColorFilter($0 ? model.lastColorFilter : ColorFilter.none) })
+            module("Color Filter", help: ControlHelp.group("Color Filter"), enabled: enabled,
+                   summary: model.colorFilters.first { $0.key == current }?.name ?? "Off",
+                   edited: model.isModified(ColorFilter.path), disablesContent: false) {
+                ColorFilterPicker(model: model)
+            }
+        }
     }
 
     /// A folded module's summary: its first slider's value.

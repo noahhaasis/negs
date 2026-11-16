@@ -76,6 +76,10 @@ struct TabEdit: Identifiable, Equatable {
                 out.append(TabEdit(title: "Film format", value: FilmFormatPicker.format(mm: mm) ?? "\(number(mm)) mm", target: .filmFormat))
             }
             path("Lens blur (µm)", "camera.lens_blur_um")
+            if model.isModified(ColorFilter.path) {
+                let name = model.colorFilters.first { $0.key == model.colorFilter }?.name ?? "None"
+                out.append(TabEdit(title: "Color filter", value: name, target: .param(ColorFilter.path)))
+            }
         case .film:
             path("Film development", filmDevelopmentPath, unit: " min")
         case .print:

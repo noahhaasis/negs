@@ -32,6 +32,7 @@ export const PATHS = {
   // Lab: camera
   "camera.exposure_compensation_ev": "Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative’s density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.",
   "camera.film_format_mm": "The film the photograph was taken on, by the frame’s long edge. Grain, halation, scatter and diffusion are all sized on the film, so a smaller format shows them larger.",
+  "camera.color_filter": "Which colours the glass holds back. The film’s own spectral sensitivity decides how much lighter or darker each turns grey.",
   "camera.lens_blur_um": "Softness of the taking lens, measured on the film. 0 is a perfect lens.",
 
   // Lens Diffusion
@@ -152,6 +153,7 @@ export const PATHS = {
 };
 
 export const GROUPS = {
+  "Color Filter": "A coloured glass in front of the lens for black-and-white film. It changes which colours turn light or dark grey, from the film’s own spectral sensitivity, not as a tint.",
   "Lens Diffusion": "A diffusion filter on the camera lens: highlights bloom into a soft halo.",
   "Film Curves": "Shapes how the film develops: its contrast, per layer and per colour.",
   "Grain": "The film’s silver grain, drawn from the stock’s measured granularity.",

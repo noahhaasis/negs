@@ -10,6 +10,15 @@ use std::path::Path;
 /// The catalog of `stocks` (profile names under `data/profiles`), sorted by
 /// display name.
 pub fn catalog(data: &Path, stocks: impl IntoIterator<Item = String>) -> Result<Value, profile::ProfileError> {
+    // The camera colour filters in the apps' order, with their curves for
+    // each B&W film's filter factors below.
+    let invalid = profile::ProfileError::Validation;
+    let mut filters = Vec::new();
+    for key in crate::color_filters::APP_ORDER {
+        let spec = crate::color_filters::COLOR_FILTER_LIBRARY.iter().find(|spec| spec.key == key).expect("APP_ORDER names library keys");
+        let curve = crate::color_filters::transmittance(data, key).map_err(invalid)?.expect("a library key has a curve");
+        filters.push((spec, curve));
+    }
     let mut profiles = Vec::new();
     for stock in stocks {
         let p = profile::load_profile_by_name(data, &stock)?;
@@ -22,7 +31,21 @@ pub fn catalog(data: &Path, stocks: impl IntoIterator<Item = String>) -> Result<
         crate::pipeline::apply_film_specific_params(&p, &mut resolved);
         let dir = &resolved.film_render.dir_couplers;
         let halation = &resolved.film_render.halation;
+        // How many stops each filter takes on a B&W camera film, for the
+        // Color Filter hint. Colour films get none: the filters are for B&W.
+        // A film the glass leaves blind (a blue-sensitive stock behind red)
+        // has no factor for it rather than no catalog.
+        let is_camera_film = !(p.info.support == "paper" || p.info.stage == "printing");
+        let mut stops = serde_json::Map::new();
+        if p.is_bw() && is_camera_film {
+            for (spec, curve) in &filters {
+                if let Ok(value) = crate::color_filters::factor_stops(&p, curve) {
+                    stops.insert(spec.key.into(), json!((value * 10.0).round() / 10.0));
+                }
+            }
+        }
         profiles.push(json!({
+            "color_filter_stops": stops,
             "id": stock, "name": p.info.name.as_ref().unwrap_or(&stock),
             "paper": p.info.support == "paper" || p.info.stage == "printing",
             "positive": p.is_positive(), "bw": p.is_bw(),
@@ -44,5 +67,13 @@ pub fn catalog(data: &Path, stocks: impl IntoIterator<Item = String>) -> Result<
         }));
     }
     profiles.sort_by_key(|p| p["name"].as_str().unwrap_or_default().to_lowercase());
-    Ok(json!({"profiles": profiles, "defaults": RuntimeParams::default(), "nullable_paths": RuntimeParams::nullable_paths()}))
+    let color_filters: Vec<Value> = filters
+        .iter()
+        .map(|(spec, curve)| {
+            let [r, g, b] = crate::color_filters::glass_srgb(curve);
+            json!({"key": spec.key, "name": spec.colour, "glass": spec.glass, "colour": format!("#{r:02x}{g:02x}{b:02x}")})
+        })
+        .collect();
+    Ok(json!({"profiles": profiles, "color_filters": color_filters, "defaults": RuntimeParams::default(),
+              "nullable_paths": RuntimeParams::nullable_paths()}))
 }
