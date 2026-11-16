@@ -767,6 +767,14 @@ struct LibraryContextMenu: View {
         Button("Paste Edits" + several) { model.pasteEdits(onto: targets) }.disabled(!editing || model.copiedEdits == nil)
         Button("Paste from Previous" + several) { model.pasteFromPrevious(onto: targets) }.disabled(!editing || model.previousEdits == nil)
         Divider()
+        // Ticket 48: the batch panel for these, and Lightroom when installed.
+        Button(targets.count > 1 ? "Export \(targets.count) Photographs…" : "Export…") { model.exportPanel(targets) }
+            .disabled(!model.canExport(targets))
+        ForEach(model.lightroomKinds, id: \.self) { kind in
+            Button(EditorModel.lightroomTitle(kind, count: targets.count)) { model.openInLightroom(kind, targets: targets) }
+                .disabled(!model.canOpenInLightroom(kind, targets: targets))
+        }
+        Divider()
         Button(targets.count > 1 ? "Duplicate \(targets.count) Photographs" : "Duplicate") { model.duplicate(targets) }.disabled(!editing)
         Button(targets.count > 1 ? "Reset Edits of \(targets.count) Photographs" : "Reset Edits") { model.resetEdits(of: targets) }.disabled(!editing)
         Divider()

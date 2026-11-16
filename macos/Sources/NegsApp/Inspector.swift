@@ -1218,11 +1218,30 @@ struct ExportFoot: View {
                 .disabled(!model.canExport || model.cropping)
                 .inkFocus { if model.canExport && !model.cropping { model.exportPanel() } }
                 .help(model.exportTitle == "Export Photograph…" ? "Export photograph (⇧⌘E)" : "Export the selected photographs (⇧⌘E)")
+            // Quieter than Export: words, and only with Lightroom installed (ticket 48).
+            let kinds = model.lightroomKinds
+            if !kinds.isEmpty {
+                let targets = model.exportTargets
+                HStack(spacing: 14) {
+                    ForEach(kinds, id: \.self) { kind in
+                        WordButton(title: "Open in \(kind.title)", size: 13.5,
+                                   help: Self.lightroomHelp(kind, count: targets.count)) { model.openInLightroom(kind) }
+                            .disabled(!model.canOpenInLightroom(kind, targets: targets))
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.horizontal, Theme.Size.gutter)
         .padding(.top, 11)
         .padding(.bottom, 16)
         .overlay(alignment: .top) { InkRule() }
+    }
+
+    /// "Open the 12 selected photographs in Lightroom as 16-bit TIFFs (⌥⌘E)".
+    static func lightroomHelp(_ kind: LightroomKind, count: Int) -> String {
+        let what = count > 1 ? "the \(count) selected photographs" : "the photograph"
+        return "Open \(what) in \(kind.title) as full-size 16-bit TIFFs" + (kind == .cloud ? " (⌥⌘E)" : "")
     }
 
     /// "3984 × 2656 · JPEG 95 · sRGB": the photograph's size, then the

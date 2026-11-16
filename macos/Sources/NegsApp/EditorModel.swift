@@ -2298,6 +2298,18 @@ import UserNotifications
     @ObservationIgnored private var batchEngine: EngineClient?
     @ObservationIgnored private var batchGeneration = 0
 
+    /// The Lightroom apps installed (ticket 48): what the last detection
+    /// found, until this launch has looked off the main actor.
+    var lightroomApps = Lightroom.remembered
+    /// "Starting Lightroom…", then "Sent 3 photographs to Lightroom" for a
+    /// few seconds, in the status line and the grid's foot.
+    var lightroomWords: String?
+    @ObservationIgnored var lightroomDetected: Date?
+    /// Cleanup checks after a send, while TIFFs wait for Lightroom.
+    @ObservationIgnored var lightroomCleanup: Task<Void, Never>?
+    /// Its TIFFs are being renamed and handed over: no cleanup meanwhile.
+    @ObservationIgnored var lightroomHandingOver = false
+
     // MARK: Edited thumbnails
 
     /// Where edited thumbnails are kept; tests use their own.
@@ -4229,6 +4241,19 @@ import UserNotifications
         batchPanel(exportTargets)
     }
 
+    /// The context menu's Export…: what Export acts on, or the batch panel
+    /// for the right-clicked photographs.
+    func exportPanel(_ targets: [URL]) {
+        guard !targets.isEmpty else { return }
+        if targets == exportTargets { return exportPanel() }
+        guard canStartBatch, ready, !saving, !cropping else { return }
+        batchPanel(targets)
+    }
+    /// Whether the context menu's Export… can start now.
+    func canExport(_ targets: [URL]) -> Bool {
+        targets == exportTargets ? canExport && !cropping : !targets.isEmpty && ready && !saving && !cropping && canStartBatch
+    }
+
     /// Picks a folder for `targets`, or for a single photograph that isn't
     /// open a file as today's single export does, then starts the batch.
     private func batchPanel(_ targets: [URL]) {
@@ -4318,7 +4343,7 @@ import UserNotifications
     }
 
     /// One exporter at a time: not during a single export either.
-    private var canStartBatch: Bool { !closing && !batchRunning && !exporting && hasCatalog && engine != nil }
+    var canStartBatch: Bool { !closing && !batchRunning && !exporting && hasCatalog && engine != nil }
 
     /// Each target's edits as they are now, and the name it gets.
     func batchItems(_ targets: [URL], options: BatchOptions) -> [BatchItem] {
@@ -4528,6 +4553,7 @@ import UserNotifications
             + (failed > 0 ? "; \(failed) failed" : "") + (run.skipped.isEmpty ? "" : "; \(run.skipped.count) skipped")
         status = run.cancelled ? "Export cancelled. " + text : text
         if !run.needsAttention, !batchPopoverShown { batch = nil }
+        if let kind = run.journal.options.lightroom { return lightroomBatchFinished(run, kind: kind) }
         if Self.notificationsAvailable, NSApp?.isActive == false, !run.cancelled { notifyBatchFinished(exported: exported, failed: failed, folder: folder) }
     }
 
@@ -4545,8 +4571,10 @@ import UserNotifications
             guard let self, !self.closing, self.batch == nil else { return }
             guard journal.remaining > 0 else { return BatchJournal.remove(at: url) }
             let count = journal.remaining
+            let photographs = count == 1 ? "1 photograph" : "\(count) photographs"
             let answer = await self.ask(AppAlert(
-                title: "Resume exporting \(count == 1 ? "1 photograph" : "\(count) photographs") to “\(journal.destination.lastPathComponent)”?",
+                title: journal.options.lightroom.map { "Resume sending \(photographs) to \($0.title)?" }
+                    ?? "Resume exporting \(photographs) to “\(journal.destination.lastPathComponent)”?",
                 detail: "Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export.",
                 buttons: [.init(title: "Resume"), .init(title: "Discard")]))
             guard answer.button == 0 else { return BatchJournal.remove(at: url) }

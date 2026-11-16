@@ -11,6 +11,8 @@ import SwiftUI
     private let removeAppData: () -> Void
     private let recent = NSMenu(title: "Open Recent")
     private var settings: SettingsWindowController?
+    /// File › Open in Lightroom and Open in Lightroom Classic, hidden without them.
+    private var lightroomItems: [LightroomKind: NSMenuItem] = [:]
     private var removingAppData = false
 
     init(model: EditorModel, updates: UpdateController, removeAppData: @escaping () -> Void) {
@@ -49,6 +51,14 @@ import SwiftUI
         command(file, "Save Preview…", #selector(savePreview), "s")
         command(file, "Export Photograph…", #selector(exportPhotograph), "e", [.command, .shift])
         command(file, "Export LUT…", #selector(exportLUT), "l", [.command, .shift])
+        // Ticket 48. ⌥⌘E, beside Export's ⇧⌘E.
+        for kind in LightroomKind.allCases {
+            let item = file.addItem(withTitle: "Open in \(kind.title)", action: #selector(openInLightroom(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = kind.rawValue
+            lightroomItems[kind] = item
+        }
+        showLightroomItems()
         file.addItem(.separator())
         command(file, "New Preset", #selector(newPreset), "s", [.command, .shift])
         command(file, "Import Presets…", #selector(importPresets), "o", [.command, .shift])
@@ -186,6 +196,23 @@ import SwiftUI
     @objc private func savePreview() { model.savePanel(export: false) }
     @objc private func exportPhotograph() { model.exportPanel() }
     @objc private func exportLUT() { model.exportLUTPanel() }
+    @objc private func openInLightroom(_ item: NSMenuItem) {
+        if let kind = (item.representedObject as? String).flatMap(LightroomKind.init) { model.openInLightroom(kind) }
+    }
+
+    /// Shows the Lightroom items that are installed, and again whenever
+    /// detection changes what is. The first offered gets ⌥⌘E. Hidden
+    /// items take no keys.
+    private func showLightroomItems() {
+        let kinds = withObservationTracking { model.lightroomKinds } onChange: { [weak self] in
+            Task { @MainActor in self?.showLightroomItems() }
+        }
+        for (kind, item) in lightroomItems {
+            item.isHidden = !kinds.contains(kind)
+            item.keyEquivalent = kinds.first == kind ? "e" : ""
+            item.keyEquivalentModifierMask = [.command, .option]
+        }
+    }
     @objc private func toggleImageOnly() { model.toggleImageOnly() }
     @objc private func toggleFilmstrip() { model.toggleFilmstrip() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
@@ -270,6 +297,11 @@ import SwiftUI
             item.title = model.exportTitle
             return model.canExport && !model.cropping
         case #selector(exportLUT): return model.canExportLUT && model.mode == .photo
+        case #selector(openInLightroom(_:)):
+            guard let kind = (item.representedObject as? String).flatMap(LightroomKind.init) else { return false }
+            let targets = model.exportTargets
+            item.title = EditorModel.lightroomTitle(kind, count: targets.count)
+            return model.canOpenInLightroom(kind, targets: targets)
         case #selector(toggleImageOnly):
             item.state = model.imageOnly ? .on : .off
             // In the grid it opens the current photograph in Image Only.
