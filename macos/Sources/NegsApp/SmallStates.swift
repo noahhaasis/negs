@@ -193,10 +193,10 @@ struct DevelopTag: View {
 /// in, Loading original while a held original is still being decoded,
 /// Updating once an edit takes long enough to notice, else nothing.
 enum DevelopTagTitle {
-    static func title(source: Bool, failed: Bool, developed: Bool, slow: Bool, loadingOriginal: Bool) -> String? {
+    static func title(source: Bool, failed: Bool, developed: Bool, slow: Bool, loadingOriginal: Bool, original: String = "original") -> String? {
         guard source, !failed else { return nil }
         if !developed { return "Developing" }
-        if loadingOriginal { return "Loading original" }
+        if loadingOriginal { return "Loading \(original)" }
         return slow ? "Updating" : nil
     }
 }

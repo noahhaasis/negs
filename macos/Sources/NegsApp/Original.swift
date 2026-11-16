@@ -21,9 +21,38 @@ enum OriginalImage {
         autoreleasepool { render(url, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels) }
     }
 
+    /// The camera's own JPEG of a RAW (RAW+JPEG shooting), laid over the
+    /// RAW's `frame` so it lines up with the developed image: the size the
+    /// camera saved it at doesn't matter, and a JPEG the camera cropped to
+    /// another shape (1:1, 16:9) sits centred on black, where it came from.
+    nonisolated static func loadCameraPicture(_ url: URL, frame: CGSize, maxPixels: Int) -> IOSurface? {
+        autoreleasepool {
+            guard frame.width > 0, frame.height > 0, let picture = decoded(url, maxPixels: maxPixels),
+                  !picture.extent.isEmpty else { return nil }
+            let long = CGFloat(maxPixels), aspect = frame.width / frame.height
+            let out = aspect >= 1 ? CGSize(width: long, height: (long / aspect).rounded())
+                : CGSize(width: (long * aspect).rounded(), height: long)
+            let size = picture.extent.size
+            // Within 1% it's the same shape, stretched to the last pixel.
+            let same = abs(size.width / size.height / aspect - 1) < 0.01
+            let sx = same ? out.width / size.width : min(out.width / size.width, out.height / size.height)
+            let sy = same ? out.height / size.height : sx
+            let placed = picture.transformed(by: CGAffineTransform(translationX: -picture.extent.minX, y: -picture.extent.minY)
+                .concatenating(CGAffineTransform(scaleX: sx, y: sy))
+                .concatenating(CGAffineTransform(translationX: ((out.width - size.width * sx) / 2).rounded(),
+                                                 y: ((out.height - size.height * sy) / 2).rounded())))
+            let black = CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: out))
+            return render(placed.composited(over: black).cropped(to: CGRect(origin: .zero, size: out)))
+        }
+    }
+
     private static func render(_ url: URL, raw: Bool, lensCorrection: Bool, maxPixels: Int) -> IOSurface? {
         guard let image = (raw ? developed(url, lensCorrection: lensCorrection, maxPixels: maxPixels) : nil)
                 ?? decoded(url, maxPixels: maxPixels) else { return nil }
+        return render(image)
+    }
+
+    private static func render(_ image: CIImage) -> IOSurface? {
         let extent = image.extent.integral
         let width = Int(extent.width), height = Int(extent.height)
         guard width > 0, height > 0, let surface = IOSurface(properties: [

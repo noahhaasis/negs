@@ -36,6 +36,14 @@ struct PhotoFile: Hashable, Sendable {
 enum PhotoFolder {
     static let extensions = Set(["jpg", "jpeg", "png", "tif", "tiff"] + EditorModel.rawExtensions)
 
+    /// The camera's own picture beside a RAW of the same name (RAW+JPEG
+    /// shooting). HEIF is only ever a camera picture: Negs doesn't develop it.
+    static let cameraPictureExtensions = Set(["jpg", "jpeg", "heic", "heif", "hif"])
+
+    /// Settings › Photographs › Show camera JPEGs separately, off by default.
+    static let separateCameraPicturesKey = "separateCameraJPEGs"
+    nonisolated static var pairsCameraPictures: Bool { !UserDefaults.standard.bool(forKey: separateCameraPicturesKey) }
+
     static func images(in directory: URL) throws -> [URL] {
         try snapshot(in: directory).map(\.url)
     }
@@ -44,25 +52,71 @@ enum PhotoFolder {
         try listing(in: directory).photos
     }
 
-    /// The folder's photographs in name order, and the sidecars beside them
-    /// (by the photograph's file name), from one directory listing.
-    static func listing(in directory: URL) throws -> (photos: [PhotoFile], sidecars: [String: PhotoFile]) {
+    /// One folder listing: its photographs in name order, the sidecars
+    /// beside them (by the photograph's file name), and, when `pairing`,
+    /// each RAW's camera picture, which is then not a photograph of its own.
+    struct Listing: Sendable {
+        var photos: [PhotoFile] = []
+        var sidecars: [String: PhotoFile] = [:]
+        /// RAW → its camera JPEG (or HEIF).
+        var companions: [URL: URL] = [:]
+    }
+
+    static func listing(in directory: URL, pairing: Bool = pairsCameraPictures) throws -> Listing {
         let files = try FileManager.default.contentsOfDirectory(at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles])
-        var photos: [PhotoFile] = [], sidecars: [String: PhotoFile] = [:]
+        var listing = Listing(), heifs: [URL] = []
         for url in files {
             try Task.checkCancellation()
             let ext = url.pathExtension.lowercased()
             let sidecar = ext == PhotoSidecar.fileExtension
-            guard sidecar || extensions.contains(ext),
+            let heif = pairing && !extensions.contains(ext) && cameraPictureExtensions.contains(ext)
+            guard sidecar || heif || extensions.contains(ext),
                   let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]),
                   values.isRegularFile == true else { continue }
             // Preserve the opened folder's spelling through symlinks.
-            let file = PhotoFile(url: directory.appendingPathComponent(url.lastPathComponent), values: values)
-            if sidecar { sidecars[url.deletingPathExtension().lastPathComponent] = file } else { photos.append(file) }
+            let spelled = directory.appendingPathComponent(url.lastPathComponent)
+            if heif { heifs.append(spelled); continue }
+            let file = PhotoFile(url: spelled, values: values)
+            if sidecar { listing.sidecars[url.deletingPathExtension().lastPathComponent] = file } else { listing.photos.append(file) }
         }
-        photos.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return (photos, sidecars)
+        listing.photos.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if pairing { pair(&listing, heifs: heifs) }
+        return listing
+    }
+
+    /// The name a RAW and its camera picture share: `img_0412` for both
+    /// `IMG_0412.CR3` and `IMG_0412.jpg`.
+    private static func stem(_ url: URL) -> String { url.deletingPathExtension().lastPathComponent.lowercased() }
+
+    /// Takes each RAW's camera picture out of the photographs: the first in
+    /// name order with the RAW's name, unless it has a sidecar (ratings or
+    /// edits of its own), which keeps it a photograph.
+    private static func pair(_ listing: inout Listing, heifs: [URL]) {
+        var raws: [String: URL] = [:]
+        for photo in listing.photos where EditorModel.rawExtensions.contains(photo.url.pathExtension.lowercased()) {
+            let stem = stem(photo.url)
+            if raws[stem] == nil { raws[stem] = photo.url }
+        }
+        guard !raws.isEmpty else { return }
+        let pictures = listing.photos.map(\.url).filter { cameraPictureExtensions.contains($0.pathExtension.lowercased()) }
+            + heifs.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        var taken = Set<URL>()
+        for picture in pictures {
+            guard let raw = raws[stem(picture)], listing.companions[raw] == nil,
+                  listing.sidecars[picture.lastPathComponent] == nil else { continue }
+            listing.companions[raw] = picture
+            taken.insert(picture)
+        }
+        if !taken.isEmpty { listing.photos.removeAll { taken.contains($0.url) } }
+    }
+
+    /// The RAW `picture` is the camera picture of, when it is one: what
+    /// opening it opens instead.
+    static func pairedRAW(of picture: URL) -> URL? {
+        guard pairsCameraPictures, cameraPictureExtensions.contains(picture.pathExtension.lowercased()),
+              let listing = try? listing(in: picture.deletingLastPathComponent()) else { return nil }
+        return listing.companions.first { $0.value.lastPathComponent == picture.lastPathComponent }?.key
     }
 }
 
@@ -257,6 +311,7 @@ struct PhotoBrowser: View {
                     StripFrame(file: file, width: layout.widths[frame.index],
                                current: file.url == model.sourceItem, selected: selected.contains(file.url),
                                summary: library.summary(for: file.url), readOnly: library.readOnly,
+                               cameraJPEG: library.companion(of: file.url),
                                edited: model.editedThumbnail(for: file.url)) { visible in
                         model.thumbnailShown(file, visible)
                     } loaded: { image in
@@ -507,6 +562,7 @@ private struct StripFrame: View {
     let selected: Bool
     let summary: LibrarySummary
     let readOnly: Bool
+    let cameraJPEG: URL?
     let edited: EditedThumbnail?
     /// On and off screen: what's shown is developed first.
     let shown: (Bool) -> Void
@@ -537,8 +593,8 @@ private struct StripFrame: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(StripFrameStyle())
-        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
-        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
+        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly, cameraJPEG: cameraJPEG))
+        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary, cameraJPEG: cameraJPEG))
         .accessibilityAddTraits(current || selected ? [.isSelected] : [])
         .onAppear { visible = true; shown(true) }
         .onDisappear { visible = false; image = nil; shown(false) }

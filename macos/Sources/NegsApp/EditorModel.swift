@@ -147,6 +147,15 @@ import UserNotifications
     /// Settings › Save ratings and edits next to photos: each photograph's
     /// edits in its sidecar (`Sidecar.swift`). Off, nothing is remembered per
     /// photograph; sidecars already there stay untouched until it's on again.
+    /// Settings › Photographs › Show camera JPEGs separately: off, a RAW's
+    /// camera JPEG of the same name goes with it as one photograph.
+    var separateCameraJPEGs: Bool {
+        get { !library.pairsCameraPictures }
+        set {
+            UserDefaults.standard.set(newValue, forKey: PhotoFolder.separateCameraPicturesKey)
+            library.pairsCameraPictures = !newValue
+        }
+    }
     var sidecarsEnabled = UserDefaults.standard.object(forKey: "sidecars") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(sidecarsEnabled, forKey: "sidecars")
@@ -218,6 +227,14 @@ import UserNotifications
     /// How long each other develop took, for tests and measurements.
     @ObservationIgnored var compareTimings: [TimeInterval] = []
     /// Original ⌄: what the Original word does.
+    /// Original ⌄'s Show the RAW / Show the camera JPEG.
+    var originalReference = OriginalReference.load() {
+        didSet {
+            guard originalReference != oldValue else { return }
+            UserDefaults.standard.set(originalReference.rawValue, forKey: OriginalReference.key)
+            originalReferenceChanged()
+        }
+    }
     var originalMode = OriginalMode.load() {
         didSet { UserDefaults.standard.set(originalMode.rawValue, forKey: OriginalMode.key); if originalMode != .split { clearSplit() } }
     }
@@ -1202,6 +1219,8 @@ import UserNotifications
             if source == first { showGrid() }
             return
         }
+        // A RAW's camera JPEG opens the RAW: the two are one photograph.
+        if let raw = PhotoFolder.pairedRAW(of: url) { return open(raw) }
         explicitOpenRequested = true
         if comparison != nil { leaveCompare(toGrid: false) }
         mode = .photo
@@ -2784,7 +2803,9 @@ import UserNotifications
     /// The folder's rejected photographs and duplicates, filtered out or not.
     var rejected: [URL] { library.items.map(\.url).filter { library.summary(for: $0).flag == .reject } }
 
-    func deletePlan(_ items: [URL]) -> DeletePlan { DeletePlan(items) { library.duplicates[$0] ?? [] } }
+    func deletePlan(_ items: [URL]) -> DeletePlan {
+        DeletePlan(items, duplicates: { library.duplicates[$0] ?? [] }, companion: { library.companion(of: $0) })
+    }
 
     /// ⌫ asks first and ⌘⌫ doesn't. Without a Trash it always asks, as
     /// nothing could be put back.
@@ -2870,7 +2891,7 @@ import UserNotifications
             }
             undoManager?.setActionName(plan.actionName)
         }
-        let files = plan.files, trash = self.trash, sidecars = self.sidecars, removing = failure
+        let files = plan.files, companions = plan.companions, trash = self.trash, sidecars = self.sidecars, removing = failure
         record.task = Task { [weak self] in
             // Everything queued is written first, so nothing writes a sidecar
             // beside a photograph that's gone.
@@ -2879,7 +2900,9 @@ import UserNotifications
                 var moves: [(original: URL, trashed: URL)] = [], failure: String?
                 for file in files {
                     let sidecar = PhotoSidecar.url(for: file)
-                    for item in [file, sidecar] where item == file || FileManager.default.fileExists(atPath: item.path) {
+                    // A RAW's camera JPEG goes with it.
+                    let picture = companions[file].map { [$0, PhotoSidecar.url(for: $0)] } ?? []
+                    for item in [file, sidecar] + picture where item == file || FileManager.default.fileExists(atPath: item.path) {
                         do {
                             if permanent { try trash.remove(item) } else { moves.append((item, try trash.trash(item))) }
                         } catch {
@@ -3016,8 +3039,46 @@ import UserNotifications
     static let lensCorrectionPath = "io.lens_correction.enabled"
     /// The original is framed like the developed image only with the same lens correction.
     @ObservationIgnored private var originalLensCorrection = false
+    /// The decoded original is the camera JPEG.
+    @ObservationIgnored private var originalIsCameraJPEG = false
     private func dropStaleOriginal() {
-        if originalLensCorrection != value(Self.lensCorrectionPath).bool { originalCache = nil }
+        if originalLensCorrection != value(Self.lensCorrectionPath).bool || originalIsCameraJPEG != showsCameraJPEG { originalCache = nil }
+    }
+
+    /// The open photograph's camera JPEG (RAW+JPEG shooting), if it has one.
+    var cameraJPEG: URL? { isRaw ? sourceItem.flatMap(library.companion(of:)) : nil }
+    /// Original shows the camera JPEG rather than the RAW.
+    var showsCameraJPEG: Bool { originalReference == .cameraJPEG && cameraJPEG != nil }
+    /// What Original is called: the word in the status line, the compare
+    /// side's name, Loading ….
+    var originalWord: String { showsCameraJPEG ? "Camera JPEG" : "Original" }
+    /// The same within a sentence: "original" or "camera JPEG".
+    var originalPhrase: String { showsCameraJPEG ? "camera JPEG" : "original" }
+
+    /// Decodes the original as Original shows it, at the developed preview's
+    /// resolution (so it is as sharp at actual size), never above the
+    /// source's own: Image Size can enlarge the preview.
+    func originalLoader() -> (@Sendable () -> IOSurface?)? {
+        guard let source, let image else { return nil }
+        let sourceLong = Int(max(sourceSize.width, sourceSize.height))
+        let maxPixels = sourceLong > 0 ? min(max(image.width, image.height), sourceLong) : max(image.width, image.height)
+        if showsCameraJPEG, let picture = cameraJPEG {
+            let frame = sourceSize.width > 0 ? sourceSize : CGSize(width: image.width, height: image.height)
+            return { OriginalImage.loadCameraPicture(picture, frame: frame, maxPixels: maxPixels) }
+        }
+        let raw = isRaw, lensCorrection = value(Self.lensCorrectionPath).bool
+        return { OriginalImage.load(source, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels) }
+    }
+
+    /// Show the RAW / Show the camera JPEG changed: a split line or held
+    /// original shows the other one.
+    private func originalReferenceChanged() {
+        guard cameraJPEG != nil else { return }
+        originalLoad?.cancel(); originalLoad = nil
+        originalCache = nil
+        if splitting { splitOriginal = nil; loadOriginal() }
+        if holdingOriginal { original = nil; loadOriginal() }
+        reloadComparedOriginal()
     }
 
     /// The original is asked for, held or split, and still being decoded:
@@ -3055,23 +3116,20 @@ import UserNotifications
     /// Decodes at the developed preview's resolution, so it is as sharp at
     /// actual size.
     private func loadOriginal() {
-        guard originalLoad == nil, let source, let image else { return }
-        // Never above the source's own resolution: Image Size can enlarge the preview.
-        let sourceLong = Int(max(sourceSize.width, sourceSize.height))
-        let raw = isRaw, maxPixels = sourceLong > 0 ? min(max(image.width, image.height), sourceLong) : max(image.width, image.height), generation = sourceGeneration
-        let lensCorrection = value(Self.lensCorrectionPath).bool
+        guard originalLoad == nil, let source, let load = originalLoader() else { return }
+        let generation = sourceGeneration
+        let lensCorrection = value(Self.lensCorrectionPath).bool, cameraJPEG = showsCameraJPEG, word = originalPhrase
         originalLoad = Task { [weak self] in
-            let surface = await Task.detached(priority: .userInitiated) {
-                OriginalImage.load(source, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels)
-            }.value
+            let surface = await Task.detached(priority: .userInitiated, operation: load).value
             guard let self, generation == self.sourceGeneration, !Task.isCancelled else { return }
             self.originalLoad = nil
             self.originalLensCorrection = lensCorrection
+            self.originalIsCameraJPEG = cameraJPEG
             guard let surface else {
                 if self.splitting { self.splitting = false }
                 if self.holdingOriginal {
                     self.holdingOriginal = false
-                    self.status = "The original of \(source.lastPathComponent) couldn’t be shown"
+                    self.status = "The \(word) of \(source.lastPathComponent) couldn’t be shown"
                 }
                 return
             }

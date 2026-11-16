@@ -51,15 +51,18 @@ struct PhotoMarks: View {
         inStrip ? (current ? 0.5 : 0.22) : 0.4
     }
 
-    static func help(_ name: String, summary: LibrarySummary, readOnly: Bool) -> String {
+    /// `cameraJPEG`: the RAW's camera JPEG, which goes with it.
+    static func help(_ name: String, summary: LibrarySummary, readOnly: Bool, cameraJPEG: URL? = nil) -> String {
         var lines = [name]
+        if let cameraJPEG { lines.append("With the camera’s JPEG, \(cameraJPEG.lastPathComponent)") }
         if let problem = summary.problem { lines.append(problem) }
         if readOnly { lines.append("Ratings and edits can’t be saved in this folder: it’s read-only.") }
         return lines.joined(separator: "\n")
     }
 
-    static func accessibilityLabel(_ name: String, summary: LibrarySummary) -> String {
+    static func accessibilityLabel(_ name: String, summary: LibrarySummary, cameraJPEG: URL? = nil) -> String {
         var parts = [name]
+        if cameraJPEG != nil { parts.append("with camera JPEG") }
         if summary.rating > 0 { parts.append(summary.rating == 1 ? "1 star" : "\(summary.rating) stars") }
         if let flag = summary.flag { parts.append(flag == .pick ? "Pick" : "Rejected") }
         if summary.edited { parts.append("Edited") }

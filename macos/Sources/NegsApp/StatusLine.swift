@@ -256,7 +256,7 @@ private struct OriginalWord: View {
         let mode = model.originalMode
         let on = model.holdingOriginal || model.splitting
         HStack(alignment: .firstTextBaseline, spacing: 3) {
-            Text("Original")
+            Text(model.originalWord)
                 .foregroundStyle(on ? Theme.paper : hovered && enabled ? Theme.label : Theme.dim)
                 .overlay(alignment: .bottom) {
                     if on { PencilStroke().pencil().frame(height: 5).offset(y: 5) }
@@ -275,9 +275,9 @@ private struct OriginalWord: View {
                         if mode == .hold { model.holdOriginal(false) } else { model.clickOriginal() }
                     })
                 .allowsHitTesting(enabled)
-                .help(Self.help(mode))
+                .help(Self.help(mode, model.originalPhrase))
                 .accessibilityElement()
-                .accessibilityLabel("Show Original")
+                .accessibilityLabel("Show \(model.originalWord)")
                 .accessibilityAddTraits(.isButton)
                 .accessibilityValue(on ? "On" : "Off")
                 // VoiceOver can't hold, so activating it toggles.
@@ -293,11 +293,11 @@ private struct OriginalWord: View {
         }
     }
 
-    static func help(_ mode: OriginalMode) -> String {
+    static func help(_ mode: OriginalMode, _ original: String = "original") -> String {
         switch mode {
-        case .hold: "Hold to show the original (\\). Hold T to turn the photograph upside down."
-        case .split: "Show the original left of a line you can drag. Hold \\ to see the whole original."
-        case .sideBySide: "Compare with the original, side by side. Hold \\ to see the whole original."
+        case .hold: "Hold to show the \(original) (\\). Hold T to turn the photograph upside down."
+        case .split: "Show the \(original) left of a line you can drag. Hold \\ to see the whole \(original)."
+        case .sideBySide: "Compare with the \(original), side by side. Hold \\ to see the whole \(original)."
         }
     }
 }
@@ -318,16 +318,31 @@ private struct OriginalWord: View {
             item.target = self; item.representedObject = mode.rawValue
             item.state = model.originalMode == mode ? .on : .off
         }
+        // A RAW shot as RAW+JPEG: which of the two Original shows.
+        if model.cameraJPEG != nil {
+            menu.addItem(.separator())
+            for reference in OriginalReference.allCases {
+                let item = menu.addItem(withTitle: reference.title, action: #selector(show(_:)), keyEquivalent: "")
+                item.attributedTitle = NSAttributedString(string: reference.title, attributes: [.font: font])
+                item.target = self; item.representedObject = reference.rawValue
+                item.state = model.originalReference == reference ? .on : .off
+            }
+        }
         // Opens upward from the status line, over the canvas.
         let y = view.isFlipped ? view.bounds.minY - 4 : view.bounds.maxY + 4
         withExtendedLifetime(self) {
-            menu.popUp(positioning: menu.items.first { $0.state == .on }, at: NSPoint(x: view.bounds.minX - 14, y: y), in: view)
+            menu.popUp(positioning: menu.items.first { $0.state == .on && $0.action == #selector(choose(_:)) }, at: NSPoint(x: view.bounds.minX - 14, y: y), in: view)
         }
     }
 
     @objc private func choose(_ item: NSMenuItem) {
         guard let raw = item.representedObject as? String, let mode = OriginalMode(rawValue: raw) else { return }
         model.originalMode = mode
+    }
+
+    @objc private func show(_ item: NSMenuItem) {
+        guard let raw = item.representedObject as? String, let reference = OriginalReference(rawValue: raw) else { return }
+        model.originalReference = reference
     }
 }
 

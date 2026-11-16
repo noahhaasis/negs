@@ -224,7 +224,7 @@ private struct CompareCaption: View {
         HStack(alignment: .center, spacing: 9) {
             CompareRing(number: model.compareNumber(side), active: active, action: activate)
             if side.isOriginal {
-                Text("Original · as shot, undeveloped").font(Theme.serif(15, italic: true)).foregroundStyle(ink.label).lineLimit(1)
+                Text(model.showsCameraJPEG ? "Camera JPEG · as the camera developed it" : "Original · as shot, undeveloped").font(Theme.serif(15, italic: true)).foregroundStyle(ink.label).lineLimit(1)
             } else {
                 ViewThatFits(in: .horizontal) {
                     facts(dropping: stacked ? [.camera, .iso] : [])
@@ -256,7 +256,7 @@ private struct CompareCaption: View {
     /// "Kodak Gold 200 on Portra Endura": the open photograph's names open the tray.
     @ViewBuilder private var stocks: some View {
         if side.isOriginal {
-            Text("nothing developed yet").font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1)
+            Text(model.showsCameraJPEG ? model.cameraJPEG?.lastPathComponent ?? "" : "nothing developed yet").font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1)
         } else if model.comparedIsOpen(side) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 StockName(model: model, paper: false, name: model.filmName, size: 16, weight: 600, marked: differences.film)
@@ -289,8 +289,8 @@ private struct CompareLabel: View {
     var body: some View {
         if side.isOriginal {
             HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.gap) {
-                Text("Original").font(Theme.serif(24, weight: 600)).tracking(-0.24).foregroundStyle(ink.paper)
-                Text("nothing developed yet").font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim)
+                Text(model.originalWord).font(Theme.serif(24, weight: 600)).tracking(-0.24).foregroundStyle(ink.paper)
+                Text(model.showsCameraJPEG ? model.cameraJPEG?.lastPathComponent ?? "" : "nothing developed yet").font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim)
             }
             .lineLimit(1)
             .padding(.top, 11)
@@ -436,7 +436,7 @@ private struct SliderFacts: View {
 
     var body: some View {
         if side.isOriginal {
-            Text("Original · as shot").font(Theme.serif(15, italic: true)).foregroundStyle(ink.label).lineLimit(1)
+            Text(model.showsCameraJPEG ? "Camera JPEG · the camera’s own" : "Original · as shot").font(Theme.serif(15, italic: true)).foregroundStyle(ink.label).lineLimit(1)
         } else {
             let parts = model.compareFacts(side)?.parts ?? [:]
             ViewThatFits(in: .horizontal) {
@@ -468,7 +468,7 @@ private struct SliderSecondLabel: View {
 
     var body: some View {
         if side.isOriginal {
-            Text("Original").font(Theme.serif(24, weight: 600)).foregroundStyle(ink.paper).padding(.top, 11)
+            Text(model.originalWord).font(Theme.serif(24, weight: 600)).foregroundStyle(ink.paper).padding(.top, 11)
         } else if model.comparedIsOpen(side) {
             StockName(model: model, paper: false, name: model.filmName, size: 24, weight: 600, marked: differences.film).padding(.top, 11)
         } else if let stocks = model.compareStocks(side) {

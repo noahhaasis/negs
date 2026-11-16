@@ -339,7 +339,7 @@ private struct SheetGrid: View {
                          waiting: model.sheetWaiting.contains(url),
                          selected: SheetLayout.drawnSelected(url, selection: selection),
                          current: url == selection.current, summary: library.summary(for: url),
-                         readOnly: library.readOnly, edited: model.editedThumbnail(for: url)) { visible in
+                         readOnly: library.readOnly, cameraJPEG: library.companion(of: url), edited: model.editedThumbnail(for: url)) { visible in
             model.thumbnailShown(file, visible)
         } loaded: { image in
             model.aspects.note(url, image: image)
@@ -615,6 +615,7 @@ private struct SheetCell: View {
     let current: Bool
     let summary: LibrarySummary
     let readOnly: Bool
+    let cameraJPEG: URL?
     let edited: EditedThumbnail?
     /// On and off screen: what's shown is developed first.
     let shown: (Bool) -> Void
@@ -646,9 +647,9 @@ private struct SheetCell: View {
         // A click selects at once; the second of a double-click opens.
         .onTapGesture(count: 2, perform: open)
         .simultaneousGesture(TapGesture().onEnded(click))
-        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
+        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly, cameraJPEG: cameraJPEG))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
+        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary, cameraJPEG: cameraJPEG))
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction { click() }
         .accessibilityAction(named: "Edit", open)
