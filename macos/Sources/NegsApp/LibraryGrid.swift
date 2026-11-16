@@ -639,7 +639,7 @@ private struct SheetCell: View {
         .frame(width: size.width, height: size.height)
         .clipped()
         .opacity(summary.flag == .reject ? PhotoMarks.rejectOpacity(inStrip: false, current: current) : 1)
-        .overlay { PhotoMarks(summary: summary, name: file.name) }
+        .overlay { PhotoMarks(summary: summary, name: file.name, cameraJPEG: cameraJPEG) }
         .modifier(PlaceReport(image: image, placed: placed))
         .opacity(waiting ? 0 : 1)
         .offset(y: waiting ? 14 : 0)

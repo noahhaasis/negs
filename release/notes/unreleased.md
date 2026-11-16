@@ -4,7 +4,8 @@
 
 - **RAW + JPEG.** If you shoot RAW+JPEG, a RAW and the camera's JPEG
   with the same name (IMG_0412.CR3 and IMG_0412.JPG) are now one
-  photo in the strip and grid. The RAW is the one that develops.
+  photo in the strip and grid, marked +JPG. The RAW is the one that
+  develops.
   Deleting the photo moves both files to the Trash. Original ⌄ can
   show the camera's JPEG instead of the RAW, so you can hold, split
   or compare side by side against the camera's own film simulation.

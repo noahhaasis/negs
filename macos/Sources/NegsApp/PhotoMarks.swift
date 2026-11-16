@@ -4,7 +4,9 @@ import SwiftUI
 /// by hand at the bottom left (`HandStar`, round 22), a reject's hand-drawn X from corner to corner
 /// (`CrossMark`), and the yellow dot of an edited photograph at the top
 /// right. Each is its own shape, never only a colour, in cream with a dark
-/// halo so it reads on a bright sky. Unrated, unflagged, unedited
+/// halo so it reads on a bright sky. A RAW with the camera's JPEG beside it
+/// gets a small badge at the bottom right, "+JPG" (round 31, C): the one
+/// mark that isn't ink. Unrated, unflagged, unedited, unpaired
 /// photographs show none. Lay it over the picture. A pick's box (round 20)
 /// reaches past the picture, so the grid and the strip draw it in a layer
 /// above the thumbnails (`BoxInk`).
@@ -13,6 +15,11 @@ struct PhotoMarks: View {
     /// The file's name: it seeds the reject's cross and the stars, so
     /// each is drawn a little differently, and the same way every time.
     let name: String
+    /// The RAW's camera JPEG (or HEIF), shown as the badge.
+    var cameraJPEG: URL? = nil
+    /// The strip's frames are smaller, and can be narrow portraits with five
+    /// stars: there the badge is shortened to "+J".
+    var inStrip = false
 
     var body: some View {
         ZStack {
@@ -41,6 +48,12 @@ struct PhotoMarks: View {
                 Circle().fill(Theme.accent).frame(width: 7, height: 7).padding([.top, .trailing], 11)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if let cameraJPEG {
+                PairBadge(word: PairBadge.word(for: cameraJPEG, short: inStrip))
+                    .padding([.bottom, .trailing], inStrip ? 5 : 7)
+            }
+        }
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }
@@ -67,5 +80,29 @@ struct PhotoMarks: View {
         if let flag = summary.flag { parts.append(flag == .pick ? "Pick" : "Rejected") }
         if summary.edited { parts.append("Edited") }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// "+JPG" on a dark chip: the RAW has the camera's picture beside it
+/// (round 31, C · the boring one, after Lightroom's badge).
+struct PairBadge: View {
+    let word: String
+
+    var body: some View {
+        Text(word)
+            .font(.system(size: 8.5, weight: .semibold))
+            .tracking(0.5)
+            .foregroundStyle(Theme.paper)
+            .padding(.horizontal, 4)
+            .padding(.top, 3)
+            .padding(.bottom, 2.5)
+            .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 3))
+            .fixedSize()
+    }
+
+    /// "+JPG", or "+HEIF" for a HEIF/HEIC/HIF; "+J" / "+H" in the strip.
+    static func word(for companion: URL, short: Bool) -> String {
+        let heif = ["heic", "heif", "hif"].contains(companion.pathExtension.lowercased())
+        return short ? (heif ? "+H" : "+J") : (heif ? "+HEIF" : "+JPG")
     }
 }
