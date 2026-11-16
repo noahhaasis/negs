@@ -29,3 +29,6 @@
   which Negs never empties by itself, and opens Classic's Import window.
   The right-click menu also has Export….
   A batch export started from the grid now shows its progress there.
+
+- **G hides the grid.** G only showed the grid. In the grid, G now goes
+  back to the current photograph, as E does.
