@@ -1360,6 +1360,12 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertFalse(model.canOpenInLightroom(.cloud, targets: model.exportTargets))
         model.lightroomApps = LightroomApps(cloud: URL(fileURLWithPath: "/Applications/Adobe Lightroom.app"))
         XCTAssertEqual(model.lightroomKinds, [.cloud])
+        model.lightroomApps = LightroomApps(cloud: URL(fileURLWithPath: "/Applications/Adobe Lightroom.app"),
+                                            classic: URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app"))
+        XCTAssertEqual(model.lightroomKinds, [.cloud, .classic], "both installed: two items")
+        model.lightroomApps = LightroomApps(classic: URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app"))
+        XCTAssertEqual(model.lightroomKinds, [.classic])
+        model.lightroomApps = LightroomApps(cloud: URL(fileURLWithPath: "/Applications/Adobe Lightroom.app"))
         XCTAssertTrue(model.canOpenInLightroom(.cloud, targets: model.exportTargets))
         XCTAssertTrue(model.canExport([b]))
 

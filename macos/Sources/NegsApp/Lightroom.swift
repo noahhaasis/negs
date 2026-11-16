@@ -54,9 +54,6 @@ enum Lightroom {
     }
     /// A cloud TIFF Lightroom never copied (Cancel, or a library elsewhere) is deleted after this.
     static let keep: TimeInterval = 7 * 24 * 3600
-    /// The Classic item ships once Classic has been tried for real; until
-    /// then `defaults write <domain> lightroomClassic -bool YES` shows it.
-    static var classicEnabled: Bool { UserDefaults.standard.bool(forKey: "lightroomClassic") }
 
     // MARK: Detection
 
@@ -252,9 +249,9 @@ enum Lightroom {
 // MARK: - The editor's part
 
 extension EditorModel {
-    /// The Lightroom items to offer, in menu order. Classic waits for a real test.
+    /// The Lightroom items to offer, in menu order: those installed.
     var lightroomKinds: [LightroomKind] {
-        LightroomKind.allCases.filter { lightroomApps.app($0) != nil && ($0 == .cloud || Lightroom.classicEnabled) }
+        LightroomKind.allCases.filter { lightroomApps.app($0) != nil }
     }
 
     /// "Open in Lightroom", or "Open 12 Photographs in Lightroom Classic".

@@ -24,5 +24,8 @@
   with their EXIF and rating. Lightroom asks once to add them all.
   Negs keeps its copies only until Lightroom has added them, or a
   week at most; Settings › Upkeep can delete them sooner. Shown only
-  when Lightroom is installed. The right-click menu also has Export….
+  when Lightroom is installed. With Lightroom Classic, Open in
+  Lightroom Classic puts the TIFFs in Pictures › Negs for Lightroom,
+  which Negs never empties by itself, and opens Classic's Import window.
+  The right-click menu also has Export….
   A batch export started from the grid now shows its progress there.
