@@ -34,11 +34,12 @@ static int fail(SFAppleRaw *out, int code, NSString *message) {
 // Some valid tiny/custom DNGs initialize a filter but expose no supported
 // sensor image (1: let the portable backend handle them). Bounds are checked
 // before conversion, arithmetic, or allocation.
-// Cameras Apple RAW 8 develops wrongly, which rawler develops as the camera
+// Cameras Apple RAW develops wrongly, which rawler develops as the camera
 // does. The Panasonic DC-S1M2 comes out with red and blue below zero in the
-// shadows: green shadows, the darkest third of the frame crushed (issue #15,
-// macOS 26.5). RAW 9, where a Mac offers it, is untested and kept.
-static BOOL raw8_misdevelops(CIRAWFilter *raw) {
+// shadows: green shadows, the darkest third of the frame crushed (issue #15:
+// RAW 8 on macOS 26.5; an M4 on macOS 26.6.2 and later shows it too, whichever
+// generation it decodes with). Every generation is declined.
+static BOOL apple_misdevelops(CIRAWFilter *raw) {
     NSDictionary *tiff = raw.properties[(NSString *)kCGImagePropertyTIFFDictionary];
     NSString *model = [tiff[(NSString *)kCGImagePropertyTIFFModel] description];
     model = [model stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
@@ -123,8 +124,9 @@ int sf_apple_raw_decode(const char *path, int decoder_major, int orient, int as_
             if (!selected) return fail(out, 1, [NSString stringWithFormat:
                 @"Apple RAW %d is not supported for this file (available: %@)",
                 major, [raw.supportedDecoderVersions componentsJoinedByString:@", "]]);
-            if (major == 8 && raw8_misdevelops(raw))
-                return fail(out, 1, @"Apple RAW 8 develops this camera's shadows wrongly");
+            if (apple_misdevelops(raw))
+                return fail(out, 1, [NSString stringWithFormat:
+                    @"Apple RAW %d develops this camera's shadows wrongly", major]);
             raw.decoderVersion = selected;
             if (![raw.decoderVersion isEqualToString:selected])
                 return fail(out, 1, @"Apple RAW did not accept the requested decoder version");
