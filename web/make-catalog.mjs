@@ -14,6 +14,13 @@ const profiles = join(here, "..", "data", "profiles");
 await init({ module_or_path: readFileSync(join(here, "pkg/spektrafilm_wasm_bg.wasm")) });
 const stocks = readdirSync(profiles).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5));
 for (const stock of stocks) registerData(`profiles/${stock}.json`, readFileSync(join(profiles, `${stock}.json`)));
+// The camera colour filters' curves, for each B&W film's filter factors.
+const colored = join(here, "..", "data", "filters", "colored");
+for (const brand of readdirSync(colored, { withFileTypes: true }).filter((d) => d.isDirectory())) {
+  for (const file of readdirSync(join(colored, brand.name)).filter((f) => f.endsWith(".csv"))) {
+    registerData(`filters/colored/${brand.name}/${file}`, readFileSync(join(colored, brand.name, file)));
+  }
+}
 const out = JSON.parse(catalog(stocks));
 if (!out.profiles.length) throw new Error(`No profiles found in ${profiles}`);
 out.attribution = "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, and from Fotufilm film profiles by MUAStudio Inc. (https://fotufilm.com), both CC BY-SA 4.0. See data/profiles, SPEKTRAFILM_LICENSE.txt and FOTUFILM_LICENSE.txt.";

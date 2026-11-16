@@ -557,6 +557,9 @@ struct InkModule<Content: View>: View {
     /// "Hide N controls", once "N more" was clicked, and what folding them does.
     var fewer = 0
     var showFewer: () -> Void = {}
+    /// Whether switching the module off dims its controls and blocks them.
+    /// Color Filter keeps its discs live: a click on one switches it on.
+    var disablesContent = true
     @ViewBuilder let content: Content
     @State private var hovered = false
 
@@ -615,7 +618,7 @@ struct InkModule<Content: View>: View {
             .accessibilityLabel(title)
             if open && !skipped {
                 VStack(alignment: .leading, spacing: 0) {
-                    content.inkDisabled(off)
+                    content.inkDisabled(off && disablesContent)
                     if more > 0 { MoreLine(text: "\(more) more control\(more == 1 ? "" : "s")", action: showMore) }
                     if fewer > 0 {
                         MoreLine(text: "Hide \(fewer) control\(fewer == 1 ? "" : "s")", ellipsis: false, help: MoreLine.hideHelp, action: showFewer)

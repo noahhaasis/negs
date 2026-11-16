@@ -44,6 +44,8 @@ import UserNotifications
     /// that border is chosen.
     private(set) var filmStrip: FilmStrip?
     private(set) var stocks: [Stock] = []
+    /// The camera colour filters for B&W film, in the catalog's order.
+    private(set) var colorFilters: [ColorFilter] = []
     private(set) var source: URL?
     /// The camera's facts for the caption over the photograph, read off the main actor.
     private(set) var photoFacts: PhotoFacts?
@@ -630,6 +632,7 @@ import UserNotifications
         sidecarWrite?.cancel(); sidecarWrite = nil
         self.catalog = catalog
         stocks = catalog["profiles"].array.map(Stock.init)
+        colorFilters = catalog["color_filters"].array.map(ColorFilter.init)
         defaults = catalog["defaults"]
         // The engine leaves lens correction off for params from before it, so
         // their crops keep their place; the app corrects every new edit.
@@ -773,6 +776,17 @@ import UserNotifications
     /// Grain arrays (`film_render.grain.<field>`) are null until edited: the
     /// engine then uses the film's preset, which the catalog resolves.
     var filmIsBW: Bool { films.first { $0.id == film }?.bw ?? false }
+    /// The camera colour filter in front of the lens, or `ColorFilter.none`.
+    var colorFilter: String { value(ColorFilter.path).string }
+    /// The filter the Color Filter tick box puts back once it took it off.
+    @ObservationIgnored var lastColorFilter = "hoya_y2"
+    func setColorFilter(_ key: String) {
+        if key != ColorFilter.none { lastColorFilter = key }
+        var next = state; next.params[ColorFilter.path] = .string(key)
+        apply(next, action: key == ColorFilter.none ? "Remove Color Filter" : "Change Color Filter")
+    }
+    /// How many stops `key` takes on the current film, if it's a B&W film.
+    func colorFilterStops(_ key: String) -> Double? { films.first { $0.id == film }?.filterStops[key] }
     func stockDefaults(_ path: String) -> [Double] {
         let field = path.split(separator: ".").last.map(String.init) ?? path
         return films.first { $0.id == film }?.grain[field].array.map(\.double) ?? []

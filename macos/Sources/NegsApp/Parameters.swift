@@ -97,6 +97,9 @@ struct Stock: Identifiable, Sendable {
     /// data rather than modelled from sample photographs (Settings › Fotufilm films).
     let fotufilm: Bool
     let manufacturerData: Bool
+    /// How many stops each camera colour filter takes on this film, by key;
+    /// empty for colour films and papers.
+    let filterStops: [String: Double]
     static let grainFields = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"]
     /// The DIR gammas and halation baseline the film's presets fill while the
     /// edit leaves them unset (`null`).
@@ -118,6 +121,36 @@ struct Stock: Identifiable, Sendable {
         // A catalog from before these fields lists every film.
         fotufilm = value["fotufilm"].bool
         manufacturerData = value["manufacturer_data"] != .bool(false)
+        filterStops = (value["color_filter_stops"].object ?? [:]).mapValues(\.double)
+    }
+}
+
+/// A camera colour filter from the catalog: its params key, the colour it's
+/// named by, the measured glass, and the glass's colour for its disc.
+struct ColorFilter: Identifiable, Equatable, Sendable {
+    let key: String
+    let name: String
+    let glass: String
+    let colour: UInt32
+    var id: String { key }
+
+    init(_ value: JSONValue) {
+        key = value["key"].string; name = value["name"].string; glass = value["glass"].string
+        colour = UInt32(value["colour"].string.dropFirst(), radix: 16) ?? 0x888888
+    }
+
+    static let path = "camera.color_filter"
+    static let none = "none"
+    /// What each filter does to a black-and-white photograph.
+    static func effect(_ key: String) -> String {
+        switch key {
+        case "hoya_x1": return "Lightens foliage; darkens red lips and skin a little, for a tanned look."
+        case "hoya_x0": return "Lightens foliage and darkens the sky a little. Kind to skin outdoors."
+        case "hoya_y2": return "Darkens blue sky a touch so clouds stand out. The everyday filter."
+        case "hoya_ya3": return "Darker sky, stronger clouds, less haze. Hides freckles and blemishes."
+        case "hoya_r1": return "Near-black blue sky, bright red and brick, pale skin and lips. Cuts haze hard."
+        default: return "No glass in front of the lens."
+        }
     }
 }
 

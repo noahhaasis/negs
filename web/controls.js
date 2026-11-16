@@ -18,6 +18,15 @@ const borderSlider = (label, border, min, max, step, styles, help) => ({ kind: "
 // the lane under `bw`, or hide it when that is null.
 const stock = (label, path, index, min, max, step, bw) => ({ kind: "stock", label, path, index, min, max, step, bw });
 
+// macOS ColorFilter.effect, under the same names as the catalog's.
+export const COLOR_FILTERS = {
+  none: { name: "None", effect: "No glass in front of the lens." },
+  hoya_x1: { name: "Green", effect: "Lightens foliage; darkens red lips and skin a little, for a tanned look." },
+  hoya_x0: { name: "Yellow-green", effect: "Lightens foliage and darkens the sky a little. Kind to skin outdoors." },
+  hoya_y2: { name: "Yellow", effect: "Darkens blue sky a touch so clouds stand out. The everyday filter." },
+  hoya_ya3: { name: "Orange", effect: "Darker sky, stronger clouds, less haze. Hides freckles and blemishes." },
+  hoya_r1: { name: "Red", effect: "Near-black blue sky, bright red and brick, pale skin and lips. Cuts haze hard." },
+};
 const METERING = ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"];
 export const RAW_WB_MODES = ["as_shot", "daylight", "tungsten", "custom"];
 const DIFFUSION_FILTERS = ["black_pro_mist", "glimmerglass", "pro_mist", "cinebloom"];
@@ -84,6 +93,13 @@ export const SECTIONS = [
     slider("Film format (mm)", "camera.film_format_mm", 4, 120, 0.1),
     { ...slider("Lens blur (µm)", "camera.lens_blur_um", 0, 100, 0.1), advanced: true },
   ], groups: [
+    // A coloured glass for black-and-white film (issue #21, design r30 · B):
+    // app.js shows it for B&W films, or while one is left on a colour film.
+    // Its glasses, their swatches and each film's filter factors come from
+    // the catalog; their names and what they do are here, to be translated.
+    { title: "Color Filter", basic: 1, colorFilter: true, open: true, controls: [
+      { kind: "filters", label: "Color filter", path: "camera.color_filter", filters: COLOR_FILTERS },
+    ] },
     { title: "Lens Diffusion", basic: 2, enable: "camera.diffusion_filter.active", controls: [
       choice("Filter", "camera.diffusion_filter.filter_family", DIFFUSION_FILTERS),
       slider("Strength", "camera.diffusion_filter.strength", 0, 2, 0.01),

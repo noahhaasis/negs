@@ -76,3 +76,43 @@ fn filters_reach_the_film_exposure() {
     let film = profile::load_profile_by_name(&data, "kodak_portra_400").unwrap();
     assert!(Pipeline::new_with_spectral(film.clone(), film, params, &data).is_err());
 }
+
+/// Tri-X 400's sensitivity is traced from Kodak's datasheet (F-4017), which
+/// also lists daylight filter factors: No. 8 yellow ×2 (1 stop) and No. 25
+/// red ×8 (3 stops). Y2 and R1 cut where those do (about 499 and 604 nm
+/// against 494 and ~600), so the film and the glass should land near them.
+#[test]
+fn trix_filter_factors_match_kodaks() {
+    let data = data_dir();
+    let film = profile::load_profile_by_name(&data, "kodak_trix400_d76_8min").unwrap();
+    let stops = |key| color_filters::factor_stops(&film, &color_filters::transmittance(&data, key).unwrap().unwrap()).unwrap();
+    let (y2, r1) = (stops("hoya_y2"), stops("hoya_r1"));
+    assert!((y2 - 1.0).abs() < 0.3, "Y2 on Tri-X: {y2} stops, Kodak's No. 8: 1");
+    assert!((r1 - 3.0).abs() < 0.5, "R1 on Tri-X: {r1} stops, Kodak's No. 25: 3");
+}
+
+/// The catalog lists the filters in the apps' order with a swatch colour
+/// of the right hue, and filter factors for B&W camera films only.
+#[test]
+fn the_catalog_carries_filters_and_bw_film_factors() {
+    let data = data_dir();
+    let stocks = ["ilford_hp5_plus", "kodak_portra_400", "ilford_mgrc_deluxe_grade2"].map(String::from);
+    let catalog = spektrafilm_core::catalog::catalog(&data, stocks).unwrap();
+    let filters = catalog["color_filters"].as_array().unwrap();
+    let names: Vec<&str> = filters.iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Green", "Yellow-green", "Yellow", "Orange", "Red"]);
+    let rgb = |key: &str| {
+        let hex = filters.iter().find(|f| f["key"] == key).unwrap()["colour"].as_str().unwrap();
+        (1..7).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect::<Vec<_>>()
+    };
+    let (red, yellow, green) = (rgb("hoya_r1"), rgb("hoya_y2"), rgb("hoya_x1"));
+    assert!(red[0] > 200 && red[1] < 120 && red[2] < 120, "red {red:?}");
+    assert!(yellow[0] > 200 && yellow[1] > 180 && yellow[2] < 100, "yellow {yellow:?}");
+    assert!(green[1] > green[0] && green[1] > green[2], "green {green:?}");
+    let profile = |id: &str| catalog["profiles"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap().clone();
+    let hp5 = profile("ilford_hp5_plus")["color_filter_stops"].clone();
+    assert_eq!(hp5.as_object().unwrap().len(), 5);
+    assert!(hp5["hoya_r1"].as_f64().unwrap() > hp5["hoya_y2"].as_f64().unwrap());
+    assert!(profile("kodak_portra_400")["color_filter_stops"].as_object().unwrap().is_empty());
+    assert!(profile("ilford_mgrc_deluxe_grade2")["color_filter_stops"].as_object().unwrap().is_empty());
+}
