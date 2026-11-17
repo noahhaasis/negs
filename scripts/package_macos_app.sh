@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# --dev: an app to try changes on this Mac, in about a minute instead of ten.
-# Apple silicon only, built in the shared target/ (so it reuses what
-# `cargo build --release`, `cargo test --release` and the Swift tests built),
-# into dist/negs-macos-dev. No source archive, zip, DMG or package audit.
-# Never publish it.
+# --dev: an app to try changes on this Mac. Apple silicon only, built in the
+# shared target/ (so it reuses what `cargo build --release`, `cargo test
+# --release` and the Swift tests built), into dist/negs-macos-dev. No source
+# archive, zip, DMG or package audit. Never publish it. About 5 s with nothing
+# changed, ~15 s after an engine edit, ~55 s after a Swift edit.
+# --dev --debug: the Swift app in debug, ~25 s after a Swift edit. SwiftUI is
+# much slower in debug, so don't judge timing, scrolling or launch with it.
 DEV=0
-if [[ "${1:-}" == --dev ]]; then
-    DEV=1
+SWIFT_CONFIG=release
+for arg in "$@"; do
+    case "$arg" in
+        --dev) DEV=1 ;;
+        --debug) SWIFT_CONFIG=debug ;;
+        *) echo "Unknown option: $arg (use --dev, --dev --debug, or nothing)" >&2; exit 2 ;;
+    esac
+done
+if [[ $SWIFT_CONFIG == debug && $DEV != 1 ]]; then
+    echo "--debug only goes with --dev" >&2
+    exit 2
+fi
+if [[ $DEV == 1 ]]; then
     BUILD_TARGET_DIR="${BUILD_TARGET_DIR:-target}"
     DIST_DIR="${DIST_DIR:-dist/negs-macos-dev}"
 fi
@@ -59,8 +72,8 @@ if [[ "${NEGS_PREBUILT_RUST:-}" == 1 ]]; then
 else
     cargo build --locked --release -p spektrafilm-native ${rust_targets[@]+"${rust_targets[@]}"} --target-dir "$BUILD_TARGET_DIR"
 fi
-swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"}
-swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"} --show-bin-path)"
+swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c "$SWIFT_CONFIG" --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"}
+swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c "$SWIFT_CONFIG" --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"} --show-bin-path)"
 if [[ "${NEGS_PREBUILT_RUST:-}" != 1 ]]; then
     cargo build --locked --release -p spektrafilm-cli --bin spektrafilm ${rust_targets[@]+"${rust_targets[@]}"} --target-dir "$BUILD_TARGET_DIR"
     cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 ${rust_targets[@]+"${rust_targets[@]}"} --target-dir "$BUILD_TARGET_DIR"
