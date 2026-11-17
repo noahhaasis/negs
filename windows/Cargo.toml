@@ -30,6 +30,8 @@ rawler = "0.8"
 raw-window-handle = "0.6"
 pollster = "0.4"
 bytemuck = { version = "1.25", features = ["derive"] }
+# The pencil marks' geometry, ported from the macOS app (tested on any OS).
+negs-marks = { path = "marks" }
 
 [build-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
@@ -38,9 +40,14 @@ image = { version = "0.25", default-features = false, features = ["png", "ico"] 
 version = "0.58"
 features = [
     "implement",
+    "Foundation_Numerics",
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",
     "Win32_Security",

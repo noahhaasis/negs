@@ -30,6 +30,9 @@ def main():
                 raise ValueError(f"Packaged executable differs from build: {name}")
         if package.read("LICENSE") != (root / "LICENSE").read_bytes():
             raise ValueError("Packaged license differs from source")
+        for name, source in [("OFL-Newsreader.txt", "macos/Fonts/OFL-Newsreader.txt"), ("OFL-BarlowCondensed.txt", "crates/spektrafilm-io/fonts/OFL-BarlowCondensed.txt")]:
+            if package.read(name) != (root / source).read_bytes():
+                raise ValueError(f"Packaged font licence differs from source: {name}")
         if not any(name.startswith("data/") for name in package.namelist()):
             raise ValueError("Missing packaged data")
         with zipfile.ZipFile(io.BytesIO(package.read("source.zip"))) as source:
