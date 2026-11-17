@@ -10,14 +10,43 @@ decisions made with their reasons, and what was carried over. See
 |---|---|---|
 | 0 | Baseline | done |
 | 1 | Drawing foundation | done, merged `e142fba` |
-| 2 | Window shell | in progress: agent on branch `win-p2-shell` (owns the PC) |
-| 3 | Inspector | not started |
+| 2 | Window shell | done, merged `a9a0763` |
+| 3 | Inspector | in progress, split in two: 3a rows/pane header/Export foot (`win-p3a-inspector`, owns the PC), then 3b presets tiles + Settings tabs |
 | 4 | Canvas | not started |
 | 5 | Tray | not started |
 | 6 | Library (crate can start in parallel after phase 0) | crate done, merged (see log); Windows glue after phase 5 |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
+
+## 2026-11-18: phase 2 merged (`a9a0763`, branch tip `171cd81`)
+
+- **What users see:** six themes live (View › Theme, saved as `appTheme`, Darkroom
+  default; Plain follows Windows light/dark; `NEGS_THEME` forces a name, light/dark =
+  Plain/Plain dark). 38 DIP title bar (Direct2D): menu row File Edit Photo View Help,
+  file name Newsreader 15/600, themed caption buttons, snap layouts kept. No toolbar or
+  canvas pill (`chrome.rs` deleted); items in menus (shortcut map in
+  `docs/windows-ui-features.md` / release notes). Status line in words (size, develop
+  time, export progress + Cancel, Original ⌄ hold/menu, Fit, 100%). Alert card replaces
+  task dialogs (About stays native). Empty window, dropping, Developing tag, can't
+  develop on the canvas (`Model::develop_error`).
+- **Gates:** cross-check clean (14 old warnings); PC build; 182 Windows tests pass.
+  Startup ABBA 6 runs: A 86.4 / 181.1, B 81.9 / 176.4 (first window / inspector). Fixed
+  on the way: `d2d::prepare` now starts at the top of `run()`, `d2d::warm` sets the first
+  frame's type styles on that thread.
+- **Decided (coordinator):** no duplicate View › Reset All Adjustments (Windows has one
+  reset, Photo › Reset Edits Ctrl+Shift+R); the big shell commit `0836731` stays whole.
+  Rotate/Crop/Fit/Actual in View as on the Mac; Crop shows Ctrl+K, C works too.
+- **Not exercised on the PC:** runtime theme switch from the menu, the drop state, Try
+  Again, holding Original, keyboard on the confirmations. 150 % not testable per run
+  (PC is at 125 %, system-wide).
+- **Carried over:** phase 3: inspector controls (still old painting in theme colours),
+  Export foot, a stray glyph left of "No developed photograph" in the empty histogram.
+  Phase 4: film → paper label (dropped from the status line), empty-window words centred
+  on the print area, whether the status line hides while dragging (match macOS), the
+  Developing tag's line is still on the software canvas. Phase 6: library items in Photo
+  and the status line's library notes; folder wording in the empty window.
+- Screenshots: `~/.negs/windows-parity/phase2/`.
 
 ## 2026-11-18: phase 6 crate merged (branch tip `7718029`)
 
