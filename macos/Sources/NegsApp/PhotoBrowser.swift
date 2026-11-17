@@ -228,6 +228,9 @@ struct PhotoBrowser: View {
     @State private var watch = ScrollWatch()
     /// The strip's width, once it has one.
     @State private var viewWidth: CGFloat?
+    /// The photograph a click in the strip just opened: it stays where it
+    /// was clicked rather than the row jumping to put it in the middle.
+    @State private var clickedOpen: URL?
 
     /// The pencil under the current frame: as heavy as the grid's yellow
     /// box, so it still reads under a pick's box (round 21). It sits 3 pt
@@ -321,7 +324,9 @@ struct PhotoBrowser: View {
                     } open: {
                         let modifiers = NSEvent.modifierFlags
                         focused = true
+                        let before = model.sourceItem
                         model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
+                        if model.sourceItem != before { clickedOpen = model.sourceItem }
                     }
                     .contextMenu { LibraryContextMenu(model: model, item: file.url) }
                     .offset(x: layout.xs[frame.index])
@@ -352,10 +357,15 @@ struct PhotoBrowser: View {
             })
         }
         .scrollIndicators(.never)
-        // Centred when it changes, not held there. A resize keeps the row
-        // where it is; once it's over, the current frame glides back to the
-        // middle (`StripSettling`).
-        .onChange(of: model.sourceItem) { _, _ in Self.centre(model, in: watch) }
+        // Centred when it changes, not held there, unless a click in the
+        // strip changed it: the row stays put under the pointer. A resize
+        // keeps the row where it is; once it's over, the current frame
+        // glides back to the middle (`StripSettling`).
+        .onChange(of: model.sourceItem) { _, item in
+            let clicked = item != nil && item == clickedOpen
+            clickedOpen = nil
+            if !clicked { Self.centre(model, in: watch) }
+        }
         .onChange(of: library.loading) { _, loading in if !loading { Self.centre(model, in: watch) } }
         .onChange(of: library.filtering) { _, filtering in if !filtering { Self.centre(model, in: watch) } }
         .onChange(of: layout) { old, new in Self.hold(model, from: old, to: new, in: watch) }
