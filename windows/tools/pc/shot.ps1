@@ -20,6 +20,7 @@ public static class NegsWin {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int w, int hh, uint f);
@@ -129,8 +130,11 @@ foreach ($s in $job.steps) {
   if ($s.shot) { Capture $s.shot ([bool]$s.front) }
 }
 
-# Close: any modal first (Escape), then the window.
+# Close: the window, then any modal first (Escape) and again. WM_CLOSE goes
+# to the main window itself: CloseMainWindow picks a tooltip's SysShadow
+# window while a tip is up.
+function CloseMain { [NegsWin]::PostMessage($h, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null }
 $proc.Refresh()
-if (!$proc.HasExited) { $proc.CloseMainWindow() | Out-Null }
-if (!$proc.WaitForExit(5000)) { [System.Windows.Forms.SendKeys]::SendWait('{ESC}'); $proc.CloseMainWindow() | Out-Null }
+if (!$proc.HasExited) { CloseMain }
+if (!$proc.WaitForExit(5000)) { [System.Windows.Forms.SendKeys]::SendWait('{ESC}'); CloseMain }
 if (!$proc.WaitForExit(5000)) { $proc.Kill(); 'killed' } else { "exit $($proc.ExitCode)" }
