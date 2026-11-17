@@ -9,6 +9,7 @@ members = [
     "crates/spektrafilm-cli",
     "crates/spektrafilm-native",
     "crates/spektrafilm-wasm",
+    "crates/negs-library",
 ]
 exclude = ["vendor"]
 

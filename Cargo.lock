@@ -1450,6 +1450,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "negs-library"
+version = "0.17.0"
+
+[[package]]
 name = "no_std_io2"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
