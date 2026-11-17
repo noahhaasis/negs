@@ -296,18 +296,21 @@ struct EditState: Codable, Equatable, Sendable {
     /// Prep › Match camera brightness: present while it's on. Sessions from
     /// before it decode as off and keep their exposure.
     var brightnessMatch: BrightnessMatch?
+    /// A scanned negative printed as a frame of a darkroom roll (§9.2).
+    /// The frame's params hold what it prints with; this says which roll.
+    var roll: NegativeRoll?
 
     /// The state without presentation-only settings, to decide whether an
-    /// edit needs a new render. The preview is never rotated: the canvas
-    /// turns it, and saving and exporting rotate the result. With an Image
+    /// edit needs a new render. The preview is never rotated or flipped: the
+    /// canvas turns it, and saving and exporting rotate the result. With an Image
     /// Size target the crop's extent sets the working size, so it stays; its
     /// position, angle and ratio never change the render.
     var rendered: EditState {
-        var state = self; state.border = BorderSettings(); state.crop = CropSettings(); state.brightnessMatch = nil
+        var state = self; state.border = BorderSettings(); state.crop = CropSettings(); state.brightnessMatch = nil; state.roll = nil
         if ImageSize.mode(of: params) == .longestSide, crop.cropped {
             state.crop.rect = CGRect(origin: .zero, size: crop.rect.size)
         }
-        state.params["io.rotate_cw"] = .null
+        state.params["io.rotate_cw"] = .null; state.params["io.flip"] = .null
         return state
     }
 }

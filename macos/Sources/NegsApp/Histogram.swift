@@ -70,7 +70,7 @@ struct ImageScopes: Equatable, Sendable {
     var histogram = Histogram()
     var waveform = Waveform()
 
-    static func of(_ surface: IOSurface, crop: CropSettings, rotation: Int = 0, maxSamples: Int = 1 << 20) -> ImageScopes {
+    static func of(_ surface: IOSurface, crop: CropSettings, rotation: Int = 0, flip: Bool = false, maxSamples: Int = 1 << 20) -> ImageScopes {
         let size = CGSize(width: surface.width, height: surface.height)
         let area = crop.pixels(in: size)
         guard area.width >= 1, area.height >= 1, maxSamples > 0 else { return ImageScopes() }
@@ -103,12 +103,14 @@ struct ImageScopes: Equatable, Sendable {
                 let pixel = base + y * rowBytes + x * 4
                 let (r, g, b) = (Int(pixel[2]), Int(pixel[1]), Int(pixel[0]))
                 histogram.red[r] += 1; histogram.green[g] += 1; histogram.blue[b] += 1
+                // The waveform runs across the photograph as shown: flipped, then turned.
+                let across = flip ? columns - 1 - column : column
                 let shownColumn: Int
                 switch turn {
                 case 1: shownColumn = rows - 1 - row
-                case 2: shownColumn = columns - 1 - column
+                case 2: shownColumn = columns - 1 - across
                 case 3: shownColumn = row
-                default: shownColumn = column
+                default: shownColumn = across
                 }
                 let waveX = shownColumn * waveWidth / shownColumns
                 red[r * waveWidth + waveX] += 1; green[g * waveWidth + waveX] += 1; blue[b * waveWidth + waveX] += 1

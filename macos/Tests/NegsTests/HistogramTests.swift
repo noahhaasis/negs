@@ -115,6 +115,17 @@ final class HistogramTests: XCTestCase {
         }
     }
 
+    /// Flipped, the waveform runs across the mirrored photograph, as a half turn does.
+    func testWaveformFollowsTheFlip() throws {
+        let image = try surface()
+        let flipped = ImageScopes.of(image, crop: CropSettings(), flip: true).waveform
+        XCTAssertEqual(flipped.red[255 * 100], 60)
+        XCTAssertEqual(flipped.red[99], 60)
+        // Flipped and turned half round, it's the photograph's own way round again.
+        let both = ImageScopes.of(image, crop: CropSettings(), rotation: 2, flip: true).waveform
+        XCTAssertEqual(both.red, ImageScopes.of(image, crop: CropSettings()).waveform.red)
+    }
+
     func testEmptySamplingProducesAnEmptyScopeWithoutAnImage() throws {
         let scopes = ImageScopes.of(try surface(), crop: CropSettings(), maxSamples: 0)
         XCTAssertEqual(scopes.histogram.peak, 0)

@@ -86,6 +86,28 @@ final class RenderedPreviewCacheTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: cache.file.path), "An earlier queued save must not resurrect an invalidated frame")
     }
 
+    /// A negative's light frame is part of the frame's identity: replaced at
+    /// the same path, the cached frame is stale.
+    func testANegativesLightFrameKeysTheFrame() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let photo = dir.appendingPathComponent("scan.tif"), helper = dir.appendingPathComponent("helper"), light = dir.appendingPathComponent("light.tif")
+        let data = dir.appendingPathComponent("data")
+        try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
+        try Data([1]).write(to: photo); try Data([2]).write(to: helper); try Data([3]).write(to: light)
+        let paths = EnginePaths(helper: helper, exporter: helper, data: data)
+        var state = EditState()
+        state.params = .object(["workflow": .object(["route": .string(NegativeScan.route)]),
+                                "film_render": .object(["convert": .object(["flat_field": .string(light.path)])])])
+        let key = try XCTUnwrap(RenderedPreviewCache.key(source: photo, state: state, paths: paths))
+        XCTAssertEqual(RenderedPreviewCache.key(source: photo, state: state, paths: paths), key)
+        try Data([4, 5]).write(to: light)
+        XCTAssertNotEqual(RenderedPreviewCache.key(source: photo, state: state, paths: paths), key, "another light frame, same path")
+        try FileManager.default.removeItem(at: light)
+        XCTAssertNotNil(RenderedPreviewCache.key(source: photo, state: state, paths: paths), "a light frame that's gone isn't used")
+    }
+
     private func bytes(_ surface: IOSurface) -> Data {
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
@@ -103,7 +125,9 @@ final class RenderedPreviewCacheTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         // The edits relaunch from the photograph's sidecar, stored against the real defaults table.
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        try FileManager.default.copyItem(at: SidecarDefaults.url(version: 1, data: checkout.appendingPathComponent("data")), to: SidecarDefaults.url(version: 1, data: data))
+        // New sidecars are stored against the newest table.
+        try FileManager.default.copyItem(at: SidecarDefaults.url(version: SidecarDefaults.latest, data: checkout.appendingPathComponent("data")),
+                                         to: SidecarDefaults.url(version: SidecarDefaults.latest, data: data))
         let sidecars = SidecarStore()
         let photo = dir.appendingPathComponent("photo.png")
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 6, bitsPerSample: 8,

@@ -6,6 +6,8 @@ struct ComparePicture {
     var image: AnyObject
     var size: CGSize
     var rotation = 0
+    /// Mirrored left to right after the crop, before `rotation` (`io.flip`).
+    var flip = false
     var crop = CropSettings()
     var border: BorderSettings?
     var filmStrip: FilmStrip?
@@ -24,12 +26,13 @@ extension EditorModel {
         guard let other = compareSides[side], let image = other.image else { return nil }
         if side.isOriginal {
             // Cropped, turned and bordered as the developed photograph, as Original shows it.
-            return ComparePicture(image: image, size: imageSize, rotation: imageRotation, crop: crop,
+            return ComparePicture(image: image, size: imageSize, rotation: imageRotation, flip: imageFlip, crop: crop,
                                   border: border.shown(for: crop.size(of: imageSize)), filmStrip: filmStrip)
         }
         if other.finished { return ComparePicture(image: image, size: other.size) }
         let state = other.state ?? EditState()
-        return ComparePicture(image: image, size: other.size, rotation: Int(state.params["io.rotate_cw"].double), crop: state.crop,
+        return ComparePicture(image: image, size: other.size, rotation: Int(state.params["io.rotate_cw"].double),
+                              flip: state.params["io.flip"].bool, crop: state.crop,
                               border: state.border.shown(for: state.crop.size(of: other.size)), filmStrip: other.filmStrip,
                               settled: other.shown == .developed)
     }
@@ -40,13 +43,13 @@ extension EditorModel {
             let size = CanvasArea.standInSize(trial, photo: photoSize)
             return ComparePicture(image: trial, size: size, border: border.shown(for: size), filmStrip: filmStrip)
         } else if let image {
-            return ComparePicture(image: original ?? image, size: imageSize, rotation: imageRotation, crop: crop,
+            return ComparePicture(image: original ?? image, size: imageSize, rotation: imageRotation, flip: imageFlip, crop: crop,
                                   border: border.shown(for: crop.size(of: imageSize)), filmStrip: filmStrip,
                                   settled: original != nil || showsSettledFrame)
         } else if let standIn {
             return ComparePicture(image: standIn, size: CanvasArea.standInSize(standIn, photo: placeholderSize))
         } else if let placeholder {
-            return ComparePicture(image: placeholder, size: placeholderSize, rotation: imageRotation, crop: crop,
+            return ComparePicture(image: placeholder, size: placeholderSize, rotation: imageRotation, flip: imageFlip, crop: crop,
                                   border: border.shown(for: crop.size(of: placeholderSize)), filmStrip: filmStrip)
         }
         return nil
@@ -143,7 +146,7 @@ private struct CompareCanvasPicture: View {
     var body: some View {
         Group {
             if let picture {
-                PreviewCanvas(image: picture.image, size: picture.size, rotation: picture.rotation, crop: picture.crop, border: picture.border,
+                PreviewCanvas(image: picture.image, size: picture.size, rotation: picture.rotation, flip: picture.flip, crop: picture.crop, border: picture.border,
                               filmTexture: model.filmTexture, filmStrip: picture.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage,
                               scale: open ? model.canvasScale : nil, upsideDown: model.upsideDown, settled: picture.settled,
                               doubleClick: { [model] zoomed in model.zoom(fit: zoomed) }, inset: 0, link: link, click: click)

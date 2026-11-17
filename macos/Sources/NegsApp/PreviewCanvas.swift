@@ -9,6 +9,8 @@ struct PreviewCanvas: NSViewRepresentable {
     let image: AnyObject
     let size: CGSize
     let rotation: Int
+    /// Mirrored left to right after the crop, before `rotation` (`io.flip`).
+    var flip = false
     let crop: CropSettings
     let border: BorderSettings?
     let filmTexture: CGImage?
@@ -26,6 +28,9 @@ struct PreviewCanvas: NSViewRepresentable {
     var settled = true
     /// A double-click on the photograph; true if it's zoomed from fitting.
     var doubleClick: ((_ zoomed: Bool) -> Void)?
+    /// While set, a click on the photograph is a pick: where, as fractions
+    /// of the whole, uncropped photograph from its top left.
+    var pick: ((CGPoint) -> Void)?
     /// Space left and right of the fitted photograph. Compare lays out its
     /// frames itself and fits each photograph to its frame (0).
     var inset = ImageScrollView.fitInset
@@ -58,6 +63,8 @@ struct PreviewCanvas: NSViewRepresentable {
         if scroll.inset != inset { scroll.inset = inset; if scroll.fitting { scroll.applyZoom() } }
         scroll.link = link
         let photo = scroll.documentView as! PhotographView
+        if (photo.pick == nil) != (pick == nil) { photo.window?.invalidateCursorRects(for: photo) }
+        photo.pick = pick
         let displaySize = Self.displaySize(size, rotation: rotation, crop: crop)
         let documentSize = Self.documentSize(size, rotation: rotation, crop: crop, border: border, filmStrip: filmStrip)
         let oldSize = photo.frame.size, oldPhotoSize = photo.displaySize
@@ -66,7 +73,7 @@ struct PreviewCanvas: NSViewRepresentable {
         let recropped = photo.crop != crop && oldSize.width != 0
         if recropped { scroll.fitting = true }
         photo.settled = settled
-        photo.show(image, size: size, rotation: rotation, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
+        photo.show(image, size: size, rotation: rotation, flip: flip, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
         photo.turned = upsideDown
         photo.split = split
         if oldSize != documentSize {
@@ -337,6 +344,7 @@ final class PhotographView: NSView {
     private var image: AnyObject?
     private var size = CGSize.zero
     private var rotation = 0
+    private var flip = false
     private(set) var crop = CropSettings()
     private var border: BorderSettings?
     private var filmTexture: CGImage?
@@ -409,10 +417,10 @@ final class PhotographView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ image: AnyObject, size: CGSize, rotation: Int, crop: CropSettings = CropSettings(), border: BorderSettings? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
-        guard image !== self.image || size != self.size || rotation != self.rotation || crop != self.crop
+    func show(_ image: AnyObject, size: CGSize, rotation: Int, flip: Bool = false, crop: CropSettings = CropSettings(), border: BorderSettings? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
+        guard image !== self.image || size != self.size || rotation != self.rotation || flip != self.flip || crop != self.crop
             || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
-        self.image = image; self.size = size; self.rotation = rotation; self.crop = crop
+        self.image = image; self.size = size; self.rotation = rotation; self.flip = flip; self.crop = crop
         self.border = border; self.filmTexture = filmTexture; self.filmStrip = filmStrip
         photo.contents = image
         needsLayout = true
@@ -425,7 +433,7 @@ final class PhotographView: NSView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         turn.bounds = CGRect(origin: .zero, size: bounds.size)
         placeTurn()
-        Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, center: CGPoint(x: bounds.midX, y: bounds.midY))
+        Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, flip: flip, center: CGPoint(x: bounds.midX, y: bounds.midY))
         borderLayers.layout(border, photo: displaySize, host: turn, texture: filmTexture, filmStrip: filmStrip)
         refreshSharp()
         CATransaction.commit()
@@ -592,17 +600,20 @@ final class PhotographView: NSView {
         return CGPoint(x: area.midX, y: area.midY)
     }
 
-    /// Places a photograph of `size` in `clip`, cropped, straightened and
-    /// turned as the exporter does, centred on `center`. The edited
-    /// thumbnails use it too. `cut`: the photograph's image is the crop
-    /// already, straightened.
-    static func layout(clip: CALayer, photo: CALayer, size: CGSize, crop: CropSettings, rotation: Int, center: CGPoint, cut: Bool = false) {
+    /// Places a photograph of `size` in `clip`, cropped, straightened,
+    /// flipped and turned as the exporter does, centred on `center`. The
+    /// edited thumbnails use it too. `cut`: the photograph's image is the
+    /// crop already, straightened.
+    static func layout(clip: CALayer, photo: CALayer, size: CGSize, crop: CropSettings, rotation: Int, flip: Bool = false,
+                       center: CGPoint, cut: Bool = false) {
         // The crop's pixels, as the exporter cuts them. Layers are y-up, so
         // the rectangle's top-left origin flips, and clockwise is negative.
+        // The flip mirrors the cut about its middle before it turns.
         let pixels = crop.pixels(in: size)
         clip.bounds = CGRect(origin: .zero, size: pixels.size)
         clip.position = center
-        clip.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
+        let turn = CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation))
+        clip.setAffineTransform(flip ? CGAffineTransform(scaleX: -1, y: 1).concatenating(turn) : turn)
         if cut {
             photo.bounds = clip.bounds
             photo.position = CGPoint(x: pixels.width / 2, y: pixels.height / 2)
@@ -614,12 +625,34 @@ final class PhotographView: NSView {
         photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
     }
 
+    /// `PreviewCanvas.pick`.
+    var pick: ((CGPoint) -> Void)?
+    /// Where `point` (in this view) lies on the whole photograph, as
+    /// fractions from its top left: back through the turns, flip, crop and
+    /// straightening as shown, and T's half turn. That's the frame the
+    /// helper's `negative_base` and `negative_neutral` read: the decoded
+    /// photograph, upright as its file says, before any of Negs' geometry.
+    /// Nil off the shown photograph, such as on the border.
+    func photographFraction(_ point: CGPoint) -> CGPoint? {
+        guard let layer, size.width > 0, size.height > 0 else { return nil }
+        guard clip.bounds.contains(clip.convert(point, from: layer)) else { return nil }
+        let local = photo.convert(point, from: layer)
+        // The photograph's layer is y-up.
+        return CGPoint(x: local.x / size.width, y: 1 - local.y / size.height)
+    }
+
     private var grabbing = false
     /// The press has moved the photograph: it isn't a click.
     private var dragged = false
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: pick == nil ? .openHand : .crosshair) }
     override func mouseDown(with event: NSEvent) {
         dragged = false
+        if let pick, let fraction = photographFraction(convert(event.locationInWindow, from: nil)) {
+            // A pick isn't a click on the photograph (compare's `click`).
+            dragged = true
+            pick(fraction)
+            return
+        }
         if event.clickCount == 2, let scroll = enclosingScrollView as? ImageScrollView {
             scroll.doubleClicked()
         } else if !grabbing { grabbing = true; NSCursor.closedHand.push() }

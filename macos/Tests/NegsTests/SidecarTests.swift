@@ -33,6 +33,7 @@ final class SidecarFormatTests: XCTestCase {
         let frozen = [
             1: "d1db8208a62b2b340884911d669ddb453ac7fae8ed59d4ddfec24c70bf81380d",
             2: "05e943191b16339df607b93c484b4e6dbad48c7db66636f1054d5161f045a3b6",
+            3: "43ff13ce9ec514dd098ec7c59a154e3bb15353a1705a5afd2e02c005113f51f3",
         ]
         let files = try FileManager.default.contentsOfDirectory(atPath: data.appendingPathComponent("sidecar-defaults").path).filter { $0.hasSuffix(".json") }
         XCTAssertEqual(files.count, SidecarDefaults.latest, "one table per version, and the newest is `SidecarDefaults.latest`")

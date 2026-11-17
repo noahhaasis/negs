@@ -18,8 +18,14 @@ enum PreviewRules {
     /// it. A film brings its own grain/DIR/halation presets, sets scanning for
     /// slides, and brings its own paper unless `keepPaper` (Settings › Keep
     /// paper when changing film); a paper keeps the film.
-    static func choosing(_ id: String, paper: Bool, keepPaper: Bool, in state: EditState, stocks: [Stock]) -> EditState {
+    /// `negative`: the film a negative is read as (the read-as tray), so the
+    /// photograph stays a negative, on its paper; any other film choice
+    /// prints it as a photograph.
+    static func choosing(_ id: String, paper: Bool, keepPaper: Bool, in state: EditState, stocks: [Stock], negative: Bool = false) -> EditState {
         var next = state
+        if !paper, !negative, state.params["workflow.route"].string == NegativeScan.route {
+            next = NegativeScan.leaving(next)
+        }
         if paper {
             next.paper = id; next.params["print_render.development_time"] = .null
             return next
@@ -28,14 +34,16 @@ enum PreviewRules {
         next.params["film_render.development_time"] = .null
         // A new film brings its own grain, DIR and halation presets, as upstream applies them.
         for path in Stock.presetPaths { next.params[path] = .null }
-        pairFilm(in: &next, stocks: stocks, paper: !keepPaper)
+        // The film a negative is read as isn't the one it's printed for: the paper stays.
+        pairFilm(in: &next, stocks: stocks, paper: !keepPaper && !negative)
         return next
     }
 
     /// Scanning for slides, and the film's own paper unless `paper` is false.
     static func pairFilm(in state: inout EditState, stocks: [Stock], paper: Bool = true) {
         guard let film = stocks.first(where: { !$0.paper && $0.id == state.film }) else { return }
-        state.params["io.scan_film"] = .bool(film.positive)
+        // A negative is read and printed, never scanned as film.
+        state.params["io.scan_film"] = .bool(film.positive && state.params["workflow.route"].string != NegativeScan.route)
         if paper, stocks.contains(where: { $0.paper && $0.id == film.target }), state.paper != film.target {
             state.paper = film.target; state.params["print_render.development_time"] = .null
         }
@@ -46,14 +54,21 @@ enum PreviewRules {
     /// render setting with the stock chosen, and the crop and straighten.
     /// `state` is the edit as rendered (`EditorModel.renderState`); `keepPaper`
     /// as for `choosing`, so a film's tile shows what a click would develop.
-    static func request(for stock: Stock, keepPaper: Bool, state: EditState, stocks: [Stock], source: URL, generation: Int) -> [String: JSONValue] {
-        let chosen = choosing(stock.id, paper: stock.paper, keepPaper: keepPaper, in: state, stocks: stocks)
+    /// A read-as tile of another film finds the base and balances the print
+    /// for it, as choosing it does (at `negativePoint` when the base was
+    /// picked); the helper keeps the print exposure (`read_negative`).
+    static func request(for stock: Stock, keepPaper: Bool, state: EditState, stocks: [Stock], source: URL, generation: Int,
+                        negative: Bool = false, negativePoint: CGPoint? = nil) -> [String: JSONValue] {
+        let chosen = choosing(stock.id, paper: stock.paper, keepPaper: keepPaper, in: state, stocks: stocks, negative: negative)
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(source.path),
             "source_generation": .number(Double(generation)),
             "film": .string(chosen.film), "paper": .string(chosen.paper), "params": chosen.params,
             "long_side": .number(Double(longSide))
         ]
+        if negative, !stock.paper, stock.id != state.film, chosen.params["workflow.route"].string == NegativeScan.route {
+            command["read_negative"] = .object(negativePoint.map { ["point": .array([.number($0.x), .number($0.y)])] } ?? [:])
+        }
         if let crop = EditorModel.cropJSON(chosen.crop) { command["crop"] = crop }
         return command
     }
@@ -80,10 +95,13 @@ enum PreviewRules {
         var request = command
         let params = command["params"] ?? .null
         var subset = JSONValue.object([:])
-        for path in kept { subset[path] = params[path] }
+        // A negative also keeps its base and print balance, and its film.
+        let negative = params["workflow.route"].string == NegativeScan.route
+        for path in kept + (negative ? NegativeScan.presetKeeps + ["io.scan_film"] : []) { subset[path] = params[path] }
         request["params"] = subset
         // The preset brings its own film and paper.
-        request["film"] = nil; request["paper"] = nil
+        if !negative { request["film"] = nil }
+        request["paper"] = nil
         return PreviewTile.Key(generation: generation, request: request)
     }
 

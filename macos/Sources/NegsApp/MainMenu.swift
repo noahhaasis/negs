@@ -102,9 +102,10 @@ import SwiftUI
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
-        // Rotate lives in cropping (§4.10); from here it starts cropping.
+        // Rotate and flip live in cropping (§4.10); from here they start cropping.
         command(view, "Rotate Clockwise", #selector(rotate), "r")
         command(view, "Rotate Counterclockwise", #selector(rotateLeft), "r", [.command, .option])
+        command(view, "Flip Horizontal", #selector(flip), "")
         command(view, "Crop", #selector(crop), "k")
         view.addItem(.separator())
         // ⇧⌘R is Photo › Reset Edits.
@@ -225,6 +226,7 @@ import SwiftUI
     @objc private func actualSize() { model.zoom(fit: false) }
     @objc private func rotate() { model.turn(clockwise: true) }
     @objc private func rotateLeft() { model.turn(clockwise: false) }
+    @objc private func flip() { model.flip() }
     @objc private func crop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
     @objc private func resetAdjustments() { model.reset() }
     @objc private func rate(_ item: NSMenuItem) { model.setRating(item.tag) }
@@ -321,7 +323,7 @@ import SwiftUI
             item.state = UserDefaults.standard.bool(forKey: AdjustmentInspector.allControlsKey) ? .on : .off
             return model.mode == .photo
         case #selector(fitPhotograph), #selector(actualSize): return editing && !model.cropping
-        case #selector(rotate), #selector(rotateLeft): return model.cropping || (editing && model.image != nil)
+        case #selector(rotate), #selector(rotateLeft), #selector(flip): return model.cropping || (editing && model.image != nil)
         case #selector(crop):
             item.title = model.cropping ? "Done Cropping" : "Crop"
             return model.cropping || (model.image != nil && model.mode == .photo)
