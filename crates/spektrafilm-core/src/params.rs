@@ -572,6 +572,10 @@ pub struct FilmRenderingParams {
     pub density_curves_morph: CurvesMorphParams,
     #[serde(default)]
     pub base: FilmBaseParams,
+    /// How a scanned negative is read back to film density on the
+    /// convert-film route ([`WorkflowParams::converts_film`]).
+    #[serde(default)]
+    pub convert: ConvertFilmParams,
 }
 
 impl Default for FilmRenderingParams {
@@ -584,7 +588,76 @@ impl Default for FilmRenderingParams {
             glare: GlareParams::default(),
             density_curves_morph: CurvesMorphParams::default(),
             base: FilmBaseParams::default(),
+            convert: ConvertFilmParams::default(),
         }
+    }
+}
+
+/// `film_render.convert`, upstream experimental's `ConvertFilmParams`
+/// (`runtime/params_schema.py`, 28bf883): reading a scan of a real negative
+/// back to film density. See [`crate::convert`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConvertFilmParams {
+    /// The light the negative was photographed or scanned on, as a
+    /// [`crate::illuminants::standard_illuminant`] name. A physical input,
+    /// not a creative one: the film base is the creative lever.
+    pub scan_illuminant: String,
+    /// Aligns the scan's level with the model's (a flat gain on the input).
+    /// Detecting the base sets it.
+    pub exposure_compensation_ev: f64,
+    /// The brightest `100 - base_percentile` % of the frame is taken as the
+    /// clear film when the base is detected.
+    pub base_percentile: f64,
+    /// A 3×3 device-correction matrix, nine numbers row-major, applied to
+    /// the input RGB before the inverse (`rgb @ calibration`). Anything
+    /// that isn't nine finite numbers is the identity.
+    pub calibration: String,
+    /// Negs' own: a light frame (the bare light, shot with the scan's
+    /// camera, lens and aperture) each scan is divided by as it is read, so
+    /// the light's and the lens's falloff don't read as density
+    /// ([`crate::flat_field`]). Empty is off. Always written, so the apps'
+    /// defaults carry the key and an edit's light frame is kept on reopening.
+    pub flat_field: String,
+}
+
+impl Default for ConvertFilmParams {
+    fn default() -> Self {
+        Self {
+            scan_illuminant: "D55".into(),
+            exposure_compensation_ev: 0.0,
+            base_percentile: 99.0,
+            calibration: "1 0 0  0 1 0  0 0 1".into(),
+            flat_field: String::new(),
+        }
+    }
+}
+
+/// The routes a photograph can take through the stages, upstream
+/// experimental's `WorkflowParams.route` spelling.
+pub const ROUTE_PRINT: &str = "input > film > print > scan";
+/// A scan of a real colour negative, read back to film density and printed.
+pub const ROUTE_CONVERT_PRINT: &str = "input > convert-film > print > scan";
+
+/// `workflow`, upstream experimental's `WorkflowParams`. Negs reads one
+/// convert route from it; the filmed routes stay `io.scan_film`'s.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkflowParams {
+    pub route: String,
+}
+
+impl Default for WorkflowParams {
+    fn default() -> Self {
+        Self { route: ROUTE_PRINT.into() }
+    }
+}
+
+impl WorkflowParams {
+    /// The photograph is a scan of a real negative: converting replaces
+    /// filming. Only the printed convert route is supported so far.
+    pub fn converts_film(&self) -> bool {
+        self.route == ROUTE_CONVERT_PRINT
     }
 }
 
@@ -709,6 +782,12 @@ pub struct IoParams {
     /// time so the pipeline always sees an upright image.
     #[serde(default)]
     pub rotate_cw: i32,
+    /// Mirrored left to right, after the crop and before `rotate_cw`, as a
+    /// negative photographed from its base side needs. The crop stays in
+    /// the unmirrored photograph's frame. A mirror top to bottom is this
+    /// with a half turn.
+    #[serde(default)]
+    pub flip: bool,
 }
 
 impl Default for IoParams {
@@ -730,6 +809,7 @@ impl Default for IoParams {
             output_gamut_compress: OutputGamutCompressParams::default(),
             input_gamut_compress: InputGamutCompressParams::default(),
             rotate_cw: 0,
+            flip: false,
         }
     }
 }
@@ -975,6 +1055,8 @@ pub struct RuntimeParams {
     /// Finishing edits on the scan; see [`crate::post`].
     #[serde(default)]
     pub post: crate::post::PostParams,
+    #[serde(default)]
+    pub workflow: WorkflowParams,
 }
 
 impl Default for RuntimeParams {
@@ -989,6 +1071,7 @@ impl Default for RuntimeParams {
             io: IoParams::default(),
             settings: SettingsParams::default(),
             post: crate::post::PostParams::default(),
+            workflow: WorkflowParams::default(),
         }
     }
 }

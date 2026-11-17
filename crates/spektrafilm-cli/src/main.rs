@@ -66,6 +66,35 @@ enum Commands {
         /// Scan film directly (skip printing stage).
         #[arg(long)]
         scan_film: bool,
+        /// The input is a scan of a real colour negative: read it back to
+        /// --film's density (upstream's convert-film route) and print it.
+        /// Detects the film base and balances the print first.
+        #[arg(long, conflicts_with = "scan_film")]
+        negative: bool,
+        /// With --negative: the light the negative was shot or scanned on
+        /// (D50, D55, D65, T, K75P, BB<temperature>). Default D55.
+        #[arg(long, requires = "negative")]
+        scan_light: Option<String>,
+        /// With --negative: read the clear film at x,y (fractions of the
+        /// frame, origin top left) instead of finding it.
+        #[arg(long, requires = "negative")]
+        base_point: Option<String>,
+        /// With --negative: print the frame as a minilab's auto printer
+        /// would, its median a neutral mid-grey.
+        #[arg(long, requires = "negative")]
+        auto_print: bool,
+        /// With --negative: crop to the picture inside the film's clear
+        /// edges (the rebate and the gaps between frames), levelled by
+        /// them, when they are found.
+        #[arg(long, requires = "negative", conflicts_with = "crop")]
+        crop_to_picture: bool,
+        /// With --negative: a light frame (the bare light, shot with the
+        /// scan's camera, lens and aperture) to divide the scan by before
+        /// the base is read, so the light's falloff doesn't print
+        /// (`film_render.convert.flat_field` in --params). Used only when
+        /// the camera, lens and aperture match.
+        #[arg(long, requires = "negative")]
+        flat_field: Option<PathBuf>,
         /// Print per-stage timing information.
         #[arg(long)]
         timings: bool,
@@ -88,8 +117,8 @@ enum Commands {
         #[arg(long)]
         raw_out: Option<PathBuf>,
         /// Crop the result to x,y,width,height[,angle]: fractions of the
-        /// unrotated image with the origin top left (before rotation), then
-        /// degrees to straighten it clockwise.
+        /// unrotated, unflipped image with the origin top left (before
+        /// io.flip and io.rotate_cw), then degrees to straighten it clockwise.
         #[arg(long)]
         crop: Option<spektrafilm_io::crop::Crop>,
         /// Add a border around the result (after rotation and crop).
@@ -181,6 +210,12 @@ fn main() -> Result<()> {
             film,
             paper,
             scan_film,
+            negative,
+            scan_light,
+            base_point,
+            auto_print,
+            crop_to_picture,
+            flat_field,
             timings,
             params: params_file,
             raw_wb,
@@ -228,6 +263,7 @@ fn main() -> Result<()> {
                 &film,
                 paper.as_deref(),
                 scan_film,
+                NegativeOptions { on: negative, scan_light, base_point, auto_print, crop_to_picture, flat_field },
                 timings,
                 params_file.as_deref(),
                 raw_wb.as_deref(),
@@ -301,13 +337,14 @@ fn cmd_process(
     film_name: &str,
     paper_name: Option<&str>,
     scan_film: bool,
+    negative: NegativeOptions,
     show_timings: bool,
     params_file: Option<&Path>,
     raw_wb: Option<&str>,
     raw_temperature: Option<f64>,
     raw_tint: Option<f64>,
     raw_out: Option<&Path>,
-    crop: Option<spektrafilm_io::crop::Crop>,
+    mut crop: Option<spektrafilm_io::crop::Crop>,
     border: Option<spektrafilm_io::border::BorderStyle>,
     border_options: &spektrafilm_io::border::BorderOptions,
     instagram: bool,
@@ -343,6 +380,19 @@ fn cmd_process(
         RuntimeParams::default()
     };
     params.io.scan_film = scan_film;
+    if negative.on {
+        params.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
+        if let Some(light) = &negative.scan_light {
+            spektrafilm_core::illuminants::standard_illuminant_f64(light).map_err(anyhow::Error::msg)?;
+            params.film_render.convert.scan_illuminant = light.clone();
+        }
+        if let Some(light) = &negative.flat_field {
+            params.film_render.convert.flat_field = light.to_string_lossy().into_owned();
+        }
+    }
+    if params.workflow.converts_film() {
+        params.io.scan_film = false;
+    }
     if let Some(interpretation) = input_interpretation {
         params.io.input_interpretation = interpretation;
     }
@@ -358,7 +408,7 @@ fn cmd_process(
             .with_context(|| format!("unknown colour space: {name}"))?;
         params.io.output_color_space = space.name.into();
     }
-    let rotate_cw = params.io.rotate_cw;
+    let (rotate_cw, flip) = (params.io.rotate_cw, params.io.flip);
     let encoded = params.io.output_cctf_encoding;
     // Borders, the 35mm strip and resizing work in the output space.
     let finish = spektrafilm_io::encoding::Encoding::new(&params.io.output_color_space, encoded);
@@ -381,7 +431,7 @@ fn cmd_process(
         eprintln!("Warning: {warning}");
     }
     params.io.apply_input_colour(&loaded.colour);
-    let image = loaded.image;
+    let mut image = loaded.image;
     eprintln!(
         "Image loaded: {}x{} ({} MP), {} ms",
         image.width,
@@ -389,6 +439,30 @@ fn cmd_process(
         (image.pixel_count() as f64 / 1e6 * 10.0).round() / 10.0,
         t.elapsed().as_millis()
     );
+
+    // A negative's flat field divides the scan as it is read, before the
+    // base is measured, as the app's helper does.
+    if let Some(light) = spektrafilm_core::flat_field::requested(&params) {
+        let t = Instant::now();
+        let applied = match spektrafilm_core::flat_field::FlatField::load(light, &params) {
+            Ok(field) => field.flatten(&mut image, input, &params),
+            Err(reason) => spektrafilm_core::flat_field::Applied::not_used(reason),
+        };
+        match applied.reason {
+            None => eprintln!("Flat field: divided by {}, {} ms", light.display(), t.elapsed().as_millis()),
+            Some(reason) => eprintln!("Flat field not used: {reason}"),
+        }
+    }
+
+    if negative.on {
+        let picture = negative.prepare(&film, &print, &mut params, &image, data_dir)?;
+        if negative.crop_to_picture {
+            match picture {
+                Some(picture) => crop = Some(picture),
+                None => eprintln!("Not cropped to the picture"),
+            }
+        }
+    }
 
     // Auto exposure meters the full source, before any resize, as the native
     // preview does, so an export has the preview's exposure.
@@ -460,12 +534,12 @@ fn cmd_process(
         spektrafilm_core::pipeline::clip_to_display(&mut result, encoded);
     }
 
-    // User crop and rotation from the GUI (post-pipeline, matches the preview).
+    // User crop, flip and rotation from the GUI (post-pipeline, matches the preview).
     let result = match crop {
         Some(crop) => crop.apply(&result),
         None => result,
     };
-    let result = result.rotated_cw(rotate_cw);
+    let result = result.flipped_rotated_cw(flip, rotate_cw);
     let result = match border {
         Some(style) => {
             let bordered = spektrafilm_io::border::add_border(
@@ -678,5 +752,121 @@ mod raw_wb_tests {
         assert!(Cli::try_parse_from(base.into_iter().chain(["--raw-tint", "0.8"])).is_err());
         assert!(apply_raw_wb_overrides(&mut wb, Some("daylight"), Some(3200.0), None).is_err());
         assert!(apply_raw_wb_overrides(&mut wb, Some("custom"), Some(0.0), None).is_err());
+    }
+}
+
+
+/// `--negative` and its options.
+struct NegativeOptions {
+    on: bool,
+    scan_light: Option<String>,
+    base_point: Option<String>,
+    auto_print: bool,
+    crop_to_picture: bool,
+    flat_field: Option<PathBuf>,
+}
+
+impl NegativeOptions {
+    /// What the app does on choosing "Your negative": detect the base (or
+    /// read it at --base-point), balance the print for the film, base and
+    /// paper and meter its print exposure, or with --auto-print print the
+    /// frame as an auto printer would; both read the picture inside the
+    /// film's edges when it was found, else the frame less a border.
+    /// Returns that picture as a crop, if found.
+    fn prepare(
+        &self,
+        film: &profile::Profile,
+        print: &profile::Profile,
+        params: &mut RuntimeParams,
+        image: &spektrafilm_math::image::ImageBuf,
+        data_dir: &Path,
+    ) -> Result<Option<spektrafilm_io::crop::Crop>> {
+        use spektrafilm_core::negative;
+        let t = Instant::now();
+        let point = self
+            .base_point
+            .as_deref()
+            .map(|text| -> Result<(f64, f64)> {
+                let values: Vec<f64> = text.split(',').map(|v| v.trim().parse()).collect::<Result<_, _>>()?;
+                match values[..] {
+                    [x, y] if (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) => Ok((x, y)),
+                    _ => bail!("--base-point takes x,y fractions of the frame"),
+                }
+            })
+            .transpose()?;
+        let frame = negative::analysis_frame(image);
+        let found = negative::detect_base(film, params, &frame, point).map_err(anyhow::Error::msg)?;
+        params.film_render.base = found.base.clone();
+        params.film_render.convert.exposure_compensation_ev = found.exposure_ev;
+        let rgb = found.verdict.rgb.map(|v| (v * 1000.0).round() / 1000.0);
+        if found.picked {
+            eprintln!("Film base: picked, clear film RGB {rgb:?}");
+        } else if found.verdict.found {
+            let names: Vec<&str> = found.verdict.edges.iter().map(|e| e.name()).collect();
+            let place = match names[..] {
+                [one] => format!("along the {one} edge"),
+                _ => format!("along the {} edges", names.join(" and ")),
+            };
+            eprintln!("Film base: found {place}, clear film RGB {rgb:?}");
+        } else {
+            eprintln!("Film base: no clear film found; guessed from the thinnest part of the frame, RGB {rgb:?}");
+        }
+        eprintln!(
+            "  base cyan {:.3} magenta {:.3} yellow {:.3}, scan exposure {:+.2} EV",
+            found.base.cyan, found.base.magenta, found.base.yellow, found.exposure_ev
+        );
+        if !found.looks_negative {
+            eprintln!("Warning: this doesn't look like a colour negative (no orange base, or colours the film can't hold)");
+        }
+        // The picture's rectangle maps directly onto --crop.
+        let picture = found.verdict.picture.as_ref().map(|p| {
+            let crop = spektrafilm_io::crop::Crop { x: p.x0, y: p.y0, width: p.x1 - p.x0, height: p.y1 - p.y0, angle: p.angle_deg };
+            let edges: Vec<&str> = p.edges.iter().map(|e| e.name()).collect();
+            eprintln!(
+                "Picture: {:.4},{:.4},{:.4},{:.4},{:.3} (--crop x,y,width,height,angle), from the film at the {}",
+                crop.x, crop.y, crop.width, crop.height, crop.angle, edges.join(", ")
+            );
+            crop
+        });
+        if picture.is_none() {
+            eprintln!("Picture: the film's edges weren't found");
+        }
+        let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
+            film.clone(),
+            print.clone(),
+            params,
+            data_dir,
+            spektrafilm_core::print_balance::MIDGRAY,
+        )
+        .map_err(anyhow::Error::msg)?;
+        params.enlarger.m_filter_shift = m as f32;
+        params.enlarger.y_filter_shift = y as f32;
+        eprintln!("Print balanced: magenta {m:+.3}, yellow {y:+.3}");
+        // The app's bounds: the picture, when it lies inside the frame.
+        let bounds = picture
+            .filter(|crop| crop.validate().is_ok())
+            .and_then(|c| negative::PictureBounds::new([c.x, c.y, c.x + c.width, c.y + c.height]).ok())
+            .unwrap_or_default();
+        if self.auto_print {
+            let auto = negative::auto_print(film.clone(), print.clone(), params, data_dir, &frame, &bounds).map_err(anyhow::Error::msg)?;
+            params.enlarger.m_filter_shift = auto.m_filter_shift as f32;
+            params.enlarger.y_filter_shift = auto.y_filter_shift as f32;
+            params.enlarger.print_exposure = auto.print_exposure as f32;
+            eprintln!(
+                "Auto print: magenta {:+.3}, yellow {:+.3}, print exposure {:.3}",
+                auto.m_filter_shift, auto.y_filter_shift, auto.print_exposure
+            );
+        } else {
+            // Each frame gets its own print exposure, as the app meters it.
+            match negative::meter_print_exposure(film.clone(), print.clone(), params, data_dir, &frame, &bounds) {
+                Ok(exposure) => {
+                    params.enlarger.print_exposure = exposure as f32;
+                    eprintln!("Print exposure metered: {exposure:.3}");
+                }
+                Err(reason) => eprintln!("Print exposure not metered ({reason}); kept at {:.3}", params.enlarger.print_exposure),
+            }
+        }
+        eprintln!("Negative prepared: {} ms", t.elapsed().as_millis());
+        Ok(picture.filter(|crop| crop.validate().is_ok()))
     }
 }

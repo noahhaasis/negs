@@ -54,6 +54,7 @@ pub fn per_pixel_params(mut params: RuntimeParams) -> RuntimeParams {
     params.io.photo_long_side_px = None;
     params.io.crop = false;
     params.io.rotate_cw = 0;
+    params.io.flip = false;
     params.settings.preview_mode = false;
     params.post = Default::default();
     params.prep = Default::default();
