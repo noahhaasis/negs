@@ -373,6 +373,9 @@ import UserNotifications
     var currentFrame: FrameID { FrameID(revision: revision, generation: sourceGeneration) }
     var renderScheduled: Bool { pendingRender != nil }
     var matchDecodeFailedHere: Bool { matchDecodeFailed == currentFrame }
+    /// Each edited thumbnail or kept develop saved: the item, the look it's
+    /// filed under, and the edits it shows (`userEdits`), for tests.
+    @ObservationIgnored var thumbnailSaved: ((_ item: URL, _ look: String, _ edits: EditState, _ kind: String) -> Void)?
     #endif
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
@@ -1555,17 +1558,32 @@ import UserNotifications
 
     /// The open photograph takes a new default film and paper while it has no
     /// edits of its own, so it shows what its thumbnail does. Not an edit: no
-    /// undo step, and nothing is written beside it.
+    /// undo step, and nothing is written beside it. Edited since it opened,
+    /// it keeps its film and paper, but what it would be without edits takes
+    /// the new ones: undoing every edit then leaves it edited, its film kept
+    /// in its sidecar, rather than unedited showing another film.
     private func followNewPhotoStocks() {
-        guard source != nil, !closing, !cropping, !interacting, var context = photoSidecar, context.photo == source,
-              !context.editedAtOpen, context.blocked == nil, Self.userEdits(state) == context.opened else { return }
-        var next = state
-        next.film = newPhotoFilm; next.paper = newPhotoPaper
-        next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        guard source != nil, !closing, var context = photoSidecar, context.photo == source,
+              !context.editedAtOpen, context.blocked == nil else { return }
+        guard Self.userEdits(state) == context.opened else {
+            context.opened = withNewPhotoStocks(context.opened)
+            photoSidecar = context
+            return
+        }
+        guard !cropping, !interacting else { return }
+        let next = withNewPhotoStocks(state)
         guard next != state else { return }
         replaceState(next)
         context.opened = Self.userEdits(state)
         photoSidecar = context
+    }
+
+    /// `edits` with the film and paper of Settings › New photographs.
+    private func withNewPhotoStocks(_ edits: EditState) -> EditState {
+        var next = edits
+        next.film = newPhotoFilm; next.paper = newPhotoPaper
+        next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        return next
     }
 
     /// The state a photograph without saved edits opens with: the defaults,
@@ -1792,6 +1810,8 @@ import UserNotifications
 
     private func sidecarFailed(_ photo: URL, _ reason: String) {
         if photoSidecar?.photo.standardizedFileURL == photo.standardizedFileURL { photoSidecar?.blocked = reason }
+        // The library showed the change as it was queued: back to what the file keeps.
+        library.reload(library.files.first { $0.url.standardizedFileURL == photo.standardizedFileURL }?.url ?? photo)
         let folder = photo.deletingLastPathComponent().standardizedFileURL
         guard !closing, unwritableFolders.insert(folder).inserted else { return }
         error = "Edits to photographs in “\(folder.lastPathComponent)” can’t be saved beside them: \(reason)"
@@ -2302,7 +2322,9 @@ import UserNotifications
                     if before[photo] == nil { before[photo] = .some(raw) }
                     openChanged = true
                     if reset || cleared {
-                        replaceState(reset ? newPhotoState(after: state) : pasted)
+                        // Without edits it shows what a new photograph does now,
+                        // not the film and paper the copy had then.
+                        replaceState(newPhotoState(after: state))
                         // Unedited from here on: a later edit is measured from this.
                         sidecarWrite?.cancel(); sidecarWrite = nil
                         sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, edits: .some(nil),
@@ -2633,8 +2655,11 @@ import UserNotifications
     private func saveOpenThumbnail() {
         guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
               !brightnessMatchPending, let look = thumbnailLook(for: item), thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
-              library.looks[item] != nil || Self.uneditedLook(of: state) == look,
+              library.looks[item] != nil ? shownEditsSaved : Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
+        #if DEBUG
+        thumbnailSaved?(item, look, Self.userEdits(state), "thumbnail")
+        #endif
         let size = imageSize, crop = crop, rotation = imageRotation, flip = imageFlip, border = state.border, texture = filmTexture, strip = filmStrip
         let store = editedThumbnails, loose = store.looseKey(for: file, look: look)
         let shown = surface
@@ -2653,14 +2678,25 @@ import UserNotifications
     private func saveOpenRender() {
         guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
               !brightnessMatchPending, let look = thumbnailLook(for: item),
-              library.looks[item] != nil || Self.uneditedLook(of: state) == look,
+              library.looks[item] != nil ? shownEditsSaved : Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = renderArchive.key(for: file, look: look) else { return }
+        #if DEBUG
+        thumbnailSaved?(item, look, Self.userEdits(state), "kept develop")
+        #endif
         let archive = renderArchive, size = imageSize, shown = surface, loose = archive.looseKey(for: file, look: look)
         Task.detached(priority: .utility) {
             guard !archive.contains(key),
                   let frame = ThumbnailComposer.image(of: shown, maxPixels: EditedThumbnailStore.renderLongSide) else { return }
             try? archive.save(frame, as: key, loose: loose, photoSize: size)
         }
+    }
+
+    /// The open photograph shows the edits its sidecar keeps: nothing waits
+    /// to be sent, and nothing failed to be written. Only then is its preview
+    /// filed under its stored edits' look.
+    private var shownEditsSaved: Bool {
+        guard let context = photoSidecar, context.photo == source else { return true }
+        return context.blocked == nil && !context.awaitingCatalog && sidecarEditsToSend(context) == nil
     }
 
     /// The background renderer can use the machine: nothing is being edited,
@@ -2880,6 +2916,9 @@ import UserNotifications
             let store = editedThumbnails, loose = store.looseKey(for: file, look: finalLook)
             try await Task.detached(priority: .utility) { try store.save(composed, as: key, loose: loose) }.value
             thumbnailMade(item, look: finalLook)
+            #if DEBUG
+            thumbnailSaved?(item, finalLook, Self.userEdits(state), "background thumbnail")
+            #endif
             if finalLook != look { library.reload(photo) }
             return true
         } catch {

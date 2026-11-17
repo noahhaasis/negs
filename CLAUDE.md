@@ -33,3 +33,11 @@ crops, early frames). When changing those, update the matching action and run
 `scripts/check_frame_model.sh` (~4 min) and
 `FramePipelineTests` (random sequences: `NEGS_PIPELINE_SEEDS=25`). See
 `macos/Specs/README.md`.
+
+`LibraryStateTests` does the same for sidecars, undo and thumbnails: random
+edits, ratings, Paste, Reset, Duplicate, Delete, Undo/Redo, other apps'
+writes and relaunches, checking that what the app shows is what is on disk,
+that an action undone at once leaves the files as they were, and that each
+thumbnail shows the edits it's filed under. Run it with
+`NEGS_LIBRARY_SEEDS=25` when changing sidecar writes, library undo or
+thumbnail filing.
