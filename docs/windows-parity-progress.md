@@ -44,7 +44,9 @@ decisions made with their reasons, and what was carried over. See
        calling thread.
      - (c) Accept the gap.
 
-     Coordinator's view: try (b) first, then (a). (c) breaks the launch requirement.
+     Coordinator's view: try (b) first, then (a).
+     **Noah (2026-11-19):** if (b) doesn't work, accept the +40 ms for now. Recheck
+     startup after phase 6.
   2. **Screenshots.** Retake them; the sliders now paint with GDI unless they have
      focus. Run `~/.negs/windows-parity/phase3a-tools/run_all.sh` (copied out of the
      session scratchpad, so paths inside may need fixing). Check by eye at 125 %
