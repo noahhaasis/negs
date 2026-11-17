@@ -273,6 +273,25 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         XCTAssertTrue(model.compareSides.isEmpty)
     }
 
+    /// A flipped photograph shows flipped in Compare, as in the photo view,
+    /// and so does its original.
+    func testComparedPhotographsShowTheirFlip() async throws {
+        let (model, photos) = try await model()
+        try await waitUntil { model.image != nil && model.previewCurrent }
+        model.flip()
+        model.endCrop(apply: true)
+        XCTAssertTrue(model.imageFlip)
+        model.compare(photos[0], photos[1])
+        XCTAssertEqual(model.comparePicture(.photo(photos[0]))?.flip, true)
+        XCTAssertEqual(model.openPicture?.flip, true)
+        model.leaveCompare()
+        model.originalMode = .sideBySide
+        model.clickOriginal()
+        let comparison = try XCTUnwrap(model.comparison)
+        try await waitUntil { model.compareSides[comparison.second]?.shown == .original }
+        XCTAssertEqual(model.comparePicture(comparison.second)?.flip, true, "the original, framed as the photograph")
+    }
+
     func testAgainstTheOriginal() async throws {
         let (model, _) = try await model()
         try await waitUntil { model.image != nil }

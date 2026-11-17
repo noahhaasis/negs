@@ -250,6 +250,39 @@ import XCTest
         XCTAssertEqual(model.photoSize, CGSize(width: 64, height: 64))
     }
 
+    /// Flip lives with rotate: it starts cropping, mirrors the photograph as
+    /// shown (a quarter turn becomes three), and never renders again. Cancel
+    /// takes it back; Done keeps it with the crop as one undo step.
+    func testFlipStartsCroppingAndMirrorsAsShown() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+
+        model.flip()
+        XCTAssertTrue(model.cropping, "flipping starts cropping")
+        XCTAssertTrue(model.imageFlip)
+        XCTAssertTrue(model.previewCurrent, "Flipping doesn't wait for a render")
+        model.endCrop(apply: false)
+        XCTAssertFalse(model.imageFlip, "Cancel takes the flip back")
+
+        model.turn(clockwise: true)
+        model.flip()
+        XCTAssertEqual(model.value("io.rotate_cw"), .number(3), "flipped as shown, a quarter turn becomes three")
+        XCTAssertEqual(model.cropSession?.flip, true)
+        undo.beginUndoGrouping(); model.endCrop(apply: true); undo.endUndoGrouping()
+        XCTAssertEqual(model.value("io.flip"), .bool(true))
+        undo.undo()
+        XCTAssertEqual(model.value("io.flip"), .bool(false), "One undo removes the flip and the turn")
+        XCTAssertEqual(model.value("io.rotate_cw"), .number(0))
+    }
+
     /// Rotate exists only while cropping (§4.10, §6.9): ⌘R and ⌥⌘R start
     /// cropping and turn a quarter either way; Cancel turns it back, and
     /// Done keeps the turn with the crop as one undo step.

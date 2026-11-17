@@ -270,7 +270,7 @@ private struct PresetTile: View {
             .aspectRatio(3 / 2, contentMode: .fit)
             .overlay {
                 if let image = tile?.image, invalid == nil {
-                    Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                    OrientedTileImage(image: image, orientation: model.shownOrientation)
                         .opacity(tile?.dimmed == true ? 0.55 : 1)
                 } else if invalid != nil {
                     Text("can’t be read").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim)

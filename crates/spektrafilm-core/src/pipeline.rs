@@ -836,6 +836,9 @@ impl Pipeline {
         image: ImageBuf,
         backend: &'a dyn ComputeBackend,
     ) -> Result<(ImageBuf, &'a str), SizeError> {
+        if self.params.workflow.converts_film() {
+            return self.process_convert(image, backend);
+        }
         let stage_timings = stage_timings_enabled();
         // Working-resolution rescale (Image Size, or the legacy
         // io.upscale_factor) — mirrors Python's ResizingService.crop_and_rescale.
@@ -928,35 +931,159 @@ impl Pipeline {
             tracing::info!("pipeline: scanning complete (film scan)");
             result
         } else {
-            let t = Instant::now();
-            let printed = stages::printing::process_with_calibration(
-                filmed,
-                &self.film,
-                &self.print,
-                &self.params,
-                backend,
-                &self.print_illuminant,
-                self.print_exposure_factor,
-                self.preflash_raw,
-                color_ref.printing_exposure_correction,
-            );
-            print_stage_timing(stage_timings, "printing", t);
-            tracing::info!("pipeline: printing complete");
-            dump_if_env("SPEKTRAFILM_DUMP_PRINT_DENSITY", &printed);
-            let t = Instant::now();
-            let result = stages::scanning::process(
-                printed,
-                &self.print,
-                &self.params,
-                backend,
-                &color_ref,
-                &self.output_gamut,
-            );
-            print_stage_timing(stage_timings, "scanning", t);
-            tracing::info!("pipeline: scanning complete");
-            result
+            self.print_and_scan(filmed, backend, &color_ref)
         };
         Ok((result, backend.name()))
+    }
+
+    /// Prints developed film density (`develop`'s scale) and scans the print.
+    fn print_and_scan(
+        &self,
+        filmed: ImageBuf,
+        backend: &dyn ComputeBackend,
+        color_ref: &crate::color_reference::ColorReference,
+    ) -> ImageBuf {
+        let stage_timings = stage_timings_enabled();
+        let t = Instant::now();
+        let printed = stages::printing::process_with_calibration(
+            filmed,
+            &self.film,
+            &self.print,
+            &self.params,
+            backend,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+            color_ref.printing_exposure_correction,
+        );
+        print_stage_timing(stage_timings, "printing", t);
+        tracing::info!("pipeline: printing complete");
+        dump_if_env("SPEKTRAFILM_DUMP_PRINT_DENSITY", &printed);
+        let t = Instant::now();
+        let result = stages::scanning::process(
+            printed,
+            &self.print,
+            &self.params,
+            backend,
+            color_ref,
+            &self.output_gamut,
+        );
+        print_stage_timing(stage_timings, "scanning", t);
+        tracing::info!("pipeline: scanning complete");
+        result
+    }
+
+    /// The convert-film route (upstream's `input > convert-film > print >
+    /// scan`): the input is a scan of a real negative, so converting it back
+    /// to film density ([`crate::convert`]) replaces filming, and the print
+    /// and scan run as for a filmed negative. The print exposure is
+    /// calibrated on the film's own mid-grey, as upstream's is. Prep, the
+    /// camera and the film's grain, halation and couplers don't apply: the
+    /// negative already has them.
+    fn process_convert<'a>(
+        &self,
+        image: ImageBuf,
+        backend: &'a dyn ComputeBackend,
+    ) -> Result<(ImageBuf, &'a str), SizeError> {
+        let stage_timings = stage_timings_enabled();
+        let t = Instant::now();
+        let mut image = self.rescale_working(image)?;
+        print_stage_timing(stage_timings, "rescale", t);
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let mut backend = backend;
+        if let Err(reason) = backend.image_capacity(image.width, image.height) {
+            tracing::warn!(%reason, "GPU capacity exceeded; rendering on CPU");
+            backend = &CPU;
+        }
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        // GPU fast path: convert, print and scan in one command buffer.
+        let run = |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.try_run_film_chain(params);
+        match self.try_gpu_resident(&image, None, false, backend, &color_ref, 0.0, run) {
+            Ok(Some(out)) => {
+                tracing::info!("pipeline: gpu-resident convert path complete");
+                return Ok((self.finish_resident(out, backend), backend.name()));
+            }
+            Err(reason) => {
+                tracing::warn!(%reason, "GPU effects exceed capacity; rendering on CPU");
+                backend = &CPU;
+            }
+            Ok(None) => {}
+        }
+        let t = Instant::now();
+        self.convert_film(&mut image);
+        print_stage_timing(stage_timings, "converting", t);
+        dump_if_env("SPEKTRAFILM_DUMP_FILM_DENSITY", &image);
+        tracing::info!("pipeline: converting complete");
+        Ok((self.print_and_scan(image, backend, &color_ref), backend.name()))
+    }
+
+    /// The input (still in its CCTF) read back to film density, in place.
+    pub fn convert_film(&self, image: &mut ImageBuf) {
+        stages::filming::decode_input_cctf(image, &self.params);
+        self.film_converter().convert_image(image);
+    }
+
+    /// The converter for these params. A scan light the app doesn't know is
+    /// refused when the params are checked; this falls back to upstream's
+    /// default light rather than fail mid-render.
+    pub fn film_converter(&self) -> crate::convert::FilmConverter {
+        crate::convert::FilmConverter::new(&self.film, &self.params).unwrap_or_else(|e| {
+            tracing::error!(error = %e, "film converter; using the default scan light");
+            let mut params = self.params.clone();
+            params.film_render.convert = Default::default();
+            crate::convert::FilmConverter::new(&self.film, &params).expect("the default scan light")
+        })
+    }
+
+    /// Prints and scans film density `cmy` (`develop`'s scale) on the CPU,
+    /// without the post adjustments: the convert route's second half, for
+    /// the negative's print balance.
+    pub fn print_film_density(&self, cmy: ImageBuf) -> ImageBuf {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        self.print_and_scan(cmy, &CPU, &color_ref)
+    }
+
+    /// Films and develops linear scene RGB `image` on the CPU as the
+    /// filming route does, without auto exposure: the film density the
+    /// scene leaves (`develop`'s scale, as [`Self::convert_film`] reads a
+    /// negative back to). For a negative's neutral axis
+    /// ([`crate::negative::NeutralAxis`]).
+    pub fn film_scene(&self, image: ImageBuf) -> ImageBuf {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        let log_raw = stages::filming::expose(
+            image,
+            &self.film,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+            color_ref.filming_exposure_correction,
+            0.0,
+        );
+        stages::filming::develop(log_raw, &self.film, &self.params, &CPU)
     }
 
     /// The CPU chain on a small image, keeping its taps: the film's log10
@@ -1125,7 +1252,10 @@ impl Pipeline {
         backend: &dyn ComputeBackend,
         run: impl FnOnce(&spektrafilm_gpu::FilmChainParams<'_>) -> Option<T>,
     ) -> Option<T> {
-        self.tc_lut.as_ref()?;
+        let converting = self.params.workflow.converts_film();
+        if !converting {
+            self.tc_lut.as_ref()?;
+        }
         let io = &self.params.io;
         if io.photo_long_side_px.is_some() || (io.upscale_factor - 1.0).abs() >= 1e-6 {
             return None;
@@ -1143,7 +1273,8 @@ impl Pipeline {
             self.print_exposure_factor,
             self.preflash_raw,
         );
-        let autoexposure_ev = self.frame_autoexposure_ev(image);
+        // A scanned negative isn't filmed, so nothing meters it.
+        let autoexposure_ev = if converting { 0.0 } else { self.frame_autoexposure_ev(image) };
         self.try_gpu_resident(image, image_key, film_cache, backend, &color_ref, autoexposure_ev, run).ok()?
     }
 
@@ -1171,6 +1302,12 @@ impl Pipeline {
         autoexposure_ev: f64,
         run: impl FnOnce(&spektrafilm_gpu::FilmChainParams<'_>) -> Option<T>,
     ) -> Result<Option<T>, String> {
+        // The convert-film route (a scanned negative): the convert pass
+        // replaces the film side, which Prep, the camera and the film's
+        // effects belong to, and the film is printed.
+        let converting = self.params.workflow.converts_film();
+        let film_effects = !converting;
+        let scan_film = self.params.io.scan_film && !converting;
         // The front pass expects linear RGB. Decoded pixels aren't the
         // caller's, so they have no key.
         let decoded;
@@ -1178,8 +1315,8 @@ impl Pipeline {
         // Exposure-only Prep is a uniform gain: it joins the exposure scale
         // below (float rounding from the CPU's per-pixel multiply, approved
         // for the GPU path), so the upload keeps its source key.
-        let fold_prep_exposure = self.params.prep.is_exposure_only();
-        let prep_active = !self.params.prep.is_identity() && !fold_prep_exposure;
+        let fold_prep_exposure = film_effects && self.params.prep.is_exposure_only();
+        let prep_active = film_effects && !self.params.prep.is_identity() && !fold_prep_exposure;
         // Other Prep changes the upload, including through its whole-frame spatial base.
         // A source-image cache key cannot identify these newly prepared pixels;
         // a kept prepared frame has its own, so a Lab edit doesn't upload it again.
@@ -1257,8 +1394,10 @@ impl Pipeline {
         };
 
         // Front pass: TC LUT lookup, with the same exposure fold as the CPU
-        // `expose` dispatch.
-        let front = {
+        // `expose` dispatch; or the film converter.
+        let front = if converting {
+            spektrafilm_gpu::FrontPass::ConvertFilm(self.film_converter().gpu_params())
+        } else {
             let Some(tc_lut) = self.tc_lut.as_ref() else { return Ok(None) };
             let ref_illuminant = select_illuminant(&self.front_illuminant);
             let mut rgb_to_adapted = spektrafilm_math::spectral::build_rgb_to_adapted_xyz(
@@ -1351,7 +1490,7 @@ impl Pipeline {
         // viewing illuminant and dye-density wavelength count come from the
         // film, not the print (mirrors the CPU scanning stage, which is
         // handed `self.film` as its profile when scan_film).
-        let scan_profile = if self.params.io.scan_film {
+        let scan_profile = if scan_film {
             &self.film
         } else {
             &self.print
@@ -1361,7 +1500,7 @@ impl Pipeline {
         let viewing_illu =
             select_illuminant_f64(&scan_profile.info.viewing_illuminant)
                 .into_owned();
-        let n_wl = if self.params.io.scan_film {
+        let n_wl = if scan_film {
             film_channel_density.len()
         } else {
             print_channel_density.len()
@@ -1405,7 +1544,7 @@ impl Pipeline {
         // Halation in the resident chain — only built when the halation
         // stage is active. Mirrors `apply_halation_um` channel for channel:
         // the µm sizes are converted to pixels in f64 and clamped like the CPU.
-        let halation = if self.params.film_render.halation.active {
+        let halation = if film_effects && self.params.film_render.halation.active {
             let pix_um = stages::filming::pixel_size_um(
                 self.params.camera.film_format_mm,
                 image.width,
@@ -1439,7 +1578,7 @@ impl Pipeline {
         // against `log_raw - correction`.
         // Held in this binding so `&model.density_curves_0` outlives the
         // backend call.
-        let dir_inputs = self.params.film_render.dir_couplers.active.then(|| {
+        let dir_inputs = (film_effects && self.params.film_render.dir_couplers.active).then(|| {
             let pix_um = stages::filming::pixel_size_um(
                 self.params.camera.film_format_mm,
                 image.width,
@@ -1479,7 +1618,7 @@ impl Pipeline {
         // Grain in the resident chain — the same multilayer model, inputs and
         // exact Poisson/binomial algorithms as `apply_grain`; only the random
         // stream differs.
-        let grain = crate::grain::grain_active(&self.params).then(|| {
+        let grain = (film_effects && crate::grain::grain_active(&self.params)).then(|| {
             spektrafilm_model::grain::gpu_params(
                 &crate::grain::grain_curves(&self.film),
                 &crate::grain::grain_settings(&self.film, &self.params.film_render.grain),
@@ -1493,7 +1632,7 @@ impl Pipeline {
         // final RGB buffer. Mirrors the CPU lognormal + blur + add. The CPU
         // scanning stage reads `film_render.glare` on the scan_film path and
         // `print_render.glare` on the print path — follow the same choice.
-        let glare_params = if self.params.io.scan_film {
+        let glare_params = if scan_film {
             &self.params.film_render.glare
         } else {
             &self.params.print_render.glare
@@ -1545,7 +1684,7 @@ impl Pipeline {
             None
         };
 
-        let camera_lens_blur_px = if self.params.camera.lens_blur_um > 0.0 {
+        let camera_lens_blur_px = if film_effects && self.params.camera.lens_blur_um > 0.0 {
             Some(self.params.camera.lens_blur_um / pix_um)
         } else {
             None
@@ -1558,7 +1697,7 @@ impl Pipeline {
         };
 
         let hboost = &self.params.film_render.halation;
-        let highlight_boost = if hboost.boost_ev != 0.0 {
+        let highlight_boost = if film_effects && hboost.boost_ev != 0.0 {
             Some(spektrafilm_gpu::HighlightBoostGpuParams {
                 boost_ev: hboost.boost_ev as f32,
                 boost_range: hboost.boost_range as f32,
@@ -1570,7 +1709,7 @@ impl Pipeline {
 
         // Camera diffusion filter plan (downsampled sum-of-Gaussians) for the
         // resident chain. `None` when the filter is a no-op.
-        let diffusion = if self.params.camera.diffusion_filter.active {
+        let diffusion = if film_effects && self.params.camera.diffusion_filter.active {
             spektrafilm_model::diffusion::diffusion_gpu_plan(
                 &self.params.camera.diffusion_filter.to_model(),
                 pix_um as f64,
@@ -1582,7 +1721,7 @@ impl Pipeline {
         };
 
         let enlarger_diffusion =
-            if !self.params.io.scan_film && self.params.enlarger.diffusion_filter.active {
+            if !scan_film && self.params.enlarger.diffusion_filter.active {
                 spektrafilm_model::diffusion::diffusion_gpu_plan(
                     &self.params.enlarger.diffusion_filter.to_model(),
                     pix_um as f64,
@@ -1614,7 +1753,7 @@ impl Pipeline {
             scan_normalization: scan_norm,
             scan_xyz_to_rgb: &scan_xyz_to_rgb,
             bw_xyz_remap: color_ref.xyz_remap(),
-            scan_film: self.params.io.scan_film,
+            scan_film,
             halation,
             dir_couplers,
             grain,

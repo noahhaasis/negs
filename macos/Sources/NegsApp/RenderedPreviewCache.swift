@@ -56,6 +56,12 @@ final class RenderedPreviewCache: @unchecked Sendable {
         }
         do {
             var files = try [stamp(source), stamp(paths.helper), stamp(paths.data)]
+            // A negative's light frame divides the scan: one replaced at the
+            // same path develops another picture. One that's gone isn't used.
+            let light = state.params[NegativeScan.flatFieldPath].string
+            if state.params["workflow.route"].string == NegativeScan.route, !light.isEmpty {
+                files.append((try? stamp(URL(fileURLWithPath: light))) ?? "missing light frame|\(light)")
+            }
             guard let items = FileManager.default.enumerator(at: paths.data, includingPropertiesForKeys: [.isRegularFileKey]) else { return nil }
             for case let url as URL in items {
                 if try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true { files.append(try stamp(url)) }
@@ -139,10 +145,11 @@ final class RenderedPreviewCache: @unchecked Sendable {
 final class LaunchFrame: @unchecked Sendable {
     struct Loaded: @unchecked Sendable {
         var frame: RenderedPreviewCache.Frame
-        /// Both scopes, counted for this crop and rotation as the frame was read.
+        /// Both scopes, counted for this crop, rotation and flip as the frame was read.
         var scopes: ImageScopes
         var scopesCrop: CropSettings
         var scopesRotation: Int
+        var scopesFlip = false
     }
 
     private let done = DispatchSemaphore(value: 0)

@@ -23,9 +23,18 @@ struct PrintLabel: View {
         let scanning = model.value("io.scan_film").bool
         let original = model.original != nil
         let kind = PrintLabelLayout.kind(scanning: scanning)
-        let oneRow = PrintLabelLayout.fitsOneRow(film: model.filmName, paper: model.paperName, kind: kind, width: photoWidth)
-        let film = StockName(model: model, paper: false, name: model.filmName, size: 24, weight: 600,
-                             strike: original ? .original : nil, opens: !original, marked: markFilm)
+        let negative = model.isNegative
+        // A negative always takes two rows: "Your negative, read as <film>", then the paper.
+        let oneRow = !negative && PrintLabelLayout.fitsOneRow(film: model.filmName, paper: model.paperName, kind: kind, width: photoWidth)
+        let film = HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner) {
+            StockName(model: model, paper: false, name: negative ? NegativeScan.name : model.filmName, size: 24, weight: 600,
+                      strike: original ? .original : nil, opens: !original, marked: markFilm && !negative)
+            if negative {
+                Text("read as").font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1).fixedSize()
+                StockName(model: model, paper: false, name: model.filmName, size: 17.5, weight: 400,
+                          strike: original ? .original : nil, opens: !original, readAs: true, marked: markFilm)
+            }
+        }
         let paper = HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner) {
             Text(kind).font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1).fixedSize()
             StockName(model: model, paper: true, name: model.paperName, size: 17.5, weight: 400,
@@ -40,8 +49,20 @@ struct PrintLabel: View {
                 HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.gap) { film; paper }
                     .padding(.top, 11)
             } else {
-                VStack(alignment: .leading, spacing: 0) { film; paper }
-                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 0) {
+                    film
+                    // The canvas is waiting for a click (Prep's pickers): the
+                    // prompt takes the paper's row, inside the label's band
+                    // (below it, the film strip covers it).
+                    if let pick = model.negativePick {
+                        Text(pick.prompt).font(Theme.serif(14, italic: true)).foregroundStyle(ink.accent)
+                            .lineLimit(1).fixedSize()
+                            .padding(.top, 3)
+                    } else {
+                        paper
+                    }
+                }
+                .padding(.top, 8)
             }
         }
         .frame(width: oneRow ? photoWidth : canvasWidth, alignment: .topLeading)
@@ -100,6 +121,8 @@ struct StockName: View {
     var strike: Strike?
     /// False while scanning (the paper) or holding Original: the name is only words.
     var opens = true
+    /// The film a negative is read as: opens the colour negatives.
+    var readAs = false
     /// Compare: it differs from the other photograph's, so the pencil is under it.
     var marked = false
     @State private var hovered = false
@@ -107,7 +130,7 @@ struct StockName: View {
     @Environment(\.sheetInk) private var ink
 
     /// Its tray is open.
-    private var open: Bool { model.tray?.paper == paper }
+    private var open: Bool { model.tray.map { $0.paper == paper && $0.readAs == readAs } ?? false }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner + 1) {
@@ -129,9 +152,9 @@ struct StockName: View {
         .background(TrayHitArea(model: model))
         .onHover { hovered = $0 && opens }
         .onTapGesture { if opens { activate() } }
-        .help(opens ? (paper ? ControlHelp.paper : ControlHelp.film) : name)
+        .help(opens ? (paper ? ControlHelp.paper : readAs ? "The film this negative is read as: its dyes undo the scan. Unknown stock? Portra 400 is a fair guess." : ControlHelp.film) : name)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(paper ? "Paper" : "Film"): \(name)")
+        .accessibilityLabel("\(paper ? "Paper" : readAs ? "Read as" : "Film"): \(name)")
         .accessibilityValue(strike == .scanning ? "Not printed, scanning the film" : strike == .original ? "Showing the original" : "")
         .accessibilityAddTraits(opens ? .isButton : [])
         .accessibilityAction { if opens { activate() } }
@@ -165,12 +188,21 @@ struct StockName: View {
     private func activate() {
         // Settings can turn the preview tiles off: then the plain menu.
         if model.previews.enabled {
-            model.toggleTray(paper: paper)
+            model.toggleTray(paper: paper, readAs: readAs)
         } else {
-            let stocks = paper ? model.papers : model.listedFilms
-            let groups = paper ? model.paperGroups : model.filmGroups
+            let keep: (Stock) -> Bool = { !readAs || NegativeScan.readable($0) }
+            let stocks = (paper ? model.papers : model.listedFilms).filter(keep)
+            let groups = (paper ? model.paperGroups : model.filmGroups).compactMap { group -> StockGroup? in
+                let stocks = group.stocks.filter(keep)
+                return stocks.isEmpty ? nil : StockGroup(title: group.title, stocks: stocks)
+            }
             let favorites = model.previews.favorites(in: stocks, paper: paper)
             var items: [ChoiceItem] = []
+            // Your negative first, as in the tray.
+            if !paper, !readAs {
+                items.append(.header("Scan"))
+                items.append(.option(NegativeScan.name, tag: NegativeScan.stockID))
+            }
             if !favorites.isEmpty {
                 items.append(.header("Favourites"))
                 items += favorites.map { .option($0.name, tag: StockMenu.favoriteID($0.id)) }
@@ -179,9 +211,11 @@ struct StockName: View {
                 items.append(.header(group.title))
                 items += group.stocks.map { .option($0.name, tag: $0.id) }
             }
-            popUpChoiceMenu(items, selected: paper ? model.paper : model.film, under: anchor.view) { tag in
+            let selected = paper ? model.paper : model.isNegative && !readAs ? NegativeScan.stockID : model.film
+            popUpChoiceMenu(items, selected: selected, under: anchor.view) { tag in
                 let id = StockMenu.stockID(tag: tag)
-                if paper { model.choosePaper(id) } else { model.chooseFilm(id) }
+                if id == NegativeScan.stockID { model.chooseNegative() }
+                else if paper { model.choosePaper(id) } else if readAs { model.chooseNegativeFilm(id) } else { model.chooseFilm(id) }
             }
         }
     }

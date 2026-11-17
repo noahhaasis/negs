@@ -214,12 +214,12 @@ final class EditedThumbnailStore: @unchecked Sendable {
 }
 
 /// Draws an edited thumbnail as the edit view shows the photograph: cropped,
-/// straightened, turned and inside its border, with the canvas's own layers.
+/// straightened, flipped, turned and inside its border, with the canvas's own layers.
 enum ThumbnailComposer {
     /// `image` is a photograph of `size` pixels, or with `cut` already its
     /// crop, straightened. The result is `longSide` on its long side, in
     /// `space`.
-    @MainActor static func compose(_ image: CGImage, size: CGSize, crop: CropSettings, cut: Bool, rotation: Int, border: BorderSettings?,
+    @MainActor static func compose(_ image: CGImage, size: CGSize, crop: CropSettings, cut: Bool, rotation: Int, flip: Bool = false, border: BorderSettings?,
                                    texture: CGImage?, strip: FilmStrip?, longSide: CGFloat = EditedThumbnailStore.longSide,
                                    space: CGColorSpace) -> CGImage? {
         let cropped = crop.size(of: size)
@@ -246,7 +246,7 @@ enum ThumbnailComposer {
         clip.addSublayer(photo)
         host.addSublayer(clip)
         let layers = BorderLayers(in: host, around: clip)
-        PhotographView.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation,
+        PhotographView.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, flip: flip,
                               center: CGPoint(x: document.width / 2, y: document.height / 2), cut: cut)
         layers.layout(border, photo: shown, host: host, texture: texture, filmStrip: strip)
         context.interpolationQuality = .high

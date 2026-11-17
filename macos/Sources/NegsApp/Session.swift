@@ -81,7 +81,7 @@ struct SessionMatch: Codable, Equatable, Sendable {
 
 extension EditState {
     /// Values a saved edit can't have: a crop outside the photograph, a
-    /// rotation that isn't a quarter turn.
+    /// rotation that isn't a quarter turn, a flip that isn't yes or no.
     func validate() throws {
         let values = [crop.rect.minX, crop.rect.minY, crop.rect.width, crop.rect.height,
                       crop.custom.width, crop.custom.height, crop.angle]
@@ -91,7 +91,8 @@ extension EditState {
               abs(crop.angle) <= CropSettings.maxAngle, crop.custom.width > 0, crop.custom.height > 0,
               case .object = params,
               (0...3).contains(params["io.rotate_cw"].double),
-              params["io.rotate_cw"].double.rounded() == params["io.rotate_cw"].double
+              params["io.rotate_cw"].double.rounded() == params["io.rotate_cw"].double,
+              params["io.flip"] == .null || params["io.flip"] == .bool(params["io.flip"].bool)
         else { throw EngineError(message: "The previous editing session could not be restored.") }
     }
 }

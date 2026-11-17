@@ -892,6 +892,29 @@ struct AdjustmentInspector: View {
                 }
             }
         }
+        if model.isNegative {
+            // Prep's tone, colour and detail work on a scene before the
+            // film; a negative is film already (the convert-film route).
+            NegativePrep(model: model)
+        } else {
+            scenePrep
+        }
+        // How the file is read; set once per photograph.
+        if model.isRaw {
+            if model.lensCorrectionSupported {
+                InkSection(title: "Lens", edited: model.isModified(EditorModel.lensCorrectionPath)) {
+                    TickRow(title: "Lens corrections", isOn: model.toggle(EditorModel.lensCorrectionPath),
+                            changed: model.isModified(EditorModel.lensCorrectionPath),
+                            help: "Corrects distortion and vignetting with the data the camera recorded for its lens.")
+                }
+            }
+        } else {
+            InkSection(title: nil) { inputColour }
+        }
+    }
+
+    /// Prep for a photograph of a scene.
+    @ViewBuilder private var scenePrep: some View {
         InkSection(title: "Brightness", edited: InspectorEdits.brightnessCount(model) > 0) {
             TickRow(title: model.isRaw ? "Match camera brightness" : "Match original brightness",
                     isOn: Binding(get: { model.matchesBrightness }, set: model.setMatchesBrightness),
@@ -921,18 +944,6 @@ struct AdjustmentInspector: View {
         controlSection("Tone", prepToneControls)
         controlSection("Color", prepColorControls)
         controlSection("Detail", prepDetailControls)
-        // How the file is read; set once per photograph.
-        if model.isRaw {
-            if model.lensCorrectionSupported {
-                InkSection(title: "Lens", edited: model.isModified(EditorModel.lensCorrectionPath)) {
-                    TickRow(title: "Lens corrections", isOn: model.toggle(EditorModel.lensCorrectionPath),
-                            changed: model.isModified(EditorModel.lensCorrectionPath),
-                            help: "Corrects distortion and vignetting with the data the camera recorded for its lens.")
-                }
-            }
-        } else {
-            InkSection(title: nil) { inputColour }
-        }
     }
 
     private func controlSection(_ title: String, _ controls: [Adjustment]) -> some View {
@@ -967,7 +978,9 @@ struct AdjustmentInspector: View {
             }
             .padding(.top, 10)
         }
-        InkSection(title: "Camera", edited: InspectorEdits.count(.camera, model) > 0) {
+        let negative = model.isNegative
+        InkSection(title: "Camera", edited: InspectorEdits.count(.camera, model) > 0, skipped: negative ? "skipped" : nil) {
+            if negative { HintText("The camera is skipped: your negative was exposed already.") }
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             FilmFormatPicker(model: model)
             let lensBlur = shows("camera.lens_blur_um", section: .camera)
@@ -978,12 +991,15 @@ struct AdjustmentInspector: View {
         }
         let filmStock = model.films.first { $0.id == model.film }
         InkSection(title: "Film", edited: InspectorEdits.count(.film, model) > 0) {
+            // A negative is read through the film's curves and base; what
+            // the film does as it's exposed and developed is in it already.
+            if negative { HintText("Your negative is read through the film's curves and base. Its grain, halation and couplers are skipped: the negative has them already.") }
             developmentTime(stock: filmStock, path: InspectorEdits.filmDevelopmentPath, label: "Development",
                             help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
-            modules(.film, ruledFirst: (filmStock?.times.count ?? 0) > 1)
+            modules(.film, ruledFirst: (filmStock?.times.count ?? 0) > 1, skippedModules: negative ? Self.negativeSkips : [])
             moreLine(.film)
         }
-        let scanSwitch = scanning || shows(section: .print)
+        let scanSwitch = !negative && (scanning || shows(section: .print))
         let paperStock = scanning ? nil : model.papers.first { $0.id == model.paper }
         let printTime = (paperStock?.times.count ?? 0) > 1
         InkSection(title: "Print", edited: InspectorEdits.count(.print, model) > 0, skipped: scanning ? "skipped" : nil) {
@@ -1058,14 +1074,20 @@ struct AdjustmentInspector: View {
 
     // MARK: Modules
 
-    @ViewBuilder private func modules(_ section: InspectorSection, ruledFirst: Bool, skipped: Bool = false) -> some View {
+    /// The film's modules a negative's read skips: they happen as film is
+    /// exposed and developed (the convert route replaces that).
+    static let negativeSkips: Set<String> = ["Grain", "Halation", "DIR Couplers"]
+
+    /// `skipped`: every module struck through; `skippedModules`: those named.
+    @ViewBuilder private func modules(_ section: InspectorSection, ruledFirst: Bool, skipped: Bool = false,
+                                      skippedModules: Set<String> = []) -> some View {
         let groups = adjustmentGroups.filter { $0.section == section && shows($0) }
         ForEach(Array(groups.enumerated()), id: \.element.id) { offset, group in
             let shown = shownControls(group)
             let enabled = group.enable.map { model.toggle($0) }
             let fewer = reveal.foldable(group, visible: shown.filter(isVisible)) { InspectorEdits.isModified($0, model) }
             module(group.title, help: ControlHelp.group(group.title), enabled: enabled, summary: summary(group),
-                   edited: InspectorEdits.count(group, model) > 0, skipped: skipped, ruled: offset > 0 || ruledFirst,
+                   edited: InspectorEdits.count(group, model) > 0, skipped: skipped || skippedModules.contains(group.title), ruled: offset > 0 || ruledFirst,
                    more: visibleCount(group) - shown.count, showMore: { revealMore(group.title) },
                    fewer: fewer, showFewer: { hideMore(group.title) }) {
                 if group.title == "Print Curves" { ToneGraphView(model: model).padding(.horizontal, Theme.Size.gutter).padding(.vertical, 6) }

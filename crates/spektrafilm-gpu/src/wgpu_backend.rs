@@ -457,6 +457,25 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
             s.f64s(rgb_to_adapted_xyz.as_flattened());
             s.bool(*guard);
         }
+        crate::FrontPass::ConvertFilm(crate::ConvertGpuParams {
+            pretransform,
+            cmy0,
+            logrgb0,
+            ginv,
+            x_hi,
+            dye_base,
+            weights,
+        }) => {
+            s.bytes(b"convert film");
+            s.f64s(pretransform.as_flattened());
+            s.f64s(cmy0);
+            s.f64s(logrgb0);
+            s.f64s(ginv.as_flattened());
+            s.f64s(x_hi);
+            s.u64(dye_base.len() as u64);
+            s.f64s(dye_base.as_flattened());
+            s.f64s(weights.as_flattened());
+        }
     }
     s.f64s(film_log_exposure);
     s.f64s(film_density_curves_normalized.as_flattened());
@@ -581,6 +600,54 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
 #[cfg(feature = "wgpu-backend")]
 #[derive(Default)]
 struct Signature(Vec<u8>);
+
+#[cfg(feature = "wgpu-backend")]
+const IDENTITY3: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// `convert_film.wgsl`'s params: the pretransform's and the seed matrix's
+/// rows, the seed and the box.
+#[cfg(feature = "wgpu-backend")]
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ConvertParams {
+    n_pixels: u32,
+    n_wavelengths: u32,
+    _pad: [u32; 2],
+    pre: [[f32; 4]; 3],
+    ginv: [[f32; 4]; 3],
+    cmy0: [f32; 4],
+    logrgb0: [f32; 4],
+    x_hi: [f32; 4],
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl ConvertParams {
+    fn new(n_pixels: u32, p: &crate::ConvertGpuParams) -> Self {
+        let v4 = |v: [f64; 3]| [v[0] as f32, v[1] as f32, v[2] as f32, 0.0];
+        Self {
+            n_pixels,
+            n_wavelengths: p.dye_base.len() as u32,
+            _pad: [0; 2],
+            pre: p.pretransform.map(v4),
+            ginv: p.ginv.map(v4),
+            cmy0: v4(p.cmy0),
+            logrgb0: v4(p.logrgb0),
+            x_hi: v4(p.x_hi),
+        }
+    }
+}
+
+/// `convert_film.wgsl`'s spectra: per wavelength, the dyes and base, then
+/// the light's weight.
+#[cfg(feature = "wgpu-backend")]
+fn convert_spectra_f32(p: &crate::ConvertGpuParams) -> Vec<f32> {
+    p.dye_base
+        .iter()
+        .zip(&p.weights)
+        .flat_map(|(d, w)| [d[0], d[1], d[2], d[3], w[0], w[1], w[2], 0.0])
+        .map(|v| v as f32)
+        .collect()
+}
 
 #[cfg(feature = "wgpu-backend")]
 impl Signature {
@@ -1362,6 +1429,8 @@ impl WgpuBackend {
                 rgb_to_adapted_xyz,
                 guard,
             } => (rgb_to_adapted_xyz, tc_lut.size as u32, *guard),
+            // The convert pass has its own params (below).
+            crate::FrontPass::ConvertFilm(_) => (&IDENTITY3, 0, false),
         };
         let front_params = FrontParams {
             width: image.width,
@@ -1558,7 +1627,36 @@ impl WgpuBackend {
                 });
                 (pipe, bg, tc_lut_buf)
             }
+            crate::FrontPass::ConvertFilm(convert) => {
+                let spectra = convert_spectra_f32(convert);
+                let spectra_buf = mk_storage("convert_spectra", bytemuck::cast_slice(&spectra));
+                let params_buf = mk_uniform(
+                    "convert_params",
+                    bytemuck::bytes_of(&ConvertParams::new(n_pixels, convert)),
+                );
+                let pipe = self.cached_pipeline(
+                    include_str!("../../spektrafilm-shaders/wgsl/convert_film.wgsl"),
+                    &[
+                        wgpu::BufferBindingType::Uniform,
+                        wgpu::BufferBindingType::Storage { read_only: true },
+                        wgpu::BufferBindingType::Storage { read_only: false },
+                    ],
+                );
+                // In place on buf_a: scan RGB in, film density out, where
+                // the film side leaves its density for print spectral.
+                let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("bg_convert_film"),
+                    layout: &pipe.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: spectra_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: buf_a.as_entire_binding() },
+                    ],
+                });
+                (pipe, bg, spectra_buf)
+            }
         };
+        let converting = matches!(p.front, crate::FrontPass::ConvertFilm(_));
         let guard_pass = guard_params_buf.as_ref().map(|params| {
             let pipe = self.cached_pipeline(
                 SPECTRAL_GUARD_WGSL,
@@ -1997,7 +2095,16 @@ impl WgpuBackend {
         }
         let mut profiler = GpuStageProfiler::new(&self.device, &self.queue);
         profiler.mark("upload", &mut encoder);
-        if film_side {
+        if film_side && converting {
+            // The convert front pass reads the scanned negative back to film
+            // density in buf_a; the film's own stages don't apply.
+            dispatch(&mut encoder, &front_pipe, &bg_front, n_pixels);
+            profiler.mark("convert_film", &mut encoder);
+            if let Some(entry) = film_store.as_ref() {
+                encoder.copy_buffer_to_buffer(&buf_a, 0, &entry.buffer, 0, img_bytes as u64);
+                profiler.mark("film_cache_store", &mut encoder);
+            }
+        } else if film_side {
             // 1. Front pass (tc LUT lookup): buf_a (rgb in) → buf_b (raw), after
             // the spectral boundary guard in place on buf_a.
             if let Some((pipe, bg)) = guard_pass.as_ref() {

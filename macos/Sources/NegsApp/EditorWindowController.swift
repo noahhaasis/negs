@@ -330,6 +330,8 @@ final class EdgeSplitView: NSSplitView {
         guard event.type == .keyDown, event.keyCode == 53, event.window === window,
               event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
               model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
+        // Esc cancels a pick on the canvas (Prep's base and neutral pickers).
+        if model.negativePick != nil { model.negativePick = nil; return true }
         if model.mode == .grid { model.editCurrent() } else if model.imageOnly { model.leaveImageOnly() }
         else if model.comparison != nil { model.leaveCompare() } else { model.showGrid() }
         return true

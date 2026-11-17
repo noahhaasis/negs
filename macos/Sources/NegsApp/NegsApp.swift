@@ -515,10 +515,17 @@ struct CanvasArea: View {
     }
 
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
-        PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
+        // Picking the base shows the whole frame, unstraightened but still flipped
+        // and turned: the rebate is usually cropped off. Either pick maps the
+        // click back to the photograph (`PhotographView.photographFraction`).
+        let whole = model.negativePick == .base
+        let crop = whole ? CropSettings() : model.crop
+        return PreviewCanvas(image: image, size: size, rotation: rotation, flip: model.imageFlip, crop: crop,
+                      border: whole ? nil : model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale, geometry: geometry,
                       upsideDown: model.upsideDown, settled: model.original != nil || model.showsSettledFrame,
                       doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) },
+                      pick: model.negativePick == nil ? nil : { [model] in model.pickedNegativePoint($0) },
                       split: model.original == nil ? model.splitOriginal.map { ($0, model.splitFraction) } : nil)
     }
 }
