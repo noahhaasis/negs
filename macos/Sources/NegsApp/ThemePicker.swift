@@ -1,15 +1,27 @@
 import SwiftUI
 
-/// Settings › Look › Theme: the five themes as small windows in a row, the
-/// chosen one ringed in the pencil (design/proposals/r28-themes.html, B).
+/// Settings › Look › Theme: the themes as small windows, three to a row,
+/// the chosen one ringed in the pencil (design/proposals/r28-themes.html,
+/// B). ← → step along a row.
 struct ThemePicker: View {
     static let gap: CGFloat = 12
+    static let columns = 3
 
     var body: some View {
         let chosen = ThemeStore.shared.theme
-        HStack(alignment: .top, spacing: Self.gap) {
-            ForEach(AppTheme.allCases) { theme in
-                ThemeSwatch(theme: theme, chosen: theme == chosen) { ThemeStore.shared.choose(theme) }
+        let themes = AppTheme.allCases
+        VStack(alignment: .leading, spacing: Self.gap) {
+            ForEach(Array(stride(from: 0, to: themes.count, by: Self.columns)), id: \.self) { start in
+                HStack(alignment: .top, spacing: Self.gap) {
+                    ForEach(start..<start + Self.columns, id: \.self) { index in
+                        if index < themes.count {
+                            let theme = themes[index]
+                            ThemeSwatch(theme: theme, chosen: theme == chosen) { ThemeStore.shared.choose(theme) }
+                        } else {
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
+                        }
+                    }
+                }
             }
         }
         .padding(.horizontal, Theme.Size.gutter)
@@ -40,14 +52,13 @@ private struct ThemeSwatch: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                // Five to a row: a name wider than its column ("Contact
-                // sheet") takes two lines.
+                // A name wider than its column takes two lines.
                 Text(theme.title)
                     .font(Theme.serif(14, weight: chosen ? 700 : 400))
                     .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .contentShape(Rectangle())
         }

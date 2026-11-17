@@ -111,7 +111,7 @@ import SwiftUI
         // ⇧⌘R is Photo › Reset Edits.
         command(view, "Reset All Adjustments", #selector(resetAdjustments), "")
         view.addItem(.separator())
-        // The same four as Settings › Look, the chosen one ticked.
+        // The same themes as Settings › Look, the chosen one ticked.
         let theme = NSMenu(title: "Theme")
         view.addItem(withTitle: "Theme", action: nil, keyEquivalent: "").submenu = theme
         for appTheme in AppTheme.allCases {

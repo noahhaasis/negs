@@ -6,7 +6,7 @@ import SwiftUI
 /// One is chosen in Settings › Look; Darkroom, the original dark design, is
 /// the default. The theme doesn't follow the system's light or dark mode.
 enum AppTheme: String, CaseIterable, Identifiable, Sendable {
-    case darkroom, contactSheet, lightTable, daylight, plain
+    case darkroom, contactSheet, lightTable, daylight, plain, plainDark
 
     /// The choice in the user defaults.
     static let key = "appTheme"
@@ -20,6 +20,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
         case .lightTable: "Light table"
         case .daylight: "Daylight"
         case .plain: "Plain"
+        case .plainDark: "Plain dark"
         }
     }
 
@@ -31,6 +32,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
         case .lightTable: "Lit white, graphite type and a yellow highlighter."
         case .daylight: "Soft grey with an amber pencil, the calmest of the light ones."
         case .plain: "Black on light grey in the system font, with plain blue marks. The easiest to read."
+        case .plainDark: "Plain in macOS’s dark greys: light words in the system font, blue marks."
         }
     }
 
@@ -142,6 +144,14 @@ struct Palette: Sendable {
                             line: 0xd2d2d2, track: 0xa6a6a6, dim: 0x4a4a4a, label: 0x1d1d1d, paper: 0x000000,
                             accent: 0x0058d0, fill: 0x0062d9, onFill: 0xffffff, warn: 0xb0160a, blank: 0xe0e0e0),
                         dark: false, plain: true),
+        // Plain in the system's dark greys: the sheet is macOS's dark window
+        // (1e1e1e), the panel its under-page grey, a tone lighter as in
+        // Darkroom, the strip darker. Words 7 : 1 and up on every ground,
+        // the system blue (dark) for marks, Apple's readable dark red.
+        .plainDark: Palette(Hex(bg: 0x1e1e1e, panel: 0x282828, film: 0x141414, grid: 0x1e1e1e,
+                                line: 0x3a3a3a, track: 0x5e5e5e, dim: 0xb4b4b4, label: 0xdcdcdc, paper: 0xf5f5f5,
+                                accent: 0x0091ff, fill: 0x0059d1, onFill: 0xffffff, warn: 0xff6961, blank: 0x2e2e2e),
+                            dark: true, plain: true),
     ]
 
     /// The highlighter's yellow and strength (Light table).
