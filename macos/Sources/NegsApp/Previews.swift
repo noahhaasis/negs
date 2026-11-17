@@ -56,9 +56,11 @@ enum PreviewRules {
     /// as for `choosing`, so a film's tile shows what a click would develop.
     /// A read-as tile of another film finds the base and balances the print
     /// for it, as choosing it does (at `negativePoint` when the base was
-    /// picked); the helper keeps the print exposure (`read_negative`).
+    /// picked); the helper keeps the print exposure (`read_negative`). A
+    /// negative's tile of another paper is printed as Auto prints it there,
+    /// metered in `negativeBounds`, as choosing it does (`auto_negative`).
     static func request(for stock: Stock, keepPaper: Bool, state: EditState, stocks: [Stock], source: URL, generation: Int,
-                        negative: Bool = false, negativePoint: CGPoint? = nil) -> [String: JSONValue] {
+                        negative: Bool = false, negativePoint: CGPoint? = nil, negativeBounds: JSONValue? = nil) -> [String: JSONValue] {
         let chosen = choosing(stock.id, paper: stock.paper, keepPaper: keepPaper, in: state, stocks: stocks, negative: negative)
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(source.path),
@@ -69,19 +71,30 @@ enum PreviewRules {
         if negative, !stock.paper, stock.id != state.film, chosen.params["workflow.route"].string == NegativeScan.route {
             command["read_negative"] = .object(negativePoint.map { ["point": .array([.number($0.x), .number($0.y)])] } ?? [:])
         }
+        if stock.paper, stock.id != state.paper, state.params["workflow.route"].string == NegativeScan.route {
+            command["auto_negative"] = autoNegative(negativeBounds)
+        }
         if let crop = EditorModel.cropJSON(chosen.crop) { command["crop"] = crop }
         return command
     }
 
+    /// A negative tile's Auto print, metered in `bounds` (nil: the frame
+    /// less a border).
+    private static func autoNegative(_ bounds: JSONValue?) -> JSONValue { .object(bounds.map { ["bounds": $0] } ?? [:]) }
+
     /// The helper request for a preset's tile, without its scratch file: the
-    /// helper applies the preset over `state` as `preset_import` does.
-    static func presetCommand(text: String, state: EditState, source: URL, generation: Int) -> [String: JSONValue] {
+    /// helper applies the preset over `state` as `preset_import` does. On a
+    /// negative, a preset with another paper prints it as Auto does there,
+    /// metered in `negativeBounds`.
+    static func presetCommand(text: String, state: EditState, source: URL, generation: Int,
+                              negativeBounds: JSONValue? = nil) -> [String: JSONValue] {
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(source.path),
             "source_generation": .number(Double(generation)),
             "film": .string(state.film), "paper": .string(state.paper), "params": state.params,
             "long_side": .number(Double(longSide)), "preset": .string(text)
         ]
+        if state.params["workflow.route"].string == NegativeScan.route { command["auto_negative"] = autoNegative(negativeBounds) }
         if let crop = EditorModel.cropJSON(state.crop) { command["crop"] = crop }
         return command
     }

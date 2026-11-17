@@ -163,6 +163,12 @@ enum Command {
         /// choosing it does (`negative_base`).
         #[serde(default)]
         read_negative: Option<ReadNegative>,
+        /// A negative's tile for another paper: printed as Auto prints it
+        /// there (`negative_auto`, metered inside `bounds`), as choosing
+        /// that paper does. A preset's tile on a negative with another
+        /// paper is printed so whether or not this is sent.
+        #[serde(default)]
+        auto_negative: Option<AutoNegative>,
     },
     /// A scanned colour negative's film base (convert-film route): found
     /// in the clear film, or read at `point` (fractions of the whole,
@@ -178,16 +184,6 @@ enum Command {
         params: Box<RuntimeParams>,
         #[serde(default)]
         point: Option<[f64; 2]>,
-    },
-    /// A negative's filtration on another paper (`negative::paper_change`):
-    /// its departure from the neutral on `from_paper` kept on `paper`'s.
-    /// Image-independent; the print exposure is metered after
-    /// (`negative_meter`).
-    NegativePaper {
-        film: String,
-        from_paper: String,
-        paper: String,
-        params: Box<RuntimeParams>,
     },
     /// Whether the photograph looks like a scan of a colour negative read as
     /// `film` (`negative::looks_negative`, after finding its base), whatever
@@ -335,6 +331,13 @@ struct Session {
 struct ReadNegative {
     #[serde(default)]
     point: Option<[f64; 2]>,
+}
+
+/// A paper tile's Auto print: metered inside `bounds` (as `negative_auto`).
+#[derive(Debug, Deserialize)]
+struct AutoNegative {
+    #[serde(default)]
+    bounds: Option<[f64; 4]>,
 }
 
 /// The source decoded with another RAW white balance, or divided by another
@@ -617,36 +620,30 @@ impl Session {
         reduced_decode: bool,
         decode_only: bool,
         colour_space: bool,
+        auto_negative: Option<AutoNegative>,
         data: &Path,
     ) -> Result<Value> {
         let started = Instant::now();
         ensure!((16..=1024).contains(&long_side), "Invalid thumbnail size");
         let preset_applied = preset.is_some();
+        let auto_bounds = auto_negative.as_ref().and_then(|auto| auto.bounds);
         if let Some(text) = preset {
             let preset = presets::import(&text, data).map_err(anyhow::Error::msg)?;
             let negative = params.workflow.converts_film();
             params = Box::new(presets::apply(&preset.params, &params));
             if negative {
                 // A negative is still read as its film, with its base and
-                // balance (`presets::KEPT_NEGATIVE`). A new paper moves the
-                // filtration by the papers' difference, as the app does when
-                // a preset changes it (`negative_paper`; the app also meters
-                // the exposure again; the tile doesn't).
+                // balance (`presets::KEPT_NEGATIVE`). A new paper prints it
+                // as Auto does there, as the app does when a preset changes it.
                 if preset.paper != paper {
-                    let (m, y) = spektrafilm_core::negative::paper_change(
-                        &profile::load_profile_by_name(data, &film)?,
-                        profile::load_profile_by_name(data, &paper)?,
-                        profile::load_profile_by_name(data, &preset.paper)?,
-                        &params,
-                        data,
-                    )
-                    .map_err(anyhow::Error::msg)?;
-                    (params.enlarger.m_filter_shift, params.enlarger.y_filter_shift) = (m as f32, y as f32);
+                    self.auto_negative_for_tile(&input, source_generation, &film, &preset.paper, &mut params, auto_bounds, data)?;
                 }
                 paper = preset.paper;
             } else {
                 (film, paper) = (preset.film, preset.paper);
             }
+        } else if auto_negative.is_some() {
+            self.auto_negative_for_tile(&input, source_generation, &film, &paper, &mut params, auto_bounds, data)?;
         }
         if let Some(crop) = &crop {
             crop.validate()?;
@@ -826,6 +823,28 @@ impl Session {
         Ok(())
     }
 
+    /// A negative's tile on `paper`: the enlarger's magenta, yellow and
+    /// print exposure as Auto prints the frame there (`negative_auto`).
+    fn auto_negative_for_tile(
+        &mut self,
+        input: &Path,
+        source_generation: u64,
+        film: &str,
+        paper: &str,
+        params: &mut RuntimeParams,
+        bounds: Option<[f64; 4]>,
+        data: &Path,
+    ) -> Result<()> {
+        let bounds = picture_bounds(bounds)?;
+        let mut read = params.clone();
+        let (film, paper, frame) = self.negative_frame(input, source_generation, film, paper, &mut read, data)?;
+        let auto = spektrafilm_core::negative::auto_print(film, paper, &read, data, &frame, &bounds).map_err(anyhow::Error::msg)?;
+        params.enlarger.m_filter_shift = auto.m_filter_shift as f32;
+        params.enlarger.y_filter_shift = auto.y_filter_shift as f32;
+        params.enlarger.print_exposure = auto.print_exposure as f32;
+        Ok(())
+    }
+
     /// The film and paper profiles and the reduced frame a negative's base
     /// and balances read, decoding `input` if the session doesn't hold it.
     /// `params` get the source's input colour.
@@ -920,14 +939,14 @@ impl Session {
             }
             Command::Thumbnail {
                 input, source_generation, film, paper, mut params, long_side, preview_path, crop, preset, reduced_decode, decode_only,
-                preview_colour_space, read_negative,
+                preview_colour_space, read_negative, auto_negative,
             } => {
                 if let Some(read) = read_negative {
                     self.read_negative_for_tile(&input, source_generation, &film, &paper, &mut params, read.point, data)?;
                 }
                 self.thumbnail(
                     input, source_generation, film, paper, params, long_side, preview_path, crop, preset, reduced_decode, decode_only,
-                    preview_colour_space, data,
+                    preview_colour_space, auto_negative, data,
                 )
             }
             Command::ToneCurve { film, paper, params, count } => {
@@ -978,19 +997,6 @@ impl Session {
                     "m_filter_shift": m, "y_filter_shift": y,
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 }))
-            }
-            Command::NegativePaper { film, from_paper, paper, params } => {
-                let started = Instant::now();
-                let (m, y) = spektrafilm_core::negative::paper_change(
-                    &profile::load_profile_by_name(data, &film)?,
-                    profile::load_profile_by_name(data, &from_paper)?,
-                    profile::load_profile_by_name(data, &paper)?,
-                    &params,
-                    data,
-                )
-                .map_err(anyhow::Error::msg)?;
-                Ok(json!({"m_filter_shift": m, "y_filter_shift": y,
-                          "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
             }
             Command::NegativeCheck { input, source_generation, film, mut params } => {
                 let started = Instant::now();
@@ -1658,7 +1664,7 @@ mod tests {
             let response = session.handle(Request { id: 1, command: Command::Thumbnail {
                 input: input.clone(), source_generation: 1, film: film.into(), paper: paper.into(),
                 params: Box::new(params), long_side: 24, preview_path: preview.clone(), crop: None,
-                preset: preset.map(str::to_string), reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative: None,
+                preset: preset.map(str::to_string), reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative: None, auto_negative: None,
             } }, &data).unwrap();
             (response, std::fs::read(preview).unwrap())
         };
@@ -1680,8 +1686,7 @@ mod tests {
         assert_ne!(with_preset, plain);
 
         // On a negative the preset keeps the film it's read as, its base and
-        // its balance; its own paper moves the filtration by the papers'
-        // difference (`negative_paper`).
+        // its balance; on its own paper it's printed as Auto prints it there.
         let mut negative = current;
         negative.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
         negative.film_render.base.cyan = 1.05;
@@ -1690,15 +1695,14 @@ mod tests {
             thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", negative.clone(), Some(text), "negative-preset.rgba");
         let mut expected = presets::apply(&presets::import(text, &data).unwrap().params, &negative);
         assert_eq!((expected.film_render.base.cyan, expected.enlarger.print_exposure), (1.05, 0.9));
-        let (m, y) = spektrafilm_core::negative::paper_change(
-            &profile::load_profile_by_name(&data, "kodak_gold_200").unwrap(),
-            profile::load_profile_by_name(&data, "kodak_supra_endura").unwrap(),
-            profile::load_profile_by_name(&data, "kodak_portra_endura").unwrap(),
-            &expected,
-            &data,
-        )
-        .unwrap();
-        (expected.enlarger.m_filter_shift, expected.enlarger.y_filter_shift) = (m as f32, y as f32);
+        let auto = session.handle(Request { id: 3, command: Command::NegativeAuto {
+            input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(), paper: "kodak_portra_endura".into(),
+            params: Box::new(expected.clone()), bounds: None,
+        } }, &data).unwrap();
+        expected.enlarger.m_filter_shift = auto["m_filter_shift"].as_f64().unwrap() as f32;
+        expected.enlarger.y_filter_shift = auto["y_filter_shift"].as_f64().unwrap() as f32;
+        expected.enlarger.print_exposure = auto["print_exposure"].as_f64().unwrap() as f32;
+        assert_ne!(expected.enlarger.print_exposure, 0.9);
         let (_, applied) = thumbnail(&mut session, "kodak_gold_200", "kodak_portra_endura", expected, None, "negative-applied.rgba");
         assert_eq!(with_preset, applied);
         assert!(session.output.is_none() && !session.pipelines.has_main());
@@ -1743,7 +1747,7 @@ mod tests {
                 input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                 paper: "kodak_supra_endura".into(), params: Box::default(), long_side: 24,
                 preview_path: preview.clone(), crop: None, preset: None, reduced_decode, decode_only: false,
-                preview_colour_space: false, read_negative: None,
+                preview_colour_space: false, read_negative: None, auto_negative: None,
             } }, &data).unwrap();
             (response, std::fs::read(preview).unwrap())
         };
@@ -1760,7 +1764,7 @@ mod tests {
             input: input.clone(), source_generation: 2, film: "kodak_gold_200".into(),
             paper: "kodak_supra_endura".into(), params: Box::default(), long_side: 24,
             preview_path: preview.clone(), crop: None, preset: None, reduced_decode: true, decode_only: true,
-            preview_colour_space: true, read_negative: None,
+            preview_colour_space: true, read_negative: None, auto_negative: None,
         } }, &data).unwrap();
         assert_eq!((decoded["source_width"].as_u64(), decoded["source_height"].as_u64()), (Some(48), Some(32)));
         assert!(decoded["preview_colour_space"].is_null() && decoded.get("width").is_none());
@@ -1787,7 +1791,7 @@ mod tests {
                 input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                 paper: "kodak_supra_endura".into(), params: Box::new(params.clone()), long_side: 512,
                 preview_path: dir.join("thumbnail.rgba"), crop: None, preset: None, reduced_decode: true, decode_only,
-                preview_colour_space: decode_only, read_negative: None,
+                preview_colour_space: decode_only, read_negative: None, auto_negative: None,
             } }, &data).unwrap();
             let (width, height) = (decoded["source_width"].as_u64().unwrap() as u32, decoded["source_height"].as_u64().unwrap() as u32);
             if !reference.exists() {
@@ -1832,7 +1836,7 @@ mod tests {
                         input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                         paper: "kodak_supra_endura".into(), params: Box::new(params.clone()), long_side: 16,
                         preview_path: dir.join("decode.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: true,
-                        preview_colour_space: true, read_negative: None,
+                        preview_colour_space: true, read_negative: None, auto_negative: None,
                     } }, &data).unwrap();
                     assert_eq!(decoded["raw"].as_bool(), Some(true));
                     (decoded["source_width"].as_u64().unwrap() as u32, decoded["source_height"].as_u64().unwrap() as u32)
@@ -1880,7 +1884,7 @@ mod tests {
                 input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                 paper: "kodak_supra_endura".into(), params: Box::default(), long_side,
                 preview_path: dir.join("thumbnail.rgba"), crop: None, preset: None, reduced_decode, decode_only: false,
-                preview_colour_space: false, read_negative: None,
+                preview_colour_space: false, read_negative: None, auto_negative: None,
             } }, &data).unwrap()
         };
         let reduced = thumbnail(256, true);
@@ -2137,7 +2141,7 @@ mod tests {
                     input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                     paper: "kodak_portra_endura".into(), params, long_side: 16,
                     preview_path: dir.join("decode.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: true,
-                    preview_colour_space: false, read_negative: None,
+                    preview_colour_space: false, read_negative: None, auto_negative: None,
                 } }, &data).unwrap();
                 assert_eq!((decoded["source_width"].as_u64(), decoded["source_height"].as_u64()), (Some(96), Some(64)));
                 assert_eq!(decoded["raw"].as_bool(), Some(false));
@@ -2473,13 +2477,47 @@ mod tests {
             session.handle(Request { id, command: Command::Thumbnail {
                 input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_portra_endura".into(),
                 params: Box::new(params.clone()), long_side: 32, preview_path: preview.clone(), crop: None, preset: None,
-                reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative,
+                reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative, auto_negative: None,
             } }, &data).unwrap();
             std::fs::read(preview).unwrap()
         };
         let read = tile(2, &params, Some(ReadNegative { point: None }), "read.rgba");
         assert!(read == tile(3, &chosen, None, "chosen.rgba"), "the tile shows the film as choosing it reads it");
         assert!(read != tile(4, &params, None, "stale.rgba"), "not on the other film's base");
+
+        // A paper's tile prints the frame as Auto prints it on that paper,
+        // as choosing the paper does.
+        let bounds = [0.15, 0.05, 0.95, 0.95];
+        let mut paper_tile = |id, params: &RuntimeParams, auto_negative, name: &str| {
+            let preview = dir.join(name);
+            session.handle(Request { id, command: Command::Thumbnail {
+                input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_endura_premier".into(),
+                params: Box::new(params.clone()), long_side: 32, preview_path: preview.clone(), crop: None, preset: None,
+                reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative: None, auto_negative,
+            } }, &data).unwrap();
+            std::fs::read(preview).unwrap()
+        };
+        let printed = paper_tile(5, &chosen, Some(AutoNegative { bounds: Some(bounds) }), "auto.rgba");
+        let stale = paper_tile(6, &chosen, None, "carried.rgba");
+        let auto = session.handle(Request { id: 7, command: Command::NegativeAuto {
+            input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_endura_premier".into(),
+            params: Box::new(chosen.clone()), bounds: Some(bounds),
+        } }, &data).unwrap();
+        let mut auto_printed = chosen.clone();
+        auto_printed.enlarger.m_filter_shift = auto["m_filter_shift"].as_f64().unwrap() as f32;
+        auto_printed.enlarger.y_filter_shift = auto["y_filter_shift"].as_f64().unwrap() as f32;
+        auto_printed.enlarger.print_exposure = auto["print_exposure"].as_f64().unwrap() as f32;
+        let mut paper_tile = |id, params: &RuntimeParams, name: &str| {
+            let preview = dir.join(name);
+            session.handle(Request { id, command: Command::Thumbnail {
+                input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_endura_premier".into(),
+                params: Box::new(params.clone()), long_side: 32, preview_path: preview.clone(), crop: None, preset: None,
+                reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative: None, auto_negative: None,
+            } }, &data).unwrap();
+            std::fs::read(preview).unwrap()
+        };
+        assert!(printed == paper_tile(8, &auto_printed, "auto-applied.rgba"), "the tile shows the paper as choosing it prints");
+        assert!(printed != stale, "not with the old paper's filtration");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2525,7 +2563,7 @@ mod tests {
             input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
             paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), long_side: 32,
             preview_path: dir.join("tile.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: false,
-            preview_colour_space: false, read_negative: None,
+            preview_colour_space: false, read_negative: None, auto_negative: None,
         };
         assert_eq!(request(&mut session, 1, render(&params))["flat_field"]["used"], true);
         request(&mut session, 2, tile(&scene));
