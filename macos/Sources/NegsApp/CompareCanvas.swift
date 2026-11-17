@@ -41,7 +41,7 @@ extension EditorModel {
     var openPicture: ComparePicture? {
         if original == nil, let trial = trialImage {
             let size = CanvasArea.standInSize(trial, photo: photoSize)
-            return ComparePicture(image: trial, size: size, border: border.shown(for: size), filmStrip: filmStrip)
+            return ComparePicture(image: trial, size: size, rotation: imageRotation, flip: imageFlip, border: border.shown(for: size), filmStrip: filmStrip)
         } else if let image {
             return ComparePicture(image: original ?? image, size: imageSize, rotation: imageRotation, flip: imageFlip, crop: crop,
                                   border: border.shown(for: crop.size(of: imageSize)), filmStrip: filmStrip,
