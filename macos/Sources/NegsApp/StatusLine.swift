@@ -22,7 +22,8 @@ struct StatusBar: View {
                 StatusLink(title: "Cancel", help: "Stop exporting", action: model.cancelExport)
             }
             if model.comparison != nil, model.mode == .photo, !model.exporting, model.batch?.running != true {
-                CompareTools(model: model)
+                // The tools keep their words; the summary on the left gives way.
+                CompareTools(model: model).fixedSize()
             } else if model.source != nil, model.mode == .photo, !model.exporting, model.batch?.running != true {
                 StatusTools(model: model)
             }
@@ -361,18 +362,26 @@ private struct OriginalWord: View {
 }
 
 /// The status line's words in compare: who's compared and what differs,
-/// then which side ← → step, when there's a roll to step through.
+/// then which side ← → step, when there's a roll to step through. Short of
+/// room, the hint goes first, so what differs can be read to the end.
 private struct CompareWords: View {
     let model: EditorModel
 
     var body: some View {
         if let comparison = model.comparison {
-            HStack(spacing: 14) {
-                Text(model.compareSummary).foregroundStyle(Theme.label).truncationMode(.tail)
-                if !comparison.againstOriginal, model.shownPhotos.count > 2 {
-                    Text("← → steps the \(comparison.layout == .slider ? "right" : model.compareArrangement == .column ? "bottom" : "right") one")
-                        .font(Theme.serif(13, italic: true))
+            let summary = Text(model.compareSummary).foregroundStyle(Theme.label)
+            if !comparison.againstOriginal, model.shownPhotos.count > 2 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        summary.fixedSize()
+                        Text("← → steps the \(comparison.layout == .slider ? "right" : model.compareArrangement == .column ? "bottom" : "right") one")
+                            .font(Theme.serif(13, italic: true))
+                            .fixedSize()
+                    }
+                    summary.truncationMode(.tail)
                 }
+            } else {
+                summary.truncationMode(.tail)
             }
         }
     }
