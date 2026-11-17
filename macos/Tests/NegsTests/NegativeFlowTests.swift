@@ -113,6 +113,9 @@ enum SyntheticNegative {
         undo.beginUndoGrouping()
         try await waitUntil("the base") { model.negativeBase != nil && model.negativeWorking == nil && (!picture || model.state.crop.cropped) }
         undo.endUndoGrouping()
+        // The negative's own render lands after the base; a later status
+        // (the roll's) must not be overwritten by its "developed in".
+        try await waitUntil("the negative's frame") { model.previewCurrent || model.error != nil }
     }
 
     private func base(_ state: EditState) -> [Double] { ["cyan", "magenta", "yellow"].map { state.params["film_render.base.\($0)"].double } }
