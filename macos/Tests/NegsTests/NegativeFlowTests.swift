@@ -579,12 +579,74 @@ enum SyntheticNegative {
         for path in ["film_render.convert", "io.scan_film", "io.raw_white_balance", "io.lens_correction", "io.input_interpretation"] {
             XCTAssertEqual(model.value(path), before.params[path], path)
         }
-        XCTAssertNotEqual(model.value("enlarger.m_filter_shift"), before.params["enlarger.m_filter_shift"], "balanced for the new paper")
+        var asked = model.state
+        for path in ["enlarger.m_filter_shift", "enlarger.y_filter_shift", "enlarger.print_exposure"] { asked.params[path] = before.params[path] }
+        let moved = try await paperChanged(asked, from: before.paper)
+        XCTAssertEqual(model.value("enlarger.m_filter_shift").double, moved.magenta, accuracy: 1e-9, "balanced for the new paper")
+        XCTAssertEqual(model.value("enlarger.y_filter_shift").double, moved.yellow, accuracy: 1e-9)
         XCTAssertNotEqual(model.value("enlarger.print_exposure"), .number(1.7), "metered, not the preset's")
         let survey = try XCTUnwrap(model.negativeSurvey)
         let exposure = try await metered(model.renderState, photo: photo, bounds: NegativeScan.bounds(picture: survey.picture))
         XCTAssertEqual(model.value("enlarger.print_exposure").double, exposure, accuracy: 1e-6)
         undo.undo()
+        XCTAssertEqual(model.state, before)
+    }
+
+    /// The helper's filtration for `state` moved to its paper from `from`.
+    private func paperChanged(_ state: EditState, from: String) async throws -> (magenta: Double, yellow: Double) {
+        let engine = try EngineClient(paths: paths)
+        defer { engine.stop() }
+        let result = try await engine.request(["command": .string("negative_paper"), "film": .string(state.film), "from_paper": .string(from),
+                                               "paper": .string(state.paper), "params": state.params]).1
+        return (result["m_filter_shift"].double, result["y_filter_shift"].double)
+    }
+
+    /// A new paper keeps the frame's own balance (here a hand-set filter):
+    /// it moves by the papers' difference, a few CC at most, and paper
+    /// after paper comes back to where it was. Esc in the tray puts the
+    /// frame back as it was, filtration and all.
+    func testANewPaperKeepsTheFramesBalance() async throws {
+        let photo = try folder().appendingPathComponent("frame.tif")
+        try SyntheticNegative.write(to: photo)
+        let model = try await model()
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        try await readNegative(photo, in: model, undo: undo)
+        let start = model.paper
+        undo.beginUndoGrouping()
+        model.set("enlarger.m_filter_shift", .number(model.value("enlarger.m_filter_shift").double + 12))
+        model.set("enlarger.y_filter_shift", .number(model.value("enlarger.y_filter_shift").double - 8))
+        undo.endUndoGrouping()
+        let own = model.state
+        var magenta = own.params["enlarger.m_filter_shift"].double, yellow = own.params["enlarger.y_filter_shift"].double
+        for paper in ["kodak_endura_premier", "kodak_ultra_endura", "fujifilm_crystal_archive_typeii", start] {
+            let from = model.paper
+            undo.beginUndoGrouping()
+            model.choosePaper(paper)
+            try await waitUntil { model.paper == paper }
+            try await waitUntil("the balance") { model.negativeWorking == nil }
+            undo.endUndoGrouping()
+            var asked = model.state
+            asked.params["enlarger.m_filter_shift"] = .number(magenta); asked.params["enlarger.y_filter_shift"] = .number(yellow)
+            let moved = try await paperChanged(asked, from: from)
+            magenta = model.value("enlarger.m_filter_shift").double; yellow = model.value("enlarger.y_filter_shift").double
+            XCTAssertEqual(magenta, moved.magenta, accuracy: 1e-9, paper)
+            XCTAssertEqual(yellow, moved.yellow, accuracy: 1e-9, paper)
+            XCTAssertEqual(magenta, own.params["enlarger.m_filter_shift"].double, accuracy: 5, paper)
+            XCTAssertEqual(yellow, own.params["enlarger.y_filter_shift"].double, accuracy: 5, paper)
+        }
+        XCTAssertEqual(magenta, own.params["enlarger.m_filter_shift"].double, accuracy: 0.05, "back on its own paper")
+        XCTAssertEqual(yellow, own.params["enlarger.y_filter_shift"].double, accuracy: 0.05)
+
+        // Trying a paper in the tray, then Esc.
+        let before = model.state
+        model.openTray(paper: true)
+        model.tryStock("kodak_endura_premier")
+        try await waitUntil { model.paper == "kodak_endura_premier" }
+        try await waitUntil("the balance") { model.negativeWorking == nil }
+        XCTAssertNotEqual(model.state, before)
+        model.endTray(keep: false)
+        try await Task.sleep(for: .milliseconds(800))
+        XCTAssertNil(model.negativeWorking)
         XCTAssertEqual(model.state, before)
     }
 

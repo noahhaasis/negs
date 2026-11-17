@@ -166,8 +166,9 @@ enum Command {
     },
     /// A scanned colour negative's film base (convert-film route): found
     /// in the clear film, or read at `point` (fractions of the whole,
-    /// uncropped photograph), then the print balanced for it as
-    /// `balance_print` does. The params come back with both written in.
+    /// uncropped photograph), then the print balanced for it
+    /// (`negative::neutral_balance`: the film's mid-grey printed neutral,
+    /// whatever the enlarger settings were).
     NegativeBase {
         input: PathBuf,
         #[serde(default)]
@@ -177,6 +178,16 @@ enum Command {
         params: Box<RuntimeParams>,
         #[serde(default)]
         point: Option<[f64; 2]>,
+    },
+    /// A negative's filtration on another paper (`negative::paper_change`):
+    /// its departure from the neutral on `from_paper` kept on `paper`'s.
+    /// Image-independent; the print exposure is metered after
+    /// (`negative_meter`).
+    NegativePaper {
+        film: String,
+        from_paper: String,
+        paper: String,
+        params: Box<RuntimeParams>,
     },
     /// Whether the photograph looks like a scan of a colour negative read as
     /// `film` (`negative::looks_negative`, after finding its base), whatever
@@ -617,16 +628,17 @@ impl Session {
             params = Box::new(presets::apply(&preset.params, &params));
             if negative {
                 // A negative is still read as its film, with its base and
-                // balance (`presets::KEPT_NEGATIVE`). A new paper balances
-                // the print again, as the app does when a preset changes it
-                // (the app also meters the exposure again; the tile doesn't).
+                // balance (`presets::KEPT_NEGATIVE`). A new paper moves the
+                // filtration by the papers' difference, as the app does when
+                // a preset changes it (`negative_paper`; the app also meters
+                // the exposure again; the tile doesn't).
                 if preset.paper != paper {
-                    let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
-                        profile::load_profile_by_name(data, &film)?,
+                    let (m, y) = spektrafilm_core::negative::paper_change(
+                        &profile::load_profile_by_name(data, &film)?,
+                        profile::load_profile_by_name(data, &paper)?,
                         profile::load_profile_by_name(data, &preset.paper)?,
                         &params,
                         data,
-                        spektrafilm_core::print_balance::MIDGRAY,
                     )
                     .map_err(anyhow::Error::msg)?;
                     (params.enlarger.m_filter_shift, params.enlarger.y_filter_shift) = (m as f32, y as f32);
@@ -807,11 +819,10 @@ impl Session {
         let found = spektrafilm_core::negative::detect_base(&film, &read, &frame, point.map(|[x, y]| (x, y))).map_err(anyhow::Error::msg)?;
         read.film_render.base = found.base.clone();
         read.film_render.convert.exposure_compensation_ev = found.exposure_ev;
-        let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(film, paper, &read, data, spektrafilm_core::print_balance::MIDGRAY)
-            .map_err(anyhow::Error::msg)?;
+        let neutral = spektrafilm_core::negative::neutral_balance(film, paper, &read, data).map_err(anyhow::Error::msg)?;
         params.film_render.base = found.base;
         params.film_render.convert.exposure_compensation_ev = found.exposure_ev;
-        (params.enlarger.m_filter_shift, params.enlarger.y_filter_shift) = (m as f32, y as f32);
+        (params.enlarger.m_filter_shift, params.enlarger.y_filter_shift) = (neutral.m_filter_shift as f32, neutral.y_filter_shift as f32);
         Ok(())
     }
 
@@ -947,10 +958,8 @@ impl Session {
                 let found = spektrafilm_core::negative::detect_base(&film, &params, &frame, point).map_err(anyhow::Error::msg)?;
                 params.film_render.base = found.base.clone();
                 params.film_render.convert.exposure_compensation_ev = found.exposure_ev;
-                let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
-                    film, paper, &params, data, spektrafilm_core::print_balance::MIDGRAY,
-                )
-                .map_err(anyhow::Error::msg)?;
+                let neutral = spektrafilm_core::negative::neutral_balance(film, paper, &params, data).map_err(anyhow::Error::msg)?;
+                let (m, y) = (neutral.m_filter_shift, neutral.y_filter_shift);
                 // The picture inside the film's clear edges, in the decoded
                 // photograph's own frame (as `point`): the crop rectangle
                 // x0..x1, y0..y1 after straightening by angle_deg (clockwise).
@@ -969,6 +978,19 @@ impl Session {
                     "m_filter_shift": m, "y_filter_shift": y,
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 }))
+            }
+            Command::NegativePaper { film, from_paper, paper, params } => {
+                let started = Instant::now();
+                let (m, y) = spektrafilm_core::negative::paper_change(
+                    &profile::load_profile_by_name(data, &film)?,
+                    profile::load_profile_by_name(data, &from_paper)?,
+                    profile::load_profile_by_name(data, &paper)?,
+                    &params,
+                    data,
+                )
+                .map_err(anyhow::Error::msg)?;
+                Ok(json!({"m_filter_shift": m, "y_filter_shift": y,
+                          "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
             }
             Command::NegativeCheck { input, source_generation, film, mut params } => {
                 let started = Instant::now();
@@ -1658,7 +1680,8 @@ mod tests {
         assert_ne!(with_preset, plain);
 
         // On a negative the preset keeps the film it's read as, its base and
-        // its balance; the preset's own paper balances the print again.
+        // its balance; its own paper moves the filtration by the papers'
+        // difference (`negative_paper`).
         let mut negative = current;
         negative.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
         negative.film_render.base.cyan = 1.05;
@@ -1667,12 +1690,12 @@ mod tests {
             thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", negative.clone(), Some(text), "negative-preset.rgba");
         let mut expected = presets::apply(&presets::import(text, &data).unwrap().params, &negative);
         assert_eq!((expected.film_render.base.cyan, expected.enlarger.print_exposure), (1.05, 0.9));
-        let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
-            profile::load_profile_by_name(&data, "kodak_gold_200").unwrap(),
+        let (m, y) = spektrafilm_core::negative::paper_change(
+            &profile::load_profile_by_name(&data, "kodak_gold_200").unwrap(),
+            profile::load_profile_by_name(&data, "kodak_supra_endura").unwrap(),
             profile::load_profile_by_name(&data, "kodak_portra_endura").unwrap(),
             &expected,
             &data,
-            spektrafilm_core::print_balance::MIDGRAY,
         )
         .unwrap();
         (expected.enlarger.m_filter_shift, expected.enlarger.y_filter_shift) = (m as f32, y as f32);

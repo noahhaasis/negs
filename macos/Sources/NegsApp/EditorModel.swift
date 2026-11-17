@@ -4255,6 +4255,9 @@ import UserNotifications
     @ObservationIgnored private var negativeRequest = 0
     /// The newest request finds the base (and balances the print for it).
     @ObservationIgnored private var negativeDetecting = false
+    /// The newest request moves the filtration to another paper, from the
+    /// paper it was balanced for (`from`), while it's running.
+    @ObservationIgnored private var negativeRebalancing: (request: Int, from: String)?
     /// Answers folded into the edit that asked for them, newest last: undo
     /// or redo putting that edit back (one made before the answer came)
     /// puts its answer back with it.
@@ -4426,6 +4429,7 @@ import UserNotifications
         guard negativeRequest == request else { return }
         negativeWorking = nil
         negativeDetecting = false
+        negativeRebalancing = nil
     }
 
     /// `request`'s answer still fits: it's the newest, for this photograph,
@@ -4497,8 +4501,20 @@ import UserNotifications
         } else if state.paper != old.paper {
             // A detection still running balances for the old paper: find
             // the base again, which balances for the new one.
-            if negativeDetecting { detectNegativeBase(undoable: false) } else { rebalanceNegative() }
+            if negativeDetecting {
+                detectNegativeBase(undoable: false)
+            } else if Self.filtration(state) == Self.filtration(old) {
+                // The filtration came along to the new paper: moved by the
+                // papers' difference. One that came with the paper (Esc in
+                // the tray putting the frame back) is the paper's already.
+                rebalanceNegative(from: negativeRebalancing.flatMap { $0.request == negativeRequest ? $0.from : nil } ?? old.paper)
+            }
         }
+    }
+
+    /// A negative's magenta and yellow.
+    private static func filtration(_ state: EditState) -> [JSONValue?] {
+        [state.params["enlarger.m_filter_shift"], state.params["enlarger.y_filter_shift"]]
     }
 
     /// The scan doesn't look like a colour negative, in Prep's words.
@@ -4635,20 +4651,26 @@ import UserNotifications
         return result["print_exposure"]
     }
 
-    /// The print balanced again for a new paper on the same base, and the
-    /// exposure metered, folded into the edit that changed the paper.
-    private func rebalanceNegative() {
+    /// The print balanced again for a new paper on the same base: the
+    /// filtration moved by the difference between `from`'s neutral and the
+    /// new paper's, so an Auto print, a picked grey or a hand-set filter
+    /// stays as it was, and the exposure metered; folded into the edit
+    /// that changed the paper.
+    private func rebalanceNegative(from: String) {
         guard isNegative, let engine, let source else { return }
         let request = beginNegative("Balancing the print…")
+        negativeRebalancing = (request, from)
         let generation = sourceGeneration, asked = state, snapshot = renderState, key = negativeAnswerKey(state)
         Task {
             defer { endNegative(request) }
             do {
-                // Trying paper after paper balances only for the last.
+                // Trying paper after paper balances only for the last, from
+                // the paper the filtration was balanced for.
                 try await Task.sleep(for: Self.negativeSettle)
                 guard negativeCurrent(request, generation: generation, key: key) else { return }
-                let (_, result) = try await engine.request(["command": .string("balance_print"), "film": .string(snapshot.film),
-                                                            "paper": .string(snapshot.paper), "params": snapshot.params])
+                let (_, result) = try await engine.request(["command": .string("negative_paper"), "film": .string(snapshot.film),
+                                                            "from_paper": .string(from), "paper": .string(snapshot.paper),
+                                                            "params": snapshot.params])
                 guard negativeCurrent(request, generation: generation, key: key) else { return }
                 var changes = ["enlarger.m_filter_shift": result["m_filter_shift"], "enlarger.y_filter_shift": result["y_filter_shift"]]
                 if let exposure = await meterNegative(snapshot, changes, engine: engine, source: source, generation: generation) {

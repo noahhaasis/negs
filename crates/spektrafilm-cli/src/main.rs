@@ -831,14 +831,10 @@ impl NegativeOptions {
         if picture.is_none() {
             eprintln!("Picture: the film's edges weren't found");
         }
-        let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
-            film.clone(),
-            print.clone(),
-            params,
-            data_dir,
-            spektrafilm_core::print_balance::MIDGRAY,
-        )
-        .map_err(anyhow::Error::msg)?;
+        // As the app balances a negative it reads (`negative_base`).
+        let neutral = spektrafilm_core::negative::neutral_balance(film.clone(), print.clone(), params, data_dir)
+            .map_err(anyhow::Error::msg)?;
+        let (m, y) = (neutral.m_filter_shift, neutral.y_filter_shift);
         params.enlarger.m_filter_shift = m as f32;
         params.enlarger.y_filter_shift = y as f32;
         eprintln!("Print balanced: magenta {m:+.3}, yellow {y:+.3}");
