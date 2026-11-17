@@ -9,8 +9,8 @@ decisions made with their reasons, and what was carried over. See
 | # | Phase | State |
 |---|---|---|
 | 0 | Baseline | done |
-| 1 | Drawing foundation | in progress: agent on branch `win-p1-drawing` (owns the PC) |
-| 2 | Window shell | not started |
+| 1 | Drawing foundation | done, merged `e142fba` |
+| 2 | Window shell | in progress: agent on branch `win-p2-shell` (owns the PC) |
 | 3 | Inspector | not started |
 | 4 | Canvas | not started |
 | 5 | Tray | not started |
@@ -18,6 +18,32 @@ decisions made with their reasons, and what was carried over. See
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
+
+## 2026-11-18: phase 1 merged (`e142fba`, branch tip `fe662f4`)
+
+- **What landed:** `windows/marks/` (crate `negs-marks`, no Win32: pencil, rings,
+  `HandStar`, `RejectCross`, `PickBox`, Plain variants; 16 tests against the Swift's
+  numbers, `cargo test --manifest-path windows/marks/Cargo.toml --target-dir target/marks`).
+  `ui/d2d.rs`: software `ID2D1DCRenderTarget` into the GDI back buffer via
+  `Canvas::d2d(scale, plain, |p| …)`, cached text formats/layouts/geometry, lost-target
+  redraw; Newsreader from memory (`IDWriteFactory6` axes on 1803+, named instances on
+  1703–1709, Segoe UI before). `ui/theme.rs`: `ThemeName` + token tables for all six
+  themes, checked against `AppTheme.swift` by script. `ui/sampler.rs`:
+  `NEGS_DRAW_SAMPLER=<theme>` draws every primitive. The visible app is unchanged.
+- **Startup** (ABBA, 6 runs, A = main, B = branch): first window 90.4 / 88.4, inspector
+  184.4 / 181.0, GPU ready 426 / 429, photograph 1191 / 1182. Within noise.
+  D2D + DWrite + fonts cost ~2.5 ms, made on a `negs-drawing` thread right after
+  `inspector_shown` (`drawing_ready` stamp).
+- **Plain on Windows:** follows Windows' light/dark (or `NEGS_THEME`), Segoe UI Variable
+  where present, else Segoe UI. Cheap (~20 lines), kept.
+- **Decided (coordinator):** the Barlow Condensed OFL notice now ships with the Windows
+  package too (it was already compiled in through `spektrafilm-io` but uncredited); a
+  licence requirement, not a design choice.
+- **Carried over:** the marks' halo is two translucent strokes (a real blur needs a
+  device-context target: phase 7). Highlighter uses normal blending, not multiply. The
+  1703–1709 font path is untested. CI doesn't run `negs-marks` tests (needs a
+  workflow edit; do it in phase 9).
+- Screenshots: `~/.negs/windows-parity/phase1/`.
 
 ## 2026-11-18: phase 0, baseline
 
