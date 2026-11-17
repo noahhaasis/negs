@@ -12,9 +12,9 @@ decisions made with their reasons, and what was carried over. See
 | 1 | Drawing foundation | done, merged `e142fba` |
 | 2 | Window shell | done, merged `a9a0763` |
 | 3 | Inspector | done: 3a and 3b merged (see log) |
-| 4 | Canvas | not started |
+| 4 | Canvas | in progress: `win-p4-canvas` (owns the PC) |
 | 5 | Tray | not started |
-| 6 | Library (crate can start in parallel after phase 0) | crate done, merged (see log); Windows glue after phase 5 |
+| 6 | Library | crate merged; glue in progress on `win-p6b-library-glue` (Mac only until it gets the PC) |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
