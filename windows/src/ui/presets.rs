@@ -548,16 +548,32 @@ fn finish_rename(app: &mut App, typed: Option<String>) {
     let Some(file) = p.files.get(index).cloned() else { return };
     let Some(text) = typed else { return app.model.cancel_rename(&file) };
     let typed = text.trim();
+    let old = file.name();
+    // The renamed tile keeps the focus wherever the list puts it.
+    let kept = if name::problem(typed).is_none() { typed.to_owned() } else { old.clone() };
+    post(move |app: &mut App| focus_named(app, &kept));
     match name::problem(typed) {
         None => app.model.rename_preset(&file, typed),
         Some(problem) => {
-            let old = file.name();
             app.model.rename_preset(&file, &old);
             if !typed.is_empty() {
                 let (main, instruction) = (app.main.0 as isize, format!("“{typed}” can’t be used as a preset name."));
                 post(move |_| super::dialogs::notice(HWND(main as *mut _), &instruction, &problem));
             }
         }
+    }
+}
+
+/// Focuses the tile of the preset called `name`, once the pane has the
+/// model's list.
+fn focus_named(app: &mut App, name: &str) {
+    sync(app);
+    let Some(p) = &mut app.presets_view else { return };
+    let Some(index) = p.files.iter().position(|f| name::key(&f.name()) == name::key(name)) else { return };
+    set_tab_stop(p, index, true);
+    reveal(p, index);
+    unsafe {
+        let _ = SetFocus(p.tiles[index]);
     }
 }
 
@@ -758,6 +774,10 @@ fn pointer_released(app: &mut App, drop: bool) -> bool {
     let Some(drag) = p.drag.take() else { return false };
     if drop && drag.order.iter().enumerate().any(|(slot, &i)| slot != i) {
         let order: Vec<PresetFile> = drag.order.iter().filter_map(|&i| p.files.get(i).cloned()).collect();
+        // The tile let go of keeps the focus in its new place.
+        if let Some(moved) = p.files.get(drag.from).map(PresetFile::name) {
+            post(move |app: &mut App| focus_named(app, &moved));
+        }
         app.model.move_presets(order);
     }
     place(app);
