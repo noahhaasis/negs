@@ -233,6 +233,7 @@ struct DevelopFailure: View {
 /// under it. A click on one, or a drag inward, starts cropping. Each takes
 /// clicks ±9 pt round its line.
 struct CropTrimMarks: View {
+    let model: EditorModel
     let print: CGRect
     /// The pointer is over the photograph.
     let lit: Bool
@@ -247,6 +248,11 @@ struct CropTrimMarks: View {
                 let handle = CropGeometry.Handle(x: mark.midX < print.midX ? -1 : 1, y: mark.midY < print.midY ? -1 : 1)
                 TrimMark(lit: lit, handle: handle, crop: crop)
                     .frame(width: mark.width + 8, height: mark.height + 18)
+                    // A click here isn't a click outside an open tray: that
+                    // would close it at once, and with the strip hidden the
+                    // photograph would grow from under the click, which then
+                    // never reaches the mark. Cropping closes it instead.
+                    .background(TrayHitArea(model: model))
                     .offset(x: mark.minX - 4, y: mark.minY - 9)
             }
         }

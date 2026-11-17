@@ -502,7 +502,7 @@ struct CanvasArea: View {
             // Not zoomed in: the corners are off the canvas then (§4.3).
             // Nor in Image Only, which crops nothing.
             if !geometry.zoomed, !model.imageOnly, model.image != nil, model.developFailure == nil {
-                CropTrimMarks(print: print, lit: overPrint, crop: model.beginCrop)
+                CropTrimMarks(model: model, print: print, lit: overPrint, crop: model.beginCrop)
             }
         }
     }
