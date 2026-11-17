@@ -96,6 +96,8 @@ import UserNotifications
     private(set) var imageRotation = 0
     /// `io.flip`: mirrored left to right after the crop, before the turns.
     private(set) var imageFlip = false
+    /// How the canvas shows the photograph, for the tray's and presets' tiles.
+    var shownOrientation: Orientation { Orientation(turns: imageRotation, flip: imageFlip) }
     private(set) var isRaw = false
     /// The colour space the preview develops in: the one Save and Export
     /// last used, so editing shows the export's gamut and Fast export and

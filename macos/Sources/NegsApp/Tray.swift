@@ -390,7 +390,8 @@ struct TrayTiles: View {
                                 NegativeTile(selected: model.isNegative, before: tried && visit.before.params["workflow.route"].string == NegativeScan.route,
                                              choose: { visit.inFavourites = false; model.tryStock(stock.id) })
                             } else if let tile = previews.tile(stock.id, paper: paper) {
-                                TrayTile(stock: stock, tile: tile, selected: stock.id == current, before: tried && stock.id == visit.beforeID,
+                                TrayTile(stock: stock, tile: tile, orientation: model.shownOrientation,
+                                         selected: stock.id == current, before: tried && stock.id == visit.beforeID,
                                          favorite: previews.isFavorite(stock.id, paper: paper),
                                          toggleFavorite: { previews.toggleFavorite(stock.id, paper: paper) },
                                          choose: { visit.inFavourites = section.favorites; model.tryStock(stock.id) })
@@ -421,6 +422,8 @@ struct TrayTiles: View {
 private struct TrayTile: View {
     let stock: Stock
     let tile: PreviewTile
+    /// How the canvas shows the photograph: the tile is developed unturned, as the preview is.
+    let orientation: Orientation
     let selected: Bool
     let before: Bool
     let favorite: Bool
@@ -436,7 +439,7 @@ private struct TrayTile: View {
                     .frame(width: StockTrayRules.tile, height: StockTrayRules.picture)
                     .overlay {
                         if let image = tile.image {
-                            Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                            OrientedTileImage(image: image, orientation: orientation)
                                 .frame(width: StockTrayRules.tile, height: StockTrayRules.picture)
                                 .opacity(tile.dimmed ? 0.55 : 1)
                         }
@@ -494,6 +497,27 @@ private struct TrayTile: View {
             }
         }
         .onHover { hovering = $0 }
+    }
+}
+
+/// A tile's developed picture filling its place, mirrored and turned as the
+/// canvas shows the photograph (`io.flip`, then `io.rotate_cw`): the helper
+/// develops tiles unturned, as it does the preview.
+struct OrientedTileImage: View {
+    let image: CGImage
+    let orientation: Orientation
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let quarter = orientation.turns % 2 == 1
+            // Filled into the place as it is before the turn, then mirrored and turned into it.
+            Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: quarter ? size.height : size.width, height: quarter ? size.width : size.height)
+                .scaleEffect(x: orientation.flip ? -1 : 1, y: 1)
+                .rotationEffect(.degrees(Double(90 * orientation.turns)))
+                .position(x: size.width / 2, y: size.height / 2)
+        }
     }
 }
 
