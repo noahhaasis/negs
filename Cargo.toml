@@ -50,6 +50,10 @@ web-time = "1"
 [profile.dev]
 debug = 1
 
+# Shipping settings (CI, web/build.sh). Claude sessions build --release without
+# LTO, with 16 codegen units and incremental (.claude/settings.json): ~10× faster
+# rebuilds, byte-identical renders (all 496 golden renders, 2026-11-17), and
+# render times within 1%. Benchmark against shipped speed with those unset.
 [profile.release]
 lto = "thin"
 codegen-units = 1

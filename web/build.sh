@@ -9,6 +9,9 @@ cd "$(dirname "$0")/.."
 # The repository's toolchain when cargo isn't on PATH (target/linux-toolchain;
 # in a worktree, link it from the main checkout).
 source linux/core-env.sh
+# This build is what gets deployed: keep Cargo.toml's release profile (thin LTO,
+# one codegen unit) even where .claude/settings.json relaxes it for iteration.
+unset CARGO_PROFILE_RELEASE_LTO CARGO_PROFILE_RELEASE_CODEGEN_UNITS CARGO_PROFILE_RELEASE_INCREMENTAL
 for target in wasm32-unknown-unknown; do
   rustup target list --installed | grep -qx "$target" || rustup target add "$target"
 done
