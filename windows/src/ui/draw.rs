@@ -713,6 +713,8 @@ pub fn hover_message(msg: &MSG) {
 fn repaint(hwnd: HWND) {
     // An inspector row brightens as a whole under the pointer.
     super::ink::repaint_row(hwnd);
+    // A preset tile is painted by the view it's in.
+    super::presets::repaint_tile(hwnd);
     unsafe {
         let _ = InvalidateRect(hwnd, None, true);
         if matches!(role(hwnd), Some(Role::Value | Role::Field)) {

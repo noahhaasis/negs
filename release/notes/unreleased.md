@@ -37,3 +37,16 @@
   "N more" lines (View › Show All Controls shows them all), and Output
   ends with the export's size and format above Export Photograph….
   Keys, Tab focus and screen readers work as before.
+- **Presets as tiles.** The Presets panel shows each preset as your
+  photograph developed through it, with its name, film and paper, two to
+  a row; the one you applied last is ringed. Click to apply, drag to
+  sort, drop preset files to import them. Each tile's menu has Rename,
+  Export…, Show in Folder and Delete…, and the arrow keys, Enter, F2 and
+  Del work on the tile with the focus.
+- **Settings in its own window.** File › Settings (Ctrl+,) opens a window
+  in the app's look with the Mac's tabs: Photographs, Speed, Upkeep and
+  Look. Look shows the six themes as small pictures of the window.
+  Changes apply at once; Esc closes it.
+- Settings › Photographs › Fotufilm films can list all of Fotufilm's
+  films, only those made from datasheets, or none. A film already in use
+  stays listed.

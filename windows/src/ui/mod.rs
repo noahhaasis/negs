@@ -23,6 +23,7 @@ mod motion;
 mod panes;
 mod presets;
 mod sampler;
+mod settings;
 mod status;
 mod strip;
 mod theme;
@@ -352,6 +353,7 @@ pub mod testing {
                 panes: none,
                 inspector: inspector::Inspector::headless(),
                 presets_view: None,
+                settings: None,
                 fonts: Fonts { ui: font, bold: font, section: font, small: font, glyph: font, glyph_small: font, line: 16 },
                 dpi: 96,
                 menu: HMENU::default(),
@@ -528,6 +530,8 @@ pub struct App {
     pub inspector: inspector::Inspector,
     /// Created the first time the Presets panel shows.
     presets_view: Option<presets::Panel>,
+    /// File › Settings…, built the first time it opens.
+    settings: Option<settings::Settings>,
     pub fonts: Fonts,
     pub dpi: u32,
     menu: HMENU,
@@ -593,6 +597,7 @@ impl App {
         if flags & (dirty::PRESETS | dirty::CHROME | dirty::LAYOUT) != 0 {
             presets::sync(self);
         }
+        settings::sync(self);
         // The canvas's tools follow the chrome (the film strip's button).
         if flags & (dirty::CANVAS | dirty::ZOOM | dirty::CROP | dirty::CHROME) != 0 {
             canvas::update_scene(self);
@@ -803,7 +808,7 @@ impl App {
             id::SAVE_PREVIEW => dialogs::save(self, false),
             id::EXPORT => dialogs::save(self, true),
             id::EXPORT_LUT => dialogs::export_lut(self),
-            id::SETTINGS => dialogs::settings(self),
+            id::SETTINGS => settings::open(self),
             id::EXIT => unsafe {
                 let _ = PostMessageW(self.main, WM_CLOSE, WPARAM(0), LPARAM(0));
             },
@@ -1409,6 +1414,7 @@ pub fn run() {
             panes,
             inspector,
             presets_view: None,
+            settings: None,
             fonts,
             dpi,
             menu,
@@ -1506,6 +1512,10 @@ fn default_height(main: HWND, dpi: u32) {
 fn pre_translate(msg: &MSG) -> bool {
     let main = main_hwnd();
     draw::hover_message(msg);
+    // The Settings window's keys are its own.
+    if let Some(handled) = settings::pre_translate(msg) {
+        return handled;
+    }
     if titlebar::keys(main, msg) {
         return true;
     }
@@ -1839,6 +1849,7 @@ impl App {
         }
         theme::apply_all();
         presets::retheme(self);
+        settings::retheme(self);
         unsafe {
             let _ = RedrawWindow(self.main, None, None, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME);
         }
