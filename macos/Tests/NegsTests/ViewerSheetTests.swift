@@ -7,11 +7,30 @@ final class ViewerSheetTests: XCTestCase {
     func testDarkroomInksAreTheThemeTokens() {
         let ink = ViewerSheet.darkroom.ink
         XCTAssertEqual(ViewerSheet.darkroom.hex, Theme.Hex.bg)
-        XCTAssertEqual(ink, .darkroom)
+        XCTAssertEqual(ink, .themes)
+        XCTAssertEqual(ViewerSheet.theme.ink, ink, "on Darkroom, the theme's own sheet is Darkroom")
         XCTAssertEqual(ink.hex, SheetInk.Hex(sheet: Theme.Hex.bg, paper: Theme.Hex.paper, label: Theme.Hex.label, dim: Theme.Hex.dim,
                                              track: Theme.Hex.track, line: Theme.Hex.line, accent: Theme.Hex.accent))
         XCTAssertTrue(ink.light)
-        XCTAssertEqual(EnvironmentValues().sheetInk, .darkroom, "outside the canvas, Theme's inks")
+        XCTAssertEqual(EnvironmentValues().sheetInk, .themes, "outside the canvas, Theme's inks")
+    }
+
+    /// Each theme's own sheet draws with that theme's tokens exactly; the
+    /// Darkroom sheet keeps Darkroom's inks under a light theme, with the
+    /// theme's pencil where it holds 3 : 1.
+    @MainActor func testThemesOwnSheetUsesItsTokens() {
+        let defaults = UserDefaults(suiteName: "ViewerSheetTests.themes")!
+        defer { ThemeStore.shared.choose(.darkroom, defaults: defaults) }
+        for theme in AppTheme.allCases {
+            ThemeStore.shared.choose(theme, defaults: defaults)
+            let t = theme.palette.hex, ink = ViewerSheet.theme.ink
+            XCTAssertEqual(ink.hex, SheetInk.Hex(sheet: t.bg, paper: t.paper, label: t.label, dim: t.dim, track: t.track, line: t.line, accent: t.accent), theme.title)
+            XCTAssertEqual(ink.light, theme.palette.dark, theme.title)
+            XCTAssertEqual(ink.highlighter, theme == .lightTable, theme.title)
+            let dark = ViewerSheet.darkroom.ink.hex, d = AppTheme.darkroom.palette.hex
+            XCTAssertEqual([dark.paper, dark.label, dark.dim], [d.paper, d.label, d.dim], theme.title)
+            XCTAssertGreaterThanOrEqual(Theme.contrast(dark.sheet, dark.accent), 3, theme.title)
+        }
     }
 
     /// The inks design/proposals/r27-sheets.html shows (its `inksFor`).

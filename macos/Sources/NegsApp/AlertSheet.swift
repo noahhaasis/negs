@@ -181,8 +181,8 @@ struct AlertSheet: View {
         .background(RoundedRectangle(cornerRadius: Self.radius).fill(Theme.panel))
         .overlay(RoundedRectangle(cornerRadius: Self.radius).strokeBorder(Theme.line, lineWidth: 1))
         .compositingGroup()
-        .shadow(color: .black.opacity(0.7), radius: 25, y: 18)
-        .shadow(color: .black.opacity(0.5), radius: 5, y: 3)
+        .shadow(color: .black.opacity(0.7 * Theme.shadowStrength), radius: 25, y: 18)
+        .shadow(color: .black.opacity(0.5 * Theme.shadowStrength), radius: 5, y: 3)
         .padding(Self.margin)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(alert.title)
@@ -217,7 +217,7 @@ final class AlertCover: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         dim.wantsLayer = true
-        dim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
+        Theme.follow(self) { [weak self] in self?.dim.layer?.backgroundColor = Theme.dimming.cgColor }
         addSubview(dim)
         setAccessibilityElement(false)
     }
@@ -247,7 +247,7 @@ final class AlertPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         isReleasedWhenClosed = false
-        appearance = NSAppearance(named: .darkAqua)
+        Theme.follow(self) { [weak self] in self?.appearance = Theme.appearance }
     }
 
     override var canBecomeKey: Bool { true }

@@ -7,7 +7,7 @@ import SwiftUI
 
 /// Settings' pages, in the order of their tabs.
 enum SettingsTab: String, CaseIterable {
-    case photographs = "Photographs", speed = "Speed", upkeep = "Upkeep"
+    case photographs = "Photographs", speed = "Speed", upkeep = "Upkeep", look = "Look"
 }
 
 /// The Settings window: Newsreader's title in the 38 pt band over the tabs,
@@ -35,12 +35,14 @@ enum SettingsTab: String, CaseIterable {
         if #available(macOS 15, *) { toolbar.allowsDisplayModeCustomization = false }
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
-        window.backgroundColor = Theme.NS.panel
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         band.title = "Settings"
         let frame = EditorFrameView(band: band, content: host)
-        frame.layer?.backgroundColor = Theme.NS.panel.cgColor
+        Theme.follow(frame) { [weak window, weak frame] in
+            window?.backgroundColor = Theme.NS.panel
+            frame?.layer?.backgroundColor = Theme.NS.panel.cgColor
+        }
         frame.addSubview(host)
         frame.addSubview(band)
         window.contentView = frame
@@ -91,7 +93,7 @@ struct SettingsView: View {
     /// Called with the page's height, for the window to fit it.
     var resize: (CGFloat) -> Void = { _ in }
     @AppStorage("settingsTab") private var tab = SettingsTab.photographs
-    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.darkroom
+    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.theme
     @State private var thumbnailBytes: Int?
     @State private var emptyingThumbnails = false
     /// The sent copies' sizes, read when Upkeep opens; nil for no folder.
@@ -116,6 +118,7 @@ struct SettingsView: View {
             case .photographs: photographs
             case .speed: speed
             case .upkeep: upkeep
+            case .look: look
             }
         }
         .frame(width: SettingsWindowController.width, alignment: .top)
@@ -123,7 +126,7 @@ struct SettingsView: View {
         .onGeometryChange(for: CGFloat.self, of: \.size.height) { resize($0) }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.panel)
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, Theme.colorScheme)
     }
 
     // MARK: Photographs: what a new photograph starts with, and what it lies on
@@ -171,10 +174,19 @@ struct SettingsView: View {
                      ? "Each photo remembers its own edits in a small file beside it, such as IMG_0412.CR3.negs, which travels with the folder. A photo you haven’t edited starts with the film and paper above, default Prep and Lab settings and no border; the Image Size and output colour stay."
                      : "Ratings and edits won’t be saved. Reopening a photo starts from the defaults.")
         }
+    }
+
+    // MARK: Look: the theme and the sheet behind the photograph (round 28)
+
+    @ViewBuilder private var look: some View {
+        InkSection(title: "Theme") {
+            ThemePicker()
+            HintText(ThemeStore.shared.theme.hint)
+        }
         InkSection(title: "Viewer") {
             ChoiceRow(title: "Sheet", items: ViewerSheet.allCases.map { .option($0.title, tag: $0.rawValue) },
-                      selection: sheet.rawValue) { sheet = ViewerSheet(rawValue: $0) ?? .darkroom }
-            HintText("The colour behind the photograph. The caption and the label under it change their ink to suit; the panels stay dark.")
+                      selection: sheet.rawValue) { sheet = ViewerSheet(rawValue: $0) ?? .theme }
+            HintText("The colour behind the photograph. Theme’s own follows the theme; a grey is fairer for judging a photograph. The caption and the label under it change their ink to suit.")
         }
     }
 
@@ -319,7 +331,7 @@ private struct StruckRow: View {
             RowLabel(title: title)
             Spacer(minLength: 8)
             Text(value).font(Theme.serif(14.5)).foregroundStyle(Theme.dim).lineLimit(1)
-                .overlay { PencilStroke().pencil().frame(height: 5).offset(y: 1) }
+                .overlay { PencilStroke().strike().frame(height: 5).offset(y: 1) }
         }
         .padding(.horizontal, Theme.Size.gutter)
         .frame(height: Theme.Size.row)

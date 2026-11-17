@@ -127,7 +127,6 @@ final class EdgeSplitView: NSSplitView {
         if #available(macOS 15, *) { toolbar.allowsDisplayModeCustomization = false }
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
-        window.backgroundColor = Theme.NS.bg
         window.isRestorable = false
         // Place the window before adding its content, so the first layout is at the final size.
         if !window.setFrameUsingName("editor") { window.center() }
@@ -140,6 +139,10 @@ final class EdgeSplitView: NSSplitView {
         super.init(window: window)
         shouldCascadeWindows = false
         window.delegate = self
+        Theme.follow(self) { [weak window, weak split] in
+            window?.backgroundColor = Theme.NS.bg
+            split?.splitView.needsDisplay = true
+        }
 
         model.undoManager = window.undoManager
         model.presentBatch = { [weak self] view in self?.showBatchPopover(below: view) }
@@ -503,7 +506,7 @@ final class EdgeSplitView: NSSplitView {
         content.sizingOptions = .preferredContentSize
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.appearance = Theme.appearance
         popover.contentViewController = content
         popover.delegate = self
         batchPopover = popover

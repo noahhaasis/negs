@@ -61,7 +61,7 @@ extension EditorModel {
 /// caption and label; what differs between them is underlined in pencil.
 struct CompareCanvas: View {
     let model: EditorModel
-    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.darkroom
+    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.theme
     @State private var link = ZoomLink()
 
     var body: some View {
@@ -206,7 +206,7 @@ private struct Marked: View {
     var body: some View {
         Text(text).font(font).foregroundStyle(marked ? ink.paper : ink.label).lineLimit(1).fixedSize()
             .overlay(alignment: .bottom) {
-                if marked { PencilStroke().pencil(ink.accent).frame(height: 5).offset(y: 5).allowsHitTesting(false) }
+                if marked { PencilStroke().pencil(ink.highlighter ? nil : ink.accent, highlighter: ink.highlighter).frame(height: 5).offset(y: 5).allowsHitTesting(false) }
             }
     }
 }
@@ -423,7 +423,7 @@ private struct Knob: View {
     var body: some View {
         Text("‹›").font(Theme.serif(14, weight: 600)).tracking(3).foregroundStyle(ink.paper)
             .frame(width: 32, height: 32)
-            .background(Circle().fill(Color(red: 12 / 255, green: 11 / 255, blue: 10 / 255).opacity(0.85)))
+            .background(Circle().fill(ink.sheet.opacity(0.85)))
             .overlay(Circle().strokeBorder(ink.paper, lineWidth: 1.5))
             .contentShape(Circle())
             .accessibilityLabel("Slider")

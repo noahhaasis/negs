@@ -2,6 +2,20 @@
 
 ## Mac
 
+- **Themes.** Settings › Look has five themes. Darkroom is the dark one
+  you know, and stays the default. Contact sheet is ivory paper with a
+  black film strip and a red pencil. Light table is white with a yellow
+  highlighter. Daylight is a mid grey, quiet for long sessions. Plain is
+  black on light grey in the system font, with blue marks, the easiest
+  to read. Panels
+  sit a tone darker than the sheet, so the photograph's surround never
+  merges with them. The sheet behind the photograph now defaults to
+  Theme's own. The fixed sheets are still there, and the greys are
+  fairer for judging a photograph. The Viewer setting moved from
+  Photographs to Look. View › Theme switches too. A white mat on a
+  light sheet gets a soft shade around it, as a black border gets a
+  light on the dark one.
+
 - **RAW + JPEG.** If you shoot RAW+JPEG, a RAW and the camera's JPEG
   with the same name (IMG_0412.CR3 and IMG_0412.JPG) are now one
   photo in the strip and grid, marked +JPG. The RAW is the one that

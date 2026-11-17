@@ -95,6 +95,9 @@ struct FocusBox: View {
 final class FocusAnchorView: NSView, InkFocusTarget {
     var activate: (() -> Void)?
     var delete: (() -> Void)?
+    /// One of a row of choices (the theme swatches): ← → step to the
+    /// anchor beside it in the row, never out of it.
+    var row = false
     var enabled = true
     var takesKeyboardFocus: Bool { enabled }
     private let box = CAShapeLayer()
@@ -104,7 +107,7 @@ final class FocusAnchorView: NSView, InkFocusTarget {
         wantsLayer = true
         layer?.masksToBounds = false
         box.fillColor = nil
-        box.strokeColor = Theme.NS.paper.cgColor
+        Theme.follow(self) { [weak self] in self?.box.strokeColor = Theme.NS.paper.cgColor }
         box.lineWidth = Theme.Size.focusLine
         box.isHidden = true
         box.actions = ["hidden": NSNull(), "path": NSNull()]
@@ -132,18 +135,31 @@ final class FocusAnchorView: NSView, InkFocusTarget {
         case 48: if let root = InkKeyLoop.root(of: self) { InkKeyLoop.advance(in: root, from: self, forward: !event.modifierFlags.contains(.shift)) }
         case 125: if let root = InkKeyLoop.root(of: self) { InkKeyLoop.advance(in: root, from: self, forward: true) }
         case 126: if let root = InkKeyLoop.root(of: self) { InkKeyLoop.advance(in: root, from: self, forward: false) }
+        case 123, 124 where row: stepInRow(forward: event.keyCode == 124)
         default: super.keyDown(with: event)
         }
+    }
+
+    private func stepInRow(forward: Bool) {
+        guard let root = InkKeyLoop.root(of: self) else { return }
+        let all = InkKeyLoop.targets(in: root)
+        guard let index = all.firstIndex(where: { $0 === self }) else { return }
+        let next = index + (forward ? 1 : -1)
+        guard all.indices.contains(next), let neighbour = all[next] as? FocusAnchorView, neighbour.row,
+              abs(neighbour.convert(neighbour.bounds, to: nil).midY - convert(bounds, to: nil).midY) < 4 else { return }
+        window?.makeFirstResponder(neighbour)
     }
 }
 
 private struct FocusAnchor: NSViewRepresentable {
     let activate: (() -> Void)?
     var delete: (() -> Void)?
+    var row = false
     func makeNSView(context: Context) -> FocusAnchorView { FocusAnchorView() }
     func updateNSView(_ view: FocusAnchorView, context: Context) {
         view.activate = activate
         view.delete = delete
+        view.row = row
         view.enabled = context.environment.isEnabled
     }
 }
@@ -151,9 +167,9 @@ private struct FocusAnchor: NSViewRepresentable {
 extension View {
     /// Takes keyboard focus, shows the cream box only when the keyboard
     /// moved it there, and runs `activate` on Space or Return (and `delete`,
-    /// if given, on ⌫ or ⌦).
-    func inkFocus(activate: (() -> Void)? = nil, delete: (() -> Void)? = nil) -> some View {
-        background(FocusAnchor(activate: activate, delete: delete))
+    /// if given, on ⌫ or ⌦). In a `row` of choices, ← → move between them.
+    func inkFocus(activate: (() -> Void)? = nil, delete: (() -> Void)? = nil, row: Bool = false) -> some View {
+        background(FocusAnchor(activate: activate, delete: delete, row: row))
     }
 
     /// The pencil under a word, 5 pt tall, just under its baseline.
@@ -282,7 +298,7 @@ final class ClosureMenuItem: NSMenuItem {
 @MainActor func popUpChoiceMenu(_ items: [ChoiceItem], selected: String, under view: NSView?, choose: @escaping (String) -> Void) {
     guard let view else { return }
     let menu = NSMenu()
-    menu.appearance = NSAppearance(named: .darkAqua)
+    menu.appearance = Theme.appearance
     menu.autoenablesItems = false
     for item in items {
         switch item {
@@ -449,7 +465,7 @@ struct PencilButtonStyle: ButtonStyle {
                 .foregroundStyle(Theme.onAccent)
                 .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
                 .padding(.bottom, 2)
-                .background(RoundedRectangle(cornerRadius: 3).fill(Theme.accent))
+                .background(RoundedRectangle(cornerRadius: 3).fill(Theme.fill))
                 .brightness(configuration.isPressed ? -0.12 : hovered ? 0.05 : 0)
                 .offset(y: configuration.isPressed ? 1 : 0)
                 .contentShape(Rectangle())
@@ -513,7 +529,7 @@ struct InkSection<Content: View>: View {
                     Text(title.uppercased())
                         .font(Theme.serif(11, weight: 700)).tracking(11 * 0.13)
                         .foregroundStyle(skipped == nil ? Theme.label : Theme.dim)
-                        .overlay { if skipped != nil { PencilStroke().pencil().frame(height: 5).offset(y: 1) } }
+                        .overlay { if skipped != nil { PencilStroke().strike().frame(height: 5).offset(y: 1) } }
                     if let skipped {
                         Text("— \(skipped)").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim).padding(.leading, 10)
                     }
@@ -583,7 +599,7 @@ struct InkModule<Content: View>: View {
                 Text(title)
                     .font(Theme.serif(16, weight: off || skipped ? 400 : 600))
                     .foregroundStyle(off || skipped ? Theme.dim : Theme.paper)
-                    .overlay { if skipped { PencilStroke().pencil().frame(height: 5).offset(y: 1) } }
+                    .overlay { if skipped { PencilStroke().strike().frame(height: 5).offset(y: 1) } }
                     .tooltip(help)
                     // The chevron's turn and the dot, in words: VoiceOver
                     // opens and closes the module from its name.

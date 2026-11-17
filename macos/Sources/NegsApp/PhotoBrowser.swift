@@ -558,7 +558,7 @@ private struct EnclosingScrollView: NSViewRepresentable {
 
 private struct StripNote: View {
     let text: String
-    var body: some View { Text(text).font(Theme.serif(14, italic: true)).foregroundStyle(Theme.dim) }
+    var body: some View { Text(text).font(Theme.serif(14, italic: true)).foregroundStyle(Theme.Film.dim) }
 }
 
 /// One frame of the strip: the picture, dimmed unless it's current, and the
@@ -593,9 +593,9 @@ private struct StripFrame: View {
                     .modifier(PlaceReport(image: image, placed: placed))
                 ZStack(alignment: .top) {
                     if current {
-                        PencilStroke().pencil(width: PhotoBrowser.pencilWidth).frame(height: Theme.pencilHeight).padding(.top, 3)
+                        PencilStroke().pencil(onFilm: true, lift: 0, width: PhotoBrowser.pencilWidth).frame(height: Theme.pencilHeight).padding(.top, 3)
                     } else if selected {
-                        Rectangle().fill(Theme.label).frame(height: 1.5).padding(.top, 3)
+                        Rectangle().fill(Theme.Film.label).frame(height: 1.5).padding(.top, 3)
                     }
                 }
                 .frame(width: width, height: Theme.Size.stripRebate, alignment: .top)
@@ -639,7 +639,7 @@ private struct StripPicture: View {
             if let image {
                 Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
             } else {
-                Theme.blank
+                Theme.Film.blank
             }
         }
         .frame(width: width, height: PhotoBrowser.pictureHeight)
@@ -699,7 +699,7 @@ struct StripLeader: View {
                 .frame(width: Self.width, height: hovered ? Self.raised : Self.height)
                 .overlay(alignment: .topTrailing) {
                     LeaderArrow()
-                        .stroke(hovered ? Theme.paper : Theme.label, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                        .stroke(hovered ? Theme.Film.paper : Theme.Film.label, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
                         .frame(width: 12.7, height: 6.4)
                         .rotationEffect(.degrees(shown ? 180 : 0))
                         // The arrow's box: 9 pt square, 22 pt from the right, 10 from the top.

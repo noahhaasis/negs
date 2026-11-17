@@ -66,6 +66,49 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(width("1984"), width("3656"), accuracy: 0.01)
     }
 
+    /// Round 28: in every theme, words reach 4.5 : 1 and marks 3 : 1 on
+    /// what they're read against: the panel, the sheet, the grid and (with
+    /// the film's own inks) the film; Export's words on its fill.
+    func testEveryThemeMeetsContrast() {
+        for theme in AppTheme.allCases {
+            let h = theme.palette.hex, f = theme.palette.filmHex
+            func check(_ ink: UInt32, on bg: UInt32, _ floor: Double, _ what: String) {
+                XCTAssertGreaterThanOrEqual(Theme.contrast(ink, bg), floor, String(format: "\(theme.title): \(what) %06x on %06x", ink, bg))
+            }
+            for (name, ink) in [("dim", h.dim), ("label", h.label), ("paper", h.paper), ("warn", h.warn)] {
+                for bg in [h.panel, h.bg, h.grid] { check(ink, on: bg, 4.5, name) }
+            }
+            for (name, ink) in [("dim", f.dim), ("label", f.label), ("paper", f.paper)] { check(ink, on: h.film, 4.5, "film " + name) }
+            for bg in [h.panel, h.bg, h.grid] { check(h.accent, on: bg, 3, "pencil") }
+            check(f.accent, on: h.film, 3, "film pencil")
+            check(h.onFill, on: h.fill, 4.5, "Export's words")
+            XCTAssertNotEqual(h.panel, h.bg, "\(theme.title): the panel stands apart from the sheet")
+            if !theme.palette.dark {
+                XCTAssertLessThan(Theme.luminance(h.panel), Theme.luminance(h.bg), "\(theme.title): the panel is a tone darker than the sheet (round 28)")
+            }
+        }
+        XCTAssertEqual(AppTheme.darkroom.palette.hex, AppTheme.darkroom.palette.filmHex, "Darkroom's film inks are its own")
+    }
+
+    /// The stored choice: Darkroom by default and for anything unknown;
+    /// choosing stores it and tells AppKit's views.
+    @MainActor func testChoosingAThemeStoresItAndNotifies() {
+        let defaults = UserDefaults(suiteName: "ThemeTests.choose")!
+        defaults.removePersistentDomain(forName: "ThemeTests.choose")
+        XCTAssertEqual(AppTheme.stored(defaults), .darkroom)
+        defaults.set("neon", forKey: AppTheme.key)
+        XCTAssertEqual(AppTheme.stored(defaults), .darkroom)
+        let posted = expectation(forNotification: Theme.didChange, object: nil)
+        ThemeStore.shared.choose(.daylight, defaults: defaults)
+        wait(for: [posted], timeout: 1)
+        XCTAssertEqual(AppTheme.stored(defaults), .daylight)
+        XCTAssertEqual(Theme.Hex.panel, 0xd8d5cf)
+        XCTAssertEqual(Theme.colorScheme, .light)
+        ThemeStore.shared.choose(.darkroom, defaults: defaults)
+        XCTAssertEqual(Theme.Hex.panel, 0x161513)
+        XCTAssertEqual(Theme.colorScheme, .dark)
+    }
+
     /// §1: body text at least 4.5:1 on what it's read against.
     func testTextColoursMeetContrast() {
         for text in [Theme.Hex.dim, Theme.Hex.label, Theme.Hex.paper, Theme.Hex.warn] {

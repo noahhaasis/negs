@@ -44,19 +44,22 @@ final class InkSliderView: NSView, InkFocusTarget {
         layer?.masksToBounds = false
         focusRingType = .none
         for sublayer in [track, tick, fill, knob, focus] { layer?.addSublayer(sublayer) }
-        track.backgroundColor = Theme.NS.track.cgColor
-        tick.backgroundColor = Theme.NS.dim.cgColor
-        fill.backgroundColor = Theme.NS.accent.cgColor
         knob.lineWidth = 1.5
         knob.path = CGPath(ellipseIn: CGRect(x: -Self.knobSize / 2, y: -Self.knobSize / 2, width: Self.knobSize, height: Self.knobSize), transform: nil)
         focus.fillColor = nil
-        focus.strokeColor = Theme.NS.paper.cgColor
         focus.lineWidth = Theme.Size.focusLine
         focus.isHidden = true
         for sublayer in [track, tick, fill, knob, focus] { sublayer.actions = Self.noAnimation }
         setAccessibilityElement(true)
         setAccessibilityRole(.slider)
-        restyle()
+        Theme.follow(self) { [weak self] in
+            guard let self else { return }
+            track.backgroundColor = Theme.NS.track.cgColor
+            tick.backgroundColor = Theme.NS.dim.cgColor
+            fill.backgroundColor = Theme.NS.accent.cgColor
+            focus.strokeColor = Theme.NS.paper.cgColor
+            restyle()
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -373,8 +376,10 @@ struct ValueField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = Theme.serifFont(14.5) as NSFont
-        field.textColor = Theme.NS.paper
+        Theme.follow(field) { [weak field] in
+            field?.font = Theme.serifFont(14.5) as NSFont
+            field?.textColor = Theme.NS.paper
+        }
         field.alignment = .right
         field.cell?.isScrollable = true
         field.setAccessibilityLabel(title)

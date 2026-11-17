@@ -324,7 +324,7 @@ private struct OriginalWord: View {
     func popUp(above view: NSView?) {
         guard let view else { return }
         let menu = NSMenu(title: "Original")
-        menu.appearance = NSAppearance(named: .darkAqua)
+        menu.appearance = Theme.appearance
         let font = Theme.serifFont(15, italic: true) as NSFont
         for mode in OriginalMode.allCases {
             let item = menu.addItem(withTitle: mode.title, action: #selector(choose(_:)), keyEquivalent: "")

@@ -6,57 +6,105 @@ import SwiftUI
 /// The T2 · Label design's tokens: colours, type and sizes, the pencil
 /// stroke and rings. Every view reads from here, so the design changes in
 /// one place. The values come from design/proposals/IMPLEMENTATION.md §2
-/// (and final.css, the mockup's tokens). Dark only: the app ignores the
-/// system's light appearance.
+/// (and final.css, the mockup's tokens). The colours belong to the chosen
+/// theme (`AppTheme`, round 28: IMPLEMENTATION-THEMES.md); every colour
+/// below reads the live one, so SwiftUI views redraw when it changes.
 enum Theme {
     // MARK: Colour (§2.1), sRGB
 
+    /// The chosen theme's palette.
+    static var palette: Palette { ThemeStore.shared.palette }
+
     /// The colour tokens as 0xRRGGBB, for the contrast tests and the hex
-    /// lookups below.
+    /// lookups below. The chosen theme's.
     enum Hex {
-        /// The sheet the photograph lies on (canvas, grid).
-        static let bg: UInt32 = 0x0c0b0a
-        /// The inspector, a shade lighter than the sheet; also the alert sheet.
-        static let panel: UInt32 = 0x161513
+        /// The sheet the photograph lies on (canvas, title band).
+        static var bg: UInt32 { palette.hex.bg }
+        /// The inspector, a shade off the sheet; also the alert sheet.
+        static var panel: UInt32 { palette.hex.panel }
         /// The strip, the tray, the leader.
-        static let film: UInt32 = 0x000000
+        static var film: UInt32 { palette.hex.film }
+        /// Behind the grid.
+        static var grid: UInt32 { palette.hex.grid }
         /// Rules between sections and modules.
-        static let line: UInt32 = 0x2b2925
+        static var line: UInt32 { palette.hex.line }
         /// Slider track, outlines, separators, outlined buttons. Only on
         /// things whose words or shape already say what they are.
-        static let track: UInt32 = 0x47443d
+        static var track: UInt32 { palette.hex.track }
         /// Values at their default, hints, secondary words.
-        static let dim: UInt32 = 0x918a7c
+        static var dim: UInt32 { palette.hex.dim }
         /// Control labels.
-        static let label: UInt32 = 0xbeb6a7
+        static var label: UInt32 { palette.hex.label }
         /// What's being read: names, changed values, the focus box.
-        static let paper: UInt32 = 0xf2ebdd
-        /// The pencil. Only ever a mark, never a text colour; it fills only
-        /// the Export button and crop's Done button.
-        static let accent: UInt32 = 0xffd23f
+        static var paper: UInt32 { palette.hex.paper }
+        /// The pencil. Only ever a mark, never a text colour.
+        static var accent: UInt32 { palette.hex.accent }
+        /// The Export and Done buttons' fill.
+        static var fill: UInt32 { palette.hex.fill }
         /// Errors and warnings, always as words.
-        static let warn: UInt32 = 0xff8a66
+        static var warn: UInt32 { palette.hex.warn }
         /// The text on the Export and Done buttons.
-        static let onAccent: UInt32 = 0x14120c
+        static var onAccent: UInt32 { palette.hex.onFill }
         /// A tile not yet developed.
-        static let blank: UInt32 = 0x1c1b18
+        static var blank: UInt32 { palette.hex.blank }
     }
 
-    static let bg = color(Hex.bg), panel = color(Hex.panel), film = color(Hex.film)
-    static let line = color(Hex.line), track = color(Hex.track), dim = color(Hex.dim)
-    static let label = color(Hex.label), paper = color(Hex.paper), accent = color(Hex.accent)
-    static let warn = color(Hex.warn), onAccent = color(Hex.onAccent), blank = color(Hex.blank)
+    static var bg: Color { palette.colors.bg }
+    static var panel: Color { palette.colors.panel }
+    static var film: Color { palette.colors.film }
+    static var grid: Color { palette.colors.grid }
+    static var line: Color { palette.colors.line }
+    static var track: Color { palette.colors.track }
+    static var dim: Color { palette.colors.dim }
+    static var label: Color { palette.colors.label }
+    static var paper: Color { palette.colors.paper }
+    static var accent: Color { palette.colors.accent }
+    static var fill: Color { palette.colors.fill }
+    static var warn: Color { palette.colors.warn }
+    static var onAccent: Color { palette.colors.onFill }
+    static var blank: Color { palette.colors.blank }
 
-    /// The same tokens for AppKit and Core Animation.
+    /// The same tokens for AppKit and Core Animation. Colours set once on a
+    /// view or layer must be set again on `Theme.didChange`.
     enum NS {
-        static let bg = nsColor(Hex.bg), panel = nsColor(Hex.panel), film = nsColor(Hex.film)
-        static let line = nsColor(Hex.line), track = nsColor(Hex.track), dim = nsColor(Hex.dim)
-        static let label = nsColor(Hex.label), paper = nsColor(Hex.paper), accent = nsColor(Hex.accent)
-        static let warn = nsColor(Hex.warn), onAccent = nsColor(Hex.onAccent), blank = nsColor(Hex.blank)
+        static var bg: NSColor { palette.ns.bg }
+        static var panel: NSColor { palette.ns.panel }
+        static var film: NSColor { palette.ns.film }
+        static var line: NSColor { palette.ns.line }
+        static var track: NSColor { palette.ns.track }
+        static var dim: NSColor { palette.ns.dim }
+        static var label: NSColor { palette.ns.label }
+        static var paper: NSColor { palette.ns.paper }
+        static var accent: NSColor { palette.ns.accent }
+        static var warn: NSColor { palette.ns.warn }
+        static var onAccent: NSColor { palette.ns.onFill }
+        static var blank: NSColor { palette.ns.blank }
     }
+
+    /// The inks on the film (the strip, the tray, the leader). The same as
+    /// the theme's, except in Contact sheet, where the film stays black.
+    enum Film {
+        static var paper: Color { palette.filmColors.paper }
+        static var label: Color { palette.filmColors.label }
+        static var dim: Color { palette.filmColors.dim }
+        static var track: Color { palette.filmColors.track }
+        static var line: Color { palette.filmColors.line }
+        static var accent: Color { palette.filmColors.accent }
+        static var blank: Color { palette.filmColors.blank }
+        static var nsPaper: NSColor { palette.filmNS.paper }
+        static var nsDim: NSColor { palette.filmNS.dim }
+    }
+
+    /// The appearance for menus, pop-overs and panels AppKit draws itself.
+    static var appearance: NSAppearance? { NSAppearance(named: palette.dark ? .darkAqua : .aqua) }
+    /// The same for SwiftUI.
+    static var colorScheme: ColorScheme { palette.dark ? .dark : .light }
+    /// Posted on the main thread after the theme changes, for AppKit views
+    /// and layers that set their colours once.
+    static let didChange = Notification.Name("NegsThemeDidChange")
 
     /// Text selection: the pencil at 0.32, never system blue (§4.9).
-    static let selection = accent.opacity(0.32)
+    static var selection: Color { accent.opacity(0.32) }
     /// Outside the crop box the photograph darkens with this (§4.10).
     static let cropShade = Color(.sRGB, red: 8 / 255, green: 7 / 255, blue: 6 / 255, opacity: 0.6)
     /// Disabled controls fade to this opacity (§2.1: 0.35–0.38).
@@ -134,9 +182,17 @@ enum Theme {
         Font(serifFont(size, weight: weight, italic: italic))
     }
     /// The same face as a Core Text font, for AppKit text and layers.
+    /// Plain sets SF instead, upright, at 0.95 of the size: the same cap
+    /// height as Newsreader's (its x-height still a fifth taller), and
+    /// near the same width, so the layouts made for Newsreader still fit.
     static func serifFont(_ size: CGFloat, weight: CGFloat = 400, italic: Bool = false) -> CTFont {
-        let key = FontKey(size: size, weight: weight, italic: italic)
+        let key = FontKey(size: size, weight: weight, italic: italic, plain: palette.plain)
         if let font = fontCache.withLock({ $0[key] }) { return font }
+        if key.plain {
+            let font = NSFont.monospacedDigitSystemFont(ofSize: size * 0.95, weight: weight >= 650 ? .semibold : weight >= 500 ? .medium : .regular) as CTFont
+            fontCache.withLock { $0[key] = font }
+            return font
+        }
         let font = Fonts.make(key)
         // A fallback isn't kept, so Newsreader replaces it once it's read.
         if Fonts.loaded { fontCache.withLock { $0[key] = font } }
@@ -147,7 +203,7 @@ enum Theme {
         .system(size: size, weight: weight).monospacedDigit()
     }
 
-    struct FontKey: Hashable { let size: CGFloat, weight: CGFloat, italic: Bool }
+    struct FontKey: Hashable { let size: CGFloat, weight: CGFloat, italic: Bool; var plain = false }
     private static let fontCache = OSAllocatedUnfairLock(initialState: [FontKey: CTFont]())
 
     /// Finding and reading the bundled fonts.
@@ -233,6 +289,8 @@ enum Theme {
     /// The pencil stroke's width: 2.1 pt, not scaled with the stroke.
     static let pencilWidth: CGFloat = 2.1
     /// The pencil's height under a word: drawn 5–6 pt tall under the baseline.
+    /// The highlighter's width (Light table): r28-light.html's 11 pt band, less its round ends.
+    static let highlighterWidth: CGFloat = 8.5
     static let pencilHeight: CGFloat = 6
 }
 
@@ -241,10 +299,19 @@ enum Theme {
 /// stretched to the rect. Stroke it with `Theme.pencilWidth`, round caps,
 /// in `accent` (`.pencil()` below).
 struct PencilStroke: Shape {
-    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect)) }
+    /// A straight line through the middle instead (Plain).
+    var plain = Theme.palette.plain
+
+    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect, plain: plain)) }
 
     /// For `CAShapeLayer`s: the same path, stretched to `rect`.
-    static func cgPath(in rect: CGRect) -> CGPath {
+    static func cgPath(in rect: CGRect, plain: Bool = Theme.palette.plain) -> CGPath {
+        if plain {
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: rect.minX + 1, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX - 1, y: rect.midY))
+            return path
+        }
         let sx = rect.width / 100, sy = rect.height / 6
         func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * sx, y: rect.minY + y * sy) }
         let path = CGMutablePath()
@@ -257,10 +324,27 @@ struct PencilStroke: Shape {
 }
 
 extension Shape {
-    /// Strokes this shape as the pencil: 2.1 pt in `accent` (or the sheet's
-    /// pencil, on the canvas), round caps.
-    func pencil(_ color: Color = Theme.accent, width: CGFloat = Theme.pencilWidth) -> some View {
-        stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+    /// The mark under a word: the pencil, 2.1 pt in `accent` (the film's on
+    /// the strip and tray), round caps. With no colour given, on a theme with
+    /// a highlighter (Light table) it's a yellow swipe behind the lower half
+    /// of the word instead, lifted `lift` pt from where the pencil would be.
+    @ViewBuilder
+    func pencil(_ color: Color? = nil, onFilm: Bool = false, highlighter: Bool? = nil, lift: CGFloat = 5,
+                width: CGFloat = Theme.pencilWidth) -> some View {
+        if color == nil, highlighter ?? Theme.palette.highlighter {
+            stroke(Theme.color(Palette.highlighterInk, opacity: Palette.highlighterOpacity),
+                   style: StrokeStyle(lineWidth: Theme.highlighterWidth, lineCap: .round, lineJoin: .round))
+                .offset(y: -lift)
+                .blendMode(.multiply)
+        } else {
+            stroke(color ?? (onFilm ? Theme.Film.accent : Theme.accent), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    /// A line struck through words (skipped, not printed): always a thin
+    /// pencil line, never the highlighter.
+    func strike(_ color: Color? = nil) -> some View {
+        stroke(color ?? Theme.accent, style: StrokeStyle(lineWidth: Theme.pencilWidth, lineCap: .round, lineJoin: .round))
     }
 }
 
@@ -287,16 +371,25 @@ struct PencilRing: Shape {
         static let number = Radii(horizontal: (0.47, 0.53, 0.50, 0.50), vertical: (0.56, 0.44, 0.58, 0.42), relative: true)
     }
     var radii: Radii = .box
+    /// A plain rounded rectangle, or an ellipse round a number, drawn
+    /// upright (Plain).
+    var plain = Theme.palette.plain
 
-    /// The rotation a ring is drawn at: −0.8° round thumbnails, −1° round tiles.
-    static let tilt = Angle.degrees(-0.8)
+    /// The rotation a ring is drawn at: −0.8° round thumbnails, −1° round
+    /// tiles; none in Plain.
+    static var tilt: Angle { tilt(-0.8) }
+    static func tilt(_ degrees: Double) -> Angle { Theme.palette.plain ? .zero : .degrees(degrees) }
     static let lineWidth: CGFloat = 2
     /// How far a ring sits outside the picture it rings.
     static let outset = CGSize(width: 7, height: 6)
 
-    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect, radii: radii)) }
+    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect, radii: radii, plain: plain)) }
 
-    static func cgPath(in rect: CGRect, radii: Radii = .box) -> CGPath {
+    static func cgPath(in rect: CGRect, radii: Radii = .box, plain: Bool = Theme.palette.plain) -> CGPath {
+        if plain {
+            let r = radii.relative ? min(rect.width, rect.height) / 2 : min(6, rect.width / 2, rect.height / 2)
+            return CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+        }
         let (w, h) = (rect.width, rect.height)
         var rx = [radii.horizontal.0, radii.horizontal.1, radii.horizontal.2, radii.horizontal.3]
         var ry = [radii.vertical.0, radii.vertical.1, radii.vertical.2, radii.vertical.3]
