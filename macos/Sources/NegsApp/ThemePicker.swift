@@ -55,7 +55,7 @@ private struct ThemeSwatch: View {
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onHover { hovered = $0 }
-        .inkFocus(activate: choose)
+        .inkFocus(activate: choose, row: true)
         .help(theme.hint)
         .accessibilityLabel(theme.title)
         .accessibilityHint(theme.hint)
