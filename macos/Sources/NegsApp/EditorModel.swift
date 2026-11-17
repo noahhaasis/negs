@@ -1793,6 +1793,8 @@ import UserNotifications
         context.written = edits; context.migrating = false
         context.exists = edits != nil || summary.rating > 0 || summary.flag != nil
         photoSidecar = context
+        // Saved: the strip shows the preview of them, if it's in.
+        saveOpenThumbnail(whileOpen: true)
         return Task { [weak self] in
             let failures = await sidecars.flush()
             for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
@@ -2649,13 +2651,20 @@ import UserNotifications
     }
 
     /// The open photograph's developed thumbnail, made from the preview on
-    /// screen, so it costs no render: on leaving it for another photograph
-    /// or the grid. One without edits only while it shows what a new
+    /// screen, so it costs no render: once the preview of its saved edits is
+    /// in (a render landing, or its sidecar written), so the strip
+    /// follows the edit, and on leaving it for another photograph or the
+    /// grid. Once per look. One without edits only while it shows what a new
     /// photograph opens with (it may predate a new default).
-    private func saveOpenThumbnail() {
+    /// `whileOpen`: filed as the edit settles, when the library's look may
+    /// not have caught up with the sidecar yet (an undone paste): only under
+    /// the look of the edits written for what's shown.
+    private func saveOpenThumbnail(whileOpen: Bool = false) {
         guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
               !brightnessMatchPending, let look = thumbnailLook(for: item), thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
               library.looks[item] != nil ? shownEditsSaved : Self.uneditedLook(of: state) == look,
+              !whileOpen || library.looks[item] == nil || photoSidecar.map({ $0.photo == source
+                  && PhotoSidecar.look(of: $0.written, defaultsVersion: $0.defaultsVersion) == look }) == true,
               let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
         #if DEBUG
         thumbnailSaved?(item, look, Self.userEdits(state), "thumbnail")
@@ -3584,6 +3593,9 @@ import UserNotifications
                 if revision == currentRevision, interactiveScale == nil {
                     renderID = id; previewCurrent = true; hideActivity()
                     surveyNegativeIfNeeded()
+                    // The strip and grid show the open photograph as edited,
+                    // not only once it's left (if its edits are saved already).
+                    saveOpenThumbnail(whileOpen: true)
                     showingCachedPreview = false
                     renderAtExportSize = result["export_resolution"].bool
                     renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
@@ -4243,6 +4255,9 @@ import UserNotifications
     @ObservationIgnored private var negativeRequest = 0
     /// The newest request finds the base (and balances the print for it).
     @ObservationIgnored private var negativeDetecting = false
+    /// The newest request moves the filtration to another paper, from the
+    /// paper it was balanced for (`from`), while it's running.
+    @ObservationIgnored private var negativeRebalancing: (request: Int, from: String)?
     /// Answers folded into the edit that asked for them, newest last: undo
     /// or redo putting that edit back (one made before the answer came)
     /// puts its answer back with it.
@@ -4414,6 +4429,7 @@ import UserNotifications
         guard negativeRequest == request else { return }
         negativeWorking = nil
         negativeDetecting = false
+        negativeRebalancing = nil
     }
 
     /// `request`'s answer still fits: it's the newest, for this photograph,
@@ -4485,8 +4501,20 @@ import UserNotifications
         } else if state.paper != old.paper {
             // A detection still running balances for the old paper: find
             // the base again, which balances for the new one.
-            if negativeDetecting { detectNegativeBase(undoable: false) } else { rebalanceNegative() }
+            if negativeDetecting {
+                detectNegativeBase(undoable: false)
+            } else if Self.filtration(state) == Self.filtration(old) {
+                // The filtration came along to the new paper: moved by the
+                // papers' difference. One that came with the paper (Esc in
+                // the tray putting the frame back) is the paper's already.
+                rebalanceNegative(from: negativeRebalancing.flatMap { $0.request == negativeRequest ? $0.from : nil } ?? old.paper)
+            }
         }
+    }
+
+    /// A negative's magenta and yellow.
+    private static func filtration(_ state: EditState) -> [JSONValue?] {
+        [state.params["enlarger.m_filter_shift"], state.params["enlarger.y_filter_shift"]]
     }
 
     /// The scan doesn't look like a colour negative, in Prep's words.
@@ -4623,20 +4651,26 @@ import UserNotifications
         return result["print_exposure"]
     }
 
-    /// The print balanced again for a new paper on the same base, and the
-    /// exposure metered, folded into the edit that changed the paper.
-    private func rebalanceNegative() {
+    /// The print balanced again for a new paper on the same base: the
+    /// filtration moved by the difference between `from`'s neutral and the
+    /// new paper's, so an Auto print, a picked grey or a hand-set filter
+    /// stays as it was, and the exposure metered; folded into the edit
+    /// that changed the paper.
+    private func rebalanceNegative(from: String) {
         guard isNegative, let engine, let source else { return }
         let request = beginNegative("Balancing the print…")
+        negativeRebalancing = (request, from)
         let generation = sourceGeneration, asked = state, snapshot = renderState, key = negativeAnswerKey(state)
         Task {
             defer { endNegative(request) }
             do {
-                // Trying paper after paper balances only for the last.
+                // Trying paper after paper balances only for the last, from
+                // the paper the filtration was balanced for.
                 try await Task.sleep(for: Self.negativeSettle)
                 guard negativeCurrent(request, generation: generation, key: key) else { return }
-                let (_, result) = try await engine.request(["command": .string("balance_print"), "film": .string(snapshot.film),
-                                                            "paper": .string(snapshot.paper), "params": snapshot.params])
+                let (_, result) = try await engine.request(["command": .string("negative_paper"), "film": .string(snapshot.film),
+                                                            "from_paper": .string(from), "paper": .string(snapshot.paper),
+                                                            "params": snapshot.params])
                 guard negativeCurrent(request, generation: generation, key: key) else { return }
                 var changes = ["enlarger.m_filter_shift": result["m_filter_shift"], "enlarger.y_filter_shift": result["y_filter_shift"]]
                 if let exposure = await meterNegative(snapshot, changes, engine: engine, source: source, generation: generation) {

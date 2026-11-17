@@ -461,9 +461,11 @@ struct CanvasArea: View {
 
     @ViewBuilder private var photograph: some View {
         if model.original == nil, let trial = model.trialImage {
-            // A tried stock's tile, enlarged at once until its develop is in (§5.1).
+            // A tried stock's tile, enlarged at once until its develop is in
+            // (§5.1). The helper cuts its crop; the turn and mirror are the
+            // canvas's, as the tray's tile does them (`OrientedTileImage`).
             let size = Self.standInSize(trial, photo: model.photoSize)
-            PreviewCanvas(image: trial, size: size, rotation: 0, crop: CropSettings(), border: model.border.shown(for: size),
+            PreviewCanvas(image: trial, size: size, rotation: model.imageRotation, flip: model.imageFlip, crop: CropSettings(), border: model.border.shown(for: size),
                           filmTexture: model.filmTexture, filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage,
                           scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
                           doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })

@@ -474,11 +474,47 @@ pub fn auto_print(
     let (axis, density, range) = read_frame(&pipeline, frame);
     let metered = meter(&axis, &density, range, bounds)?;
     let target = patch(printed_grey(&axis, &metered, true));
-    let x0 = vec![
+    let x0 = [
         params.enlarger.m_filter_shift as f64,
         params.enlarger.y_filter_shift as f64,
-        (params.enlarger.print_exposure as f64).max(1e-3).log2(),
+        params.enlarger.print_exposure as f64,
     ];
+    Ok(print_grey(&mut pipeline, target, x0))
+}
+
+/// The negative's neutral print: the magenta, yellow and print exposure
+/// that print the film's own mid-grey (0 on its [`NeutralAxis`]) as a
+/// neutral mid-grey, for this film, base, reading and paper. Unlike
+/// [`crate::print_balance`]'s grey card, which keeps the print exposure, the
+/// exposure is found with the filtration, so the grey never sits in the
+/// paper's toe or shoulder, where the paper's own white or black passes for
+/// neutral at almost any filtration. It always starts from no filtration:
+/// the answer doesn't depend on the frame's enlarger settings.
+pub fn neutral_balance(film: Profile, print: Profile, params: &RuntimeParams, data_dir: &Path) -> Result<PrintSettings, String> {
+    let mut pipeline = balance_pipeline(film, print, params, data_dir)?;
+    let target = patch(NeutralAxis::new(&pipeline).density([0.0; 3]));
+    Ok(print_grey(&mut pipeline, target, [0.0, 0.0, 1.0]))
+}
+
+/// The filtration that keeps a negative's print balance on another paper:
+/// its own departure from the neutral on `from` (an Auto print, a picked
+/// grey or a hand-set filter) kept on `to`'s neutral, as a printer moves
+/// the filter pack by the difference between the two papers. The print
+/// exposure is the caller's to meter.
+pub fn paper_change(film: &Profile, from: Profile, to: Profile, params: &RuntimeParams, data_dir: &Path) -> Result<(f64, f64), String> {
+    let old = neutral_balance(film.clone(), from, params, data_dir)?;
+    let new = neutral_balance(film.clone(), to, params, data_dir)?;
+    Ok((
+        params.enlarger.m_filter_shift as f64 + new.m_filter_shift - old.m_filter_shift,
+        params.enlarger.y_filter_shift as f64 + new.y_filter_shift - old.y_filter_shift,
+    ))
+}
+
+/// The magenta, yellow and print exposure that print film density
+/// `target` as a neutral mid-grey, starting from `x0` (magenta, yellow,
+/// exposure).
+fn print_grey(pipeline: &mut Pipeline, target: ImageBuf, x0: [f64; 3]) -> PrintSettings {
+    let x0 = vec![x0[0], x0[1], x0[2].max(1e-3).log2()];
     let x = levenberg_marquardt_with_step(
         |x| {
             pipeline.set_print_filter_shifts(x[0], x[1]);
@@ -492,7 +528,7 @@ pub fn auto_print(
         50,
         Some(0.05),
     );
-    Ok(PrintSettings { m_filter_shift: x[0], y_filter_shift: x[1], print_exposure: x[2].exp2() })
+    PrintSettings { m_filter_shift: x[0], y_filter_shift: x[1], print_exposure: x[2].exp2() }
 }
 
 /// The print exposure for `frame`, metered inside `bounds` as
@@ -772,6 +808,66 @@ mod tests {
         for c in 0..2 {
             assert!(after[c].abs() < 0.5 * before[c].abs(), "{before:?} → {after:?}");
         }
+    }
+
+    const PAPERS: [&str; 5] =
+        ["kodak_portra_endura", "kodak_endura_premier", "kodak_ultra_endura", "kodak_supra_endura", "fujifilm_crystal_archive_typeii"];
+
+    /// The print's RGB of film density `cmy` on `paper` with `settings`.
+    fn printed_on(paper: &str, params: &RuntimeParams, settings: &PrintSettings, cmy: [f64; 3]) -> [f64; 3] {
+        let mut params = params.clone();
+        params.enlarger.m_filter_shift = settings.m_filter_shift as f32;
+        params.enlarger.y_filter_shift = settings.y_filter_shift as f32;
+        params.enlarger.print_exposure = settings.print_exposure as f32;
+        let pipeline = balance_pipeline(load("kodak_portra_400"), load(paper), &params, &data()).unwrap();
+        mean_rgb(&pipeline.print_film_density(patch(cmy)))
+    }
+
+    #[test]
+    fn the_neutral_balance_prints_the_films_grey_neutral_whatever_the_enlarger_was() {
+        // A frame's own exposure can put the grey card of a plain print
+        // balance in the paper's shoulder, where its white passes for
+        // neutral: there the solve wandered to −55 M −81 Y on Endura Premier.
+        let params = linear_params();
+        let grey = NeutralAxis::new(&portra(&params)).density([0.0; 3]);
+        for paper in PAPERS {
+            let neutral = neutral_balance(load("kodak_portra_400"), load(paper), &params, &data()).unwrap();
+            let rgb = printed_on(paper, &params, &neutral, grey);
+            let cast = [(rgb[0] / rgb[1]).log2(), (rgb[2] / rgb[1]).log2()];
+            assert!(cast.iter().all(|c| c.abs() < 0.005), "{paper}: {cast:?} with {neutral:?}");
+            assert!(((rgb[1] / MIDGRAY).log2()).abs() < 0.01, "{paper}: {rgb:?}");
+            assert!(neutral.m_filter_shift.abs() < 20.0 && neutral.y_filter_shift.abs() < 20.0, "{paper}: {neutral:?}");
+            for (m, y, exposure) in [(-60.0, -87.0, 0.51), (84.0, -44.0, 0.64), (0.0, 0.0, 3.0)] {
+                let mut from = params.clone();
+                (from.enlarger.m_filter_shift, from.enlarger.y_filter_shift, from.enlarger.print_exposure) = (m, y, exposure);
+                let again = neutral_balance(load("kodak_portra_400"), load(paper), &from, &data()).unwrap();
+                assert_eq!(again, neutral, "{paper} from {m} {y} {exposure}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_new_paper_keeps_the_frames_own_balance() {
+        let mut params = linear_params();
+        let neutral = |paper: &str| neutral_balance(load("kodak_portra_400"), load(paper), &params, &data()).unwrap();
+        let (portra, premier) = (neutral("kodak_portra_endura"), neutral("kodak_endura_premier"));
+        // A frame printed 10 M and 5 Y away from the neutral (Auto, a
+        // picked grey or a hand-set filter) stays 10 M and 5 Y away.
+        params.enlarger.m_filter_shift = (portra.m_filter_shift + 10.0) as f32;
+        params.enlarger.y_filter_shift = (portra.y_filter_shift - 5.0) as f32;
+        let (m, y) = paper_change(&load("kodak_portra_400"), load("kodak_portra_endura"), load("kodak_endura_premier"), &params, &data()).unwrap();
+        assert!((m - (premier.m_filter_shift + 10.0)).abs() < 1e-4 && (y - (premier.y_filter_shift - 5.0)).abs() < 1e-4, "{m} {y} {premier:?}");
+        // Paper after paper comes back to where it was.
+        let film = load("kodak_portra_400");
+        let mut walked = params.clone();
+        for pair in PAPERS.iter().chain(&PAPERS[..1]).collect::<Vec<_>>().windows(2) {
+            let (m, y) = paper_change(&film, load(pair[0]), load(pair[1]), &walked, &data()).unwrap();
+            (walked.enlarger.m_filter_shift, walked.enlarger.y_filter_shift) = (m as f32, y as f32);
+            assert!((m - params.enlarger.m_filter_shift as f64).abs() < 5.0, "{pair:?}: {m}");
+            assert!((y - params.enlarger.y_filter_shift as f64).abs() < 5.0, "{pair:?}: {y}");
+        }
+        assert!((walked.enlarger.m_filter_shift - params.enlarger.m_filter_shift).abs() < 1e-3, "{walked:?}");
+        assert!((walked.enlarger.y_filter_shift - params.enlarger.y_filter_shift).abs() < 1e-3, "{walked:?}");
     }
 
     #[test]

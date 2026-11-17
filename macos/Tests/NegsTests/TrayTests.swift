@@ -280,6 +280,29 @@ import XCTest
         model.previews.filmShown = false
     }
 
+    /// The tile comes cut to the crop but not turned or mirrored: standing
+    /// in on the canvas, it's turned and mirrored as the photograph is.
+    func testTheTriedStocksTileIsTurnedAsThePhotograph() async throws {
+        let (model, _, fixture) = try await opened()
+        defer { model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
+        model.rotate()
+        model.set("io.flip", .bool(true))
+        try await waitUntil { model.previewCurrent }
+        let target = try XCTUnwrap(others(model, count: 1).first)
+        model.openTray(paper: false)
+        model.previews.filmShown = true
+        model.pumpPreviews()
+        let tile = try XCTUnwrap(model.previews.tile(target, paper: false))
+        try await waitUntil(seconds: 60) { tile.image != nil && !tile.dimmed }
+        model.tryStock(target)
+        XCTAssertNotNil(model.trialImage)
+        let picture = try XCTUnwrap(model.openPicture)
+        XCTAssertTrue(picture.image === tile.image)
+        XCTAssertEqual(picture.rotation, 1)
+        XCTAssertEqual(picture.flip, true)
+        model.previews.filmShown = false
+    }
+
     /// The paper's name clicked while the film tray is open: the tray in
     /// the window becomes the paper tray, tiles and all. It used to keep the
     /// film tiles under the papers' foot, so a click on one printed the
