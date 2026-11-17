@@ -362,7 +362,10 @@ private struct SheetGrid: View {
     /// opens: a pick's in cream, and selection's in yellow over it.
     private func box(_ file: PhotoFile, frame: CGRect, selection layer: Bool) -> some View {
         let url = file.url
-        let waiting = model.sheetWaiting.contains(url)
+        // A carried thumbnail's boxes fade in place as its flyer lands
+        // (`sheetBoxesWaiting`); the others rise with their cells.
+        let rising = model.sheetWaiting.contains(url) && !model.sheetCarried.contains(url)
+        let hidden = rising || model.sheetBoxesWaiting.contains(url)
         let picked = model.library.summary(for: url).flag == .pick, selected = SheetLayout.drawnSelected(url, selection: model.selection)
         return ZStack {
             if layer ? selected : picked {
@@ -370,8 +373,8 @@ private struct SheetGrid: View {
             }
         }
         .frame(width: frame.width, height: frame.height)
-        .opacity(waiting ? 0 : 1)
-        .offset(x: frame.minX, y: frame.minY + (waiting ? 14 : 0))
+        .opacity(hidden ? 0 : 1)
+        .offset(x: frame.minX, y: frame.minY + (rising ? 14 : 0))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

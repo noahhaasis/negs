@@ -253,6 +253,13 @@ import UserNotifications
     /// Grid thumbnails waiting while the grid opens or folds: a flyer is
     /// carrying them, or they fade in after.
     var sheetWaiting: Set<URL> = []
+    /// Of those, the ones a flyer carries: their boxes stay where they are
+    /// drawn in the grid rather than rising with the cell.
+    var sheetCarried: Set<URL> = []
+    /// Carried thumbnails whose boxes are hidden. They fade in as the
+    /// flyer lands and fade out as it leaves, rather than appearing with
+    /// the picture all at once.
+    var sheetBoxesWaiting: Set<URL> = []
     /// Where the strip's frames and the grid's thumbnails are drawn, for
     /// the flight between them.
     @ObservationIgnored let places = ThumbnailPlaces()

@@ -58,6 +58,16 @@ struct PlaceReport: ViewModifier {
     /// Each step from the current photograph starts 16 ms later, up to 12 steps.
     static let stagger: CFTimeInterval = 0.016
     static let staggerSteps = 12
+    /// How far into a flyer's flight its boxes in the grid start fading in.
+    static let boxesFrom: Double = 0.35
+    /// The last stretch of a fold, over which the sheet fades off the strip
+    /// so its boxes and marks come up under the landing flyers rather than
+    /// appearing once it's gone.
+    static let foldFade: CFTimeInterval = 0.18
+    /// How far past the window's top the sheet's growing edge is aimed, as
+    /// a share of its height. Aimed at the top itself, the curve's long tail
+    /// left the sentence across the top for the very end.
+    static let maskReach: CGFloat = 0.25
 
     private let model: EditorModel
     /// The window's content (the split view's container), the canvas's
@@ -138,19 +148,27 @@ struct PlaceReport: ViewModifier {
         for (index, url) in shown.enumerated() { order[url] = index }
         let grid = places(model.places.sheet, in: sheet).filter { $0.value.rect.intersects(viewport) }
         let strip = starts.filter { $0.value.rect.intersects(band) }
+        let carried = Set(grid.keys.filter { url in strip[url].map { (grid[url]?.image ?? $0.image) != nil } ?? false })
         model.sheetWaiting = Set(grid.keys)
+        model.sheetCarried = carried
+        model.sheetBoxesWaiting = carried
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         container.alphaValue = 1
-        mask(from: band, to: root.bounds)
+        mask(from: band, to: sheetReach)
         var latest: CFTimeInterval = Self.duration
         for (url, to) in grid {
             let delay = Self.stagger * CFTimeInterval(min(abs((order[url] ?? centre) - centre), Self.staggerSteps))
-            if let from = strip[url], let image = to.image ?? from.image {
-                let opacity: Float = url == model.sourceItem || !dimmed ? 1 : Float(Theme.stripDim)
-                let layer = flyer(image: image, from: from.rect, to: to.rect, opacity: (opacity, 1), delay: delay)
+            if carried.contains(url), let from = strip[url], let image = to.image ?? from.image {
+                let layer = flyer(image: image, from: from.rect, to: to.rect,
+                                  opacity: (dimmed ? stripOpacity(url) : 1, gridOpacity(url)), delay: delay)
                 latest = max(latest, delay + Self.duration)
+                // Its boxes fade in where they're drawn as it comes in to
+                // land: the curve has it nearly there by a third of the way.
+                after(delay + Self.duration * Self.boxesFrom, generation) { [weak self] in
+                    withAnimation(.easeOut(duration: Self.duration * (1 - Self.boxesFrom))) { _ = self?.model.sheetBoxesWaiting.remove(url) }
+                }
                 after(delay + Self.duration, generation) { [weak self] in
                     layer.removeFromSuperlayer()
                     self?.model.sheetWaiting.remove(url)
@@ -165,7 +183,7 @@ struct PlaceReport: ViewModifier {
         CATransaction.commit()
         after(latest + 0.02, generation) { [weak self] in
             self?.unmask()
-            self?.model.sheetWaiting = []
+            self?.clearWaiting()
         }
     }
 
@@ -190,18 +208,34 @@ struct PlaceReport: ViewModifier {
             let strip = self.places(self.model.places.strip, in: self.canvas).filter { $0.value.rect.intersects(self.band) }
             let carried = Set(grid.keys).intersection(strip.keys)
             self.model.sheetWaiting = carried
+            self.model.sheetCarried = carried
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            self.mask(from: self.root.bounds, to: self.band)
+            self.mask(from: self.sheetReach, to: self.band)
+            var flyers: [(CALayer, Float)] = []
             for url in carried {
                 guard let from = grid[url], let to = strip[url], let image = from.image ?? to.image else { continue }
-                let opacity: Float = url == self.model.sourceItem ? 1 : Float(Theme.stripDim)
-                _ = self.flyer(image: image, from: from.rect, to: to.rect, opacity: (1, opacity), delay: 0)
+                let opacity = self.stripOpacity(url)
+                flyers.append((self.flyer(image: image, from: from.rect, to: to.rect, opacity: (self.gridOpacity(url), opacity), delay: 0), opacity))
             }
             CATransaction.commit()
-            // The rest fade out early.
+            // The rest fade out early, and the carried ones' boxes.
             withAnimation(.easeOut(duration: Self.duration * 0.4)) {
                 self.model.sheetWaiting = Set(grid.keys)
+                self.model.sheetBoxesWaiting = carried
+            }
+            // The strip under the band shows through as the flyers land, and
+            // they fade into their frames. A flyer at the strip's opacity over
+            // its own frame would show it twice as bright, so each fades as
+            // keeps the two together at that opacity.
+            self.after(Self.duration - Self.foldFade, generation) { [weak self] in
+                guard let self else { return }
+                for (layer, opacity) in flyers { Self.fadeIntoFrame(layer, opacity: opacity) }
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = Self.foldFade
+                    context.timingFunction = CAMediaTimingFunction(name: .linear)
+                    self.container.animator().alphaValue = 0
+                }
             }
             self.after(Self.duration, generation) { [weak self] in self?.finishFold() }
         }
@@ -214,11 +248,13 @@ struct PlaceReport: ViewModifier {
         let compare = places(model.places.compare, in: canvas)
         let carried = Set(grid.keys).intersection(compare.keys)
         model.sheetWaiting = carried
+        model.sheetCarried = carried
+        withAnimation(.easeOut(duration: Self.duration * 0.4)) { model.sheetBoxesWaiting = carried }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for url in carried {
             guard let from = grid[url], let to = compare[url], let image = from.image ?? to.image else { continue }
-            _ = flyer(image: image, from: from.rect, to: to.rect, opacity: (1, 1), delay: 0)
+            _ = flyer(image: image, from: from.rect, to: to.rect, opacity: (gridOpacity(url), 1), delay: 0)
         }
         CATransaction.commit()
         NSAnimationContext.runAnimationGroup { context in
@@ -248,11 +284,61 @@ struct PlaceReport: ViewModifier {
         cancelFlight()
         container.isHidden = true
         container.alphaValue = 1
-        model.sheetWaiting = []
+        clearWaiting()
         model.sheetFolding = false
     }
 
+    private func clearWaiting() {
+        model.sheetWaiting = []
+        model.sheetCarried = []
+        model.sheetBoxesWaiting = []
+    }
+
     // MARK: Layers
+
+    /// What the sheet's growing edge is aimed at: the window, reaching past
+    /// its top (`maskReach`).
+    private var sheetReach: CGRect {
+        let bounds = root.bounds, reach = bounds.height * Self.maskReach
+        return CGRect(x: bounds.minX, y: root.isFlipped ? bounds.minY - reach : bounds.minY,
+                      width: bounds.width, height: bounds.height + reach)
+    }
+
+    /// How the strip shows a frame (`StripPicture`), so a flyer leaves or
+    /// lands as it: the current and selected ones whole, the rest dimmed,
+    /// a reject greyed further. Not the pointer's lift.
+    private func stripOpacity(_ url: URL) -> Float {
+        let shown = url == model.sourceItem || model.selection.selected.contains(url)
+        if model.library.summary(for: url).flag == .reject {
+            return Float(PhotoMarks.rejectOpacity(inStrip: true, current: shown))
+        }
+        return shown ? 1 : Float(Theme.stripDim)
+    }
+
+    /// How the grid shows a thumbnail (`SheetCell`): a reject greyed.
+    private func gridOpacity(_ url: URL) -> Float {
+        guard model.library.summary(for: url).flag == .reject else { return 1 }
+        return Float(PhotoMarks.rejectOpacity(inStrip: false, current: url == model.selection.current))
+    }
+
+    /// Fades a landed flyer out over `foldFade` as the sheet fades off its
+    /// frame, which shows the same picture at `opacity`: at each step the
+    /// flyer over the frame shows through as much as the frame alone,
+    /// `opacity`, so neither brightens nor dims. Linear, as the sheet's fade.
+    private static func fadeIntoFrame(_ layer: CALayer, opacity: Float) {
+        guard opacity < 0.999 else { return layer.opacity = 1 }
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        // The sheet's alpha is 1 - u; the frame shows opacity × u of it.
+        fade.values = (0...12).map { step -> Float in
+            let u = Float(step) / 12
+            return opacity * (1 - u) / (1 - opacity * u)
+        }
+        fade.duration = foldFade
+        fade.calculationMode = .linear
+        fade.fillMode = .forwards
+        fade.isRemovedOnCompletion = false
+        layer.add(fade, forKey: "opacity")
+    }
 
     /// `places` (in `view`'s coordinates) in the root's.
     private func places(_ places: [URL: ThumbnailPlaces.Place], in view: NSView) -> [URL: ThumbnailPlaces.Place] {
