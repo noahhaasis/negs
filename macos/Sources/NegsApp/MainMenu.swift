@@ -111,6 +111,15 @@ import SwiftUI
         // ⇧⌘R is Photo › Reset Edits.
         command(view, "Reset All Adjustments", #selector(resetAdjustments), "")
         view.addItem(.separator())
+        // The same four as Settings › Look, the chosen one ticked.
+        let theme = NSMenu(title: "Theme")
+        view.addItem(withTitle: "Theme", action: nil, keyEquivalent: "").submenu = theme
+        for appTheme in AppTheme.allCases {
+            let item = theme.addItem(withTitle: appTheme.title, action: #selector(chooseTheme(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = appTheme.rawValue
+        }
+        view.addItem(.separator())
 
         // Plain keys, as in Lightroom and Capture One. Disabled while text is
         // typed, so a number typed into a field never rates the photograph.
@@ -236,6 +245,9 @@ import SwiftUI
     @objc private func reject() { model.setFlag(.reject) }
     @objc private func unflag() { model.setFlag(nil) }
     @objc private func toggleAdvance() { model.advanceAfterRating.toggle() }
+    @objc private func chooseTheme(_ item: NSMenuItem) {
+        if let theme = (item.representedObject as? String).flatMap(AppTheme.init) { ThemeStore.shared.choose(theme) }
+    }
     @objc private func clearFilter() { model.library.filter = LibraryFilter() }
     @objc private func editPhotograph() { model.editCurrent() }
     @objc private func copyEdits() { model.copyEdits() }
@@ -361,6 +373,9 @@ import SwiftUI
         case #selector(reject): item.state = state { $0.flag == .reject }; return rating
         case #selector(unflag): item.state = state { $0.flag == nil }; return rating
         case #selector(toggleAdvance): item.state = model.advanceAfterRating ? .on : .off; return true
+        case #selector(chooseTheme(_:)):
+            item.state = item.representedObject as? String == ThemeStore.shared.theme.rawValue ? .on : .off
+            return true
         case #selector(clearFilter): return model.library.filter.active
         default: return true
         }
