@@ -130,6 +130,22 @@ enum SyntheticNegative {
         return try await engine.request(command).1["print_exposure"].double
     }
 
+    /// Prep › Auto's magenta, yellow and print exposure for `state` on
+    /// `photo`, inside `bounds`, as the helper answers it.
+    private func autoPrinted(_ state: EditState, photo: URL, bounds: JSONValue?) async throws -> [Double] {
+        let engine = try EngineClient(paths: paths)
+        defer { engine.stop() }
+        var command: [String: JSONValue] = ["command": .string("negative_auto"), "input": .string(photo.path), "source_generation": .number(1),
+                                            "film": .string(state.film), "paper": .string(state.paper), "params": state.params]
+        if let bounds { command["bounds"] = bounds }
+        let result = try await engine.request(command).1
+        return ["m_filter_shift", "y_filter_shift", "print_exposure"].map { result[$0].double }
+    }
+
+    private func printing(_ state: EditState) -> [Double] {
+        ["m_filter_shift", "y_filter_shift", "print_exposure"].map { state.params["enlarger.\($0)"].double }
+    }
+
     // MARK: Reading a negative
 
     /// Reading a negative finds its base, balances the print and meters its
@@ -494,6 +510,17 @@ enum SyntheticNegative {
                                           negative: true)["read_negative"], "the current film's tile is the edit as it is")
         XCTAssertNil(PreviewRules.request(for: gold, keepPaper: false, state: negative, stocks: model.stocks, source: source, generation: 1)["read_negative"],
                      "a film printed as a scene")
+        // A paper's tile prints it as Auto does there, in the picture.
+        let bounds = JSONValue.array([0.1, 0.05, 0.9, 0.95].map { .number($0) })
+        let premier = try XCTUnwrap(model.stocks.first { $0.paper && $0.id != negative.paper })
+        XCTAssertEqual(PreviewRules.request(for: premier, keepPaper: false, state: negative, stocks: model.stocks, source: source, generation: 1,
+                                            negativeBounds: bounds)["auto_negative"], .object(["bounds": bounds]))
+        let ownPaper = try XCTUnwrap(model.stocks.first { $0.paper && $0.id == negative.paper })
+        XCTAssertNil(PreviewRules.request(for: ownPaper, keepPaper: false, state: negative, stocks: model.stocks, source: source, generation: 1,
+                                          negativeBounds: bounds)["auto_negative"], "the current paper's tile is the edit as it is")
+        var scene = negative; scene.params["workflow.route"] = .null
+        XCTAssertNil(PreviewRules.request(for: premier, keepPaper: false, state: scene, stocks: model.stocks, source: source, generation: 1,
+                                          negativeBounds: bounds)["auto_negative"], "a scene's paper keeps its balance")
     }
 
     // MARK: Presets
@@ -579,63 +606,46 @@ enum SyntheticNegative {
         for path in ["film_render.convert", "io.scan_film", "io.raw_white_balance", "io.lens_correction", "io.input_interpretation"] {
             XCTAssertEqual(model.value(path), before.params[path], path)
         }
-        var asked = model.state
-        for path in ["enlarger.m_filter_shift", "enlarger.y_filter_shift", "enlarger.print_exposure"] { asked.params[path] = before.params[path] }
-        let moved = try await paperChanged(asked, from: before.paper)
-        XCTAssertEqual(model.value("enlarger.m_filter_shift").double, moved.magenta, accuracy: 1e-9, "balanced for the new paper")
-        XCTAssertEqual(model.value("enlarger.y_filter_shift").double, moved.yellow, accuracy: 1e-9)
-        XCTAssertNotEqual(model.value("enlarger.print_exposure"), .number(1.7), "metered, not the preset's")
         let survey = try XCTUnwrap(model.negativeSurvey)
-        let exposure = try await metered(model.renderState, photo: photo, bounds: NegativeScan.bounds(picture: survey.picture))
-        XCTAssertEqual(model.value("enlarger.print_exposure").double, exposure, accuracy: 1e-6)
+        let auto = try await autoPrinted(model.renderState, photo: photo, bounds: NegativeScan.bounds(picture: survey.picture))
+        XCTAssertEqual(printing(model.state), auto, "printed as Auto prints it on the new paper")
+        XCTAssertNotEqual(model.value("enlarger.print_exposure"), .number(1.7), "not the preset's exposure")
         undo.undo()
         XCTAssertEqual(model.state, before)
     }
 
-    /// The helper's filtration for `state` moved to its paper from `from`.
-    private func paperChanged(_ state: EditState, from: String) async throws -> (magenta: Double, yellow: Double) {
-        let engine = try EngineClient(paths: paths)
-        defer { engine.stop() }
-        let result = try await engine.request(["command": .string("negative_paper"), "film": .string(state.film), "from_paper": .string(from),
-                                               "paper": .string(state.paper), "params": state.params]).1
-        return (result["m_filter_shift"].double, result["y_filter_shift"].double)
-    }
-
-    /// A new paper keeps the frame's own balance (here a hand-set filter):
-    /// it moves by the papers' difference, a few CC at most, and paper
-    /// after paper comes back to where it was. Esc in the tray puts the
-    /// frame back as it was, filtration and all.
-    func testANewPaperKeepsTheFramesBalance() async throws {
+    /// A new paper prints the frame as Auto prints it there, whatever it was
+    /// printed with before (here a hand-set filter), so paper after paper
+    /// comes back to Auto on the first. Esc in the tray puts the frame back
+    /// as it was, filtration and all.
+    func testANewPaperPrintsTheFrameAsAuto() async throws {
         let photo = try folder().appendingPathComponent("frame.tif")
         try SyntheticNegative.write(to: photo)
         let model = try await model()
         let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
         try await readNegative(photo, in: model, undo: undo)
         let start = model.paper
+        let bounds = NegativeScan.bounds(picture: try XCTUnwrap(model.negativeSurvey).picture)
         undo.beginUndoGrouping()
         model.set("enlarger.m_filter_shift", .number(model.value("enlarger.m_filter_shift").double + 12))
         model.set("enlarger.y_filter_shift", .number(model.value("enlarger.y_filter_shift").double - 8))
         undo.endUndoGrouping()
         let own = model.state
-        var magenta = own.params["enlarger.m_filter_shift"].double, yellow = own.params["enlarger.y_filter_shift"].double
         for paper in ["kodak_endura_premier", "kodak_ultra_endura", "fujifilm_crystal_archive_typeii", start] {
-            let from = model.paper
             undo.beginUndoGrouping()
             model.choosePaper(paper)
             try await waitUntil { model.paper == paper }
-            try await waitUntil("the balance") { model.negativeWorking == nil }
+            try await waitUntil("the print") { model.negativeWorking == nil }
             undo.endUndoGrouping()
-            var asked = model.state
-            asked.params["enlarger.m_filter_shift"] = .number(magenta); asked.params["enlarger.y_filter_shift"] = .number(yellow)
-            let moved = try await paperChanged(asked, from: from)
-            magenta = model.value("enlarger.m_filter_shift").double; yellow = model.value("enlarger.y_filter_shift").double
-            XCTAssertEqual(magenta, moved.magenta, accuracy: 1e-9, paper)
-            XCTAssertEqual(yellow, moved.yellow, accuracy: 1e-9, paper)
-            XCTAssertEqual(magenta, own.params["enlarger.m_filter_shift"].double, accuracy: 5, paper)
-            XCTAssertEqual(yellow, own.params["enlarger.y_filter_shift"].double, accuracy: 5, paper)
+            let auto = try await autoPrinted(model.renderState, photo: photo, bounds: bounds)
+            XCTAssertEqual(printing(model.state), auto, paper)
         }
-        XCTAssertEqual(magenta, own.params["enlarger.m_filter_shift"].double, accuracy: 0.05, "back on its own paper")
-        XCTAssertEqual(yellow, own.params["enlarger.y_filter_shift"].double, accuracy: 0.05)
+        XCTAssertNotEqual(printing(model.state), printing(own), "the hand-set filter gave way to Auto")
+        let back = model.state
+        model.autoPrintNegative()
+        try await waitUntil("Auto") { model.negativeWorking == nil }
+        XCTAssertEqual(printing(model.state), printing(back), "the same as Prep › Auto on its own paper")
+        XCTAssertEqual(undo.undoActionName, "Change Paper", "Auto changed nothing, so no step of its own")
 
         // Trying a paper in the tray, then Esc.
         let before = model.state
@@ -1126,8 +1136,9 @@ enum SyntheticNegative {
         undo.endUndoGrouping()
         XCTAssertEqual(model.state.roll, roll, "still on its roll")
         XCTAssertEqual(roll.ownFiltration(model.state), "On another paper than its roll, so it has its own filtration.")
+        let auto = try await autoPrinted(model.renderState, photo: b, bounds: model.negativeSurvey.flatMap { NegativeScan.bounds(picture: $0.picture) })
+        XCTAssertEqual(printing(model.state), auto, "printed as Auto prints it on its paper")
         let balanced = try await detected(model.renderState, photo: b)
-        XCTAssertEqual(model.value("enlarger.m_filter_shift").double, balanced.magenta, accuracy: 0.05)
 
         // Found again: balanced for its own paper, not the roll's.
         undo.beginUndoGrouping()

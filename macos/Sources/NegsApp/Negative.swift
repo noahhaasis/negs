@@ -50,7 +50,7 @@ enum NegativeScan {
     /// What a preset never changes on a negative (decision 6): how it's read
     /// (the film, base, backlight, route and how the file is read) and its
     /// print balance, which belongs to this frame and its roll. The preset
-    /// brings the look and the paper; a new paper balances the print again.
+    /// brings the look and the paper; a new paper prints it as Auto does.
     static let presetKeeps = ["workflow", "film_render.base", "film_render.convert",
                               "enlarger.m_filter_shift", "enlarger.y_filter_shift", "enlarger.print_exposure"] + scanReading
 
@@ -351,7 +351,7 @@ struct NegativePrep: View {
                       model.useNegativeForRoll)])
         }
         InkSection(title: "Balance", edited: false) {
-            HintText("Balance Print ran when the base was found, and the print exposure was metered. Auto prints this frame as a minilab would; the picker balances on something grey. Both set Lab › Enlarger.")
+            HintText("Balance Print ran when the base was found, and the print exposure was metered. Auto prints this frame as a minilab would, and runs again on each new paper; the picker balances on something grey. Both set Lab › Enlarger.")
             buttons([
                 ("Auto", "Sets the enlarger's magenta, yellow and print exposure so this frame prints as a minilab's auto printer would.",
                  model.autoPrintNegative),

@@ -954,15 +954,17 @@ import UserNotifications
         if tray.readAs, let stock = stocks.first(where: { $0.id == id }), !NegativeScan.readable(stock) { return }
         let next = PreviewRules.choosing(id, paper: tray.paper, keepPaper: previews.keepPaper, in: state, stocks: stocks, negative: tray.readAs)
         guard next != state else { return }
-        replaceState(next)
         // The tile shows exactly this edit if it was made from the request
-        // it would be made from now.
-        guard !previewCurrent, let stock = stocks.first(where: { $0.paper == tray.paper && $0.id == id }),
-              let tile = previews.tile(id, paper: tray.paper), let image = tile.image else { return }
-        let wanted = PreviewTile.Key(generation: sourceGeneration, request: PreviewRules.request(
-            for: stock, keepPaper: previews.keepPaper, state: renderState, stocks: stocks, source: source, generation: sourceGeneration,
-            negative: tray.readAs, negativePoint: negativeTilePoint))
-        if tile.shown == wanted { trialImage = image }
+        // it's made from before the change (a negative's tile of another
+        // film or paper shows what that change finds after).
+        let request = stocks.first(where: { $0.paper == tray.paper && $0.id == id }).map {
+            PreviewRules.request(for: $0, keepPaper: previews.keepPaper, state: renderState, stocks: stocks, source: source,
+                                 generation: sourceGeneration, negative: tray.readAs, negativePoint: negativeTilePoint,
+                                 negativeBounds: negativeTileBounds)
+        }
+        replaceState(next)
+        guard !previewCurrent, let request, let tile = previews.tile(id, paper: tray.paper), let image = tile.image else { return }
+        if tile.shown == PreviewTile.Key(generation: sourceGeneration, request: request) { trialImage = image }
     }
 
     /// ← →: the previous or next stock, in the tray's order, through the
@@ -3749,7 +3751,7 @@ import UserNotifications
         for entry in entries {
             let command = PreviewRules.request(for: entry.stock, keepPaper: previews.keepPaper, state: rendered, stocks: stocks,
                                                source: source, generation: generation, negative: tray?.readAs ?? false,
-                                               negativePoint: negativeTilePoint)
+                                               negativePoint: negativeTilePoint, negativeBounds: negativeTileBounds)
             wanted.append((entry.tile, PreviewTile.Key(generation: generation, request: command), command, entry.stock.id))
         }
         if previews.presetsShown, checkingPresets == 0 {
@@ -3760,7 +3762,8 @@ import UserNotifications
                                                         photo: rendered.params["io.raw_white_balance"])
             for preset in ordered {
                 guard case .valid = presetStatus[preset], let text = presetTexts[preset], let tile = previews.tile(preset: preset.url) else { continue }
-                let command = PreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation)
+                let command = PreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation,
+                                                         negativeBounds: negativeTileBounds)
                 wanted.append((tile, PreviewRules.presetKey(command, kept: kept.isEmpty ? nil : kept, generation: generation), command, preset.name))
             }
         }
@@ -4238,14 +4241,13 @@ import UserNotifications
     @ObservationIgnored private var negativeBasePoint: (generation: Int, point: CGPoint)?
     /// Where the base was picked on this photograph, for the read-as tiles.
     private var negativeTilePoint: CGPoint? { negativeBasePoint.flatMap { $0.generation == sourceGeneration ? $0.point : nil } }
+    /// The picture a paper tile's Auto reads in, as choosing the paper does.
+    private var negativeTileBounds: JSONValue? { negativeSurvey.flatMap { NegativeScan.bounds(picture: $0.picture) } }
     /// Counts requests about the negative: the newest supersedes the others,
     /// so a late answer never lands on a newer edit or on a newer request's.
     @ObservationIgnored private var negativeRequest = 0
     /// The newest request finds the base (and balances the print for it).
     @ObservationIgnored private var negativeDetecting = false
-    /// The newest request moves the filtration to another paper, from the
-    /// paper it was balanced for (`from`), while it's running.
-    @ObservationIgnored private var negativeRebalancing: (request: Int, from: String)?
     /// Answers folded into the edit that asked for them, newest last: undo
     /// or redo putting that edit back (one made before the answer came)
     /// puts its answer back with it.
@@ -4345,7 +4347,7 @@ import UserNotifications
     }
 
     /// What a base was found for: changing any of it finds it again. The
-    /// paper isn't: a new paper only balances the print again.
+    /// paper isn't: a new paper only prints it as Auto again.
     private func negativeKey(_ state: EditState) -> String? {
         guard state.params["workflow.route"].string == NegativeScan.route else { return nil }
         return [state.film, state.params["film_render.convert.scan_illuminant"].string,
@@ -4417,7 +4419,6 @@ import UserNotifications
         guard negativeRequest == request else { return }
         negativeWorking = nil
         negativeDetecting = false
-        negativeRebalancing = nil
     }
 
     /// `request`'s answer still fits: it's the newest, for this photograph,
@@ -4465,7 +4466,7 @@ import UserNotifications
 
     /// After an edit: entering negative mode, or a new film, scan light or
     /// white balance, finds the base and balance again; a new paper (a
-    /// preset's, say) balances the print again on the same base. Both are
+    /// preset's, say) prints it as Auto does there, on the same base. Both are
     /// part of that edit (no undo step of their own). Entering also crops to
     /// the picture, as a step of its own.
     private func followNegative(from old: EditState) {
@@ -4492,10 +4493,11 @@ import UserNotifications
             if negativeDetecting {
                 detectNegativeBase(undoable: false)
             } else if Self.filtration(state) == Self.filtration(old) {
-                // The filtration came along to the new paper: moved by the
-                // papers' difference. One that came with the paper (Esc in
-                // the tray putting the frame back) is the paper's already.
-                rebalanceNegative(from: negativeRebalancing.flatMap { $0.request == negativeRequest ? $0.from : nil } ?? old.paper)
+                // The filtration came along to the new paper: Auto for this
+                // frame there, whatever it was printed with before. One that
+                // came with the paper (Esc in the tray putting the frame
+                // back) is the paper's already.
+                autoPrintForPaper()
             }
         }
     }
@@ -4639,35 +4641,40 @@ import UserNotifications
         return result["print_exposure"]
     }
 
-    /// The print balanced again for a new paper on the same base: the
-    /// filtration moved by the difference between `from`'s neutral and the
-    /// new paper's, so an Auto print, a picked grey or a hand-set filter
-    /// stays as it was, and the exposure metered; folded into the edit
-    /// that changed the paper.
-    private func rebalanceNegative(from: String) {
+    /// A new paper on the same base: the frame printed as Auto prints it
+    /// there (Prep › Auto), so a picked grey or a hand-set filter gives way
+    /// to it; folded into the edit that changed the paper. The paper tiles
+    /// show the same (`PreviewRules.request`'s `auto_negative`).
+    private func autoPrintForPaper() {
         guard isNegative, let engine, let source else { return }
-        let request = beginNegative("Balancing the print…")
-        negativeRebalancing = (request, from)
+        let request = beginNegative("Printing like a minilab…")
         let generation = sourceGeneration, asked = state, snapshot = renderState, key = negativeAnswerKey(state)
         Task {
             defer { endNegative(request) }
             do {
-                // Trying paper after paper balances only for the last, from
-                // the paper the filtration was balanced for.
+                // Trying paper after paper prints only the last.
                 try await Task.sleep(for: Self.negativeSettle)
                 guard negativeCurrent(request, generation: generation, key: key) else { return }
-                let (_, result) = try await engine.request(["command": .string("negative_paper"), "film": .string(snapshot.film),
-                                                            "from_paper": .string(from), "paper": .string(snapshot.paper),
-                                                            "params": snapshot.params])
-                guard negativeCurrent(request, generation: generation, key: key) else { return }
-                var changes = ["enlarger.m_filter_shift": result["m_filter_shift"], "enlarger.y_filter_shift": result["y_filter_shift"]]
-                if let exposure = await meterNegative(snapshot, changes, engine: engine, source: source, generation: generation) {
-                    changes["enlarger.print_exposure"] = exposure
+                var command = negativeRequestCommand("negative_auto", source: source, generation: generation, state: snapshot)
+                if let bounds = try await negativeBounds(engine: engine, source: source, generation: generation, state: snapshot) {
+                    command["bounds"] = bounds
                 }
                 guard negativeCurrent(request, generation: generation, key: key) else { return }
+                let (_, result) = try await engine.request(command)
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                let changes = ["enlarger.m_filter_shift": result["m_filter_shift"], "enlarger.y_filter_shift": result["y_filter_shift"],
+                               "enlarger.print_exposure": result["print_exposure"]]
                 foldNegative(changes, asked: asked, generation: generation)
+                status = Self.balanceSentence(changes)
             } catch { if negativeRequest == request { report(error) } }
         }
+    }
+
+    /// The picture Auto and the meter read in, from the survey: left, top,
+    /// right, bottom of the whole photograph; nil for the frame less a border.
+    private func negativeBounds(engine: EngineClient, source: URL, generation: Int, state: EditState) async throws -> JSONValue? {
+        try await surveyNegative(engine: engine, source: source, generation: generation, state: state)
+            .flatMap { NegativeScan.bounds(picture: $0.picture) }
     }
 
     /// How long a detection or balance that follows an edit waits for the next.
@@ -4721,8 +4728,7 @@ import UserNotifications
         Task {
             defer { endNegative(request) }
             do {
-                if point == nil, let survey = try await surveyNegative(engine: engine, source: source, generation: generation, state: snapshot),
-                   let bounds = NegativeScan.bounds(picture: survey.picture) {
+                if point == nil, let bounds = try await negativeBounds(engine: engine, source: source, generation: generation, state: snapshot) {
                     command["bounds"] = bounds
                 }
                 guard negativeCurrent(request, generation: generation, key: key) else { return }
