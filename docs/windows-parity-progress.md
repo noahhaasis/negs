@@ -11,7 +11,7 @@ decisions made with their reasons, and what was carried over. See
 | 0 | Baseline | done |
 | 1 | Drawing foundation | done, merged `e142fba` |
 | 2 | Window shell | done, merged `a9a0763` |
-| 3 | Inspector | **paused** 2026-11-19: 3a WIP on `win-p3a-inspector` (`a62bdaf`), see "Resume here"; then 3b presets tiles + Settings tabs |
+| 3 | Inspector | 3a done (merged, see log); 3b presets tiles + Settings tabs in progress (`win-p3b-presets-settings`, owns the PC) |
 | 4 | Canvas | not started |
 | 5 | Tray | not started |
 | 6 | Library (crate can start in parallel after phase 0) | crate done, merged (see log); Windows glue after phase 5 |
@@ -19,51 +19,46 @@ decisions made with their reasons, and what was carried over. See
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
 
-## Resume here (paused 2026-11-19, PC powered down)
+## 2026-11-19: phase 3a merged (branch tip `786d7f8`)
 
-- **Phase 3a** is on branch `win-p3a-inspector`, tip `a62bdaf`: two WIP commits on
-  `a09d753`, clean tree. Its worktree is `.claude/worktrees/agent-aa758de2772174590`.
-  It builds; all 186 Windows tests pass on the PC; the Mac cross-check is clean (15 old
-  warnings).
-- **Done in the WIP:**
-  - Pane header: Adjustments · Presets as words, Reset / New / Import, an edit count.
-  - Histogram · Waveform as words; the stray glyph in the empty histogram is fixed.
-  - Prep · Lab · Output tabs in Newsreader 21 with per-tab counts. A count opens a menu
-    ("N edits in Tab", Reset for each edit, Reset Tab).
-  - Every row style. "N more" lines, and View › Show All Controls replacing Advanced.
-  - The focus box. The Export foot (on Output only).
-  - An MSAA accessibility check passed.
-- **Open gates:**
-  1. **Startup.** `inspector_shown` is 222.6 ms against main's 182.0 (ABBA, 6 runs;
-     main's exe is kept at `C:\Users\Noah\.negs\p3a-base\Negs.exe`). The time is
-     spent in Direct2D EndDraw (WARP) while the engine starts. That cause is a
-     hypothesis, not confirmed. Options:
-     - (a) Run the engine's threads at below-normal priority during startup. Engine-
-       adjacent, so it needs Noah's OK, though outputs stay identical.
-     - (b) Draw the inspector text with a DirectWrite bitmap render target on the
-       calling thread.
-     - (c) Accept the gap.
+- **What users see:** the Mac's inspector.
+  - Pane header: Adjustments · Presets as words, with the edit count and Reset.
+  - Histogram · Waveform as words. The light-theme histogram is now added up and laid
+    over the well, as the Mac's is.
+  - Prep · Lab · Output in Newsreader 21 with per-tab counts. A count opens a menu with
+    Reset for each edit and Reset Tab.
+  - Every row style. Changed values are 700 paper with the pencil under them.
+  - "N more" lines, with View › Show All Controls in place of Advanced.
+  - The focus box. The Export foot, on Output only.
+  - MSAA names, values and roles were checked.
+- **Painting:** every Canvas paint now goes to a single-threaded WARP device, created on
+  its own thread at launch. The old Direct2D DC path is the fallback. Screenshots of
+  the inspector are pixel-identical between the two paths.
+- **Startup:** the cause is confirmed. Direct2D's worker threads are starved while the
+  engine starts: delaying the background threads by 400 ms closed the gap to +3 ms.
+  ABBA medians for `inspector_shown`:
+  - quiet PC: +4.9 ms (199.3 / 204.2);
+  - Defender busy after a reboot: +42.6 ms (186.7 / 229.3).
 
-     Coordinator's view: try (b) first, then (a).
-     **Noah (2026-11-19):** if (b) doesn't work, accept the +40 ms for now. Recheck
-     startup after phase 6.
-  2. **Screenshots.** Retake them; the sliders now paint with GDI unless they have
-     focus. Run `~/.negs/windows-parity/phase3a-tools/run_all.sh` (copied out of the
-     session scratchpad, so paths inside may need fixing). Check by eye at 125 %
-     against `ref/macos-main/*/01–03`.
-  3. The release-notes line (Windows section).
-  4. Split the WIP into commits: header and tabs, rows, focus, Export foot. Each needs a
-     "Windows: …" message, re-dated outside 08:00–16:00 Berlin.
-  5. Optional: the MSAA re-check, `C:\Users\Noah\.negs\uia-p3a.ps1`.
-- **To confirm with Noah:** the agent read "struck tab" as "Print section struck while
-  scanning". Check it against `TabEdits.swift` before asking.
+  First window +2.6 to +7.5 ms. **Noah accepted up to +40 ms for now; recheck after
+  phase 6.** Next options:
+  - text through `IDWriteBitmapRenderTarget` with no D3D at all;
+  - engine thread priorities during startup (needs Noah's OK).
+- **Tests:** 185/186 on the PC. The one failure was a "graphics driver reset" in a GPU
+  export lifecycle test this branch doesn't touch; the 40 lifecycle tests re-run all
+  pass. An earlier run had 186/186. The Mac cross-check is clean.
+- **"Struck tab":** macOS never strikes a tab. It strikes Print and its modules while
+  scanning (Windows matches), and Camera and Grain/Halation/DIR for a negative scan.
+  That part comes with "Your negative" in phase 8.
 - **Mismatches left vs macOS:**
-  - The tone graph's segmented buttons, the border samples (still GDI), the rounded
-    Longest side field.
-  - Value-box text sits high while typing. No Input Colour summary.
-  - The scroll bar is always shown. Wheel up lowers a slider's value (as before).
-- **Then:** review and merge 3a; brief 3b. Commit dates: main tip + 1 min
-  (`~/.negs/windows-parity/tipdate.sh`).
+  - the tone graph's segmented buttons;
+  - the border samples, still GDI;
+  - the rounded Longest side field;
+  - value-box text sits high while typing;
+  - no Input Colour summary;
+  - the scroll bar is always shown;
+  - wheel up lowers a slider's value (as before).
+- Screenshots: `~/.negs/windows-parity/phase3a/`.
 
 ## 2026-11-18: phase 2 merged (`a9a0763`, branch tip `171cd81`)
 
