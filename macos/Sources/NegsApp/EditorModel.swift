@@ -365,6 +365,14 @@ import UserNotifications
     var holdingFrameForMatch: Bool { heldPreview != nil }
     /// Brightness matches solved by the helper (not found in `matchCache`), for tests.
     @ObservationIgnored private(set) var matchSolves = 0
+    /// Runs before a brightness match's decode; throwing fails the decode, for tests.
+    @ObservationIgnored var matchDecodeWillRun: (() throws -> Void)?
+    /// The frame on the canvas: the edit it was rendered for, and how
+    /// (nil: the restored session's saved frame), for tests.
+    @ObservationIgnored private(set) var shownFrame: (frame: FrameID, step: RenderStep?)?
+    var currentFrame: FrameID { FrameID(revision: revision, generation: sourceGeneration) }
+    var renderScheduled: Bool { pendingRender != nil }
+    var matchDecodeFailedHere: Bool { matchDecodeFailed == currentFrame }
     #endif
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
@@ -889,6 +897,11 @@ import UserNotifications
         // The drag frames were canvas-size already: letting go settles.
         quickStep = FrameID(revision: revision, generation: sourceGeneration)
         if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
+        // What waited for the release goes on: a match the drag made stale
+        // (its frames were settled ones where the canvas shows every pixel),
+        // or the render after a match that finished during the drag.
+        reconcileBrightnessMatch()
+        if matchTask == nil { settleQuickFrame(); renderAfterMatch() }
         if !previewCurrent { scheduleActivity() }
         pumpPreviews()
     }
@@ -1247,6 +1260,10 @@ import UserNotifications
         } else if state.params["io.rotate_cw"] != rotation || state.params["io.flip"] != flip {
             var next = state; next.params["io.rotate_cw"] = rotation; next.params["io.flip"] = flip; replaceState(next)
         }
+        // What waited for the crop goes on, Done or Cancel: a match an edit
+        // made stale meanwhile, or the render after one.
+        reconcileBrightnessMatch()
+        if matchTask == nil { renderAfterMatch() }
         zoom(fit: true)
     }
 
@@ -1325,6 +1342,9 @@ import UserNotifications
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         sourceDeleted = false
         source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
+        #if DEBUG
+        shownFrame = nil
+        #endif
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -1420,6 +1440,9 @@ import UserNotifications
         sourceSize = frame.sourceSize; workingSize = frame.workingSize
         previewScale = frame.workingSize.width > 0 ? Double(frame.surface.width) / frame.workingSize.width : 1
         showingCachedPreview = true; placeholder = nil; standIn = nil; hideActivity()
+        #if DEBUG
+        shownFrame = (FrameID(revision: revision, generation: generation), nil)
+        #endif
         // Counted with the frame for the crop it was read with.
         if crop == cached.scopesCrop, imageRotation == cached.scopesRotation, imageFlip == cached.scopesFlip {
             histogramRequest += 1; histogram = cached.scopes.histogram; waveform = cached.scopes.waveform
@@ -3381,6 +3404,10 @@ import UserNotifications
         willRender?()
         #endif
         guard !rendering, !closing, let source, let engine else { return }
+        // The edit's settled frame shows already: a render scheduled before
+        // it landed (on a slider's release) would only replace it. Every
+        // edit clears `previewCurrent`.
+        guard !previewCurrent else { return }
         let currentRevision = revision, snapshot = renderState, generation = sourceGeneration
         let frame = FrameID(revision: currentRevision, generation: generation)
         // A quick frame's settled render waits for a solve that started after
@@ -3410,6 +3437,12 @@ import UserNotifications
             if generation == sourceGeneration { decodedFor = (generation, decoded.map { CGSize(width: $0["source_width"].double, height: $0["source_height"].double) } ?? .zero) }
             guard !closing else { return }
             guard revision == currentRevision, generation == sourceGeneration else { return scheduleRender() }
+            // Matching turned on during the decode (at exposure 0, no new
+            // edit) is solved first too.
+            if !interacting, !cropping, brightnessMatchPending, matchDecodeFailed != frame {
+                reconcileBrightnessMatch()
+                if matchTask != nil { return }
+            }
         }
         let buffer = engine.directory.appendingPathComponent("preview.rgba")
         var command: [String: JSONValue] = [
@@ -3471,7 +3504,11 @@ import UserNotifications
             // A quick frame of an earlier edit still shows while edits keep
             // coming (Undo held down); the current one renders next.
             let quick = step.isQuick
-            func showable() -> Bool { quick ? !closing && generation == sourceGeneration : shouldShow(currentRevision, generation) }
+            // A canvas-size frame never replaces the current edit's settled one.
+            func showable() -> Bool {
+                (quick ? !closing && generation == sourceGeneration : shouldShow(currentRevision, generation))
+                    && (step == .settled || !previewCurrent)
+            }
             guard showable() else { return }
             let width = Int(result["width"].double), height = Int(result["height"].double)
             let display = result["display_color_space"].string
@@ -3493,6 +3530,9 @@ import UserNotifications
                 showingInteractiveFrame = interactiveScale != nil
                 quickFrame = quick ? frame : nil
                 image = developed; placeholder = nil; standIn = nil
+                #if DEBUG
+                shownFrame = (frame, step)
+                #endif
                 if revision == currentRevision { trialImage = nil }
                 updateHistogram()
                 let film = FilmHistogram(result["film_histogram"])
@@ -3525,7 +3565,8 @@ import UserNotifications
             // in. A stale match is solved before rendering, so this is only a
             // match that went stale while the frame rendered (turned on at
             // exposure 0, which is no new edit).
-            if !step.isDrag, revision == currentRevision, !interacting, !cropping, brightnessMatchPending {
+            // Not for an edit whose match decode failed: no solve would show it.
+            if !step.isDrag, revision == currentRevision, !interacting, !cropping, brightnessMatchPending, matchDecodeFailed != frame {
                 heldPreview = (currentRevision, generation, show)
             } else {
                 show()
@@ -3923,6 +3964,9 @@ import UserNotifications
                 // pipeline the solve and the render use.
                 let decoded: JSONValue
                 do {
+                    #if DEBUG
+                    try self?.matchDecodeWillRun?()
+                    #endif
                     decoded = try await engine.request(decode).1
                 } catch {
                     try stillWanted()
