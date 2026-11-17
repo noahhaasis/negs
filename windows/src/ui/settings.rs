@@ -529,12 +529,22 @@ pub fn layout(app: &mut App) {
                 let top = y + px(12.0);
                 let gap = px(SWATCH_GAP);
                 let each = (right - gutter - gap * (SWATCH_COLUMNS as i32 - 1)) / SWATCH_COLUMNS as i32;
-                let name_height = px(7.0 + 2.0 * 18.0);
+                // A row's names take one line, or two if one of them wraps.
+                let lines = |row: usize| {
+                    let wraps = ThemeName::ALL.iter().skip(row * SWATCH_COLUMNS).take(SWATCH_COLUMNS).any(|name| {
+                        super::d2d::measure_text(name.title(), &NAME_CHOSEN, 0.0, plain).width * scale > each as f32
+                    });
+                    if wraps { 2.0 } else { 1.0 }
+                };
                 let mut bottom = top;
+                let mut row_top = top;
                 for (i, &swatch) in c.iter().enumerate() {
                     let (column, line) = (i % SWATCH_COLUMNS, i / SWATCH_COLUMNS);
-                    let height = px(MINIATURE) + name_height;
-                    let top = top + line as i32 * (height + gap);
+                    let height = px(MINIATURE) + px(7.0 + lines(line) * 18.0);
+                    if column == 0 && line > 0 {
+                        row_top = bottom + gap;
+                    }
+                    let top = row_top;
                     // The ring reaches 7 × 6 DIPs past the miniature.
                     positions.push((swatch, gutter + column as i32 * (each + gap) - px(8.0), top - px(7.0), each + px(16.0), height + px(7.0)));
                     bottom = top + height;
