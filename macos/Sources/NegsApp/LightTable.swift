@@ -37,7 +37,7 @@ enum LightTable {
     static func light(sheet: UInt32, edge: UInt32?) -> UInt32? {
         guard let edge, Theme.contrast(sheet, edge) < minimumContrast else { return nil }
         // Away from the edge: lighter under a dark edge, darker under a light one.
-        let toward: UInt32 = Theme.luminance(edge) <= Theme.luminance(sheet) ? Theme.Hex.paper : 0x000000
+        let toward: UInt32 = Theme.luminance(edge) <= Theme.luminance(sheet) ? AppTheme.darkroom.palette.hex.paper : 0x000000
         return mix(sheet, toward, strength)
     }
 

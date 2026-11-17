@@ -1,12 +1,14 @@
 import Foundation
+import os
 import SwiftUI
 
 /// The sheet the photograph lies on in the viewer, chosen in Settings ›
 /// Photographs › Viewer from a few (design/proposals/r27-sheets.html).
-/// Darkroom is `bg`. The title band, the inspector, the strip and the grid
-/// stay dark whichever is chosen.
+/// Theme's own, the default, is the theme's `bg` (round 28); Darkroom is
+/// the Darkroom theme's, whichever theme is chosen. The title band, the
+/// inspector, the strip and the grid follow the theme, not the sheet.
 enum ViewerSheet: String, CaseIterable, Identifiable, Sendable {
-    case darkroom, black, charcoal, grey22, middleGrey, lightGrey, paper
+    case theme, darkroom, black, charcoal, grey22, middleGrey, lightGrey, paper
 
     /// The choice in the user defaults.
     static let key = "viewerSheet"
@@ -15,6 +17,7 @@ enum ViewerSheet: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
+        case .theme: "Theme’s own"
         case .darkroom: "Darkroom"
         case .black: "Black"
         case .charcoal: "Charcoal"
@@ -28,7 +31,8 @@ enum ViewerSheet: String, CaseIterable, Identifiable, Sendable {
     /// 0xRRGGBB, sRGB.
     var hex: UInt32 {
         switch self {
-        case .darkroom: Theme.Hex.bg
+        case .theme: Theme.Hex.bg
+        case .darkroom: AppTheme.darkroom.palette.hex.bg
         case .black: 0x000000
         // Lightroom's and Photoshop's Dark Gray, about.
         case .charcoal: 0x242424
@@ -38,22 +42,30 @@ enum ViewerSheet: String, CaseIterable, Identifiable, Sendable {
         case .middleGrey: 0x777777
         // Lightroom's Light Gray, about.
         case .lightGrey: 0xb4b4b4
-        case .paper: Theme.Hex.paper
+        case .paper: AppTheme.darkroom.palette.hex.paper
         }
     }
 
     var color: Color { Theme.color(hex) }
 
-    /// The canvas's inks on this sheet, worked out once.
-    var ink: SheetInk { Self.inks[self] ?? .darkroom }
-    private static let inks = Dictionary(uniqueKeysWithValues: allCases.map { ($0, SheetInk(sheet: $0.hex)) })
+    /// The canvas's inks on this sheet under the chosen theme, worked out
+    /// once per pair. Read in a view's body, it redraws when the theme changes.
+    var ink: SheetInk {
+        let theme = ThemeStore.shared.theme
+        let key = "\(theme.rawValue)/\(rawValue)"
+        if let ink = Self.inks.withLock({ $0[key] }) { return ink }
+        let ink = SheetInk(sheet: hex)
+        Self.inks.withLock { $0[key] = ink }
+        return ink
+    }
+    private static let inks = OSAllocatedUnfairLock(initialState: [String: SheetInk]())
 }
 
 /// The inks the canvas draws with on a sheet: the caption, the label, the
 /// trim marks, the empty window's words, crop's dial, and the pencil. The
 /// views on the canvas read them from the environment (`sheetInk`); the
 /// inspector, the title band and everything else keep `Theme`'s, which the
-/// default is.
+/// default is (the theme's own sheet).
 ///
 /// Each role keeps its warm hue and chroma in OKLCH and moves only in
 /// lightness, to the contrast with the sheet that it has on `bg`. A sheet
@@ -71,6 +83,9 @@ struct SheetInk: Equatable, Sendable {
     let hex: Hex
     /// Light ink, on a dark sheet.
     let light: Bool
+    /// The mark under a word is the theme's highlighter (Light table, on a
+    /// light sheet: multiplied, it needs one).
+    let highlighter: Bool
 
     var sheet: Color { Theme.color(hex.sheet) }
     var paper: Color { Theme.color(hex.paper) }
@@ -80,7 +95,8 @@ struct SheetInk: Equatable, Sendable {
     var line: Color { Theme.color(hex.line) }
     var accent: Color { Theme.color(hex.accent) }
 
-    static let darkroom = SheetInk(sheet: Theme.Hex.bg)
+    /// The chosen theme's own sheet and inks.
+    static var themes: SheetInk { ViewerSheet.theme.ink }
 
     /// Each role's contrast with `bg`, and its OKLCH chroma and hue.
     private static let roles: [(ink: WritableKeyPath<Hex, UInt32>, contrast: Double, chroma: Double, hue: Double, words: Bool)] = [
@@ -96,10 +112,16 @@ struct SheetInk: Equatable, Sendable {
     static let wordsFloor = 4.5, markFloor = 3.0
 
     init(sheet: UInt32) {
-        if sheet == Theme.Hex.bg {
-            hex = Hex(sheet: sheet, paper: Theme.Hex.paper, label: Theme.Hex.label, dim: Theme.Hex.dim,
-                      track: Theme.Hex.track, line: Theme.Hex.line, accent: Theme.Hex.accent)
-            light = true
+        let palette = Theme.palette
+        // A theme's own sheet keeps that theme's inks exactly; the pencil is
+        // the chosen theme's while it holds a mark's 3 : 1 there.
+        let own = palette.hex.bg == sheet ? palette : AppTheme.allCases.map(\.palette).first { $0.hex.bg == sheet }
+        if let own {
+            let t = own.hex
+            let accent = Theme.contrast(sheet, palette.hex.accent) >= Self.markFloor ? palette.hex.accent : t.accent
+            hex = Hex(sheet: sheet, paper: t.paper, label: t.label, dim: t.dim, track: t.track, line: t.line, accent: accent)
+            light = own.dark
+            highlighter = palette.highlighter && !own.dark
             return
         }
         let light = Theme.contrast(sheet, 0xffffff) >= Theme.contrast(sheet, 0x000000)
@@ -113,6 +135,8 @@ struct SheetInk: Equatable, Sendable {
         }
         if Theme.contrast(sheet, Theme.Hex.accent) >= Self.markFloor {
             hex.accent = Theme.Hex.accent
+        } else if Theme.contrast(sheet, AppTheme.darkroom.palette.hex.accent) >= Self.markFloor {
+            hex.accent = AppTheme.darkroom.palette.hex.accent
         } else if light {
             hex.accent = OKLCH.solve(sheet: sheet, contrast: Self.markFloor, chroma: 0.162, hue: 91, light: true)
         } else {
@@ -121,12 +145,13 @@ struct SheetInk: Equatable, Sendable {
         }
         self.hex = hex
         self.light = light
+        highlighter = palette.highlighter && !light
     }
 }
 
 extension EnvironmentValues {
     /// The canvas's inks; `Theme`'s outside the canvas.
-    @Entry var sheetInk = SheetInk.darkroom
+    @Entry var sheetInk = SheetInk.themes
 }
 
 /// Björn Ottosson's OKLab in polar form, for inks that keep their hue.

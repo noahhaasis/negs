@@ -181,7 +181,7 @@ struct StockTray: View {
                     .id(ObjectIdentifier(visit))
                 if sections.isEmpty {
                     Text(StockTrayRules.noMatch(visit.query, paper: visit.paper))
-                        .font(Theme.serif(16, italic: true)).foregroundStyle(Theme.dim)
+                        .font(Theme.serif(16, italic: true)).foregroundStyle(Theme.Film.dim)
                         .padding(.top, 46).padding(.leading, 30)
                 }
             }
@@ -379,7 +379,7 @@ struct TrayTiles: View {
             ForEach(StockTray.sections(model: model, visit: visit)) { section in
                 HStack(alignment: .top, spacing: StockTrayRules.titleGap) {
                     Text(section.title)
-                        .font(Theme.serif(13.5, italic: true)).foregroundStyle(Theme.label)
+                        .font(Theme.serif(13.5, italic: true)).foregroundStyle(Theme.Film.label)
                         .lineLimit(1).fixedSize()
                         .rotationEffect(.degrees(-90))
                         .frame(width: StockTrayRules.title, height: StockTrayRules.picture)
@@ -435,7 +435,7 @@ private struct TrayTile: View {
         Button(action: choose) {
             VStack(alignment: .leading, spacing: 4) {
                 // Not developed yet: a blank; an older edit of this photograph: dimmed.
-                Rectangle().fill(Theme.blank)
+                Rectangle().fill(Theme.Film.blank)
                     .frame(width: StockTrayRules.tile, height: StockTrayRules.picture)
                     .overlay {
                         if let image = tile.image {
@@ -447,7 +447,7 @@ private struct TrayTile: View {
                     .clipped()
                     .overlay {
                         if selected {
-                            PencilRing().stroke(Theme.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
+                            PencilRing().stroke(Theme.Film.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
                                 .padding(EdgeInsets(top: -6, leading: -7, bottom: -1, trailing: -7))
                                 .rotationEffect(.degrees(-1))
                                 .allowsHitTesting(false)
@@ -456,10 +456,10 @@ private struct TrayTile: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(stock.name)
                         .font(Theme.serif(14, weight: selected ? 600 : 400))
-                        .foregroundStyle(selected ? Theme.paper : before || hovering ? Theme.label : Theme.dim)
+                        .foregroundStyle(selected ? Theme.Film.paper : before || hovering ? Theme.Film.label : Theme.Film.dim)
                         .lineLimit(1).truncationMode(.tail)
                     if before {
-                        Text("before").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim).fixedSize()
+                        Text("before").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.dim).fixedSize()
                     }
                 }
                 .frame(width: StockTrayRules.tile, alignment: .leading)
@@ -479,9 +479,9 @@ private struct TrayTile: View {
             if favorite || hovering {
                 Button(action: toggleFavorite) {
                     StarShape()
-                        .fill(favorite ? Theme.accent : .clear)
+                        .fill(favorite ? Theme.Film.accent : .clear)
                         .overlay {
-                            StarShape().stroke(favorite ? Theme.accent : Theme.paper,
+                            StarShape().stroke(favorite ? Theme.Film.accent : Theme.onPhoto,
                                                style: StrokeStyle(lineWidth: favorite ? 1.2 : 1.4, lineJoin: .round))
                         }
                         .frame(width: 15, height: 15)
@@ -532,16 +532,16 @@ private struct NegativeTile: View {
     var body: some View {
         Button(action: choose) {
             VStack(alignment: .leading, spacing: 4) {
-                Rectangle().fill(Theme.blank)
+                Rectangle().fill(Theme.Film.blank)
                     .frame(width: StockTrayRules.tile, height: StockTrayRules.picture)
                     .overlay {
                         Text(NegativeScan.tileText)
-                            .font(Theme.serif(15, italic: true)).foregroundStyle(Theme.label)
+                            .font(Theme.serif(15, italic: true)).foregroundStyle(Theme.Film.label)
                             .multilineTextAlignment(.center).padding(.horizontal, 18)
                     }
                     .overlay {
                         if selected {
-                            PencilRing().stroke(Theme.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
+                            PencilRing().stroke(Theme.Film.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
                                 .padding(EdgeInsets(top: -6, leading: -7, bottom: -1, trailing: -7))
                                 .rotationEffect(.degrees(-1))
                                 .allowsHitTesting(false)
@@ -550,10 +550,10 @@ private struct NegativeTile: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(NegativeScan.name)
                         .font(Theme.serif(14, weight: selected ? 600 : 400))
-                        .foregroundStyle(selected ? Theme.paper : before || hovering ? Theme.label : Theme.dim)
+                        .foregroundStyle(selected ? Theme.Film.paper : before || hovering ? Theme.Film.label : Theme.Film.dim)
                         .lineLimit(1)
                     if before {
-                        Text("before").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim).fixedSize()
+                        Text("before").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.dim).fixedSize()
                     }
                 }
                 .frame(width: StockTrayRules.tile, alignment: .leading)
@@ -603,11 +603,11 @@ private struct TrayFoot: View {
                 index
             } else {
                 Text(StockTrayRules.matches(sections.reduce(0) { $0 + $1.stocks.count }))
-                    .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.label).lineLimit(1)
+                    .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.label).lineLimit(1)
             }
             Spacer(minLength: 12)
             Text(StockTrayRules.hint(before: before))
-                .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim).lineLimit(1)
+                .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.dim).lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(-1)
             if !visit.paper {
@@ -616,15 +616,15 @@ private struct TrayFoot: View {
                     .padding(.bottom, 1)
                     .overlay(alignment: .bottom) {
                         if searching {
-                            PencilStroke().pencil().frame(height: 5).offset(y: 3).allowsHitTesting(false)
+                            PencilStroke().pencil(onFilm: true).frame(height: 5).offset(y: 3).allowsHitTesting(false)
                         } else {
-                            Rectangle().fill(Theme.line).frame(height: 1)
+                            Rectangle().fill(Theme.Film.line).frame(height: 1)
                         }
                     }
                     .padding(.leading, 6)
             }
             Button { model.endTray(keep: true) } label: {
-                Text("Done").font(Theme.serif(14, weight: 600)).foregroundStyle(Theme.paper)
+                Text("Done").font(Theme.serif(14, weight: 600)).foregroundStyle(Theme.Film.paper)
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -670,10 +670,10 @@ private struct IndexWord: View {
         Button(action: action) {
             Text(title)
                 .font(Theme.serif(13, italic: true))
-                .foregroundStyle(selected ? Theme.paper : hovering ? Theme.label : Theme.dim)
+                .foregroundStyle(selected ? Theme.Film.paper : hovering ? Theme.Film.label : Theme.Film.dim)
                 .padding(.bottom, 3)
                 .overlay(alignment: .bottom) {
-                    if selected { PencilStroke().pencil().frame(height: 5).allowsHitTesting(false) }
+                    if selected { PencilStroke().pencil(onFilm: true).frame(height: 5).allowsHitTesting(false) }
                 }
         }
         .buttonStyle(.plain)
@@ -701,8 +701,8 @@ private struct TraySearchField: NSViewRepresentable {
         field.cell?.wraps = false
         let font = Theme.serifFont(13.5, italic: true) as NSFont
         field.font = font
-        field.textColor = Theme.NS.paper
-        field.placeholderAttributedString = NSAttributedString(string: "Search films", attributes: [.font: font, .foregroundColor: Theme.NS.dim])
+        field.textColor = Theme.Film.nsPaper
+        field.placeholderAttributedString = NSAttributedString(string: "Search films", attributes: [.font: font, .foregroundColor: Theme.Film.nsDim])
         field.setAccessibilityLabel("Search films")
         field.delegate = context.coordinator
         field.stringValue = visit.query

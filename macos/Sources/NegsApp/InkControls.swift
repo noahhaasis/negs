@@ -104,7 +104,7 @@ final class FocusAnchorView: NSView, InkFocusTarget {
         wantsLayer = true
         layer?.masksToBounds = false
         box.fillColor = nil
-        box.strokeColor = Theme.NS.paper.cgColor
+        Theme.follow(self) { [weak self] in self?.box.strokeColor = Theme.NS.paper.cgColor }
         box.lineWidth = Theme.Size.focusLine
         box.isHidden = true
         box.actions = ["hidden": NSNull(), "path": NSNull()]
@@ -282,7 +282,7 @@ final class ClosureMenuItem: NSMenuItem {
 @MainActor func popUpChoiceMenu(_ items: [ChoiceItem], selected: String, under view: NSView?, choose: @escaping (String) -> Void) {
     guard let view else { return }
     let menu = NSMenu()
-    menu.appearance = NSAppearance(named: .darkAqua)
+    menu.appearance = Theme.appearance
     menu.autoenablesItems = false
     for item in items {
         switch item {
@@ -449,7 +449,7 @@ struct PencilButtonStyle: ButtonStyle {
                 .foregroundStyle(Theme.onAccent)
                 .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
                 .padding(.bottom, 2)
-                .background(RoundedRectangle(cornerRadius: 3).fill(Theme.accent))
+                .background(RoundedRectangle(cornerRadius: 3).fill(Theme.fill))
                 .brightness(configuration.isPressed ? -0.12 : hovered ? 0.05 : 0)
                 .offset(y: configuration.isPressed ? 1 : 0)
                 .contentShape(Rectangle())
@@ -513,7 +513,7 @@ struct InkSection<Content: View>: View {
                     Text(title.uppercased())
                         .font(Theme.serif(11, weight: 700)).tracking(11 * 0.13)
                         .foregroundStyle(skipped == nil ? Theme.label : Theme.dim)
-                        .overlay { if skipped != nil { PencilStroke().pencil().frame(height: 5).offset(y: 1) } }
+                        .overlay { if skipped != nil { PencilStroke().strike().frame(height: 5).offset(y: 1) } }
                     if let skipped {
                         Text("— \(skipped)").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim).padding(.leading, 10)
                     }
@@ -583,7 +583,7 @@ struct InkModule<Content: View>: View {
                 Text(title)
                     .font(Theme.serif(16, weight: off || skipped ? 400 : 600))
                     .foregroundStyle(off || skipped ? Theme.dim : Theme.paper)
-                    .overlay { if skipped { PencilStroke().pencil().frame(height: 5).offset(y: 1) } }
+                    .overlay { if skipped { PencilStroke().strike().frame(height: 5).offset(y: 1) } }
                     .tooltip(help)
                     // The chevron's turn and the dot, in words: VoiceOver
                     // opens and closes the module from its name.

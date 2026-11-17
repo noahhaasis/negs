@@ -358,7 +358,7 @@ struct CanvasArea: View {
     /// The pointer is over the photograph, which brightens the trim marks.
     @State private var overPrint = false
     /// Settings › Photographs › Viewer.
-    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.darkroom
+    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.theme
 
     /// Above the photograph, for the caption; below it, for the label's two rows (§2.3).
     static let captionBand: CGFloat = 54
@@ -564,7 +564,7 @@ struct SplitLine: View {
                         .allowsHitTesting(false)
                     Text("‹›").font(Theme.serif(14, weight: 600)).tracking(3).foregroundStyle(ink.paper)
                         .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color(red: 12 / 255, green: 11 / 255, blue: 10 / 255).opacity(0.85)))
+                        .background(Circle().fill(ink.sheet.opacity(0.85)))
                         .overlay(Circle().strokeBorder(ink.paper, lineWidth: 1.5))
                         .contentShape(Circle())
                         .offset(x: x - 16, y: print.midY - 16)
@@ -582,7 +582,7 @@ struct SplitLine: View {
     }
 
     private func tag(_ text: String) -> some View {
-        Text(text).font(Theme.ui(11)).foregroundStyle(Theme.paper)
+        Text(text).font(Theme.ui(11)).foregroundStyle(Theme.onPhoto)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: 3).fill(Color.black.opacity(0.55)))
             .allowsHitTesting(false)

@@ -34,7 +34,7 @@ final class EditorFrameView: NSView {
         self.content = content
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = Theme.NS.bg.cgColor
+        Theme.follow(self) { [weak self] in self?.layer?.backgroundColor = Theme.NS.bg.cgColor }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -72,9 +72,11 @@ final class TitleBand: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = Theme.NS.bg.cgColor
+        Theme.follow(self) { [weak self] in
+            self?.layer?.backgroundColor = Theme.NS.bg.cgColor
+            self?.name.textColor = Theme.NS.paper
+        }
         name.font = Theme.serifFont(15, weight: 600) as NSFont
-        name.textColor = Theme.NS.paper
         name.lineBreakMode = .byTruncatingMiddle
         name.cell?.truncatesLastVisibleLine = true
         // The window's title says it; VoiceOver reads that.

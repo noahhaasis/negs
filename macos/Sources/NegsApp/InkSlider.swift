@@ -44,19 +44,22 @@ final class InkSliderView: NSView, InkFocusTarget {
         layer?.masksToBounds = false
         focusRingType = .none
         for sublayer in [track, tick, fill, knob, focus] { layer?.addSublayer(sublayer) }
-        track.backgroundColor = Theme.NS.track.cgColor
-        tick.backgroundColor = Theme.NS.dim.cgColor
-        fill.backgroundColor = Theme.NS.accent.cgColor
         knob.lineWidth = 1.5
         knob.path = CGPath(ellipseIn: CGRect(x: -Self.knobSize / 2, y: -Self.knobSize / 2, width: Self.knobSize, height: Self.knobSize), transform: nil)
         focus.fillColor = nil
-        focus.strokeColor = Theme.NS.paper.cgColor
         focus.lineWidth = Theme.Size.focusLine
         focus.isHidden = true
         for sublayer in [track, tick, fill, knob, focus] { sublayer.actions = Self.noAnimation }
         setAccessibilityElement(true)
         setAccessibilityRole(.slider)
-        restyle()
+        Theme.follow(self) { [weak self] in
+            guard let self else { return }
+            track.backgroundColor = Theme.NS.track.cgColor
+            tick.backgroundColor = Theme.NS.dim.cgColor
+            fill.backgroundColor = Theme.NS.accent.cgColor
+            focus.strokeColor = Theme.NS.paper.cgColor
+            restyle()
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 

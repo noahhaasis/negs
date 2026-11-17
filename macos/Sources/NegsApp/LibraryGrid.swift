@@ -21,10 +21,10 @@ struct GridSheet: View {
                 SheetGrid(model: model)
                 SheetFoot(model: model)
             }
-            .background(Theme.film)
+            .background(Theme.grid)
             // Where the cells report their places (`SheetFlight`).
             .coordinateSpace(.named(ThumbnailPlaces.space))
-            .environment(\.colorScheme, .dark)
+            .environment(\.colorScheme, Theme.colorScheme)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("All photographs")
         }
@@ -160,7 +160,7 @@ private struct ClearMark: View {
     func popUp(below view: NSView?) {
         guard let view else { return }
         let menu = NSMenu(title: "Filter")
-        menu.appearance = NSAppearance(named: .darkAqua)
+        menu.appearance = Theme.appearance
         fill(menu)
         let y = view.isFlipped ? view.bounds.maxY + 6 : view.bounds.minY - 6
         menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.minX - 14, y: y), in: view)

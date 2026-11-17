@@ -163,11 +163,11 @@ struct StockName: View {
     @ViewBuilder private var underline: some View {
         if strike == nil {
             if open {
-                PencilStroke().pencil(ink.accent).frame(height: 6).allowsHitTesting(false)
+                PencilStroke().pencil(ink.highlighter ? nil : ink.accent, highlighter: ink.highlighter).frame(height: 6).allowsHitTesting(false)
             } else if hovered {
                 Rectangle().fill(ink.track).frame(height: 1.5).offset(y: -1).allowsHitTesting(false)
             } else if marked {
-                PencilStroke().pencil(ink.accent).frame(height: 5).allowsHitTesting(false)
+                PencilStroke().pencil(ink.highlighter ? nil : ink.accent, highlighter: ink.highlighter).frame(height: 5).allowsHitTesting(false)
             }
         }
     }
@@ -177,7 +177,7 @@ struct StockName: View {
             // As CSS places it: `left 54% / 88% 6px` over the name and its 5 pt below.
             GeometryReader { proxy in
                 let width = proxy.size.width * strike.width
-                PencilStroke().pencil(ink.accent)
+                PencilStroke().strike(ink.accent)
                     .frame(width: width, height: 6)
                     .position(x: width / 2, y: (proxy.size.height - 6) * strike.height + 3)
             }

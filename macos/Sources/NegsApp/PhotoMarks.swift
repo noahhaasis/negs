@@ -92,7 +92,7 @@ struct PairBadge: View {
         Text(word)
             .font(.system(size: 8.5, weight: .semibold))
             .tracking(0.5)
-            .foregroundStyle(Theme.paper)
+            .foregroundStyle(Theme.onPhoto)
             .padding(.horizontal, 4)
             .padding(.top, 3)
             .padding(.bottom, 2.5)

@@ -425,7 +425,7 @@ struct BatchProgressView: View {
         .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
         .frame(width: Self.width, alignment: .leading)
         .background(Theme.panel)
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, Theme.colorScheme)
     }
 }
 
