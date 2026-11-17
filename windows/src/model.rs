@@ -520,6 +520,12 @@ pub struct Model {
     pub renaming_preset: Option<PathBuf>,
     /// New Preset's file while it is first named: Escape removes it.
     unnamed_preset: Option<PathBuf>,
+    /// The preset applied last to each photograph, by its file: its tile
+    /// has the pencil ring (`appliedPresets`).
+    applied_presets: HashMap<PathBuf, PathBuf>,
+    /// The presets whose tiles are on screen, by index, with a row read
+    /// ahead: only they are developed. None until the pane says.
+    visible_presets: Option<std::ops::Range<usize>>,
     /// The film, paper and preset thumbnails.
     pub previews: Previews,
     /// Lab › Film format › Custom picked while the value is still a format's,
@@ -666,6 +672,8 @@ impl Model {
             preset_status: HashMap::new(),
             renaming_preset: None,
             unnamed_preset: None,
+            applied_presets: HashMap::new(),
+            visible_presets: None,
             previews: Previews::default(),
             custom_film_format: false,
             matching_brightness: false,
@@ -1489,7 +1497,7 @@ impl Model {
             return;
         }
         match self.preset_library.read(preset).and_then(|data| presets::text(&data)) {
-            Ok(text) => self.request_preset(preset.name(), text, 0),
+            Ok(text) => self.request_preset(preset.path.clone(), text, 0),
             Err(error) => {
                 self.report(&error);
                 self.refresh_presets();
@@ -1499,16 +1507,17 @@ impl Model {
 
     /// The engine keeps the photograph's settings from the params it's
     /// given; ask again if they changed while it answered.
-    fn request_preset(&mut self, name: String, text: String, attempt: u32) {
+    fn request_preset(&mut self, preset: PathBuf, text: String, attempt: u32) {
         let Some(engine) = self.engine.clone() else { return };
         let snapshot = self.state.clone();
         let command = json!({"command": "preset_import", "text": text, "params": snapshot.params});
         engine.request(command, engine::timeout_for("preset_import"), move |result| {
-            ui::post(move |app: &mut App| app.model.preset_imported(name, text, snapshot, attempt, result));
+            ui::post(move |app: &mut App| app.model.preset_imported(preset, text, snapshot, attempt, result));
         });
     }
 
-    fn preset_imported(&mut self, name: String, text: String, snapshot: EditState, attempt: u32, result: Result<(u64, Value)>) {
+    fn preset_imported(&mut self, preset: PathBuf, text: String, snapshot: EditState, attempt: u32, result: Result<(u64, Value)>) {
+        let name = preset.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let result = match result {
             Ok((_, result)) => result,
             Err(error) => {
@@ -1521,7 +1530,7 @@ impl Model {
         }
         if self.state != snapshot {
             if attempt < 2 {
-                self.request_preset(name, text, attempt + 1);
+                self.request_preset(preset, text, attempt + 1);
             }
             return;
         }
@@ -1536,8 +1545,11 @@ impl Model {
         next.paper = paper;
         next.params = result["params"].clone();
         self.apply(next, format!("Apply Preset “{name}”"));
+        if let Some(source) = self.source.clone() {
+            self.applied_presets.insert(source, preset);
+        }
         self.status = format!("Applied preset “{name}”");
-        self.mark(dirty::STATUS);
+        self.mark(dirty::STATUS | dirty::PRESETS);
     }
 
     /// Saves the film, paper and Lab settings as a new preset, named after
@@ -1654,10 +1666,29 @@ impl Model {
             return;
         }
         self.unnamed_preset = None;
+        self.forget_applied(&preset.path);
         if let Err(error) = self.preset_library.delete(preset) {
             self.report(&error);
         }
         self.refresh_presets();
+    }
+
+    /// The preset applied last to the photograph on screen, if it's listed.
+    pub fn applied_preset(&self) -> Option<&PathBuf> {
+        self.source.as_ref().and_then(|s| self.applied_presets.get(s))
+    }
+
+    fn forget_applied(&mut self, preset: &Path) {
+        self.applied_presets.retain(|_, p| p != preset);
+    }
+
+    /// The presets whose tiles are on screen (and a row ahead); thumbnails
+    /// are made for those only.
+    pub fn set_visible_presets(&mut self, range: std::ops::Range<usize>) {
+        if self.visible_presets.as_ref() != Some(&range) {
+            self.visible_presets = Some(range);
+            self.mark(dirty::PREVIEWS);
+        }
     }
 
     pub fn rename_preset(&mut self, preset: &PresetFile, name: &str) {
@@ -1670,13 +1701,19 @@ impl Model {
             return;
         }
         match self.preset_library.rename(preset, name) {
-            Ok(renamed) => self.previews.move_preset(&preset.path, &renamed.path),
+            Ok(renamed) => {
+                self.previews.move_preset(&preset.path, &renamed.path);
+                for applied in self.applied_presets.values_mut().filter(|p| **p == preset.path) {
+                    *applied = renamed.path.clone();
+                }
+            }
             Err(error) => self.report(&error),
         }
         self.refresh_presets();
     }
 
     pub fn delete_preset(&mut self, preset: &PresetFile) {
+        self.forget_applied(&preset.path);
         if let Err(error) = self.preset_library.delete(preset) {
             self.report(&error);
         }
@@ -2119,9 +2156,13 @@ impl Model {
         let checking = self.presets.iter().any(|p| matches!(self.preset_status.get(p), None | Some(PresetStatus::Checking)));
         if self.preset_thumbnails_shown() && !checking {
             let kept: Option<Vec<String>> = self.catalog["preset_kept"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect());
+            let visible = self.visible_presets.clone().unwrap_or(0..0);
             let valid: Vec<(&PresetFile, &str, &Value)> = self
                 .presets
                 .iter()
+                .enumerate()
+                .filter(|(i, _)| visible.contains(i))
+                .map(|(_, p)| p)
                 .filter_map(|p| match self.preset_status.get(p) {
                     Some(PresetStatus::Valid { text, white_balance, .. }) => Some((p, text.as_str(), white_balance)),
                     _ => None,

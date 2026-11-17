@@ -4632,7 +4632,3 @@ mod tests {
     }
 }
 
-/// The small Segoe MDL2 Assets font the headers' chevrons use.
-pub fn glyph_font() -> HGDIOBJ {
-    with_app_fonts_glyph()
-}
