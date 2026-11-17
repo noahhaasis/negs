@@ -76,6 +76,8 @@ final class TitleBand: NSView {
             self?.layer?.backgroundColor = Theme.NS.bg.cgColor
             self?.name.textColor = Theme.NS.paper
             self?.name.font = Theme.serifFont(15, weight: 600) as NSFont
+            // Plain's type is wider: the name and the view switch are measured again.
+            self?.needsLayout = true
         }
         name.lineBreakMode = .byTruncatingMiddle
         name.cell?.truncatesLastVisibleLine = true

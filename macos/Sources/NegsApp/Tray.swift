@@ -699,10 +699,12 @@ private struct TraySearchField: NSViewRepresentable {
         field.focusRingType = .none
         field.cell?.isScrollable = true
         field.cell?.wraps = false
-        let font = Theme.serifFont(13.5, italic: true) as NSFont
-        field.font = font
-        field.textColor = Theme.Film.nsPaper
-        field.placeholderAttributedString = NSAttributedString(string: "Search films", attributes: [.font: font, .foregroundColor: Theme.Film.nsDim])
+        Theme.follow(field) { [weak field] in
+            let font = Theme.serifFont(13.5, italic: true) as NSFont
+            field?.font = font
+            field?.textColor = Theme.Film.nsPaper
+            field?.placeholderAttributedString = NSAttributedString(string: "Search films", attributes: [.font: font, .foregroundColor: Theme.Film.nsDim])
+        }
         field.setAccessibilityLabel("Search films")
         field.delegate = context.coordinator
         field.stringValue = visit.query

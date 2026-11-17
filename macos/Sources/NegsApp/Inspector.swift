@@ -395,8 +395,10 @@ struct PixelField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = Theme.serifFont(14.5) as NSFont
-        field.textColor = Theme.NS.paper
+        Theme.follow(field) { [weak field] in
+            field?.font = Theme.serifFont(14.5) as NSFont
+            field?.textColor = Theme.NS.paper
+        }
         field.alignment = .right
         field.setAccessibilityLabel(title)
         field.delegate = context.coordinator
