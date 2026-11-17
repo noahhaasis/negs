@@ -205,6 +205,9 @@ pub struct Preferences {
     /// The custom colour behind the photograph, "#rrggbb" in sRGB.
     #[serde(rename = "viewerBackgroundColor")]
     pub viewer_background: String,
+    /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
+    /// Old settings files lack it: Darkroom.
+    pub app_theme: String,
 }
 
 /// Starred for new users, as on the web and the Mac; once they change the
@@ -252,6 +255,7 @@ impl Default for Preferences {
             viewer_background_custom: false,
             // A neutral dark grey, near the dark theme's.
             viewer_background: "#242424".into(),
+            app_theme: "darkroom".into(),
         }
     }
 }

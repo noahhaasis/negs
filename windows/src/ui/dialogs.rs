@@ -1,7 +1,7 @@
-//! Open and save dialogs, error and question dialogs, Settings and About.
-//! Export's options live inside the save dialog (§20.4, decided): the file
-//! type filter picks the format, `IFileDialogCustomize` adds Engine, Size and
-//! the message.
+//! Open and save dialogs, Settings and About; errors and questions go to the
+//! alert card (`alert.rs`). Export's options live inside the save dialog
+//! (§20.4, decided): the file type filter picks the format,
+//! `IFileDialogCustomize` adds Engine, Size and the message.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -17,6 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement};
 
 use super::App;
+use super::alert::Alert;
 use crate::engine::ExportEngine;
 use crate::model::{COLOR_SPACES, Edge, ExportSize, IMAGE_EXTENSIONS, OutputFormat, PIXEL_RANGE, PROPHOTO, QUALITY_RANGE, RAW_EXTENSIONS, SaveSettings};
 use crate::platform::{pcwstr, wide};
@@ -129,42 +130,28 @@ fn task_dialog(owner: HWND, instruction: &str, content: &str, details: Option<&s
     pressed
 }
 
-/// An error, with an exporter log as expandable details.
+/// An error, in the alert card; an exporter's log offered to copy.
 pub fn error(owner: HWND, message: &str) {
-    let (first, rest) = message.split_once('\n').unwrap_or((message, ""));
-    let details = (!rest.trim().is_empty()).then_some(rest.trim());
-    task_dialog(owner, first, "", details, TD_WARNING_ICON, &[], TASKDIALOG_FLAGS(0));
+    super::alert::error(owner, message);
 }
 
-/// A short message with an explanation below it.
+/// A short message with an explanation below it, in the alert card.
 pub fn notice(owner: HWND, instruction: &str, content: &str) {
-    task_dialog(owner, instruction, content, None, TD_WARNING_ICON, &[], TASKDIALOG_FLAGS(0));
+    super::alert::notice(owner, instruction, content);
 }
 
 /// True to delete the preset.
 pub fn confirm_delete_preset(owner: HWND, name: &str) -> bool {
-    task_dialog(
-        owner,
-        &format!("Delete the preset “{name}”?"),
-        "This can’t be undone. Photographs edited with it keep their settings.",
-        None,
-        TD_WARNING_ICON,
-        &[(100, "Delete"), (IDCANCEL.0, "Cancel")],
-        TDF_ALLOW_DIALOG_CANCELLATION,
-    ) == 100
+    let alert = Alert::new(format!("Delete the preset “{name}”?"), Some("This can’t be undone. Photographs edited with it keep their settings.".into()))
+        .buttons(&["Delete", "Cancel"], Some(1));
+    super::alert::ask(owner, alert) == 0
 }
 
 /// True to quit and cancel the export.
 pub fn confirm_quit_during_export(owner: HWND) -> bool {
-    task_dialog(
-        owner,
-        "An export is still in progress.",
-        "Quitting cancels it. Any existing file at the destination is left unchanged.",
-        None,
-        TD_WARNING_ICON,
-        &[(100, "Continue exporting"), (101, "Quit")],
-        TDF_USE_COMMAND_LINKS,
-    ) == 101
+    let alert = Alert::new("An export is still in progress.", Some("Quitting cancels it. Any existing file at the destination is left unchanged.".into()))
+        .buttons(&["Continue Exporting", "Quit"], Some(0));
+    super::alert::ask(owner, alert) == 1
 }
 
 pub fn about(owner: HWND) {

@@ -449,6 +449,8 @@ pub struct Model {
     pub shows_activity: bool,
     /// The latest edit couldn't be developed; the last good preview stays.
     pub render_failed: bool,
+    /// Why, for the canvas's "couldn't be developed" (§4.14), not an alert.
+    pub develop_error: Option<String>,
     pub saving: bool,
     /// A Balance Print solve is running.
     pub balancing_print: bool,
@@ -614,6 +616,7 @@ impl Model {
             preview_current: false,
             shows_activity: false,
             render_failed: false,
+            develop_error: None,
             saving: false,
             balancing_print: false,
             exporting: false,
@@ -1685,6 +1688,7 @@ impl Model {
         self.preview_current = false;
         self.showing_cached_preview = false;
         self.render_failed = false;
+        self.develop_error = None;
         self.update_histogram();
         if self.film_histogram.take().is_some() {
             self.mark(dirty::TONE_GRAPH);
@@ -2179,6 +2183,8 @@ impl Model {
         self.preview_current = false;
         if self.render_failed {
             self.render_failed = false;
+            self.develop_error = None;
+            self.mark(dirty::CANVAS);
         }
         self.mark(dirty::CHROME | dirty::STATUS);
         if !self.ready || self.source.is_none() || self.closing {
@@ -2378,9 +2384,12 @@ impl Model {
                     && generation == self.source_generation
                     && !self.closing
                 {
+                    // Said on the canvas, with Try Again (§4.14), not in an alert.
                     self.render_failed = true;
+                    self.develop_error = Some(format!("{error:#}"));
                     self.hide_activity();
-                    self.report(&error);
+                    self.status.clear();
+                    self.mark(dirty::CANVAS | dirty::STATUS | dirty::CHROME);
                 }
             }
         }
@@ -3304,6 +3313,19 @@ impl Model {
             engine.stop();
         }
         self.preview_cache.flush();
+    }
+
+    /// Try Again on the canvas: develops the current edit once more.
+    pub fn retry_develop(&mut self) {
+        if !self.render_failed || self.source.is_none() || self.closing {
+            return;
+        }
+        self.render_failed = false;
+        self.develop_error = None;
+        self.preview_current = false;
+        self.mark(dirty::CANVAS | dirty::STATUS | dirty::CHROME);
+        self.schedule_render();
+        self.schedule_activity();
     }
 
     pub fn report(&mut self, error: &anyhow::Error) {

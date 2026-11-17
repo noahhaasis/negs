@@ -65,30 +65,39 @@ Every command is enabled or disabled from the model's state, and some
 titles change (see below). The Mac app menu (About, Services, Hide, Quit)
 and Window menu are macOS conventions: drop them.
 
-Suggested Windows menu bar (with `&` access keys):
+The Windows menus (parity phase 2, 2026-11-18; `&` access keys; ⌘ is Ctrl
+and ⌥ is Alt, except ⌥⌘, which keeps F6/F7/F8):
 
 | Menu | Item | Mac key | Windows key | Enabled when |
 |---|---|---|---|---|
-| File | Open Photograph… | ⌘O | Ctrl+O | always |
-| File | Recent Photographs ▸ (up to 10) | — | — | list not empty |
+| File | Open… | ⌘O | Ctrl+O | always |
+| File | Open Recent ▸ (up to 10) | — | — | list not empty |
 | File | Save Preview… | ⌘S | Ctrl+S | preview current, not saving, not cropping |
 | File | Export Photograph… | ⇧⌘E | Ctrl+Shift+E | photo open, engine ready, not exporting, not cropping |
 | File | Export LUT… | ⇧⌘L | Ctrl+Shift+L | catalog loaded, not saving/exporting/cropping; no photo needed |
-| File | Settings… (Mac: app menu) | ⌘, | — | always |
+| File | New Preset / Import Presets… / Show Presets Folder | ⇧⌘S / ⇧⌘O / — | Ctrl+Shift+S / Ctrl+Shift+O / — | presets can change |
+| File | Settings… (Mac: app menu) | ⌘, | Ctrl+, | always |
 | File | Exit (Mac: Quit / Close) | ⌘Q / ⌘W | Alt+F4 | always |
 | Edit | Undo *action* | ⌘Z | Ctrl+Z | something to undo |
 | Edit | Redo *action* | ⇧⌘Z | Ctrl+Y (also Ctrl+Shift+Z) | something to redo |
 | Edit | Cut / Copy / Paste / Delete / Select All | ⌘X… | Ctrl+X… | forwarded to the focused edit control |
-| Edit | Reset All Adjustments (Mac: View menu) | — (⇧⌘R is Photo › Reset Edits) | Ctrl+Shift+R | catalog known, not cropping |
+| Photo | Show Original | hold \\ | hold O or \\ | an original to show, not cropping |
+| Photo | Reset Edits | ⇧⌘R | Ctrl+Shift+R | catalog known, not cropping |
 | View | Film Strip (check) | ⌥⌘F | F6 | always |
-| View | Adjustments (check) | ⌥⌘I | F7 | always |
+| View | Adjustments / Presets (check) | ⌥⌘I / ⌥⌘P | F7 / F8 | always |
+| View | Full Screen | — | F11 | always |
 | View | Fit Photograph | ⌘0 | Ctrl+0 | photo open, not cropping |
 | View | Actual Size | ⌘1 | Ctrl+1 | photo open, not cropping |
 | View | Zoom In / Zoom Out (new) | — | Ctrl+= / Ctrl+- | photo open, not cropping |
-| Image | Rotate Clockwise (Mac: View) | ⌘R | Ctrl+R | photo open (also while cropping) |
-| Image | Crop / Done Cropping (Mac: View) | ⌘K | C, or Ctrl+K | cropping, or a developed image exists |
+| View | Rotate Clockwise | ⌘R | Ctrl+R | photo open (also while cropping) |
+| View | Crop / Done Cropping | ⌘K | Ctrl+K, or C | cropping, or a developed image exists |
+| View | Theme ▸ (six, the chosen one ticked) | — | — | always |
 | Help | Check for Updates… (Mac: app menu) | — | — | updates configured |
 | Help | About Negs | — | — | always |
+
+The Photo menu gains ratings, flags, copying edits and the rest with the
+library (phase 6). The Mac's View › Reset All Adjustments is Photo › Reset
+Edits here, as Windows has only the one reset.
 
 Notes:
 
@@ -117,25 +126,19 @@ Rotate, Crop (accent-tinted while cropping). Right: Export, Adjustments.
 While cropping, Export is replaced by **Cancel** and **Done** (Done is the
 prominent/default button). Enabled states as in the menu table.
 
-On Windows, each control sits with what it acts on:
+On Windows (parity phase 2): no toolbar, as on the Mac since round 2.
 
-- The title bar holds the window's actions: Open (with its label) after the
-  menus, Export (labelled, in the accent) and a button that hides or shows
-  the panel column before the caption buttons. They are toolbar controls
-  (`TOOLBARCLASSNAME`), so screen readers name them.
-- The photograph's tools float in a pill under it on the canvas (`canvas::Tool`):
-  Fit, 1:1 · Rotate, Crop · Before | After · Film Strip, with tooltips that name
-  the shortcut. A fitted photograph leaves room for the pill; the pill hides while
-  cropping. It is drawn by the canvas, so the menus and shortcuts are its keyboard
-  and screen reader route.
+- The title bar (`ui/titlebar.rs`, 38 DIP of `bg`) holds the menu row, the
+  file name in Newsreader 15/600 and the caption buttons. The Grid · Photo ·
+  Compare switch waits for the grid and Compare (phases 7 and 8).
+- Open, Export, the panel, fit, 1:1, rotate, crop and the film strip are menu
+  items with shortcuts (§2). Before/After is the status line's Original ⌄
+  (hold it, or choose Original or Edited) and Photo › Show Original.
+- The status line (`ui/status.rs`, §13) has Fit and 100% as words that act.
 - Adjustments | Presets is a switch at the top of the column (`ui/panes.rs`),
   hidden while cropping.
-- Crop's Done/Cancel: on Windows, put them at the bottom of the crop panel
-  (§9), Done as the default push button, Cancel next to it; Enter and Esc
-  work anywhere in crop mode. Keep them in the toolbar too only if it looks
-  right.
-- Icons: Segoe Fluent Icons (Windows 11) / Segoe MDL2 Assets (Windows 10)
-  glyphs, drawn at the current DPI, or bundled icons. SF Symbols don't exist.
+- Crop's Done/Cancel are at the bottom of the crop panel (§9); Enter and Esc
+  work anywhere in crop mode.
 
 ## 4. Opening photographs
 

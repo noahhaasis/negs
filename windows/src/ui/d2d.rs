@@ -96,9 +96,18 @@ pub fn shared() -> Option<&'static Shared> {
     SHARED.get_or_init(|| Shared::new(false).ok()).as_ref()
 }
 
+/// Sets each sample once in a scratch bitmap on this thread, so DirectWrite
+/// has the faces, sizes and shaping the first frame asks for (the title
+/// band's name, the empty window's words) before the window paints them.
+pub fn warm(samples: &[(&str, TextStyle)]) {
+    for (text, style) in samples {
+        let _ = mask(text, style, 0.0, Align::Leading, 1.0, false);
+    }
+}
+
 /// Starts making the factories and reading the fonts on a thread of their
-/// own, then calls `done` there. Startup calls this after the inspector is
-/// shown, so neither the first window nor the inspector waits for it.
+/// own, then calls `done` there. Startup calls this first thing, so the
+/// title bar's first paint finds them made.
 pub fn prepare(done: impl FnOnce(&Shared) + Send + 'static) {
     if SHARED.get().is_some() {
         return;
@@ -365,10 +374,13 @@ struct Target {
 }
 
 impl Target {
-    fn new(shared: &Shared) -> windows::core::Result<Self> {
+    /// Opaque (ClearType text), or premultiplied alpha for a layered
+    /// window's pixels (greyscale text).
+    fn new(shared: &Shared, premultiplied: bool) -> windows::core::Result<Self> {
+        let alpha = if premultiplied { D2D1_ALPHA_MODE_PREMULTIPLIED } else { D2D1_ALPHA_MODE_IGNORE };
         let props = D2D1_RENDER_TARGET_PROPERTIES {
             r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-            pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+            pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: alpha },
             dpiX: 96.0,
             dpiY: 96.0,
             usage: D2D1_RENDER_TARGET_USAGE_NONE,
@@ -406,6 +418,8 @@ const MOST_SHAPES: usize = 512;
 #[derive(Default)]
 struct Device {
     target: Option<Target>,
+    /// For layered windows (the alert card): premultiplied pixels.
+    layer: Option<Target>,
     caches: Caches,
 }
 
@@ -417,16 +431,27 @@ thread_local! {
 /// `scale`, with `plain` marks and type (Plain). Draws a second time on a
 /// fresh target if the first was lost. False when Direct2D isn't there or
 /// drawing failed; the buffer is then as `draw` left it, or untouched.
-pub fn paint(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, mut draw: impl FnMut(&mut Painter)) -> bool {
+pub fn paint(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, draw: impl FnMut(&mut Painter)) -> bool {
+    paint_with(dc, w, h, scale, plain, false, draw)
+}
+
+/// `paint` into a 32-bit buffer whose alpha counts: premultiplied pixels for
+/// `UpdateLayeredWindow`, text in greyscale. Clear it first.
+pub fn paint_layer(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, draw: impl FnMut(&mut Painter)) -> bool {
+    paint_with(dc, w, h, scale, plain, true, draw)
+}
+
+fn paint_with(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, layer: bool, mut draw: impl FnMut(&mut Painter)) -> bool {
     let Some(shared) = shared() else { return false };
     DEVICE.with(|cell| {
         let Ok(mut device) = cell.try_borrow_mut() else { return false };
         let device = &mut *device;
         for _ in 0..2 {
-            if device.target.is_none() {
-                device.target = Target::new(shared).ok();
+            let slot = if layer { &mut device.layer } else { &mut device.target };
+            if slot.is_none() {
+                *slot = Target::new(shared, layer).ok();
             }
-            let Some(target) = device.target.as_ref() else { return false };
+            let Some(target) = slot.as_ref() else { return false };
             unsafe {
                 if target.rt.BindDC(dc, &RECT { left: 0, top: 0, right: w, bottom: h }).is_err() {
                     return false;
@@ -434,17 +459,85 @@ pub fn paint(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, mut draw: impl Fn
                 target.rt.SetDpi(96.0 * scale, 96.0 * scale);
                 target.rt.BeginDraw();
                 target.rt.SetTransform(&IDENTITY);
+                target.rt.SetTextAntialiasMode(if layer { D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE } else { D2D1_TEXT_ANTIALIAS_MODE_DEFAULT });
             }
             let mut painter = Painter { shared, rt: &target.rt, brush: &target.brush, caches: &mut device.caches, plain };
             draw(&mut painter);
             match unsafe { target.rt.EndDraw(None, None) } {
                 Ok(()) => return true,
-                Err(e) if e.code() == D2DERR_RECREATE_TARGET => device.target = None,
+                Err(e) if e.code() == D2DERR_RECREATE_TARGET => *(if layer { &mut device.layer } else { &mut device.target }) = None,
                 Err(_) => return false,
             }
         }
         false
     })
+}
+
+/// Words as a coverage mask (one byte a pixel, greyscale antialiased), for
+/// the canvas to colour on the GPU: Newsreader there too. `scale` is pixels
+/// per DIP; the mask is in pixels.
+pub struct Mask {
+    pub coverage: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub fn mask(text: &str, style: &TextStyle, width: f32, align: Align, scale: f32, plain: bool) -> Option<Mask> {
+    use windows::Win32::Graphics::Gdi::*;
+    if text.is_empty() {
+        return None;
+    }
+    unsafe {
+        let screen = GetDC(None);
+        let dc = CreateCompatibleDC(screen);
+        ReleaseDC(None, screen);
+        // Measured first on a one-pixel buffer: the layout is then cached.
+        let dib = |w: i32, h: i32| {
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w,
+                    biHeight: -h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0).ok().map(|b| (b, bits))
+        };
+        let mut result = None;
+        if let Some((one, _)) = dib(1, 1) {
+            let old = SelectObject(dc, one);
+            let mut size = TextMetrics::default();
+            paint(dc, 1, 1, scale, plain, |p| size = p.measure_in(text, style, width, align));
+            SelectObject(dc, old);
+            let _ = DeleteObject(one);
+            let layout_width = if width > 0.0 { width } else { size.width };
+            let (w, h) = (((layout_width * scale).ceil() as i32 + 2).max(1), ((size.height * scale).ceil() as i32 + 2).max(1));
+            if let Some((bitmap, bits)) = dib(w, h) {
+                let old = SelectObject(dc, bitmap);
+                let drawn = paint(dc, w, h, scale, plain, |p| {
+                    p.grayscale_text();
+                    p.fill_rect(RectF::new(0.0, 0.0, w as f32 / scale, h as f32 / scale), Ink::hex(0));
+                    p.text_in(text, style, RectF::new(1.0 / scale, 1.0 / scale, layout_width, 0.0), align, Ink::hex(0xffffff));
+                });
+                let _ = GdiFlush();
+                if drawn && !bits.is_null() {
+                    let pixels = std::slice::from_raw_parts(bits as *const u8, (w * h * 4) as usize);
+                    // White on black: the green channel is the coverage.
+                    let coverage = pixels.chunks_exact(4).map(|p| p[1]).collect();
+                    result = Some(Mask { coverage, width: w as u32, height: h as u32 });
+                }
+                SelectObject(dc, old);
+                let _ = DeleteObject(bitmap);
+            }
+        }
+        let _ = DeleteDC(dc);
+        result
+    }
 }
 
 const IDENTITY: Matrix3x2 = Matrix3x2 { M11: 1.0, M12: 0.0, M21: 0.0, M22: 1.0, M31: 0.0, M32: 0.0 };
@@ -598,6 +691,11 @@ impl Painter<'_> {
 
     pub fn fill_rect(&mut self, r: RectF, ink: Ink) {
         unsafe { self.rt.FillRectangle(&r.d2d(), self.ink(ink)) };
+    }
+
+    /// A rectangle's outline, centred on its edge.
+    pub fn stroke_rect(&mut self, r: RectF, width: f32, ink: Ink) {
+        unsafe { self.rt.DrawRectangle(&r.d2d(), self.ink(ink), width, None) };
     }
 
     pub fn fill_round_rect(&mut self, r: RectF, radius: f32, ink: Ink) {
@@ -820,8 +918,28 @@ impl Painter<'_> {
 
     /// The size of `text` in `style` on one line (or wrapped at `width`).
     pub fn measure(&mut self, text: &str, style: &TextStyle, width: f32) -> TextMetrics {
-        let Some(layout) = self.layout(text, style, width, Align::Leading) else { return TextMetrics::default() };
+        self.measure_in(text, style, width, Align::Leading)
+    }
+
+    /// `measure` for the layout `text_in` makes with `align`.
+    pub fn measure_in(&mut self, text: &str, style: &TextStyle, width: f32, align: Align) -> TextMetrics {
+        if text.is_empty() {
+            return TextMetrics::default();
+        }
+        let Some(layout) = self.layout(text, style, width, align) else { return TextMetrics::default() };
         metrics(&layout)
+    }
+
+    /// Text from here on in greyscale, as on a surface that isn't opaque.
+    pub fn grayscale_text(&mut self) {
+        unsafe { self.rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
+    }
+
+    /// Draws `draw` clipped to `r`.
+    pub fn clipped(&mut self, r: RectF, draw: impl FnOnce(&mut Self)) {
+        unsafe { self.rt.PushAxisAlignedClip(&r.d2d(), D2D1_ANTIALIAS_MODE_ALIASED) };
+        draw(self);
+        unsafe { self.rt.PopAxisAlignedClip() };
     }
 
     /// `text` with its layout's top left at (`x`, `y`); returns its size.

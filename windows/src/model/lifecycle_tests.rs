@@ -783,7 +783,8 @@ lifecycle_test! {
         h.edit(|m| m.set("enlarger.y_filter_shift", serde_json::json!("not a number")));
         h.idle();
         assert!(h.model().render_failed && h.model().brightness_match_pending() && h.model().held_frame().is_none());
-        assert_eq!(h.errors.len(), 1, "the render's own error");
+        // The render's own error is said on the canvas, not in an alert.
+        assert!(h.errors.is_empty() && h.model().develop_error.is_some(), "{:?}", h.errors);
         let saved = std::env::temp_dir().join(format!("negs-held-failed-{}.tif", std::process::id()));
         h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 }));
         assert!(h.model().waiting_output.is_none() && !saved.exists());
@@ -1179,10 +1180,11 @@ lifecycle_test! {
         }
         h.idle();
         assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)], "no retry");
-        assert_eq!(h.errors.len(), 1, "one error: {:?}", h.errors);
-        eprintln!("error: {}", h.errors[0]);
+        // Said once, on the canvas ("couldn't be developed"), not in an alert.
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
         let m = h.model();
-        assert!(m.render_failed && !m.preview_current);
+        eprintln!("error: {:?}", m.develop_error);
+        assert!(m.render_failed && !m.preview_current && m.develop_error.is_some());
         assert!(m.shown_frame == previous, "the quick frame failed, silently");
         assert!(presented(&h).is_empty());
     }
