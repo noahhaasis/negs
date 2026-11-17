@@ -623,6 +623,9 @@ private struct TrayFoot: View {
                     }
                     .padding(.leading, 6)
             }
+            if visit.paper, !visit.readAs {
+                KeepPaperWord(model: model).padding(.leading, 6)
+            }
             Button { model.endTray(keep: true) } label: {
                 Text("Done").font(Theme.serif(14, weight: 600)).foregroundStyle(Theme.Film.paper)
             }
@@ -657,6 +660,36 @@ private struct TrayFoot: View {
     /// Esc in Search clears it; in an empty Search it goes back, as anywhere in the tray.
     private func cancel() {
         if visit.query.isEmpty { model.endTray(keep: false) } else { visit.query = "" }
+    }
+}
+
+/// The paper tray's switch for the paper lock (`PaperLock`): "Keep for
+/// every film", and "Kept for every film" with the lock closed.
+private struct KeepPaperWord: View {
+    let model: EditorModel
+    @State private var hovering = false
+
+    var body: some View {
+        let kept = model.previews.keepPaper
+        Button { model.setKeepPaper(!kept) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(Image(systemName: kept ? "lock" : "lock.open"))
+                    .font(.system(size: PrintLabelLayout.lockSize, weight: .medium))
+                    .foregroundStyle(kept ? Theme.Film.accent : hovering ? Theme.Film.label : Theme.Film.dim)
+                Text(kept ? "Kept for every film" : "Keep for every film")
+                    .font(Theme.serif(13, italic: true))
+                    .foregroundStyle(kept ? Theme.Film.paper : hovering ? Theme.Film.label : Theme.Film.dim)
+                    .lineLimit(1).fixedSize()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { hovering = $0 }
+        .help(kept ? ControlHelp.paperKept : ControlHelp.paperLock)
+        .accessibilityLabel("Keep paper when changing film")
+        .accessibilityValue(kept ? "On" : "Off")
+        .accessibilityAddTraits(kept ? .isSelected : [])
     }
 }
 

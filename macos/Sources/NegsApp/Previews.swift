@@ -16,8 +16,8 @@ enum PreviewRules {
 
     /// The edit with `id` chosen, exactly as choosing it from the menu makes
     /// it. A film brings its own grain/DIR/halation presets, sets scanning for
-    /// slides, and brings its own paper unless `keepPaper` (Settings › Keep
-    /// paper when changing film); a paper keeps the film.
+    /// slides, and brings its own paper unless `keepPaper` (the lock before
+    /// "printed on"); a paper keeps the film.
     /// `negative`: the film a negative is read as (the read-as tray), so the
     /// photograph stays a negative, on its paper; any other film choice
     /// prints it as a photograph.
@@ -188,7 +188,7 @@ struct StockEntry {
     static let keepPaperKey = "keep_paper"
     /// Settings › Film, paper and preset previews; a missing value means on.
     var enabled: Bool { didSet { defaults.set(enabled, forKey: Self.defaultsKey) } }
-    /// Settings › Keep paper when changing film; a missing value means off.
+    /// The paper lock (`PaperLock`); a missing value means open.
     /// Here because the film tiles follow it too.
     var keepPaper: Bool { didSet { defaults.set(keepPaper, forKey: Self.keepPaperKey) } }
     static let favoriteFilmsKey = "favoriteFilms"

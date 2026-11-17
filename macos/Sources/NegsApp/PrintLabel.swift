@@ -25,7 +25,13 @@ struct PrintLabel: View {
         let kind = PrintLabelLayout.kind(scanning: scanning)
         let negative = model.isNegative
         // A negative always takes two rows: "Your negative, read as <film>", then the paper.
-        let oneRow = !negative && PrintLabelLayout.fitsOneRow(film: model.filmName, paper: model.paperName, kind: kind, width: photoWidth)
+        // The lock before "printed on": not while scanning (no paper) or
+        // holding Original (the names are only words).
+        let lockable = !scanning && !original
+        // Measured at its widest, closed or open, so the label never jumps
+        // between one row and two when the lock is clicked.
+        let oneRow = !negative && PrintLabelLayout.fitsOneRow(film: model.filmName, paper: model.paperName,
+                                                              kind: lockable ? PrintLabelLayout.keptKind : kind, width: photoWidth, lock: lockable)
         let film = HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner) {
             StockName(model: model, paper: false, name: negative ? NegativeScan.name : model.filmName, size: 24, weight: 600,
                       strike: original ? .original : nil, opens: !original, marked: markFilm && !negative)
@@ -36,7 +42,11 @@ struct PrintLabel: View {
             }
         }
         let paper = HStack(alignment: .firstTextBaseline, spacing: PrintLabelLayout.inner) {
-            Text(kind).font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1).fixedSize()
+            if lockable {
+                PaperLock(model: model)
+            } else {
+                Text(kind).font(Theme.serif(14, italic: true)).foregroundStyle(ink.dim).lineLimit(1).fixedSize()
+            }
             StockName(model: model, paper: true, name: model.paperName, size: 17.5, weight: 400,
                       strike: original ? .original : scanning ? .scanning : nil, opens: !original && !scanning, marked: markPaper)
             if original {
@@ -80,6 +90,15 @@ struct PrintLabel: View {
     static let band: CGFloat = 68
 
     static func kind(scanning: Bool) -> String { scanning ? "not printed — scanning the film" : "printed on" }
+    /// "printed on" while the paper is locked: a new film keeps it.
+    static let keptKind = "always printed on"
+    /// The lock before "printed on", open (the wider) or closed.
+    static let lockSize: CGFloat = 10.5
+    static var lockWidth: CGFloat {
+        let symbol = NSImage(systemSymbolName: "lock.open", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: lockSize, weight: .medium))
+        return ceil(symbol?.size.width ?? 12)
+    }
 
     static func width(_ text: String, font: CTFont, tracking: CGFloat = 0) -> CGFloat {
         var attributes: [NSAttributedString.Key: Any] = [.font: font]
@@ -92,12 +111,48 @@ struct PrintLabel: View {
     static func filmWidth(_ name: String) -> CGFloat {
         width(name, font: Theme.serifFont(24, weight: 600), tracking: -0.24) + inner + chevron
     }
-    /// "printed on", the paper's name at 17.5 pt and its `⌄`.
-    static func paperWidth(_ name: String, kind: String) -> CGFloat {
-        width(kind, font: Theme.serifFont(14, italic: true)) + inner + width(name, font: Theme.serifFont(17.5)) + inner + chevron
+    /// The lock (`lock`), "printed on", the paper's name at 17.5 pt and its `⌄`.
+    static func paperWidth(_ name: String, kind: String, lock: Bool = false) -> CGFloat {
+        (lock ? lockWidth + PaperLock.spacing : 0)
+            + width(kind, font: Theme.serifFont(14, italic: true)) + inner + width(name, font: Theme.serifFont(17.5)) + inner + chevron
     }
-    static func fitsOneRow(film: String, paper: String, kind: String, width: CGFloat) -> Bool {
-        filmWidth(film) + gap + paperWidth(paper, kind: kind) <= width
+    static func fitsOneRow(film: String, paper: String, kind: String, width: CGFloat, lock: Bool = false) -> Bool {
+        filmWidth(film) + gap + paperWidth(paper, kind: kind, lock: lock) <= width
+    }
+}
+
+/// "printed on" with a lock before it, one button. Open, a new film brings
+/// the paper made for it; closed ("always printed on"), the paper stays.
+/// The paper tray's foot has the same switch (`KeepPaperWord`).
+struct PaperLock: View {
+    let model: EditorModel
+    static let spacing: CGFloat = 5
+    @State private var hovered = false
+    @Environment(\.sheetInk) private var ink
+
+    var body: some View {
+        let kept = model.previews.keepPaper
+        Button { model.setKeepPaper(!kept) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: Self.spacing) {
+                Text(Image(systemName: kept ? "lock" : "lock.open"))
+                    .font(.system(size: PrintLabelLayout.lockSize, weight: .medium))
+                    .foregroundStyle(kept ? ink.accent : hovered ? ink.label : ink.track)
+                Text(kept ? PrintLabelLayout.keptKind : PrintLabelLayout.kind(scanning: false))
+                    .font(Theme.serif(14, italic: true))
+                    .foregroundStyle(kept || hovered ? ink.label : ink.dim)
+                    .lineLimit(1).fixedSize()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        // A click here leaves an open tray open, as on the names.
+        .background(TrayHitArea(model: model))
+        .onHover { hovered = $0 }
+        .help(kept ? ControlHelp.paperKept : ControlHelp.paperLock)
+        .accessibilityLabel("Keep paper when changing film")
+        .accessibilityValue(kept ? "On" : "Off")
+        .accessibilityAddTraits(kept ? .isSelected : [])
     }
 }
 

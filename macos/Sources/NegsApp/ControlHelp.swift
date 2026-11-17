@@ -9,7 +9,9 @@ enum ControlHelp {
     static func group(_ title: String) -> String? { groups[title] }
 
     static let film = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data."
-    static let paper = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless Settings › Keep paper when changing film is on."
+    static let paper = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless the lock before “printed on” is closed."
+    static let paperLock = "Keep this paper when you change film. Open, a new film brings the paper made for it."
+    static let paperKept = "This paper stays when you change film. Click to let a new film bring the paper made for it."
 
     private static let paths: [String: String] = [
         // Prep: white balance and brightness

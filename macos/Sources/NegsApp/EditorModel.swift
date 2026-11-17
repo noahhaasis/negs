@@ -1539,7 +1539,7 @@ import UserNotifications
     }
 
     /// Chooses the film new photographs open with. Its own paper comes with
-    /// it unless Settings › Keep paper when changing film, as in the inspector.
+    /// it unless the paper lock is closed, as in the label.
     func setNewPhotoFilm(_ film: String) {
         var choice = EditState(); choice.film = newPhotoFilm; choice.paper = newPhotoPaper
         let chosen = PreviewRules.choosing(film, paper: false, keepPaper: previews.keepPaper, in: choice, stocks: stocks)
@@ -3721,7 +3721,7 @@ import UserNotifications
         }
     }
 
-    /// Settings › Keep paper when changing film. The film tiles show what a
+    /// The paper lock (the label's "printed on", the paper tray's foot). The film tiles show what a
     /// click would develop, so they go stale (their key holds the paper).
     func setKeepPaper(_ keep: Bool) {
         guard keep != previews.keepPaper else { return }

@@ -162,11 +162,6 @@ struct SettingsView: View {
                      ? "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are two photos."
                      : "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are one photo: the RAW develops, the JPEG goes to the Trash with it, and Original can show it. A JPEG you’ve already rated or edited stays a photo of its own.")
         }
-        InkSection(title: "Changing film") {
-            TickRow(title: "Keep paper when changing film", isOn: Binding(
-                get: { model.previews.keepPaper }, set: { model.setKeepPaper($0) }))
-            HintText("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")
-        }
         InkSection(title: "Edits") {
             TickRow(title: "Save ratings and edits next to photos", isOn: Binding(
                 get: { model.sidecarsEnabled }, set: { model.sidecarsEnabled = $0 }))
