@@ -169,7 +169,10 @@ mod tests {
         let own = |table: &[(&str, &str)]| table.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
         assert_eq!(swift_pairs(swift, "paths"), own(PATHS));
         assert_eq!(swift_pairs(swift, "groups"), own(GROUPS));
-        assert!(swift.contains(&format!("static let film = \"{FILM}\"")) && swift.contains(&format!("static let paper = \"{PAPER}\"")));
+        // The Mac keeps the paper with a lock by "printed on"; here it's
+        // still the Settings toggle, so only the clause before "unless" is shared.
+        let paper = PAPER.split(", unless").next().unwrap();
+        assert!(swift.contains(&format!("static let film = \"{FILM}\"")) && swift.contains(&format!("static let paper = \"{paper}, unless ")));
     }
 
     /// Every inspector control and group explains itself (`ControlHelpTests`).

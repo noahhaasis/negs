@@ -632,7 +632,10 @@ mod tests {
         assert_eq!(swift_pairs(swift, "paths"), own(PATHS));
         assert_eq!(swift_pairs(swift, "groups"), own(GROUPS));
         assert!(swift.contains(&format!("static let film = \"{FILM}\"")));
-        assert!(swift.contains(&format!("static let paper = \"{PAPER}\"")));
+        // The Mac keeps the paper with a lock by "printed on"; here it's
+        // still the Settings toggle, so only the clause before "unless" is shared.
+        let shared = PAPER.split(", unless").next().unwrap();
+        assert!(swift.contains(&format!("static let paper = \"{shared}, unless ")));
     }
 
     #[test]

@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.17.0" date="2026-11-18">
+      <description>
+        <p>On the Mac: a lock that keeps the paper when the film changes, a dark Plain theme, and scanned negatives printed as Auto does on a new paper.</p>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-11-17">
       <description>
         <p>Colour noise reduction in the scanner. On the Mac: print your own scanned colour negatives, compare two photographs, five themes, RAW + JPEG pairs, Open in Lightroom and colour filters for black-and-white film.</p>
