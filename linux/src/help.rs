@@ -425,6 +425,10 @@ const GROUPS: &[(&str, &str)] = &[
         "A diffusion filter on the camera lens: highlights bloom into a soft halo.",
     ),
     (
+        "Color Filter",
+        "A coloured glass in front of the lens for black-and-white film. It changes which colours turn light or dark grey, from the film’s own spectral sensitivity, not as a tint.",
+    ),
+    (
         "Film Curves",
         "Shapes how the film develops: its contrast, per layer and per colour.",
     ),

@@ -30,7 +30,8 @@ import XCTest
         if !Self.photos.isEmpty { return Self.photos }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-frame-pipeline-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        Self.photos = try [(3000, 2000, 40), (2400, 2400, 25), (1200, 800, 60)].enumerated().map { index, size in
+        let sizes: [(Int, Int, Int)] = [(3000, 2000, 40), (2400, 2400, 25), (1200, 800, 60)]
+        Self.photos = try sizes.enumerated().map { (index: Int, size: (Int, Int, Int)) throws -> URL in
             let (width, height, tile) = size
             let url = directory.appendingPathComponent("photo-\(index).png")
             var pixels = [UInt8](repeating: 255, count: width * height * 4)
@@ -39,7 +40,8 @@ import XCTest
                     let i = (y * width + x) * 4
                     pixels[i] = UInt8((x * 255) / width)
                     pixels[i + 1] = UInt8((y * 255) / height)
-                    pixels[i + 2] = UInt8(((x / tile + y / tile) % 2) * 160 + 40 * index)
+                    let check: Int = (x / tile + y / tile) % 2
+                    pixels[i + 2] = UInt8(check * 160 + 40 * index)
                 }
             }
             let context = try XCTUnwrap(CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
