@@ -9,12 +9,12 @@ decisions made with their reasons, and what was carried over. See
 | # | Phase | State |
 |---|---|---|
 | 0 | Baseline | done |
-| 1 | Drawing foundation | not started |
+| 1 | Drawing foundation | in progress: agent on branch `win-p1-drawing` (owns the PC) |
 | 2 | Window shell | not started |
 | 3 | Inspector | not started |
 | 4 | Canvas | not started |
 | 5 | Tray | not started |
-| 6 | Library (crate can start in parallel after phase 0) | not started |
+| 6 | Library (crate can start in parallel after phase 0) | crate in progress: agent on branch `win-p6-library-crate` (no PC); glue after phase 5 |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
