@@ -211,6 +211,11 @@ pub struct Preferences {
     /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
     /// Old settings files lack it: Darkroom.
     pub app_theme: String,
+    /// Settings › Fotufilm films, as the Mac stores it: "all",
+    /// "datasheets" or "off".
+    pub fotufilm_films: String,
+    /// The Settings tab last shown (the Mac's `settingsTab`).
+    pub settings_tab: String,
 }
 
 /// Starred for new users, as on the web and the Mac; once they change the
@@ -260,6 +265,8 @@ impl Default for Preferences {
             // A neutral dark grey, near the dark theme's.
             viewer_background: "#242424".into(),
             app_theme: "darkroom".into(),
+            fotufilm_films: "all".into(),
+            settings_tab: "Photographs".into(),
         }
     }
 }

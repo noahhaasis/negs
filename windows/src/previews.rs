@@ -344,7 +344,7 @@ mod tests {
     use super::*;
 
     fn stock(id: &str, paper: bool, positive: bool, target: &str) -> Stock {
-        Stock { id: id.into(), name: id.into(), paper, positive, bw: false, target: target.into(), times: vec![], grain: Value::Null }
+        Stock { id: id.into(), name: id.into(), paper, positive, bw: false, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true }
     }
 
     fn stocks() -> Vec<Stock> {

@@ -691,8 +691,27 @@ impl Model {
     pub fn has_catalog(&self) -> bool {
         !self.stocks.is_empty()
     }
+    #[cfg(test)]
     pub fn films(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| !s.paper).collect()
+    }
+    /// The films the menu and the grid list (Settings › Fotufilm films). The
+    /// photograph's film stays listed, so the menu always shows its choice.
+    pub fn listed_films(&self) -> Vec<&Stock> {
+        let shown = self.fotufilm_films();
+        self.stocks.iter().filter(|s| !s.paper && (shown.lists(s) || s.id == self.state.film)).collect()
+    }
+    pub fn fotufilm_films(&self) -> state::FotufilmFilms {
+        state::FotufilmFilms::from_key(&self.prefs.fotufilm_films)
+    }
+    /// Settings › Fotufilm films: the film menu and grid list again.
+    pub fn set_fotufilm_films(&mut self, films: state::FotufilmFilms) {
+        if self.fotufilm_films() == films {
+            return;
+        }
+        self.prefs.fotufilm_films = films.key().into();
+        self.prefs.save();
+        self.mark(dirty::INSPECTOR | dirty::PREVIEWS);
     }
     pub fn papers(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| s.paper).collect()
@@ -2084,7 +2103,7 @@ impl Model {
             if !self.grid_shown(paper) {
                 continue;
             }
-            let (films, papers) = (self.films(), self.papers());
+            let (films, papers) = (self.listed_films(), self.papers());
             // While the Film grid searches, only its matches, as listed.
             let query = if paper { "" } else { self.previews.film_query.as_str() };
             let searching = !query.trim().is_empty();
@@ -3468,11 +3487,35 @@ mod tests {
         Rendered { id: 1, revision: model.revision, generation: model.source_generation, interactive, result, picture, cached: None }
     }
 
+    /// Settings › Fotufilm films: From datasheets hides the sampled ports,
+    /// None every port; the photograph's film stays listed.
+    #[test]
+    fn fotufilm_films_filter_the_lists_but_keep_the_film_in_use() {
+        let stock = |id: &str, fotufilm: bool, manufacturer_data: bool| Stock {
+            id: id.into(), name: id.into(), paper: false, positive: false, bw: false, target: String::new(), times: vec![], grain: Value::Null, fotufilm, manufacturer_data,
+        };
+        let mut model = Model::new(Preferences::default());
+        model.stocks = vec![stock("portra", false, true), stock("sheet", true, true), stock("sampled", true, false)];
+        model.state.film = "portra".into();
+        let listed = |m: &Model| m.listed_films().iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(listed(&model), ["portra", "sheet", "sampled"]);
+        // Set directly: `set_fotufilm_films` writes the settings file.
+        model.prefs.fotufilm_films = state::FotufilmFilms::Datasheets.key().into();
+        assert_eq!(listed(&model), ["portra", "sheet"]);
+        model.prefs.fotufilm_films = state::FotufilmFilms::Off.key().into();
+        assert_eq!(listed(&model), ["portra"]);
+        model.state.film = "sampled".into();
+        assert_eq!(listed(&model), ["portra", "sampled"]);
+        // An old catalog without the fields lists every film.
+        let old = Stock::new(&json!({"id": "x", "name": "X"}));
+        assert!(!old.fotufilm && old.manufacturer_data);
+    }
+
     /// Settings › Keep paper when changing film, through the film menu.
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
         let stock = |id: &str, paper: bool, target: &str| Stock {
-            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null,
+            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
         };
         for keep in [false, true] {
             let mut model = Model::new(Preferences { keep_paper: keep, ..Preferences::default() });

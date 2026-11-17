@@ -2165,14 +2165,22 @@ fn enable_all(controls: &[HWND], on: bool) {
 /// What a grid or menu was built from: the catalog and the favourites.
 fn grid_key(model: &Model, paper: bool) -> String {
     let catalog = model.stocks.len() + model.stocks.iter().map(|s| s.id.len()).sum::<usize>();
-    format!("{catalog}|{}", model.prefs.favorites(paper).join(","))
+    // Settings › Fotufilm films, and the photograph's film when only it keeps it listed.
+    let listing = if paper {
+        String::new()
+    } else {
+        let films = model.fotufilm_films();
+        let kept = model.stocks.iter().find(|s| !s.paper && s.id == model.state.film).filter(|s| !films.lists(s)).map_or("", |s| s.id.as_str());
+        format!("{}:{kept}", films.key())
+    };
+    format!("{catalog}|{}|{listing}", model.prefs.favorites(paper).join(","))
 }
 
 /// The film or paper menu's entries: the favourites, starred, then each
 /// group's heading (None, can't be chosen) and stocks. A favourite stays in
 /// its group too; the closed menu shows that entry, with the plain name.
 fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
-    let (films, papers) = (model.films(), model.papers());
+    let (films, papers) = (model.listed_films(), model.papers());
     let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
     let mut entries: Vec<(String, Option<(String, bool)>)> =
         model.favorite_stocks(paper).iter().map(|s| (format!("★ {}", s.name), Some((s.id.clone(), true)))).collect();
@@ -3074,7 +3082,7 @@ fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, ke
     unsafe {
         SetWindowLongPtrW(window, GWLP_USERDATA, paper as isize);
     }
-    let (films, papers) = (model.films(), model.papers());
+    let (films, papers) = (model.listed_films(), model.papers());
     let favorites = model.favorite_stocks(paper);
     let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
     let sections = std::iter::once((None, favorites)).chain(groups.into_iter().map(|g| (Some(g.title), g.stocks)));
@@ -3122,7 +3130,7 @@ fn search_matches(grid: &StockGrid, model: &Model, query: &str) -> Option<Vec<bo
     if query.trim().is_empty() {
         return None;
     }
-    let (films, papers) = (model.films(), model.papers());
+    let (films, papers) = (model.listed_films(), model.papers());
     let matched: std::collections::HashSet<&str> =
         state::matching(query, state::film_groups(&films, &papers)).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.as_str())).collect();
     Some((0..grid.tiles.len()).map(|i| !among_favorites(grid, i) && matched.contains(grid.tiles[i].0.as_str())).collect())
@@ -3213,7 +3221,7 @@ pub(crate) fn choose_first_match(app: &mut App) {
     if query.trim().is_empty() {
         return;
     }
-    let (films, papers) = (app.model.films(), app.model.papers());
+    let (films, papers) = (app.model.listed_films(), app.model.papers());
     let first = state::matching(&query, state::film_groups(&films, &papers)).first().and_then(|g| g.stocks.first()).map(|s| s.id.clone());
     if let Some(id) = first {
         app.model.choose_film(&id);
@@ -4493,7 +4501,7 @@ mod tests {
     fn a_search_shows_each_match_once_under_its_group() {
         use crate::session::Preferences;
         let stock = |id: &str, name: &str, bw: bool| state::Stock {
-            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null,
+            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
         };
         let mut model = Model::new(Preferences { favorite_films: vec!["gold".into()], ..Preferences::default() });
         model.stocks = vec![stock("gold", "Gold 200", false), stock("portra", "Portra 400", false), stock("trix", "Tri-X 400", true)];
