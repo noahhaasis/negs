@@ -19,6 +19,21 @@ decisions made with their reasons, and what was carried over. See
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
 
+## 2026-11-19: speed-ups agreed with Noah
+
+Phases were slow: most of the time went to chasing startup noise, retaking
+screenshots, polishing commits, and the single PC. Agreed:
+
+1. **Phase 6 glue runs alongside phase 4.** It is built on the Mac with the cross-check
+   and gets the PC only at the end, for its build and the Mac↔Windows round trip.
+   Phase 4 owns the PC until then. Merge conflicts in `model.rs`/`ui/mod.rs` get
+   resolved at merge.
+2. **Startup gates only where launch code changes.** One full ABBA after phase 6.
+3. **Leaner briefs:** screenshots in Darkroom plus one light theme, taken once;
+   commits as they come, no history polishing; the Windows test suite only in phases
+   4 and 8.
+4. **Phases 4 and 5 stay separate agents,** so neither runs out of context.
+
 ## 2026-11-19: phase 3a merged (branch tip `786d7f8`)
 
 - **What users see:** the Mac's inspector.
