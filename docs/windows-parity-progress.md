@@ -14,10 +14,37 @@ decisions made with their reasons, and what was carried over. See
 | 3 | Inspector | not started |
 | 4 | Canvas | not started |
 | 5 | Tray | not started |
-| 6 | Library (crate can start in parallel after phase 0) | crate in progress: agent on branch `win-p6-library-crate` (no PC); glue after phase 5 |
+| 6 | Library (crate can start in parallel after phase 0) | crate done, merged (see log); Windows glue after phase 5 |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
+
+## 2026-11-18: phase 6 crate merged (branch tip `7718029`)
+
+- **What landed:** `crates/negs-library` (no dependencies; workspace member; `Cargo.lock`
+  gains only its own entry). Exact JSON (JSONEncoder's `.prettyPrinted` `" : "`, sorted
+  keys, Swift's `Double.description` incl. ties-to-even; JSONDecoder's quirks), sidecar
+  read/patch/atomic write, edits as the sidecar's own JSON, folder listing in Finder order
+  with RAW+JPEG/HEIF pairs, filter + wording, selection, delete plans + `Bin` trait,
+  thumbnail looks/keys (CryptoKit goldens), xmp:Rating embedding (PNG/JPEG/TIFF), and a
+  `Library` with actions returning an `Outcome` (the Mac's note text) and byte-exact undo.
+  API and the Swift each part mirrors: `crates/negs-library/README.md`.
+- **Gate (crate part):** `cargo test --release -p negs-library`: 48 pass; every fixture
+  reads and rewrites to the Mac encoder's bytes (`tests/mac-encoded/`);
+  `NEGS_LIBRARY_SEEDS=25` random-action test passes (1.3 s; 200 × 200 also passes).
+  Re-run by the coordinator before merging.
+- **Decided (coordinator):**
+  - `docs/sidecar-fixtures/` stay as they are (hand-written `": "`); the crate checks
+    that spacing is the only difference. Not worth touching shared fixtures.
+  - Undoing a rating/flag after another app's write restores only the fields the action
+    changed (keeps the other app's change). Safer than restoring the whole summary.
+  - Case-insensitive sidecar names on Linux: decide in the Linux port, not now.
+- **Left for the Windows glue (phase 6 proper):** Recycle Bin `Bin` (IFileOperation),
+  folder watcher + refresh on activate, 1 s save debounce, one undo stack interleaving
+  editor steps with `library.undo()`, brightness-match inputs, `EditDefaults` from the
+  catalog, settings persistence (filter, copied groups), view restore after undo,
+  batch-export naming, `xmp::embed_in_file` after exports, and making `change_edits`
+  public for whole-roll actions. Then the Mac↔Windows sidecar round trip.
 
 ## 2026-11-18: phase 1 merged (`e142fba`, branch tip `fe662f4`)
 
