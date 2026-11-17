@@ -24,3 +24,12 @@ variables for both sides.
   (`scripts/seed_worktree_build.sh --install`), so only the workspace crates
   build. Don't point a worktree's `--target-dir` at the main checkout: shared
   build directories serialise sessions and rebuild each other's crates.
+
+# Frame pipeline model
+
+`macos/Specs/FramePipeline.tla` models how the canvas gets its frame
+(`EditorModel` `render()`, the brightness match and held frame, releases,
+crops, early frames). When changing those, update the matching action and run
+`scripts/check_frame_model.sh` (~4 min) and
+`FramePipelineTests` (random sequences: `NEGS_PIPELINE_SEEDS=25`). See
+`macos/Specs/README.md`.
