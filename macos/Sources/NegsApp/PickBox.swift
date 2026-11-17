@@ -16,10 +16,21 @@ struct BoxInk: View {
     var inStrip = false
 
     var body: some View {
+        let plain = Theme.palette.plain
         Canvas { context, size in
             let reach = PickBox.reach
             let picture = CGSize(width: size.width - 2 * reach, height: size.height - 2 * reach)
             context.translateBy(x: reach, y: reach)
+            if plain {
+                // Plain: straight rounded boxes, no halo.
+                func ring(_ outset: CGFloat, _ width: CGFloat, _ color: Color) {
+                    let rect = CGRect(origin: .zero, size: picture).insetBy(dx: -outset, dy: -outset)
+                    context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(color), lineWidth: width)
+                }
+                if picked { ring(inStrip ? 2 : 3, 2, Theme.paper) }
+                if selected { ring(7, 3, Theme.accent) }
+                return
+            }
             if picked {
                 let box = inStrip ? PickBox.strip(in: picture, name: name) : PickBox.grid(in: picture, name: name)
                 context.fill(box.path(in: picture), with: .color(Theme.paper))
@@ -30,8 +41,8 @@ struct BoxInk: View {
         }
         .padding(-PickBox.reach)
         // The halo: drop-shadow 1.5 pt black at 0.95, then 4 pt at 0.45.
-        .shadow(color: .black.opacity(0.95), radius: 0.75)
-        .shadow(color: .black.opacity(0.45), radius: 2)
+        .shadow(color: .black.opacity(plain ? 0 : 0.95), radius: 0.75)
+        .shadow(color: .black.opacity(plain ? 0 : 0.45), radius: 2)
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }

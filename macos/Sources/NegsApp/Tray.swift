@@ -449,7 +449,7 @@ private struct TrayTile: View {
                         if selected {
                             PencilRing().stroke(Theme.Film.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
                                 .padding(EdgeInsets(top: -6, leading: -7, bottom: -1, trailing: -7))
-                                .rotationEffect(.degrees(-1))
+                                .rotationEffect(PencilRing.tilt(-1))
                                 .allowsHitTesting(false)
                         }
                     }
@@ -543,7 +543,7 @@ private struct NegativeTile: View {
                         if selected {
                             PencilRing().stroke(Theme.Film.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
                                 .padding(EdgeInsets(top: -6, leading: -7, bottom: -1, trailing: -7))
-                                .rotationEffect(.degrees(-1))
+                                .rotationEffect(PencilRing.tilt(-1))
                                 .allowsHitTesting(false)
                         }
                     }

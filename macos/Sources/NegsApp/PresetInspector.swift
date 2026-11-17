@@ -281,7 +281,7 @@ private struct PresetTile: View {
                 if applied {
                     PencilRing().pencil(width: PencilRing.lineWidth)
                         .padding(EdgeInsets(top: -6, leading: -7, bottom: -6, trailing: -7))
-                        .rotationEffect(.degrees(-1))
+                        .rotationEffect(PencilRing.tilt(-1))
                         .allowsHitTesting(false)
                 }
             }

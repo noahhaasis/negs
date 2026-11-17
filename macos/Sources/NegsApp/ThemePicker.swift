@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings › Look › Theme: the four themes as small windows in a row, the
+/// Settings › Look › Theme: the five themes as small windows in a row, the
 /// chosen one ringed in the pencil (design/proposals/r28-themes.html, B).
 struct ThemePicker: View {
     static let gap: CGFloat = 12
@@ -36,19 +36,18 @@ private struct ThemeSwatch: View {
                             PencilRing().stroke(Theme.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
                                 .padding(.horizontal, -PencilRing.outset.width)
                                 .padding(.vertical, -PencilRing.outset.height)
-                                .rotationEffect(.degrees(-1))
+                                .rotationEffect(PencilRing.tilt(-1))
                                 .allowsHitTesting(false)
                         }
                     }
-                // The name may run a little into the gap (bold "Contact sheet"
-                // is wider than its column), so it takes no width of its own.
-                Color.clear.frame(height: 18).overlay(alignment: .leading) {
-                    Text(theme.title)
-                        .font(Theme.serif(14, weight: chosen ? 700 : 400))
-                        .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
-                        .lineLimit(1)
-                        .fixedSize()
-                }
+                // Five to a row: a name wider than its column ("Contact
+                // sheet") takes two lines.
+                Text(theme.title)
+                    .font(Theme.serif(14, weight: chosen ? 700 : 400))
+                    .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .topLeading)
             }
             .contentShape(Rectangle())
         }

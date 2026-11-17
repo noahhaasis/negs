@@ -75,8 +75,8 @@ final class TitleBand: NSView {
         Theme.follow(self) { [weak self] in
             self?.layer?.backgroundColor = Theme.NS.bg.cgColor
             self?.name.textColor = Theme.NS.paper
+            self?.name.font = Theme.serifFont(15, weight: 600) as NSFont
         }
-        name.font = Theme.serifFont(15, weight: 600) as NSFont
         name.lineBreakMode = .byTruncatingMiddle
         name.cell?.truncatesLastVisibleLine = true
         // The window's title says it; VoiceOver reads that.

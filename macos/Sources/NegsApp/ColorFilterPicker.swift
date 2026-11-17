@@ -75,7 +75,7 @@ struct ColorFilterPicker: View {
             .overlay {
                 if selected {
                     PencilRing(radii: .number).pencil(width: PencilRing.lineWidth)
-                        .frame(width: 34, height: 32).rotationEffect(.degrees(-8))
+                        .frame(width: 34, height: 32).rotationEffect(PencilRing.tilt(-8))
                 }
             }
             Text(name)

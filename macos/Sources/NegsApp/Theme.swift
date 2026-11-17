@@ -182,9 +182,17 @@ enum Theme {
         Font(serifFont(size, weight: weight, italic: italic))
     }
     /// The same face as a Core Text font, for AppKit text and layers.
+    /// Plain sets SF instead, upright, at 0.95 of the size: the same cap
+    /// height as Newsreader's (its x-height still a fifth taller), and
+    /// near the same width, so the layouts made for Newsreader still fit.
     static func serifFont(_ size: CGFloat, weight: CGFloat = 400, italic: Bool = false) -> CTFont {
-        let key = FontKey(size: size, weight: weight, italic: italic)
+        let key = FontKey(size: size, weight: weight, italic: italic, plain: palette.plain)
         if let font = fontCache.withLock({ $0[key] }) { return font }
+        if key.plain {
+            let font = NSFont.monospacedDigitSystemFont(ofSize: size * 0.95, weight: weight >= 650 ? .semibold : weight >= 500 ? .medium : .regular) as CTFont
+            fontCache.withLock { $0[key] = font }
+            return font
+        }
         let font = Fonts.make(key)
         // A fallback isn't kept, so Newsreader replaces it once it's read.
         if Fonts.loaded { fontCache.withLock { $0[key] = font } }
@@ -195,7 +203,7 @@ enum Theme {
         .system(size: size, weight: weight).monospacedDigit()
     }
 
-    struct FontKey: Hashable { let size: CGFloat, weight: CGFloat, italic: Bool }
+    struct FontKey: Hashable { let size: CGFloat, weight: CGFloat, italic: Bool; var plain = false }
     private static let fontCache = OSAllocatedUnfairLock(initialState: [FontKey: CTFont]())
 
     /// Finding and reading the bundled fonts.
@@ -291,10 +299,19 @@ enum Theme {
 /// stretched to the rect. Stroke it with `Theme.pencilWidth`, round caps,
 /// in `accent` (`.pencil()` below).
 struct PencilStroke: Shape {
-    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect)) }
+    /// A straight line through the middle instead (Plain).
+    var plain = Theme.palette.plain
+
+    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect, plain: plain)) }
 
     /// For `CAShapeLayer`s: the same path, stretched to `rect`.
-    static func cgPath(in rect: CGRect) -> CGPath {
+    static func cgPath(in rect: CGRect, plain: Bool = Theme.palette.plain) -> CGPath {
+        if plain {
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: rect.minX + 1, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX - 1, y: rect.midY))
+            return path
+        }
         let sx = rect.width / 100, sy = rect.height / 6
         func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * sx, y: rect.minY + y * sy) }
         let path = CGMutablePath()
@@ -354,16 +371,25 @@ struct PencilRing: Shape {
         static let number = Radii(horizontal: (0.47, 0.53, 0.50, 0.50), vertical: (0.56, 0.44, 0.58, 0.42), relative: true)
     }
     var radii: Radii = .box
+    /// A plain rounded rectangle, or an ellipse round a number, drawn
+    /// upright (Plain).
+    var plain = Theme.palette.plain
 
-    /// The rotation a ring is drawn at: −0.8° round thumbnails, −1° round tiles.
-    static let tilt = Angle.degrees(-0.8)
+    /// The rotation a ring is drawn at: −0.8° round thumbnails, −1° round
+    /// tiles; none in Plain.
+    static var tilt: Angle { tilt(-0.8) }
+    static func tilt(_ degrees: Double) -> Angle { Theme.palette.plain ? .zero : .degrees(degrees) }
     static let lineWidth: CGFloat = 2
     /// How far a ring sits outside the picture it rings.
     static let outset = CGSize(width: 7, height: 6)
 
-    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect, radii: radii)) }
+    func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect, radii: radii, plain: plain)) }
 
-    static func cgPath(in rect: CGRect, radii: Radii = .box) -> CGPath {
+    static func cgPath(in rect: CGRect, radii: Radii = .box, plain: Bool = Theme.palette.plain) -> CGPath {
+        if plain {
+            let r = radii.relative ? min(rect.width, rect.height) / 2 : min(6, rect.width / 2, rect.height / 2)
+            return CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+        }
         let (w, h) = (rect.width, rect.height)
         var rx = [radii.horizontal.0, radii.horizontal.1, radii.horizontal.2, radii.horizontal.3]
         var ry = [radii.vertical.0, radii.vertical.1, radii.vertical.2, radii.vertical.3]

@@ -2,11 +2,11 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// The four built-in themes (round 28, design/proposals/IMPLEMENTATION-THEMES.md).
+/// The built-in themes (round 28, design/proposals/IMPLEMENTATION-THEMES.md).
 /// One is chosen in Settings › Look; Darkroom, the original dark design, is
 /// the default. The theme doesn't follow the system's light or dark mode.
 enum AppTheme: String, CaseIterable, Identifiable, Sendable {
-    case darkroom, contactSheet, lightTable, daylight
+    case darkroom, contactSheet, lightTable, daylight, plain
 
     /// The choice in the user defaults.
     static let key = "appTheme"
@@ -19,6 +19,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
         case .contactSheet: "Contact sheet"
         case .lightTable: "Light table"
         case .daylight: "Daylight"
+        case .plain: "Plain"
         }
     }
 
@@ -29,6 +30,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
         case .contactSheet: "Ivory paper and the red grease pencil; the strip stays black film."
         case .lightTable: "Lit white, graphite type and a yellow highlighter."
         case .daylight: "Soft grey with an amber pencil, the calmest of the light ones."
+        case .plain: "Black on light grey in the system font, with plain blue marks. The easiest to read."
         }
     }
 
@@ -88,6 +90,9 @@ struct Palette: Sendable {
     /// The pencil under a word is a highlighter, swiped behind its lower
     /// half (Light table); strikes stay a pencil line in `accent`.
     let highlighter: Bool
+    /// The system font for the serif and straight, upright marks for the
+    /// pencil's (Plain): `Theme.serifFont`, `PencilStroke`, `PencilRing`.
+    let plain: Bool
     let colors: Colors
     let ns: NSColors
     /// The words and marks on the film (strip, tray, leader): this palette's
@@ -96,10 +101,11 @@ struct Palette: Sendable {
     let filmColors: Colors
     let filmNS: NSColors
 
-    init(_ hex: Hex, dark: Bool, highlighter: Bool = false, filmInk: Hex? = nil) {
+    init(_ hex: Hex, dark: Bool, highlighter: Bool = false, plain: Bool = false, filmInk: Hex? = nil) {
         self.hex = hex
         self.dark = dark
         self.highlighter = highlighter
+        self.plain = plain
         filmHex = filmInk ?? hex
         colors = Colors(hex)
         ns = NSColors(hex)
@@ -130,6 +136,12 @@ struct Palette: Sendable {
         .daylight: Palette(Hex(bg: 0xe8e6e1, panel: 0xd8d5cf, film: 0xc9c6bf, grid: 0xc9c6bf,
                                line: 0xc6c2bb, track: 0xa29e96, dim: 0x57524b, label: 0x3a3631, paper: 0x161411,
                                accent: 0xa35000, fill: 0xa35000, onFill: 0xffffff, warn: 0x912a16, blank: 0xd0cdc7), dark: false),
+        // Near native: neutral greys, near-black words (7 : 1 and up on every
+        // ground), a plain blue mark and the system font.
+        .plain: Palette(Hex(bg: 0xf7f7f7, panel: 0xececec, film: 0xe2e2e2, grid: 0xf7f7f7,
+                            line: 0xd2d2d2, track: 0xa6a6a6, dim: 0x4a4a4a, label: 0x1d1d1d, paper: 0x000000,
+                            accent: 0x0058d0, fill: 0x0062d9, onFill: 0xffffff, warn: 0xb0160a, blank: 0xe0e0e0),
+                        dark: false, plain: true),
     ]
 
     /// The highlighter's yellow and strength (Light table).
