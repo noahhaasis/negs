@@ -39,6 +39,29 @@ import XCTest
         XCTAssertGreaterThanOrEqual(content().width, columns, "Showing the inspector makes room for it")
     }
 
+    /// The window's size is saved, so the next launch opens at it.
+    func testWindowSavesItsFrame() throws {
+        _ = NSApplication.shared
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: frameKey)
+        defer { defaults.set(saved, forKey: frameKey) }
+        defaults.removeObject(forKey: frameKey)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-window-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let model = EditorModel(previewCache: RenderedPreviewCache(file: directory.appendingPathComponent("preview.cache")))
+        defer { model.shutdown() }
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        defer { window.setFrameAutosaveName("") }
+
+        XCTAssertEqual(window.frameAutosaveName, "editor")
+        window.setContentSize(NSSize(width: 1234, height: 777))
+        let frame = try XCTUnwrap(defaults.string(forKey: frameKey), "The frame is saved under the window's name")
+        XCTAssertEqual(frame.split(separator: " ").dropFirst(2).first.flatMap { Double($0) }, window.frame.width)
+    }
+
     private func waitUntil(_ predicate: () -> Bool) async throws {
         for _ in 0..<100 where !predicate() { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertTrue(predicate())

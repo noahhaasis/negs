@@ -135,8 +135,10 @@ final class EdgeSplitView: NSSplitView {
         Self.fitMinimum(of: window, width: inspector.isCollapsed ? canvasMinimum : columnsMinimum)
         editorFrame = EditorFrame(split: split, size: window.contentRect(forFrameRect: window.frame).size)
         window.contentViewController = editorFrame
-        window.setFrameAutosaveName("editor")
         super.init(window: window)
+        // After super.init: NSWindowController(window:) clears the window's
+        // autosave name, so naming it earlier never saved the frame.
+        window.setFrameAutosaveName("editor")
         shouldCascadeWindows = false
         window.delegate = self
         Theme.follow(self) { [weak window, weak split] in
