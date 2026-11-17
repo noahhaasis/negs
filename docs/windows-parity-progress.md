@@ -11,13 +11,57 @@ decisions made with their reasons, and what was carried over. See
 | 0 | Baseline | done |
 | 1 | Drawing foundation | done, merged `e142fba` |
 | 2 | Window shell | done, merged `a9a0763` |
-| 3 | Inspector | in progress, split in two: 3a rows/pane header/Export foot (`win-p3a-inspector`, owns the PC), then 3b presets tiles + Settings tabs |
+| 3 | Inspector | **paused** 2026-11-19: 3a WIP on `win-p3a-inspector` (`a62bdaf`), see "Resume here"; then 3b presets tiles + Settings tabs |
 | 4 | Canvas | not started |
 | 5 | Tray | not started |
 | 6 | Library (crate can start in parallel after phase 0) | crate done, merged (see log); Windows glue after phase 5 |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
+
+## Resume here (paused 2026-11-19, PC powered down)
+
+- **Phase 3a** is on branch `win-p3a-inspector`, tip `a62bdaf`: two WIP commits on
+  `a09d753`, clean tree. Its worktree is `.claude/worktrees/agent-aa758de2772174590`.
+  It builds; all 186 Windows tests pass on the PC; the Mac cross-check is clean (15 old
+  warnings).
+- **Done in the WIP:**
+  - Pane header: Adjustments · Presets as words, Reset / New / Import, an edit count.
+  - Histogram · Waveform as words; the stray glyph in the empty histogram is fixed.
+  - Prep · Lab · Output tabs in Newsreader 21 with per-tab counts. A count opens a menu
+    ("N edits in Tab", Reset for each edit, Reset Tab).
+  - Every row style. "N more" lines, and View › Show All Controls replacing Advanced.
+  - The focus box. The Export foot (on Output only).
+  - An MSAA accessibility check passed.
+- **Open gates:**
+  1. **Startup.** `inspector_shown` is 222.6 ms against main's 182.0 (ABBA, 6 runs;
+     main's exe is kept at `C:\Users\Noah\.negs\p3a-base\Negs.exe`). The time is
+     spent in Direct2D EndDraw (WARP) while the engine starts. That cause is a
+     hypothesis, not confirmed. Options:
+     - (a) Run the engine's threads at below-normal priority during startup. Engine-
+       adjacent, so it needs Noah's OK, though outputs stay identical.
+     - (b) Draw the inspector text with a DirectWrite bitmap render target on the
+       calling thread.
+     - (c) Accept the gap.
+
+     Coordinator's view: try (b) first, then (a). (c) breaks the launch requirement.
+  2. **Screenshots.** Retake them; the sliders now paint with GDI unless they have
+     focus. Run `~/.negs/windows-parity/phase3a-tools/run_all.sh` (copied out of the
+     session scratchpad, so paths inside may need fixing). Check by eye at 125 %
+     against `ref/macos-main/*/01–03`.
+  3. The release-notes line (Windows section).
+  4. Split the WIP into commits: header and tabs, rows, focus, Export foot. Each needs a
+     "Windows: …" message, re-dated outside 08:00–16:00 Berlin.
+  5. Optional: the MSAA re-check, `C:\Users\Noah\.negs\uia-p3a.ps1`.
+- **To confirm with Noah:** the agent read "struck tab" as "Print section struck while
+  scanning". Check it against `TabEdits.swift` before asking.
+- **Mismatches left vs macOS:**
+  - The tone graph's segmented buttons, the border samples (still GDI), the rounded
+    Longest side field.
+  - Value-box text sits high while typing. No Input Colour summary.
+  - The scroll bar is always shown. Wheel up lowers a slider's value (as before).
+- **Then:** review and merge 3a; brief 3b. Commit dates: main tip + 1 min
+  (`~/.negs/windows-parity/tipdate.sh`).
 
 ## 2026-11-18: phase 2 merged (`a9a0763`, branch tip `171cd81`)
 
