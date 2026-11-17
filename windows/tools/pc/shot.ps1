@@ -5,6 +5,10 @@
 #   "env": {"NAME": "value"}, "keep_profile": "dir (optional)",
 #   "steps": [ {"shot": "start"}, {"keys": "{F8}", "wait": 800, "shot": "presets"},
 #              {"click": [x, y], "wait": 500}, {"key": "VK name", ...} ] }
+# "drag": [x0, y0, x1, y1, steps, ms] presses at the first point, moves to the
+# second in steps ms apart, and lets go.
+# A step with "front": true clicks in, and shoots, the app's frontmost
+# window (Settings, an alert) instead of the main one.
 # Every PNG is the window's own rectangle only. Windows close at the end.
 param([Parameter(Mandatory=$true)][string]$JobFile)
 $ErrorActionPreference = 'Stop'
@@ -15,6 +19,8 @@ using System; using System.Runtime.InteropServices;
 public static class NegsWin {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int w, int hh, uint f);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -70,11 +76,19 @@ $hh = if ($job.height) { [int]$job.height } else { 900 }
 $settle = if ($job.settle_ms) { [int]$job.settle_ms } else { 4000 }
 Start-Sleep -Milliseconds $settle
 
-function Capture([string]$name) {
-  [NegsWin]::SetForegroundWindow($h) | Out-Null
+# The app's window in front: the main one unless one of its own is.
+function Front {
+  $f = [NegsWin]::GetForegroundWindow()
+  $fpid = [uint32]0
+  [NegsWin]::GetWindowThreadProcessId($f, [ref]$fpid) | Out-Null
+  if ($fpid -eq $proc.Id) { $f } else { $h }
+}
+
+function Capture([string]$name, [bool]$front) {
+  $win = if ($front) { Front } else { [NegsWin]::SetForegroundWindow($h) | Out-Null; $h }
   Start-Sleep -Milliseconds 150
   $r = New-Object NegsWin+RECT
-  if ([NegsWin]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) -ne 0) { [NegsWin]::GetWindowRect($h, [ref]$r) | Out-Null }
+  if ([NegsWin]::DwmGetWindowAttribute($win, 9, [ref]$r, 16) -ne 0) { [NegsWin]::GetWindowRect($win, [ref]$r) | Out-Null }
   $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
@@ -85,17 +99,34 @@ function Capture([string]$name) {
 }
 
 foreach ($s in $job.steps) {
-  if ($s.keys) { [NegsWin]::SetForegroundWindow($h) | Out-Null; [System.Windows.Forms.SendKeys]::SendWait($s.keys) }
+  $target = if ($s.front) { Front } else { $h }
+  if ($s.keys) { [NegsWin]::SetForegroundWindow($target) | Out-Null; [System.Windows.Forms.SendKeys]::SendWait($s.keys) }
   if ($s.click) {
     $p = New-Object NegsWin+POINT; $p.X = [int]$s.click[0]; $p.Y = [int]$s.click[1]
-    [NegsWin]::ClientToScreen($h, [ref]$p) | Out-Null
+    [NegsWin]::ClientToScreen($target, [ref]$p) | Out-Null
     [NegsWin]::SetCursorPos($p.X, $p.Y) | Out-Null
     [NegsWin]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); [NegsWin]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
     if ($s.double) { [NegsWin]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); [NegsWin]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero) }
   }
+  if ($s.drag) {
+    $d = $s.drag
+    $p = New-Object NegsWin+POINT; $p.X = [int]$d[0]; $p.Y = [int]$d[1]
+    [NegsWin]::ClientToScreen($target, [ref]$p) | Out-Null
+    $q = New-Object NegsWin+POINT; $q.X = [int]$d[2]; $q.Y = [int]$d[3]
+    [NegsWin]::ClientToScreen($target, [ref]$q) | Out-Null
+    [NegsWin]::SetCursorPos($p.X, $p.Y) | Out-Null
+    [NegsWin]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)
+    $n = [int]$d[4]
+    for ($k = 1; $k -le $n; $k++) {
+      Start-Sleep -Milliseconds ([int]$d[5])
+      [NegsWin]::SetCursorPos([int]($p.X + ($q.X - $p.X) * $k / $n), [int]($p.Y + ($q.Y - $p.Y) * $k / $n)) | Out-Null
+    }
+    Start-Sleep -Milliseconds 100
+    [NegsWin]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
+  }
   $wait = if ($s.wait) { [int]$s.wait } else { 600 }
   Start-Sleep -Milliseconds $wait
-  if ($s.shot) { Capture $s.shot }
+  if ($s.shot) { Capture $s.shot ([bool]$s.front) }
 }
 
 # Close: any modal first (Escape), then the window.
