@@ -28,3 +28,12 @@
 - A photograph that couldn't be developed now says so where it would be,
   with the reason and Try Again, instead of an error box. "Developing"
   and "Updating" show as a small tag at the top of the photograph.
+- **The Mac's inspector.** The panel reads like the Mac's. Adjustments ·
+  Presets and Histogram · Waveform are words, with Reset on the right.
+  Prep, Lab and Output are tabs in Newsreader, each with a count of its
+  edits; click the count to see them or reset them. Sliders have a fine
+  track and a ring for a knob, ↺ resets one value, and a changed value
+  turns bold and underlined in pencil. Rarely used controls fold into
+  "N more" lines (View › Show All Controls shows them all), and Output
+  ends with the export's size and format above Export Photograph….
+  Keys, Tab focus and screen readers work as before.

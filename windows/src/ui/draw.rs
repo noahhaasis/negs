@@ -333,7 +333,7 @@ impl Canvas {
                 let _ = GdiFlush();
             }
         }
-        let drawn = super::d2d::paint(self.dc, self.w, self.h, scale, plain, draw);
+        let drawn = super::d2d::paint_pixels(self.dc, self.bits as *mut u8, self.stride as usize * 4, self.w, self.h, scale, plain, draw);
         // Direct2D wrote through the DC: flush before touching the pixels.
         self.gdi = true;
         drawn
@@ -473,9 +473,82 @@ pub enum Role {
     Field = 11,
     /// Accent text, underlined under the pointer (recent photographs).
     Link = 12,
+    // The inspector's ink (`ink.rs`, §4.8–4.13).
+    /// Adjustments · Presets: a word, `paper` when chosen.
+    PaneWord = 20,
+    /// Prep · Lab · Output in Newsreader 21, the chosen one penciled.
+    TabWord = 21,
+    /// A tab's dot and edit count, which opens its edits.
+    Count = 22,
+    /// Words that act, underlined (Reset, New, Import…).
+    WordButton = 23,
+    /// Histogram · Waveform.
+    ScopeWord = 24,
+    /// A switch as a label and a crossed tick box.
+    Tick = 25,
+    /// A capsule outline (Balance Print).
+    Outlined = 26,
+    /// The filled Export button.
+    Export = 27,
+    /// A row's ↺.
+    ResetMark = 28,
+    /// "N more controls…", "Hide …".
+    More = 29,
+    /// The ink slider.
+    InkSlider = 30,
+    /// A slider's value in the serif, a field only while typing.
+    InkValue = 31,
+    /// A choice: the value word and a ⌄, its menu on a click.
+    Choice = 32,
+    /// Owner-drawn statics and buttons.
+    Label = 40,
+    Section = 41,
+    Hint = 42,
+    Readout = 43,
+    EditCount = 44,
+    Summary = 45,
+    Unit = 46,
+    Module = 47,
+    Foldout = 48,
+    Well = 49,
 }
 
 const ROLE: PCWSTR = w!("NegsRole");
+
+const ROLES: [Role; 32] = [
+    Role::Primary,
+    Role::Secondary,
+    Role::Glyph,
+    Role::SegmentLeft,
+    Role::SegmentRight,
+    Role::SegmentMiddle,
+    Role::Value,
+    Role::Field,
+    Role::Link,
+    Role::PaneWord,
+    Role::TabWord,
+    Role::Count,
+    Role::WordButton,
+    Role::ScopeWord,
+    Role::Tick,
+    Role::Outlined,
+    Role::Export,
+    Role::ResetMark,
+    Role::More,
+    Role::InkSlider,
+    Role::InkValue,
+    Role::Choice,
+    Role::Label,
+    Role::Section,
+    Role::Hint,
+    Role::Readout,
+    Role::EditCount,
+    Role::Summary,
+    Role::Unit,
+    Role::Module,
+    Role::Foldout,
+    Role::Well,
+];
 
 pub fn set_role(hwnd: HWND, role: Role) {
     unsafe {
@@ -485,7 +558,14 @@ pub fn set_role(hwnd: HWND, role: Role) {
 
 fn role(hwnd: HWND) -> Option<Role> {
     let value = unsafe { GetPropW(hwnd, ROLE) }.0 as isize;
-    [Role::Primary, Role::Secondary, Role::Glyph, Role::SegmentLeft, Role::SegmentRight, Role::SegmentMiddle, Role::Value, Role::Field, Role::Link].into_iter().find(|r| *r as isize == value)
+    if value == 0 {
+        return None;
+    }
+    ROLES.into_iter().find(|r| *r as isize == value)
+}
+
+pub fn role_of(hwnd: HWND) -> Option<Role> {
+    role(hwnd)
 }
 
 /// A button's role: set explicitly, else from its style.
@@ -493,6 +573,9 @@ fn button_role(hwnd: HWND) -> Option<ButtonKind> {
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let kind = style & BS_TYPEMASK as u32;
     if let Some(role) = role(hwnd) {
+        if role as isize >= Role::PaneWord as isize {
+            return Some(ButtonKind::Ink(role));
+        }
         return Some(match role {
             Role::Primary => ButtonKind::Push(true),
             Role::Glyph => ButtonKind::Glyph,
@@ -526,6 +609,8 @@ enum ButtonKind {
     Radio,
     Segment(Part),
     Link,
+    /// The inspector's ink (`ink.rs`).
+    Ink(Role),
 }
 
 /// Where a segment sits in its switch.
@@ -584,6 +669,11 @@ pub fn is_hot(hwnd: HWND) -> bool {
     HOT.with(Cell::get) == hwnd.0 as isize
 }
 
+/// The control under the pointer, of those that track it.
+pub fn hot() -> HWND {
+    HWND(HOT.with(Cell::get) as *mut _)
+}
+
 /// Tracks the pointer over `hwnd` and repaints it when it enters or
 /// leaves. The message loop follows it (`hover_message`), which costs
 /// nothing per control; value boxes are subclassed instead, since their
@@ -621,6 +711,8 @@ pub fn hover_message(msg: &MSG) {
 }
 
 fn repaint(hwnd: HWND) {
+    // An inspector row brightens as a whole under the pointer.
+    super::ink::repaint_row(hwnd);
     unsafe {
         let _ = InvalidateRect(hwnd, None, true);
         if matches!(role(hwnd), Some(Role::Value | Role::Field)) {
@@ -717,6 +809,7 @@ pub fn paint_panel(hwnd: HWND, background: Color) {
         let mut ps = PAINTSTRUCT::default();
         let dc = BeginPaint(hwnd, &mut ps);
         FillRect(dc, &ps.rcPaint, theme::brush(background));
+        super::ink::paint_rules(hwnd, dc, &ps.rcPaint);
         let s = dpi_of(hwnd);
         let p = theme::palette();
         let mut child = GetWindow(hwnd, GW_CHILD).unwrap_or_default();
@@ -767,7 +860,11 @@ pub fn custom_draw(lparam: LPARAM) -> Option<LRESULT> {
             }
             "msctls_trackbar32" => {
                 if draw.dwDrawStage == CDDS_PREPAINT {
-                    paint_trackbar(draw);
+                    if role(header.hwndFrom) == Some(Role::InkSlider) {
+                        super::ink::paint_trackbar(draw);
+                    } else {
+                        paint_trackbar(draw);
+                    }
                 }
                 Some(LRESULT(CDRF_SKIPDEFAULT as isize))
             }
@@ -777,6 +874,9 @@ pub fn custom_draw(lparam: LPARAM) -> Option<LRESULT> {
 }
 
 fn paint_button(draw: &NMCUSTOMDRAW, kind: ButtonKind) {
+    if let ButtonKind::Ink(role) = kind {
+        return super::ink::paint_button(draw, role);
+    }
     let hwnd = draw.hdr.hwndFrom;
     let p = theme::palette();
     let s = dpi_of(hwnd);
@@ -870,6 +970,7 @@ fn paint_button(draw: &NMCUSTOMDRAW, kind: ButtonKind) {
                 focus_ring(&mut c, r.inset(s, s), radius, s);
             }
         }
+        ButtonKind::Ink(_) => {}
         ButtonKind::Check | ButtonKind::Radio => {
             let size = (16.0 * s).round();
             let top = ((r.h - size) / 2.0).round();
@@ -929,6 +1030,12 @@ fn parent_background(hwnd: HWND) -> Color {
 const DEFAULT_POS: PCWSTR = w!("NegsDefault");
 /// Stored above zero, which means none.
 const DEFAULT_OFFSET: isize = 1 << 20;
+
+/// The position set by `set_default_pos`, if any.
+pub fn default_pos(trackbar: HWND) -> Option<isize> {
+    let stored = unsafe { GetPropW(trackbar, DEFAULT_POS) }.0 as isize;
+    (stored != 0).then_some(stored - DEFAULT_OFFSET)
+}
 
 /// The position a slider's fill starts from (its default value).
 pub fn set_default_pos(trackbar: HWND, pos: isize) {
@@ -1022,6 +1129,16 @@ extern "system" fn combo_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
+            // A choice opens its menu, not the list; the stocks keep their list.
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if is_choice(hwnd) => {
+                super::ink::open_choice(hwnd);
+                LRESULT(0)
+            }
+            WM_KEYDOWN | WM_SYSKEYDOWN if is_choice(hwnd) && super::ink::opens_choice(msg, VIRTUAL_KEY(wparam.0 as u16)) => {
+                super::ink::open_choice(hwnd);
+                LRESULT(0)
+            }
+            WM_GETDLGCODE if is_choice(hwnd) && wparam.0 == VK_RETURN.0 as usize => LRESULT(DLGC_WANTALLKEYS as isize),
             // The control draws its choice itself, outside `WM_PAINT`, when
             // focus or the choice changes (keys, the wheel, its list's
             // `LBN_SELCHANGE`, `CB_SETCURSEL`), in the system's highlight
@@ -1036,7 +1153,15 @@ extern "system" fn combo_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
+/// A choice that opens a menu: the role, without a list of its own drawing.
+fn is_choice(hwnd: HWND) -> bool {
+    role(hwnd) == Some(Role::Choice) && unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32 & CBS_OWNERDRAWFIXED as u32 == 0
+}
+
 fn draw_combo(hwnd: HWND, dc: HDC) {
+    if role(hwnd) == Some(Role::Choice) {
+        return super::ink::paint_choice(hwnd, dc);
+    }
     let p = theme::palette();
     let s = dpi_of(hwnd);
     unsafe {

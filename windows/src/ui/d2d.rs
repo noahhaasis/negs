@@ -114,9 +114,162 @@ pub fn prepare(done: impl FnOnce(&Shared) + Send + 'static) {
     }
     let _ = std::thread::Builder::new().name("negs-drawing".into()).spawn(move || {
         if let Some(shared) = SHARED.get_or_init(|| Shared::new(true).ok()).as_ref() {
+            // The WARP device beside the first frame's words, so it is there
+            // when the inspector first paints, even while the engine starts.
+            let _ = std::thread::Builder::new().name("negs-warp".into()).spawn(move || {
+                let start = crate::platform::qpc();
+                let made = WARP.get_or_init(|| Warp::new(shared).ok()).is_some();
+                let at = crate::platform::qpc();
+                let ms = crate::platform::qpc_ms(start, at);
+                super::post(move |app: &mut super::App| app.report.line(&format!("drawing_warp {at} made {made} in {ms:.1} ms")));
+            });
             done(shared);
         }
     });
+}
+
+// MARK: Drawing on the calling thread
+
+/// A Direct2D device on WARP, Direct3D's software rasteriser, made single
+/// threaded and told to make no threads of its own: everything it draws, it
+/// draws on the thread that paints. The DC render target's rasteriser hands
+/// its work to a pool of threads, and while the engine starts and fills
+/// every core, each control's paint waited for that pool (40 ms in all when
+/// the inspector first showed). Without `SINGLETHREADED`, reading the pixels
+/// back still waited, most of all while the machine was busy (50 ms).
+struct Warp(ID2D1Device);
+
+// SAFETY: the device comes from the multithreaded factory, which takes its
+// lock around every use of the device, so the single-threaded Direct3D
+// device is never used by two threads at once; each thread draws through a
+// device context of its own.
+unsafe impl Send for Warp {}
+unsafe impl Sync for Warp {}
+
+static WARP: OnceLock<Option<Warp>> = OnceLock::new();
+
+impl Warp {
+    fn new(shared: &Shared) -> windows::core::Result<Self> {
+        use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP;
+        use windows::Win32::Graphics::Direct3D11::*;
+        let factory: ID2D1Factory1 = shared.d2d.cast()?;
+        let mut device = None;
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_WARP,
+                windows::Win32::Foundation::HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                None,
+            )?;
+            let device: windows::Win32::Graphics::Dxgi::IDXGIDevice = device.ok_or(windows::core::Error::empty())?.cast()?;
+            Ok(Self(factory.CreateDevice(&device)?))
+        }
+    }
+}
+
+/// One thread's device context on `WARP`, with the bitmap it draws in and a
+/// copy the processor reads back, both as large as the largest paint yet.
+struct WarpTarget {
+    context: ID2D1DeviceContext,
+    rt: ID2D1RenderTarget,
+    brush: ID2D1SolidColorBrush,
+    bitmaps: Option<(ID2D1Bitmap1, ID2D1Bitmap1, u32, u32)>,
+}
+
+impl WarpTarget {
+    fn new(warp: &Warp) -> windows::core::Result<Self> {
+        unsafe {
+            let context = warp.0.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
+            let brush = context.CreateSolidColorBrush(&Ink::hex(0).color(), None)?;
+            let rt = context.cast()?;
+            Ok(Self { context, rt, brush, bitmaps: None })
+        }
+    }
+
+    /// The bitmaps, made again larger when `w` × `h` doesn't fit.
+    fn bitmaps(&mut self, w: u32, h: u32) -> windows::core::Result<(ID2D1Bitmap1, ID2D1Bitmap1)> {
+        if let Some((target, readback, bw, bh)) = &self.bitmaps {
+            if w <= *bw && h <= *bh {
+                return Ok((target.clone(), readback.clone()));
+            }
+        }
+        let (old_w, old_h) = self.bitmaps.as_ref().map_or((0, 0), |b| (b.2, b.3));
+        let (bw, bh) = (w.max(old_w).next_multiple_of(64), h.max(old_h).next_multiple_of(64));
+        let props = |options: D2D1_BITMAP_OPTIONS| D2D1_BITMAP_PROPERTIES1 {
+            pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            bitmapOptions: options,
+            colorContext: std::mem::ManuallyDrop::new(None),
+        };
+        let size = D2D_SIZE_U { width: bw, height: bh };
+        let (target, readback) = unsafe {
+            (
+                self.context.CreateBitmap(size, None, 0, &props(D2D1_BITMAP_OPTIONS_TARGET))?,
+                self.context.CreateBitmap(size, None, 0, &props(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW))?,
+            )
+        };
+        self.bitmaps = Some((target.clone(), readback.clone(), bw, bh));
+        Ok((target, readback))
+    }
+}
+
+/// `paint` through `WARP` on this thread: the buffer's pixels (`bits`, rows
+/// `stride` bytes apart, top down) go up, are drawn over and come back. None
+/// when that path isn't there (not made yet, or the device was lost), for
+/// the DC render target to paint instead.
+fn paint_warp(device: &mut Device, shared: &'static Shared, (bits, stride): (*mut u8, usize), w: i32, h: i32, scale: f32, plain: bool, draw: &mut impl FnMut(&mut Painter)) -> Option<bool> {
+    use windows::Win32::Graphics::Gdi::GdiFlush;
+    let warp = WARP.get()?.as_ref()?;
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    let Device { warp: slot, caches, .. } = device;
+    if slot.is_none() {
+        *slot = WarpTarget::new(warp).ok();
+    }
+    let target = slot.as_mut()?;
+    let (bitmap, readback) = target.bitmaps(w as u32, h as u32).ok()?;
+    let rect = D2D_RECT_U { left: 0, top: 0, right: w as u32, bottom: h as u32 };
+    unsafe {
+        let _ = GdiFlush();
+        bitmap.CopyFromMemory(Some(&rect), bits as *const _, stride as u32).ok()?;
+        target.context.SetTarget(&bitmap);
+        target.context.SetDpi(96.0 * scale, 96.0 * scale);
+        target.context.BeginDraw();
+        target.context.SetTransform(&IDENTITY);
+        target.context.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
+    }
+    let mut painter = Painter { shared, rt: &target.rt, brush: &target.brush, caches, plain };
+    draw(&mut painter);
+    let ended = unsafe { target.context.EndDraw(None, None) };
+    unsafe {
+        target.context.SetTarget(None::<&ID2D1Image>);
+    }
+    match ended {
+        Ok(()) => {}
+        Err(e) if e.code() == D2DERR_RECREATE_TARGET => {
+            *slot = None;
+            return None;
+        }
+        Err(_) => return Some(false),
+    }
+    unsafe {
+        if readback.CopyFromBitmap(Some(&D2D_POINT_2U { x: 0, y: 0 }), &bitmap, Some(&rect)).is_err() {
+            return Some(false);
+        }
+        let Ok(mapped) = readback.Map(D2D1_MAP_OPTIONS_READ) else { return Some(false) };
+        for y in 0..h as usize {
+            std::ptr::copy_nonoverlapping(mapped.bits.add(y * mapped.pitch as usize), bits.add(y * stride), w as usize * 4);
+        }
+        let _ = readback.Unmap();
+    }
+    Some(true)
 }
 
 impl Shared {
@@ -369,7 +522,8 @@ impl RectF {
 }
 
 struct Target {
-    rt: ID2D1DCRenderTarget,
+    dc: ID2D1DCRenderTarget,
+    rt: ID2D1RenderTarget,
     brush: ID2D1SolidColorBrush,
 }
 
@@ -387,9 +541,10 @@ impl Target {
             minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
         };
         unsafe {
-            let rt = shared.d2d.CreateDCRenderTarget(&props)?;
-            let brush = rt.CreateSolidColorBrush(&Ink::hex(0).color(), None)?;
-            Ok(Self { rt, brush })
+            let dc = shared.d2d.CreateDCRenderTarget(&props)?;
+            let brush = dc.CreateSolidColorBrush(&Ink::hex(0).color(), None)?;
+            let rt = dc.cast()?;
+            Ok(Self { dc, rt, brush })
         }
     }
 }
@@ -417,6 +572,8 @@ const MOST_SHAPES: usize = 512;
 
 #[derive(Default)]
 struct Device {
+    /// Drawing on this thread, once `WARP` is made.
+    warp: Option<WarpTarget>,
     target: Option<Target>,
     /// For layered windows (the alert card): premultiplied pixels.
     layer: Option<Target>,
@@ -432,20 +589,32 @@ thread_local! {
 /// fresh target if the first was lost. False when Direct2D isn't there or
 /// drawing failed; the buffer is then as `draw` left it, or untouched.
 pub fn paint(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, draw: impl FnMut(&mut Painter)) -> bool {
-    paint_with(dc, w, h, scale, plain, false, draw)
+    paint_with(dc, None, w, h, scale, plain, false, draw)
+}
+
+/// `paint` into a buffer whose pixels this thread can reach (`bits`, top
+/// down, rows `stride` bytes apart; `dc` has it selected): drawn on this
+/// thread, through `WARP`, once that is made.
+pub fn paint_pixels(dc: HDC, bits: *mut u8, stride: usize, w: i32, h: i32, scale: f32, plain: bool, draw: impl FnMut(&mut Painter)) -> bool {
+    paint_with(dc, (!bits.is_null()).then_some((bits, stride)), w, h, scale, plain, false, draw)
 }
 
 /// `paint` into a 32-bit buffer whose alpha counts: premultiplied pixels for
 /// `UpdateLayeredWindow`, text in greyscale. Clear it first.
 pub fn paint_layer(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, draw: impl FnMut(&mut Painter)) -> bool {
-    paint_with(dc, w, h, scale, plain, true, draw)
+    paint_with(dc, None, w, h, scale, plain, true, draw)
 }
 
-fn paint_with(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, layer: bool, mut draw: impl FnMut(&mut Painter)) -> bool {
+fn paint_with(dc: HDC, pixels: Option<(*mut u8, usize)>, w: i32, h: i32, scale: f32, plain: bool, layer: bool, mut draw: impl FnMut(&mut Painter)) -> bool {
     let Some(shared) = shared() else { return false };
     DEVICE.with(|cell| {
         let Ok(mut device) = cell.try_borrow_mut() else { return false };
         let device = &mut *device;
+        if let Some(pixels) = pixels.filter(|_| !layer) {
+            if let Some(drawn) = paint_warp(device, shared, pixels, w, h, scale, plain, &mut draw) {
+                return drawn;
+            }
+        }
         for _ in 0..2 {
             let slot = if layer { &mut device.layer } else { &mut device.target };
             if slot.is_none() {
@@ -453,17 +622,17 @@ fn paint_with(dc: HDC, w: i32, h: i32, scale: f32, plain: bool, layer: bool, mut
             }
             let Some(target) = slot.as_ref() else { return false };
             unsafe {
-                if target.rt.BindDC(dc, &RECT { left: 0, top: 0, right: w, bottom: h }).is_err() {
+                if target.dc.BindDC(dc, &RECT { left: 0, top: 0, right: w, bottom: h }).is_err() {
                     return false;
                 }
-                target.rt.SetDpi(96.0 * scale, 96.0 * scale);
-                target.rt.BeginDraw();
-                target.rt.SetTransform(&IDENTITY);
-                target.rt.SetTextAntialiasMode(if layer { D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE } else { D2D1_TEXT_ANTIALIAS_MODE_DEFAULT });
+                target.dc.SetDpi(96.0 * scale, 96.0 * scale);
+                target.dc.BeginDraw();
+                target.dc.SetTransform(&IDENTITY);
+                target.dc.SetTextAntialiasMode(if layer { D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE } else { D2D1_TEXT_ANTIALIAS_MODE_DEFAULT });
             }
             let mut painter = Painter { shared, rt: &target.rt, brush: &target.brush, caches: &mut device.caches, plain };
             draw(&mut painter);
-            match unsafe { target.rt.EndDraw(None, None) } {
+            match unsafe { target.dc.EndDraw(None, None) } {
                 Ok(()) => return true,
                 Err(e) if e.code() == D2DERR_RECREATE_TARGET => *(if layer { &mut device.layer } else { &mut device.target }) = None,
                 Err(_) => return false,
@@ -632,7 +801,7 @@ fn shape_in<'c>(caches: &'c mut Caches, factory: &ID2D1Factory, id: u64, make: i
     caches.shapes.get(&id)
 }
 
-fn draw_on(rt: &ID2D1DCRenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1PathGeometry, transform: Matrix3x2, stroke: Option<f32>, style: Option<&ID2D1StrokeStyle>, ink: Ink) {
+fn draw_on(rt: &ID2D1RenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1PathGeometry, transform: Matrix3x2, stroke: Option<f32>, style: Option<&ID2D1StrokeStyle>, ink: Ink) {
     unsafe {
         brush.SetColor(&ink.color());
         rt.SetTransform(&transform);
@@ -647,7 +816,7 @@ fn draw_on(rt: &ID2D1DCRenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1Path
 /// A mark's dark halo (drop-shadow 1.5 pt black at 0.95, then 4 pt at 0.45
 /// on macOS), here as two soft outlines under it: Direct2D's shadow effect
 /// needs a device context, which a DC target over GDI doesn't give.
-fn halo_on(rt: &ID2D1DCRenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1PathGeometry, transform: Matrix3x2, round: Option<&ID2D1StrokeStyle>) {
+fn halo_on(rt: &ID2D1RenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1PathGeometry, transform: Matrix3x2, round: Option<&ID2D1StrokeStyle>) {
     draw_on(rt, brush, g, transform, Some(4.0), round, Ink::hex(0).alpha(0.22));
     draw_on(rt, brush, g, transform, Some(1.5), round, Ink::hex(0).alpha(0.6));
 }
@@ -657,7 +826,7 @@ fn halo_on(rt: &ID2D1DCRenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1Path
 /// Drawing on one bound buffer, in DIPs. Made by `paint`.
 pub struct Painter<'a> {
     shared: &'static Shared,
-    rt: &'a ID2D1DCRenderTarget,
+    rt: &'a ID2D1RenderTarget,
     brush: &'a ID2D1SolidColorBrush,
     caches: &'a mut Caches,
     plain: bool,
@@ -855,65 +1024,9 @@ impl Painter<'_> {
 
     // MARK: Text
 
-    fn format(&mut self, style: &TextStyle) -> Option<IDWriteTextFormat> {
-        let k = FormatKey::of(style);
-        if let Some(f) = self.caches.formats.get(&k) {
-            return Some(f.clone());
-        }
-        let format = make_format(self.shared, style).ok()?;
-        self.caches.formats.insert(k, format.clone());
-        Some(format)
-    }
-
-    fn typography(&mut self) -> Option<IDWriteTypography> {
-        if self.caches.typography.is_none() {
-            self.caches.typography = unsafe {
-                self.shared.dwrite.CreateTypography().ok().filter(|t| {
-                    [DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_FEATURE_TAG_LINING_FIGURES]
-                        .into_iter()
-                        .all(|tag| t.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: tag, parameter: 1 }).is_ok())
-                })
-            };
-        }
-        self.caches.typography.clone()
-    }
-
     /// `text` laid out in `style`, `width` wide (unbounded for 0), cached.
     pub fn layout(&mut self, text: &str, style: &TextStyle, width: f32, align: Align) -> Option<IDWriteTextLayout> {
-        let style = style.resolved(self.plain);
-        let id = key((text, FormatKey::of(&style), style.tracking.to_bits(), style.wrap, width.to_bits(), align));
-        if let Some((cached, layout)) = self.caches.layouts.get(&id) {
-            if **cached == *text {
-                return Some(layout.clone());
-            }
-        }
-        let format = self.format(&style)?;
-        let typography = self.typography();
-        let wide: Vec<u16> = text.encode_utf16().collect();
-        let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };
-        let width = if width > 0.0 { width } else { 1.0e6 };
-        let layout = unsafe {
-            let layout = self.shared.dwrite.CreateTextLayout(&wide, &format, width, 1.0e6).ok()?;
-            if let Some(typography) = &typography {
-                let _ = layout.SetTypography(typography, range);
-            }
-            if style.tracking != 0.0 {
-                if let Ok(layout1) = layout.cast::<IDWriteTextLayout1>() {
-                    let _ = layout1.SetCharacterSpacing(0.0, style.tracking * style.size, 0.0, range);
-                }
-            }
-            let _ = layout.SetTextAlignment(match align {
-                Align::Leading => DWRITE_TEXT_ALIGNMENT_LEADING,
-                Align::Center => DWRITE_TEXT_ALIGNMENT_CENTER,
-                Align::Trailing => DWRITE_TEXT_ALIGNMENT_TRAILING,
-            });
-            layout
-        };
-        if self.caches.layouts.len() >= MOST_LAYOUTS {
-            self.caches.layouts.clear();
-        }
-        self.caches.layouts.insert(id, (text.into(), layout.clone()));
-        Some(layout)
+        layout_in(self.shared, self.caches, self.plain, text, style, width, align)
     }
 
     /// The size of `text` in `style` on one line (or wrapped at `width`).
@@ -956,6 +1069,82 @@ impl Painter<'_> {
         unsafe { self.rt.DrawTextLayout(D2D_POINT_2F { x: r.x, y: r.y }, &layout, self.ink(ink), D2D1_DRAW_TEXT_OPTIONS_NONE) };
         metrics(&layout)
     }
+}
+
+fn format_in(shared: &Shared, caches: &mut Caches, style: &TextStyle) -> Option<IDWriteTextFormat> {
+    let k = FormatKey::of(style);
+    if let Some(f) = caches.formats.get(&k) {
+        return Some(f.clone());
+    }
+    let format = make_format(shared, style).ok()?;
+    caches.formats.insert(k, format.clone());
+    Some(format)
+}
+
+fn typography_in(shared: &Shared, caches: &mut Caches) -> Option<IDWriteTypography> {
+    if caches.typography.is_none() {
+        caches.typography = unsafe {
+            shared.dwrite.CreateTypography().ok().filter(|t| {
+                [DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_FEATURE_TAG_LINING_FIGURES]
+                    .into_iter()
+                    .all(|tag| t.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: tag, parameter: 1 }).is_ok())
+            })
+        };
+    }
+    caches.typography.clone()
+}
+
+/// `text` laid out in `style`, `width` wide (unbounded for 0), cached per
+/// thread: painting the same words again makes nothing.
+fn layout_in(shared: &Shared, caches: &mut Caches, plain: bool, text: &str, style: &TextStyle, width: f32, align: Align) -> Option<IDWriteTextLayout> {
+    let style = style.resolved(plain);
+    let id = key((text, FormatKey::of(&style), style.tracking.to_bits(), style.wrap, width.to_bits(), align));
+    if let Some((cached, layout)) = caches.layouts.get(&id) {
+        if **cached == *text {
+            return Some(layout.clone());
+        }
+    }
+    let format = format_in(shared, caches, &style)?;
+    let typography = typography_in(shared, caches);
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };
+    let width = if width > 0.0 { width } else { 1.0e6 };
+    let layout = unsafe {
+        let layout = shared.dwrite.CreateTextLayout(&wide, &format, width, 1.0e6).ok()?;
+        if let Some(typography) = &typography {
+            let _ = layout.SetTypography(typography, range);
+        }
+        if style.tracking != 0.0 {
+            if let Ok(layout1) = layout.cast::<IDWriteTextLayout1>() {
+                let _ = layout1.SetCharacterSpacing(0.0, style.tracking * style.size, 0.0, range);
+            }
+        }
+        let _ = layout.SetTextAlignment(match align {
+            Align::Leading => DWRITE_TEXT_ALIGNMENT_LEADING,
+            Align::Center => DWRITE_TEXT_ALIGNMENT_CENTER,
+            Align::Trailing => DWRITE_TEXT_ALIGNMENT_TRAILING,
+        });
+        layout
+    };
+    if caches.layouts.len() >= MOST_LAYOUTS {
+        caches.layouts.clear();
+    }
+    caches.layouts.insert(id, (text.into(), layout.clone()));
+    Some(layout)
+}
+
+/// The size of `text` in `style`, wrapped at `width` (0: one line), without
+/// painting: for laying out rows whose height follows their words. The
+/// layout is cached for the paint that follows. Zero when Direct2D isn't there.
+pub fn measure_text(text: &str, style: &TextStyle, width: f32, plain: bool) -> TextMetrics {
+    if text.is_empty() {
+        return TextMetrics::default();
+    }
+    let Some(shared) = shared() else { return TextMetrics::default() };
+    DEVICE.with(|cell| {
+        let Ok(mut device) = cell.try_borrow_mut() else { return TextMetrics::default() };
+        layout_in(shared, &mut device.caches, plain, text, style, width, Align::Leading).map_or_else(TextMetrics::default, |l| metrics(&l))
+    })
 }
 
 fn metrics(layout: &IDWriteTextLayout) -> TextMetrics {
