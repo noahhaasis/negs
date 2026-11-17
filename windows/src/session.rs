@@ -13,17 +13,30 @@ use crate::crop::MAX_ANGLE;
 use crate::state::EditState;
 
 pub fn settings_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("NEGS_PROFILE_DIR") {
-        return PathBuf::from(dir);
+    if let Some(dir) = profile_override() {
+        return dir;
     }
     PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("Negs")
 }
 
 pub fn cache_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("NEGS_PROFILE_DIR") {
-        return PathBuf::from(dir).join("Cache");
+    if let Some(dir) = profile_override() {
+        return dir.join("Cache");
     }
     PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join("Negs")
+}
+
+/// `NEGS_PROFILE_DIR`, or in test builds a scratch folder, so no test can ever
+/// write the real profile in `%APPDATA%` (one did, through a run without the
+/// variable set).
+fn profile_override() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("NEGS_PROFILE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    if cfg!(test) {
+        return Some(std::env::temp_dir().join(format!("negs-test-profile-{}", std::process::id())));
+    }
+    None
 }
 
 /// Writes `data` to a sibling temporary file and renames it over `path`, so a
