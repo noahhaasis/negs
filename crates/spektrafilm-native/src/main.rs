@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use spektrafilm_core::{
+    flat_field,
     image_size,
     params::RuntimeParams,
     pipeline::Pipeline,
@@ -157,6 +158,77 @@ enum Command {
         /// decodes, as "preview_colour_space".
         #[serde(default)]
         preview_colour_space: bool,
+        /// A negative's tile for another film it could be read as: its
+        /// base is found and its print balanced for that film first, as
+        /// choosing it does (`negative_base`).
+        #[serde(default)]
+        read_negative: Option<ReadNegative>,
+    },
+    /// A scanned colour negative's film base (convert-film route): found
+    /// in the clear film, or read at `point` (fractions of the whole,
+    /// uncropped photograph), then the print balanced for it as
+    /// `balance_print` does. The params come back with both written in.
+    NegativeBase {
+        input: PathBuf,
+        #[serde(default)]
+        source_generation: u64,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        #[serde(default)]
+        point: Option<[f64; 2]>,
+    },
+    /// Whether the photograph looks like a scan of a colour negative read as
+    /// `film` (`negative::looks_negative`, after finding its base), whatever
+    /// its route: where the app places "Your negative". Read from the
+    /// decoded source the session holds for the photograph's own white
+    /// balance, lens correction and interpretation; no print balance.
+    NegativeCheck {
+        input: PathBuf,
+        #[serde(default)]
+        source_generation: u64,
+        film: String,
+        params: Box<RuntimeParams>,
+    },
+    /// A minilab's auto print of the negative: the enlarger's magenta,
+    /// yellow and print exposure for this frame (`negative::auto_print`),
+    /// metered inside `bounds` (the picture: left, top, right, bottom as
+    /// fractions of the whole, uncropped photograph; without them the
+    /// frame less a border).
+    NegativeAuto {
+        input: PathBuf,
+        #[serde(default)]
+        source_generation: u64,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        #[serde(default)]
+        bounds: Option<[f64; 4]>,
+    },
+    /// The print exposure alone for this frame, metered as `negative_auto`
+    /// meters it, keeping the enlarger's filtration
+    /// (`negative::meter_print_exposure`): a darkroom roll shares its
+    /// filtration and each frame gets its own exposure.
+    NegativeMeter {
+        input: PathBuf,
+        #[serde(default)]
+        source_generation: u64,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        #[serde(default)]
+        bounds: Option<[f64; 4]>,
+    },
+    /// The magenta and yellow that print `point` (fractions of the whole
+    /// photograph) neutral (`negative::neutral_print`).
+    NegativeNeutral {
+        input: PathBuf,
+        #[serde(default)]
+        source_generation: u64,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        point: [f64; 2],
     },
     /// Frees the thumbnails' caches (the previews were turned off).
     ReleaseThumbnails,
@@ -194,6 +266,10 @@ enum Command {
         /// the photograph doesn't need a new render.
         #[serde(default)]
         rotate_cw: i32,
+        /// Mirrored left to right after the crop, before `rotate_cw`
+        /// (`IoParams::flip`). The preview is never mirrored either.
+        #[serde(default)]
+        flip: bool,
         /// Resample the saved file to this edge, after the border.
         #[serde(default)]
         fit: Option<Fit>,
@@ -231,16 +307,34 @@ struct Session {
     /// The metering frame's film exposure in stops for the tone graph's
     /// histogram, keyed by the source and the render pipeline.
     film_stops: Option<(String, Vec<[f32; 3]>)>,
+    /// The source reduced for a negative's base and auto print
+    /// (`negative::analysis_frame`), until the source changes.
+    negative_frame: Option<ImageBuf>,
     /// Counts the sources decoded: with a slot and a size it names a working
     /// frame's pixels for the backend's film-side cache (ticket 41).
     source_loads: u64,
+    /// The last light frame read for a negative's flat field, under its
+    /// [`light_frame_key`], or why it couldn't be: read once, not per render.
+    light_frame: Option<(String, std::result::Result<std::sync::Arc<flat_field::FlatField>, String>)>,
 }
 
-/// The source decoded with another RAW white balance, reduced to the largest
-/// frame a thumbnail develops (`THUMBNAIL_FRAME_MAX`).
+/// A read-as tile's base detection: at `point` when the base was picked
+/// there (fractions of the whole photograph), else found.
+#[derive(Debug, Deserialize)]
+struct ReadNegative {
+    #[serde(default)]
+    point: Option<[f64; 2]>,
+}
+
+/// The source decoded with another RAW white balance, or divided by another
+/// flat field (a film's tile, printed as a scene, on a negative divided by
+/// one), reduced to the largest frame a thumbnail develops
+/// (`THUMBNAIL_FRAME_MAX`).
 struct WbSource {
     /// Effective (`RawWhiteBalance::effective`).
     wb: spektrafilm_io::RawWhiteBalance,
+    /// The light frame it was divided by ([`LightFrame::requested`]).
+    flat: Option<LightFrame>,
     colour: spektrafilm_io::InputColour,
     image: ImageBuf,
     /// The auto-exposure metering frame of this decode.
@@ -296,6 +390,29 @@ struct Source {
     interpretation: spektrafilm_io::InputInterpretation,
     colour: spektrafilm_io::InputColour,
     image: ImageBuf,
+    /// The light frame a negative asked to be divided by
+    /// ([`flat_field::requested`]), and whether `image` was.
+    flat: Option<(LightFrame, flat_field::Applied)>,
+}
+
+/// A light frame as a flat field names it: its path, with its size and last
+/// change, so a light frame replaced at the same path is read again.
+#[derive(Debug, Clone, PartialEq)]
+struct LightFrame {
+    path: PathBuf,
+    stamp: Option<(std::time::SystemTime, u64)>,
+}
+
+impl LightFrame {
+    fn new(path: &Path) -> Self {
+        let stamp = std::fs::metadata(path).ok().and_then(|m| Some((m.modified().ok()?, m.len())));
+        Self { path: path.to_path_buf(), stamp }
+    }
+
+    /// The light frame `params` ask a scan to be divided by, if any.
+    fn requested(params: &RuntimeParams) -> Option<Self> {
+        flat_field::requested(params).map(Self::new)
+    }
 }
 
 impl Source {
@@ -305,13 +422,24 @@ impl Source {
         wb: spektrafilm_io::RawWhiteBalance,
         lens: spektrafilm_io::LensCorrection,
         interpretation: &spektrafilm_io::InputInterpretation,
+        flat: Option<&LightFrame>,
     ) -> bool {
         self.path == path
+            && self.flat.as_ref().map(|(light, _)| light) == flat
             && if spektrafilm_io::is_raw(path) {
                 self.wb == wb && self.lens == lens
             } else {
                 &self.interpretation == interpretation
             }
+    }
+
+    /// What a response says about the flat field: null when none was asked
+    /// for, else the light frame, whether this photograph was divided by it,
+    /// and why not.
+    fn flat_answer(&self) -> Value {
+        self.flat.as_ref().map_or(Value::Null, |(light, applied)| {
+            json!({"path": light.path, "used": applied.used, "reason": applied.reason})
+        })
     }
 
     /// Large enough for a read limited to `max_long_side` (0 is whole).
@@ -373,6 +501,12 @@ impl Session {
     /// Decodes `input` unless the session already holds it with these
     /// settings, and at least `max_long_side` large (0 is whole: see
     /// [`spektrafilm_io::load_image_colour_limited`]).
+    ///
+    /// A negative with a flat field (`params`, [`flat_field::requested`]) is
+    /// divided by it here, as it is read, so every render, thumbnail and
+    /// one-shot solve of the source sees the same flattened scan and none
+    /// of them pays for it again.
+    #[allow(clippy::too_many_arguments)]
     fn load_source(
         &mut self,
         input: &Path,
@@ -381,10 +515,12 @@ impl Session {
         lens: spektrafilm_io::LensCorrection,
         interpretation: spektrafilm_io::InputInterpretation,
         max_long_side: u32,
+        params: &RuntimeParams,
     ) -> Result<()> {
+        let flat = LightFrame::requested(params);
         let reload = self.source_generation != source_generation
             || self.source.as_ref().is_none_or(|source| {
-                !source.current(input, wb, lens, &interpretation) || !source.covers(max_long_side)
+                !source.current(input, wb, lens, &interpretation, flat.as_ref()) || !source.covers(max_long_side)
             });
         if reload {
             // Release the last source's caches before decoding the next.
@@ -397,6 +533,7 @@ impl Session {
             self.thumbnail_source = None;
             self.thumbnail_wb_sources = Vec::new();
             self.film_stops = None;
+            self.negative_frame = None;
             self.source_loads += 1;
             if let Some(backend) = &self.backend {
                 backend.release_film_cache();
@@ -410,6 +547,13 @@ impl Session {
                 max_long_side,
             )?;
             let reduced = loaded.full_size != (loaded.image.width, loaded.image.height);
+            let mut image = loaded.image;
+            let flat = flat.map(|light| {
+                let mut params = params.clone();
+                params.io.apply_input_colour(&loaded.colour);
+                let applied = self.flatten(&mut image, input, &light.path, &params);
+                (light, applied)
+            });
             self.source = Some(Source {
                 path: input.to_path_buf(),
                 full: loaded.full_size,
@@ -419,11 +563,33 @@ impl Session {
                 lens_correction_supported: loaded.lens_correction_supported,
                 interpretation,
                 colour: loaded.colour,
-                image: loaded.image,
+                image,
+                flat,
             });
             self.source_generation = source_generation;
         }
         Ok(())
+    }
+
+    /// The held source's [`Source::flat_answer`].
+    fn flat_answer(&self) -> Value {
+        self.source.as_ref().map_or(Value::Null, Source::flat_answer)
+    }
+
+    /// Divides `image` (the scan `input`, as decoded; `params` with its input
+    /// colour) by the light frame `light`, reading the light frame unless the
+    /// session holds it read the same way.
+    fn flatten(&mut self, image: &mut ImageBuf, input: &Path, light: &Path, params: &RuntimeParams) -> flat_field::Applied {
+        let key = light_frame_key(light, params);
+        if self.light_frame.as_ref().is_none_or(|(old, _)| old != &key) {
+            self.light_frame = None; // released before the next is read
+            let loaded = flat_field::FlatField::load(light, params).map(std::sync::Arc::new);
+            self.light_frame = Some((key, loaded));
+        }
+        match &self.light_frame.as_ref().unwrap().1 {
+            Ok(field) => field.flatten(image, input, params),
+            Err(reason) => flat_field::Applied::not_used(reason.clone()),
+        }
     }
 
     fn thumbnail(
@@ -447,8 +613,28 @@ impl Session {
         let preset_applied = preset.is_some();
         if let Some(text) = preset {
             let preset = presets::import(&text, data).map_err(anyhow::Error::msg)?;
+            let negative = params.workflow.converts_film();
             params = Box::new(presets::apply(&preset.params, &params));
-            (film, paper) = (preset.film, preset.paper);
+            if negative {
+                // A negative is still read as its film, with its base and
+                // balance (`presets::KEPT_NEGATIVE`). A new paper balances
+                // the print again, as the app does when a preset changes it
+                // (the app also meters the exposure again; the tile doesn't).
+                if preset.paper != paper {
+                    let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
+                        profile::load_profile_by_name(data, &film)?,
+                        profile::load_profile_by_name(data, &preset.paper)?,
+                        &params,
+                        data,
+                        spektrafilm_core::print_balance::MIDGRAY,
+                    )
+                    .map_err(anyhow::Error::msg)?;
+                    (params.enlarger.m_filter_shift, params.enlarger.y_filter_shift) = (m as f32, y as f32);
+                }
+                paper = preset.paper;
+            } else {
+                (film, paper) = (preset.film, preset.paper);
+            }
         }
         if let Some(crop) = &crop {
             crop.validate()?;
@@ -465,13 +651,19 @@ impl Session {
         interpretation.validate()?;
         let (wb, lens) = (params.io.raw_white_balance, params.io.lens_correction);
         // A preset whose RAW white balance isn't the photograph's needs a
-        // decode of its own. It gets a reduced copy here, so the main render
-        // keeps its decoded source. (A preset keeps the lens correction and
-        // the interpretation, so only the white balance can differ.)
-        let own_decode = preset_applied
-            && spektrafilm_io::is_raw(&input)
+        // decode of its own, as does a tile with another flat field (a film
+        // printed as a scene, on a negative divided by one). It gets a
+        // reduced copy here, so the main render keeps its decoded source.
+        // (A preset keeps the lens correction and the interpretation, and on
+        // a negative the white balance; a film's tile keeps all three.)
+        let flat = LightFrame::requested(&params);
+        let own_decode = !decode_only
             && self.source_generation == source_generation
-            && self.source.as_ref().is_some_and(|s| s.path == input && s.wb.effective() != wb.effective());
+            && self.source.as_ref().is_some_and(|s| {
+                s.path == input
+                    && (preset_applied && spektrafilm_io::is_raw(&input) && s.wb.effective() != wb.effective()
+                        || s.flat.as_ref().map(|(light, _)| light) != flat.as_ref())
+            });
         ensure!(!decode_only || !preset_applied, "A preset's thumbnail can't be decoded alone");
         // The camera preview's colour space beside the decode, which takes
         // far longer: the match needs both.
@@ -479,7 +671,7 @@ impl Session {
             let declared = colour_space.then(|| scope.spawn(|| declared_preview_colour_space(&input)));
             if !own_decode {
                 let limit = if reduced_decode { reduced_read_side(long_side, crop.as_ref()) } else { 0 };
-                self.load_source(&input, source_generation, wb, lens, interpretation.clone(), limit)?;
+                self.load_source(&input, source_generation, wb, lens, interpretation.clone(), limit, &params)?;
             }
             declared.map(|thread| thread.join().map_err(|_| anyhow::anyhow!("Reading the preview's colour space failed"))?).transpose()
         })?;
@@ -490,14 +682,22 @@ impl Session {
         image_size::clear(&mut params);
         let dimensions = thumbnail_dimensions(full, long_side, crop.as_ref());
         let (working, metering) = if own_decode {
-            let found = self.thumbnail_wb_sources.iter().position(|s| s.wb == wb.effective() && s.reduced == reduced_decode);
+            let found = self
+                .thumbnail_wb_sources
+                .iter()
+                .position(|s| s.wb == wb.effective() && s.flat == flat && s.reduced == reduced_decode);
             let index = match found {
                 Some(index) => index,
                 None => {
                     let limit = if reduced_decode { THUMBNAIL_FRAME_MAX } else { 0 };
-                    let loaded = spektrafilm_io::load_image_colour_limited(
+                    let mut loaded = spektrafilm_io::load_image_colour_limited(
                         &input, spektrafilm_io::Formats::Any, wb, lens, &interpretation, limit,
                     )?;
+                    if let Some(light) = &flat {
+                        let mut flat_params = (*params).clone();
+                        flat_params.io.apply_input_colour(&loaded.colour);
+                        self.flatten(&mut loaded.image, &input, &light.path, &flat_params);
+                    }
                     let metering = spektrafilm_core::stages::filming::metering_preview(&loaded.image);
                     // The largest frame any thumbnail develops, so a new crop
                     // reduces this copy instead of decoding again.
@@ -511,7 +711,7 @@ impl Session {
                         self.thumbnail_wb_sources.remove(0);
                     }
                     self.thumbnail_wb_sources.push(WbSource {
-                        wb: wb.effective(), colour: loaded.colour, image, metering, reduced: reduced_decode,
+                        wb: wb.effective(), flat: flat.clone(), colour: loaded.colour, image, metering, reduced: reduced_decode,
                     });
                     self.thumbnail_wb_sources.len() - 1
                 }
@@ -584,6 +784,73 @@ impl Session {
         Ok(result)
     }
 
+    /// `params` with the base found (or read at `point`) and the print
+    /// balanced for `film`, as `negative_base` answers and the app writes
+    /// them on choosing it: what a read-as tile shows. About 0.2 s on the
+    /// analysis frame. The print exposure stays the current one: metering it
+    /// again (as the app does after) takes about 0.9 s a film, too long for
+    /// every tile of the tray, so a tile can print a little lighter or
+    /// darker than the film will once chosen.
+    #[allow(clippy::too_many_arguments)]
+    fn read_negative_for_tile(
+        &mut self,
+        input: &Path,
+        source_generation: u64,
+        film: &str,
+        paper: &str,
+        params: &mut RuntimeParams,
+        point: Option<[f64; 2]>,
+        data: &Path,
+    ) -> Result<()> {
+        let mut read = params.clone();
+        let (film, paper, frame) = self.negative_frame(input, source_generation, film, paper, &mut read, data)?;
+        let found = spektrafilm_core::negative::detect_base(&film, &read, &frame, point.map(|[x, y]| (x, y))).map_err(anyhow::Error::msg)?;
+        read.film_render.base = found.base.clone();
+        read.film_render.convert.exposure_compensation_ev = found.exposure_ev;
+        let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(film, paper, &read, data, spektrafilm_core::print_balance::MIDGRAY)
+            .map_err(anyhow::Error::msg)?;
+        params.film_render.base = found.base;
+        params.film_render.convert.exposure_compensation_ev = found.exposure_ev;
+        (params.enlarger.m_filter_shift, params.enlarger.y_filter_shift) = (m as f32, y as f32);
+        Ok(())
+    }
+
+    /// The film and paper profiles and the reduced frame a negative's base
+    /// and balances read, decoding `input` if the session doesn't hold it.
+    /// `params` get the source's input colour.
+    fn negative_frame(
+        &mut self,
+        input: &Path,
+        source_generation: u64,
+        film: &str,
+        paper: &str,
+        params: &mut RuntimeParams,
+        data: &Path,
+    ) -> Result<(profile::Profile, profile::Profile, ImageBuf)> {
+        let frame = self.negative_scan(input, source_generation, params)?;
+        Ok((profile::load_profile_by_name(data, film)?, profile::load_profile_by_name(data, paper)?, frame))
+    }
+
+    /// The reduced frame of `input` a negative's base and balances read
+    /// (`negative_frame`), without the profiles.
+    fn negative_scan(&mut self, input: &Path, source_generation: u64, params: &mut RuntimeParams) -> Result<ImageBuf> {
+        ensure!(params.workflow.converts_film(), "The photograph isn't read as a negative");
+        params.io.raw_white_balance.validate()?;
+        params.io.input_interpretation.validate()?;
+        params.io.scan_film = false;
+        spektrafilm_core::illuminants::standard_illuminant_f64(&params.film_render.convert.scan_illuminant)
+            .map_err(|_| anyhow::anyhow!("Unknown scan light: {}", params.film_render.convert.scan_illuminant))?;
+        let (wb, lens) = (params.io.raw_white_balance, params.io.lens_correction);
+        let interpretation = params.io.input_interpretation.clone();
+        let side = spektrafilm_core::negative::ANALYSIS_SIDE;
+        self.load_source(input, source_generation, wb, lens, interpretation, side, params)?;
+        let source = self.source.as_ref().unwrap();
+        params.io.apply_input_colour(&source.colour);
+        ensure!(RgbColourspace::find(&params.io.input_color_space).is_some(),
+            "Unknown input colour space: {}", params.io.input_color_space);
+        Ok(self.negative_frame.get_or_insert_with(|| spektrafilm_core::negative::analysis_frame(&source.image)).clone())
+    }
+
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
@@ -641,12 +908,17 @@ impl Session {
                           "display_color_space": DisplaySpace::of(encoding).name()}))
             }
             Command::Thumbnail {
-                input, source_generation, film, paper, params, long_side, preview_path, crop, preset, reduced_decode, decode_only,
-                preview_colour_space,
-            } => self.thumbnail(
-                input, source_generation, film, paper, params, long_side, preview_path, crop, preset, reduced_decode, decode_only,
-                preview_colour_space, data,
-            ),
+                input, source_generation, film, paper, mut params, long_side, preview_path, crop, preset, reduced_decode, decode_only,
+                preview_colour_space, read_negative,
+            } => {
+                if let Some(read) = read_negative {
+                    self.read_negative_for_tile(&input, source_generation, &film, &paper, &mut params, read.point, data)?;
+                }
+                self.thumbnail(
+                    input, source_generation, film, paper, params, long_side, preview_path, crop, preset, reduced_decode, decode_only,
+                    preview_colour_space, data,
+                )
+            }
             Command::ToneCurve { film, paper, params, count } => {
                 let started = Instant::now();
                 let params = spektrafilm_core::tone_curve::tone_params(&params);
@@ -663,6 +935,87 @@ impl Session {
                     "cached_pipeline": cached,
                     "timing_ms": {"pipeline": ms(built), "curve": ms(started.elapsed() - built)},
                     "elapsed_ms": ms(started.elapsed()),
+                }))
+            }
+            Command::NegativeBase { input, source_generation, film, paper, mut params, point } => {
+                let started = Instant::now();
+                let (film, paper, frame) = self.negative_frame(&input, source_generation, &film, &paper, &mut params, data)?;
+                let point = point.map(|[x, y]| (x, y));
+                if let Some((x, y)) = point {
+                    ensure!((0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y), "The point is outside the photograph");
+                }
+                let found = spektrafilm_core::negative::detect_base(&film, &params, &frame, point).map_err(anyhow::Error::msg)?;
+                params.film_render.base = found.base.clone();
+                params.film_render.convert.exposure_compensation_ev = found.exposure_ev;
+                let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
+                    film, paper, &params, data, spektrafilm_core::print_balance::MIDGRAY,
+                )
+                .map_err(anyhow::Error::msg)?;
+                // The picture inside the film's clear edges, in the decoded
+                // photograph's own frame (as `point`): the crop rectangle
+                // x0..x1, y0..y1 after straightening by angle_deg (clockwise).
+                let picture = found.verdict.picture.as_ref().map(|p| json!({
+                    "x0": p.x0, "y0": p.y0, "x1": p.x1, "y1": p.y1, "angle_deg": p.angle_deg,
+                    "edges": p.edges.iter().map(|e| e.name()).collect::<Vec<_>>(),
+                }));
+                Ok(json!({
+                    "base": found.base, "exposure_ev": found.exposure_ev,
+                    "found": found.verdict.found, "picked": found.picked,
+                    "edge": found.verdict.edge.map(|e| e.name()),
+                    "edges": found.verdict.edges.iter().map(|e| e.name()).collect::<Vec<_>>(),
+                    "picture": picture,
+                    "looks_negative": found.looks_negative,
+                    "flat_field": self.flat_answer(),
+                    "m_filter_shift": m, "y_filter_shift": y,
+                    "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
+                }))
+            }
+            Command::NegativeCheck { input, source_generation, film, mut params } => {
+                let started = Instant::now();
+                // A scene's source was decoded without a light frame: keep it so.
+                if !params.workflow.converts_film() {
+                    params.film_render.convert.flat_field.clear();
+                    params.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
+                }
+                let frame = self.negative_scan(&input, source_generation, &mut params)?;
+                let film = profile::load_profile_by_name(data, &film)?;
+                let found = spektrafilm_core::negative::detect_base(&film, &params, &frame, None).map_err(anyhow::Error::msg)?;
+                Ok(json!({"looks_negative": found.looks_negative, "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
+            }
+            Command::NegativeAuto { input, source_generation, film, paper, mut params, bounds } => {
+                let started = Instant::now();
+                let bounds = picture_bounds(bounds)?;
+                let (film, paper, frame) = self.negative_frame(&input, source_generation, &film, &paper, &mut params, data)?;
+                let auto = spektrafilm_core::negative::auto_print(film, paper, &params, data, &frame, &bounds).map_err(anyhow::Error::msg)?;
+                Ok(json!({
+                    "m_filter_shift": auto.m_filter_shift, "y_filter_shift": auto.y_filter_shift,
+                    "print_exposure": auto.print_exposure,
+                    "flat_field": self.flat_answer(),
+                    "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
+                }))
+            }
+            Command::NegativeMeter { input, source_generation, film, paper, mut params, bounds } => {
+                let started = Instant::now();
+                let bounds = picture_bounds(bounds)?;
+                let (film, paper, frame) = self.negative_frame(&input, source_generation, &film, &paper, &mut params, data)?;
+                let exposure = spektrafilm_core::negative::meter_print_exposure(film, paper, &params, data, &frame, &bounds)
+                    .map_err(anyhow::Error::msg)?;
+                Ok(json!({
+                    "print_exposure": exposure,
+                    "flat_field": self.flat_answer(),
+                    "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
+                }))
+            }
+            Command::NegativeNeutral { input, source_generation, film, paper, mut params, point: [x, y] } => {
+                let started = Instant::now();
+                ensure!((0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y), "The point is outside the photograph");
+                let (film, paper, frame) = self.negative_frame(&input, source_generation, &film, &paper, &mut params, data)?;
+                let neutral = spektrafilm_core::negative::neutral_print(film, paper, &params, data, &frame, (x, y))
+                    .map_err(anyhow::Error::msg)?;
+                Ok(json!({
+                    "m_filter_shift": neutral.m_filter_shift, "y_filter_shift": neutral.y_filter_shift,
+                    "flat_field": self.flat_answer(),
+                    "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 }))
             }
             Command::ReleaseThumbnails => {
@@ -710,7 +1063,7 @@ impl Session {
                 let source = self.source.as_ref().context("Open a photograph and wait for its preview before placing exposure")?;
                 ensure!(self.source_generation == source_generation
                     && source.current(&input, params.io.raw_white_balance, params.io.lens_correction,
-                                      &params.io.input_interpretation),
+                                      &params.io.input_interpretation, LightFrame::requested(&params).as_ref()),
                     "The photograph or RAW settings changed; wait for its current preview and try again");
                 let reference = placement_reference(&reference_path, &source.image)?;
                 params.io.apply_input_colour(&source.colour);
@@ -745,6 +1098,7 @@ impl Session {
                 instagram,
                 crop,
                 rotate_cw,
+                flip,
                 fit,
             } => {
                 let Rendered {
@@ -778,14 +1132,14 @@ impl Session {
                 let adjusted_before = (crop_after_post && !post.is_identity())
                     .then(|| PostProcess::new(post, encoded, encoding.space.name).applied(image));
                 let image = adjusted_before.as_ref().unwrap_or(image);
-                // Crop in the unrotated orientation, then rotate, then add the border.
+                // Crop in the unrotated orientation, then flip and rotate, then add the border.
                 let cropped = crop.map(|crop| crop.apply(image));
                 let image = cropped.as_ref().unwrap_or(image);
                 let adjusted = (!crop_after_post && !post.is_identity())
                     .then(|| PostProcess::new(post, encoded, encoding.space.name).applied(image));
                 let image = adjusted.as_ref().unwrap_or(image);
-                let rotated =
-                    (rotate_cw.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(rotate_cw));
+                let rotated = (flip || rotate_cw.rem_euclid(4) != 0)
+                    .then(|| image.clone().flipped_rotated_cw(flip, rotate_cw));
                 let image = rotated.as_ref().unwrap_or(image);
                 let bordered = match border {
                     Some(style) => {
@@ -854,7 +1208,8 @@ impl Session {
                 let lens = params.io.lens_correction;
                 let interpretation = params.io.input_interpretation.clone();
                 interpretation.validate()?;
-                self.load_source(&input, source_generation, wb, lens, interpretation, 0)?;
+                self.load_source(&input, source_generation, wb, lens, interpretation, 0, &params)?;
+                let flat_answer = self.source.as_ref().unwrap().flat_answer();
                 let Source { image: source, colour: input_colour, lens_correction_supported, .. } =
                     self.source.as_ref().unwrap();
                 // RAW and decoded files are the engine's linear sRGB; manual
@@ -913,7 +1268,25 @@ impl Session {
                 // Prep's exposure is a uniform gain, so it shifts the stops like
                 // the camera's; its other controls reshape them, so then the
                 // frame goes through Prep and is counted as exposed.
-                let histogram = {
+                let histogram = if params.workflow.converts_film() {
+                    // A negative: the film density the converter reads,
+                    // as the exposure that made it on the film's neutral
+                    // axis, on the same stops. Nothing shifts it.
+                    let metering = self
+                        .metering
+                        .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
+                    let stops_key = format!(
+                        "negative|{}|{source_generation}|{}|{}",
+                        input.display(),
+                        key,
+                        serde_json::to_string(&params.film_render)?,
+                    );
+                    if self.film_stops.as_ref().is_none_or(|(old, _)| old != &stops_key) {
+                        self.film_stops = Some((stops_key, spektrafilm_core::negative::film_stops(&pipeline, metering)));
+                    }
+                    let counts = spektrafilm_core::tone_curve::film_histogram(&self.film_stops.as_ref().unwrap().1, 0.0, 128);
+                    json!({"stops": spektrafilm_core::tone_curve::STOPS, "ev": 0.0, "counts": counts})
+                } else {
                     let metering = self
                         .metering
                         .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
@@ -975,6 +1348,7 @@ impl Session {
                     "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
                     "input_colour": input_colour,
                     "lens_correction_supported": lens_correction_supported,
+                    "flat_field": flat_answer,
                     "output_color_space": encoding.space.name,
                     "display_color_space": DisplaySpace::of(encoding).name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
@@ -1018,6 +1392,31 @@ fn placement_reference(path: &Path, source: &ImageBuf) -> Result<ImageBuf> {
     Ok(reference)
 }
 
+/// What a light frame read for a flat field depends on: the file (its size
+/// and last change) and how it is decoded, which is how its scans are. (A
+/// RAW's white balance mixes into its colours through the camera matrix, so
+/// it changes the map; a preset keeps a negative's, so preset tiles share
+/// the light frame read.)
+fn light_frame_key(light: &Path, params: &RuntimeParams) -> String {
+    let changed = LightFrame::new(light).stamp;
+    let io = &params.io;
+    format!(
+        "{}|{changed:?}|{:?}|{:?}|{}|{}|{}",
+        light.display(),
+        io.raw_white_balance,
+        io.lens_correction,
+        serde_json::to_string(&io.input_interpretation).unwrap_or_default(),
+        io.input_color_space,
+        io.input_cctf_decoding,
+    )
+}
+
+/// A negative's picture bounds from a request, checked; the default
+/// without them.
+fn picture_bounds(bounds: Option<[f64; 4]>) -> Result<spektrafilm_core::negative::PictureBounds> {
+    bounds.map_or(Ok(Default::default()), |b| spektrafilm_core::negative::PictureBounds::new(b).map_err(anyhow::Error::msg))
+}
+
 /// A request line. Params from before `io.input_interpretation` keep the
 /// meaning of their input fields; see `infer_input_interpretation`.
 fn parse_request(line: &str) -> Result<Request> {
@@ -1047,8 +1446,12 @@ fn write_display(
 /// A calibrated pipeline for `film` printed on `paper` (or scanned).
 fn build_pipeline(data: &Path, film: &str, paper: &str, params: &RuntimeParams) -> Result<Pipeline> {
     let film_profile = profile::load_profile_by_name(data, film)?;
-    let print_profile = profile::load_profile_by_name(data, if params.io.scan_film { film } else { paper })?;
-    Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data).map_err(anyhow::Error::msg)
+    // A negative is converted and printed, never scanned as film.
+    let scanned = params.io.scan_film && !params.workflow.converts_film();
+    let print_profile = profile::load_profile_by_name(data, if scanned { film } else { paper })?;
+    let mut params = params.clone();
+    params.io.scan_film = scanned;
+    Pipeline::new_with_spectral(film_profile, print_profile, params, data).map_err(anyhow::Error::msg)
 }
 
 /// The source at `dimensions`. A resampled copy is kept until the source or
@@ -1233,7 +1636,7 @@ mod tests {
             let response = session.handle(Request { id: 1, command: Command::Thumbnail {
                 input: input.clone(), source_generation: 1, film: film.into(), paper: paper.into(),
                 params: Box::new(params), long_side: 24, preview_path: preview.clone(), crop: None,
-                preset: preset.map(str::to_string), reduced_decode: false, decode_only: false, preview_colour_space: false,
+                preset: preset.map(str::to_string), reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative: None,
             } }, &data).unwrap();
             (response, std::fs::read(preview).unwrap())
         };
@@ -1251,8 +1654,30 @@ mod tests {
         let paper = imported["paper"].as_str().unwrap();
         let (_, applied) = thumbnail(&mut session, film, paper, params, None, "applied.rgba");
         assert_eq!(with_preset, applied);
-        let (_, plain) = thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", current, None, "plain.rgba");
+        let (_, plain) = thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", current.clone(), None, "plain.rgba");
         assert_ne!(with_preset, plain);
+
+        // On a negative the preset keeps the film it's read as, its base and
+        // its balance; the preset's own paper balances the print again.
+        let mut negative = current;
+        negative.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
+        negative.film_render.base.cyan = 1.05;
+        negative.enlarger.print_exposure = 0.9;
+        let (_, with_preset) =
+            thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", negative.clone(), Some(text), "negative-preset.rgba");
+        let mut expected = presets::apply(&presets::import(text, &data).unwrap().params, &negative);
+        assert_eq!((expected.film_render.base.cyan, expected.enlarger.print_exposure), (1.05, 0.9));
+        let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
+            profile::load_profile_by_name(&data, "kodak_gold_200").unwrap(),
+            profile::load_profile_by_name(&data, "kodak_portra_endura").unwrap(),
+            &expected,
+            &data,
+            spektrafilm_core::print_balance::MIDGRAY,
+        )
+        .unwrap();
+        (expected.enlarger.m_filter_shift, expected.enlarger.y_filter_shift) = (m as f32, y as f32);
+        let (_, applied) = thumbnail(&mut session, "kodak_gold_200", "kodak_portra_endura", expected, None, "negative-applied.rgba");
+        assert_eq!(with_preset, applied);
         assert!(session.output.is_none() && !session.pipelines.has_main());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -1295,7 +1720,7 @@ mod tests {
                 input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                 paper: "kodak_supra_endura".into(), params: Box::default(), long_side: 24,
                 preview_path: preview.clone(), crop: None, preset: None, reduced_decode, decode_only: false,
-                preview_colour_space: false,
+                preview_colour_space: false, read_negative: None,
             } }, &data).unwrap();
             (response, std::fs::read(preview).unwrap())
         };
@@ -1312,7 +1737,7 @@ mod tests {
             input: input.clone(), source_generation: 2, film: "kodak_gold_200".into(),
             paper: "kodak_supra_endura".into(), params: Box::default(), long_side: 24,
             preview_path: preview.clone(), crop: None, preset: None, reduced_decode: true, decode_only: true,
-            preview_colour_space: true,
+            preview_colour_space: true, read_negative: None,
         } }, &data).unwrap();
         assert_eq!((decoded["source_width"].as_u64(), decoded["source_height"].as_u64()), (Some(48), Some(32)));
         assert!(decoded["preview_colour_space"].is_null() && decoded.get("width").is_none());
@@ -1339,7 +1764,7 @@ mod tests {
                 input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                 paper: "kodak_supra_endura".into(), params: Box::new(params.clone()), long_side: 512,
                 preview_path: dir.join("thumbnail.rgba"), crop: None, preset: None, reduced_decode: true, decode_only,
-                preview_colour_space: decode_only,
+                preview_colour_space: decode_only, read_negative: None,
             } }, &data).unwrap();
             let (width, height) = (decoded["source_width"].as_u64().unwrap() as u32, decoded["source_height"].as_u64().unwrap() as u32);
             if !reference.exists() {
@@ -1384,7 +1809,7 @@ mod tests {
                         input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                         paper: "kodak_supra_endura".into(), params: Box::new(params.clone()), long_side: 16,
                         preview_path: dir.join("decode.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: true,
-                        preview_colour_space: true,
+                        preview_colour_space: true, read_negative: None,
                     } }, &data).unwrap();
                     assert_eq!(decoded["raw"].as_bool(), Some(true));
                     (decoded["source_width"].as_u64().unwrap() as u32, decoded["source_height"].as_u64().unwrap() as u32)
@@ -1432,7 +1857,7 @@ mod tests {
                 input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                 paper: "kodak_supra_endura".into(), params: Box::default(), long_side,
                 preview_path: dir.join("thumbnail.rgba"), crop: None, preset: None, reduced_decode, decode_only: false,
-                preview_colour_space: false,
+                preview_colour_space: false, read_negative: None,
             } }, &data).unwrap()
         };
         let reduced = thumbnail(256, true);
@@ -1464,6 +1889,45 @@ mod tests {
         );
         assert_eq!(image.data[1], 0.18);
     }
+    /// Save cuts the crop from the unmirrored render, then flips it left to
+    /// right, then turns it.
+    #[test]
+    fn save_crops_then_flips_then_turns() {
+        let dir = std::env::temp_dir().join(format!("negs-flip-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // 4 × 2, each pixel's red its column and green its row (in eighths).
+        let mut source = ImageBuf::new(4, 2);
+        for y in 0..2 {
+            for x in 0..4 {
+                source.set(x, y, [x as f32 / 8.0, y as f32 / 8.0, 0.0]);
+            }
+        }
+        let mut session = Session {
+            output: Some(Rendered { id: 1, key: Value::Null, response: Value::Null,
+                source: dir.join("input.png"), film: "kodak_gold_200".into(), encoding: Encoding::from(true),
+                post: PostParams::default(), image: source }),
+            ..Default::default()
+        };
+        // The right three columns, flipped, then a quarter turn clockwise.
+        let saved = dir.join("saved.png");
+        let crop = Crop { x: 0.25, y: 0.0, width: 0.75, height: 1.0, angle: 0.0 };
+        session.handle(Request { id: 2, command: Command::Save {
+            render_id: 1, output: saved.clone(), save_options: Default::default(), crop_after_post: false, border: None,
+            border_options: BorderOptions::default(), instagram: false,
+            crop: Some(crop), rotate_cw: 1, flip: true, fit: None,
+        } }, Path::new(".")).unwrap();
+        let out = image::open(&saved).unwrap().to_rgb8();
+        assert_eq!(out.dimensions(), (2, 3));
+        let at = |x: u32, y: u32| {
+            let p = out.get_pixel(x, y);
+            ((p[0] as f32 / 255.0 * 8.0).round() as u32, (p[1] as f32 / 255.0 * 8.0).round() as u32)
+        };
+        // Flipped, the cut's columns run 3, 2, 1; the quarter turn puts its
+        // bottom row on the left and its first column at the top.
+        assert_eq!([at(0, 0), at(1, 0)], [(3, 1), (3, 0)]);
+        assert_eq!([at(0, 2), at(1, 2)], [(1, 1), (1, 0)]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn original_keeps_the_render_available_for_save() {
         let dir = std::env::temp_dir().join(format!("negs-original-test-{}", std::process::id()));
@@ -1492,7 +1956,7 @@ mod tests {
         session.handle(Request { id: 9, command: Command::Save {
             render_id: 7, output: saved.clone(), save_options: Default::default(), crop_after_post: false, border: None,
             border_options: BorderOptions::default(), instagram: false,
-            crop: None, rotate_cw: 0, fit: None,
+            crop: None, rotate_cw: 0, flip: false, fit: None,
         } }, Path::new(".")).unwrap();
         assert_eq!(std::fs::read(input).unwrap(), std::fs::read(saved).unwrap());
         // Another colour space converts the sRGB render and carries its profile.
@@ -1503,7 +1967,7 @@ mod tests {
         session.handle(Request { id: 10, command: Command::Save {
             render_id: 7, output: wide.clone(), save_options, crop_after_post: false, border: None,
             border_options: BorderOptions::default(), instagram: false,
-            crop: None, rotate_cw: 0, fit: None,
+            crop: None, rotate_cw: 0, flip: false, fit: None,
         } }, Path::new(".")).unwrap();
         let mut decoder = image::ImageReader::open(&wide).unwrap().into_decoder().unwrap();
         let icc = image::ImageDecoder::icc_profile(&mut decoder).unwrap().unwrap();
@@ -1550,7 +2014,7 @@ mod tests {
             };
             session.handle(Request { id: 2, command: Command::Save {
                 render_id: 1, output: output.clone(), save_options, crop_after_post: false, border: None,
-                border_options: BorderOptions::default(), instagram: false, crop: None, rotate_cw: 0, fit: None,
+                border_options: BorderOptions::default(), instagram: false, crop: None, rotate_cw: 0, flip: false, fit: None,
             } }, &data).unwrap();
             image::open(&output).unwrap().to_rgb16().into_raw()
         };
@@ -1650,7 +2114,7 @@ mod tests {
                     input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
                     paper: "kodak_portra_endura".into(), params, long_side: 16,
                     preview_path: dir.join("decode.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: true,
-                    preview_colour_space: false,
+                    preview_colour_space: false, read_negative: None,
                 } }, &data).unwrap();
                 assert_eq!((decoded["source_width"].as_u64(), decoded["source_height"].as_u64()), (Some(96), Some(64)));
                 assert_eq!(decoded["raw"].as_bool(), Some(false));
@@ -1818,6 +2282,7 @@ mod tests {
                 instagram: false,
                 crop: None,
                 rotate_cw: 0,
+                flip: false,
                 fit: None,
             },
         };
@@ -1828,5 +2293,232 @@ mod tests {
                 .to_string()
                 .contains("preview changed")
         );
+    }
+
+    #[test]
+    fn a_negative_meters_its_own_print_exposure_and_shows_its_film_density() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-negative-meter-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (input, preview) = (dir.join("negative.tif"), dir.join("preview.rgba"));
+        let mut params = RuntimeParams::default();
+        params.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
+        // The file is linear sRGB, as it's read.
+        params.io.input_color_space = "sRGB".into();
+        params.io.input_cctf_decoding = false;
+        let film = profile::load_profile_by_name(&data, "kodak_portra_400").unwrap();
+        let paper = profile::load_profile_by_name(&data, "kodak_portra_endura").unwrap();
+        let mut filming = params.clone();
+        filming.film_render.grain.active = false;
+        let pipeline = Pipeline::new_with_spectral(film, paper, filming, &data).unwrap();
+        // A grey a stop over mid-grey on Portra 400, scanned, after a strip
+        // of clear film: a negative whose exposure is known.
+        let grey = (0.184 * 2.0) as spektrafilm_math::Scalar;
+        let filmed = pipeline.film_scene(ImageBuf::from_data(2, 2, vec![grey; 12]));
+        let cmy: [f64; 3] = std::array::from_fn(|c| filmed.data[c] as f64);
+        let converter = pipeline.film_converter();
+        let (w, h) = (64u32, 40u32);
+        let (clear, picture) = (converter.forward([0.0; 3]), converter.forward(cmy));
+        let pixels = (0..w * h).flat_map(|i| if i % w < 8 { clear } else { picture }).map(|v| v as spektrafilm_math::Scalar).collect();
+        let options = spektrafilm_io::save::SaveOptions { linear: true, ..Default::default() };
+        spektrafilm_io::save::save_image_with_options(&ImageBuf::from_data(w, h, pixels), &input, None, &options).unwrap();
+
+        let mut session = Session::default();
+        let mut request = |id, command| session.handle(Request { id, command }, &data);
+        let meter = |bounds| Command::NegativeMeter {
+            input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
+            paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), bounds,
+        };
+        let over = request(1, meter(None)).unwrap();
+        let exposure = over["print_exposure"].as_f64().unwrap();
+        assert!(exposure > 1.3, "a negative a stop over prints longer: {over}");
+        assert_eq!(request(2, meter(Some([0.3, 0.1, 0.9, 0.9]))).unwrap()["print_exposure"].as_f64(), Some(exposure));
+        assert!(request(3, meter(Some([0.0, 0.0, 0.1, 1.0]))).unwrap_err().to_string().contains("no picture"));
+        assert!(request(4, meter(Some([0.5, 0.0, 0.4, 1.0]))).is_err());
+
+        let response = request(5, Command::Render {
+            input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
+            paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
+            preview_path: preview.clone(), interactive_scale: None, crop: None,
+        })
+        .unwrap();
+        let histogram = &response["film_histogram"];
+        assert_eq!(histogram["ev"].as_f64(), Some(0.0));
+        let (lo, hi) = spektrafilm_core::tone_curve::STOPS;
+        let over_bin = ((1.0 - lo) * 128.0 / (hi - lo)) as usize;
+        for channel in histogram["counts"].as_array().unwrap() {
+            let counts: Vec<u64> = channel.as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+            assert_eq!(counts.iter().sum::<u64>(), ((w - 8) * h) as u64, "the clear film isn't counted");
+            let peak = (0..counts.len()).max_by_key(|&i| counts[i]).unwrap();
+            assert!(peak.abs_diff(over_bin) <= 1, "the film reads a stop over: bin {peak}, want {over_bin}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `negative_check` says whether a photograph printed as a scene looks
+    /// like a colour negative, as `negative_base` would once it's read as
+    /// one, from the source its render decoded: no second decode.
+    #[test]
+    fn negative_check_reads_the_rendered_source() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-negative-check-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (w, h) = (64u32, 40u32);
+        let write = |name: &str, pixel: &dyn Fn(u32, u32) -> [f64; 3]| {
+            let input = dir.join(name);
+            let pixels = (0..w * h).flat_map(|i| pixel(i % w, i / w));
+            let image = ImageBuf::from_data(w, h, pixels.map(|v| v as spektrafilm_math::Scalar).collect());
+            let options = spektrafilm_io::save::SaveOptions { linear: true, ..Default::default() };
+            spektrafilm_io::save::save_image_with_options(&image, &input, None, &options).unwrap();
+            input
+        };
+        let negative = write("negative.tif", &|x, y| {
+            if x < 8 { [0.706, 0.237, 0.144] } else { [0.25 + 0.002 * x as f64, 0.06 + 0.001 * y as f64, 0.05] }
+        });
+        let scene = write("scene.tif", &|x, y| if y < 15 { [0.15, 0.35, 0.8] } else if y < 28 { [0.9, 0.9, 0.85] } else { [0.08, 0.3 + 0.002 * x as f64, 0.05] });
+        let mut params = RuntimeParams::default();
+        params.io.input_color_space = "sRGB".into();
+        params.io.input_cctf_decoding = false;
+        params.film_render.grain.active = false;
+        assert!(!params.workflow.converts_film());
+
+        let mut session = Session::default();
+        let check = |session: &mut Session, input: &Path, generation: u64| {
+            let preview = dir.join("preview.rgba");
+            session.handle(Request { id: 1, command: Command::Render {
+                input: input.to_path_buf(), source_generation: generation, film: "kodak_portra_400".into(),
+                paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
+                preview_path: preview, interactive_scale: None, crop: None,
+            } }, &data).unwrap();
+            let loads = session.source_loads;
+            let answer = session.handle(Request { id: 2, command: Command::NegativeCheck {
+                input: input.to_path_buf(), source_generation: generation, film: "kodak_portra_400".into(),
+                params: Box::new(params.clone()),
+            } }, &data).unwrap();
+            assert_eq!(session.source_loads, loads, "the rendered source is read again");
+            answer["looks_negative"].as_bool().unwrap()
+        };
+        assert!(check(&mut session, &negative, 1), "the negative");
+        assert!(!check(&mut session, &scene, 2), "the scene");
+        // As negative_base says, read as a negative.
+        let mut read = params.clone();
+        read.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
+        let found = session.handle(Request { id: 3, command: Command::NegativeBase {
+            input: negative.clone(), source_generation: 3, film: "kodak_portra_400".into(), paper: "kodak_portra_endura".into(),
+            params: Box::new(read), point: None,
+        } }, &data).unwrap();
+        assert_eq!(found["looks_negative"].as_bool(), Some(true));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A read-as tile finds the base and balances the print for its film,
+    /// as choosing that film does: the same picture as a tile of the
+    /// detection's answer.
+    #[test]
+    fn a_read_as_tile_reads_the_negative_for_its_film() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-read-as-tile-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("negative.tif");
+        let (w, h) = (64u32, 40u32);
+        let pixels = (0..w * h).flat_map(|i| {
+            let (x, y) = (i % w, i / w);
+            if x < 8 { [0.706, 0.237, 0.144] } else { [0.25 + 0.002 * x as f64, 0.06 + 0.001 * y as f64, 0.05] }
+        });
+        let image = ImageBuf::from_data(w, h, pixels.map(|v| v as spektrafilm_math::Scalar).collect());
+        let options = spektrafilm_io::save::SaveOptions { linear: true, ..Default::default() };
+        spektrafilm_io::save::save_image_with_options(&image, &input, None, &options).unwrap();
+        let mut params = RuntimeParams::default();
+        params.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
+        params.io.input_color_space = "sRGB".into();
+        params.io.input_cctf_decoding = false;
+        params.film_render.grain.active = false;
+
+        let mut session = Session::default();
+        let film = "kodak_gold_200";
+        let found = session.handle(Request { id: 1, command: Command::NegativeBase {
+            input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_portra_endura".into(),
+            params: Box::new(params.clone()), point: None,
+        } }, &data).unwrap();
+        let mut chosen = params.clone();
+        chosen.film_render.base = serde_json::from_value(found["base"].clone()).unwrap();
+        chosen.film_render.convert.exposure_compensation_ev = found["exposure_ev"].as_f64().unwrap();
+        chosen.enlarger.m_filter_shift = found["m_filter_shift"].as_f64().unwrap() as f32;
+        chosen.enlarger.y_filter_shift = found["y_filter_shift"].as_f64().unwrap() as f32;
+        let mut tile = |id, params: &RuntimeParams, read_negative, name: &str| {
+            let preview = dir.join(name);
+            session.handle(Request { id, command: Command::Thumbnail {
+                input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_portra_endura".into(),
+                params: Box::new(params.clone()), long_side: 32, preview_path: preview.clone(), crop: None, preset: None,
+                reduced_decode: false, decode_only: false, preview_colour_space: false, read_negative,
+            } }, &data).unwrap();
+            std::fs::read(preview).unwrap()
+        };
+        let read = tile(2, &params, Some(ReadNegative { point: None }), "read.rgba");
+        assert!(read == tile(3, &chosen, None, "chosen.rgba"), "the tile shows the film as choosing it reads it");
+        assert!(read != tile(4, &params, None, "stale.rgba"), "not on the other film's base");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A film's tile on a negative divided by a flat field (the film printed
+    /// as a scene, so not divided) decodes a copy of its own: the main
+    /// render keeps its flattened source. A light frame replaced at the
+    /// same path is read again.
+    #[test]
+    fn a_flat_field_source_stays_through_film_tiles_and_follows_its_light_frame() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-flat-source-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (input, light, preview) = (dir.join("negative.tif"), dir.join("light.tif"), dir.join("preview.rgba"));
+        let (w, h) = (48u32, 32u32);
+        let save = |path: &Path, f: &dyn Fn(u32, u32) -> f64| {
+            let pixels = (0..w * h).flat_map(|i| {
+                let v = f(i % w, i / w);
+                [v * 0.7, v * 0.25, v * 0.15]
+            });
+            let image = ImageBuf::from_data(w, h, pixels.map(|v| v as spektrafilm_math::Scalar).collect());
+            let options = spektrafilm_io::save::SaveOptions { linear: true, ..Default::default() };
+            spektrafilm_io::save::save_image_with_options(&image, path, None, &options).unwrap();
+        };
+        save(&input, &|x, _| 0.4 + 0.4 * x as f64 / w as f64);
+        save(&light, &|x, _| 1.0 - 0.3 * (x as f64 / w as f64 - 0.5).abs());
+        let mut params = RuntimeParams::default();
+        params.workflow.route = spektrafilm_core::params::ROUTE_CONVERT_PRINT.into();
+        params.io.input_color_space = "sRGB".into();
+        params.io.input_cctf_decoding = false;
+        params.film_render.convert.flat_field = light.to_string_lossy().into_owned();
+        let mut scene = params.clone();
+        scene.workflow = Default::default();
+        scene.film_render.convert = Default::default();
+
+        let mut session = Session::default();
+        let request = |session: &mut Session, id, command| session.handle(Request { id, command }, &data).unwrap();
+        let render = |params: &RuntimeParams| Command::Render {
+            input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
+            paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
+            preview_path: preview.clone(), interactive_scale: None, crop: None,
+        };
+        let tile = |params: &RuntimeParams| Command::Thumbnail {
+            input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
+            paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), long_side: 32,
+            preview_path: dir.join("tile.rgba"), crop: None, preset: None, reduced_decode: false, decode_only: false,
+            preview_colour_space: false, read_negative: None,
+        };
+        assert_eq!(request(&mut session, 1, render(&params))["flat_field"]["used"], true);
+        request(&mut session, 2, tile(&scene));
+        request(&mut session, 3, tile(&params));
+        request(&mut session, 4, render(&params));
+        assert_eq!(session.source_loads, 1, "the film's tile didn't replace the flattened source");
+        let (scene_tile, negative_tile) = (session.thumbnail_wb_sources.len(), session.thumbnail_source.is_some());
+        assert_eq!((scene_tile, negative_tile), (1, true));
+
+        // The same path, another light frame (another size on disk too).
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let pixels = (0..w * h * 3).map(|_| 0.9 as spektrafilm_math::Scalar).collect();
+        let options = spektrafilm_io::save::SaveOptions { linear: false, ..Default::default() };
+        spektrafilm_io::save::save_image_with_options(&ImageBuf::from_data(w, h, pixels), &light, None, &options).unwrap();
+        request(&mut session, 5, render(&params));
+        assert_eq!(session.source_loads, 2, "a new light frame is read again");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
