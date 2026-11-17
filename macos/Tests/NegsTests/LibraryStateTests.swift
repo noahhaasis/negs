@@ -251,6 +251,39 @@ private let paths = EnginePaths(helper: root.appendingPathComponent("target/rele
                       "filed under the saved edits' look: \(filed.map { "\($0.kind) with contrast \($0.edits.params["prep.contrast"])" })")
     }
 
+    /// The strip shows the open photograph as edited once the edit is saved
+    /// and its preview is in, not only after leaving it: reading a scan as
+    /// a negative left the strip showing the negative.
+    func testTheOpenPhotographsThumbnailFollowsItsSavedEdits() async throws {
+        let folder = try temporaryFolder("photos"), bin = try temporaryFolder("trash")
+        let a = try fixture(in: folder, "a.png", seed: 0)
+        let model = try await makeModel(store: SidecarStore(), bin: bin)
+        var saved: [(item: URL, look: String, edits: EditState, kind: String)] = []
+        model.thumbnailSaved = { saved.append(($0, $1, $2, $3)) }
+        model.open(a)
+        let watching = Task { await model.library.watch(folder) }
+        cleanup.append { watching.cancel() }
+        func waitUntil(_ predicate: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(30)
+            while !predicate(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(predicate())
+        }
+        try await waitUntil { model.hasCatalog && model.library.summariesLoaded && model.previewCurrent && model.thumbnailStamp != nil }
+        for contrast in [20.0, -30.0] {
+            let before = model.library.looks[a]
+            model.set("prep.contrast", .number(contrast))
+            try await waitUntil {
+                guard let look = model.library.looks[a], look != before else { return false }
+                return saved.contains { $0.item == a && $0.look == look }
+            }
+            let look = try XCTUnwrap(model.library.looks[a])
+            let filed = try XCTUnwrap(saved.last { $0.item == a && $0.look == look })
+            XCTAssertEqual(filed.edits.params["prep.contrast"], .number(contrast), "filed with the edits it's filed under")
+            XCTAssertEqual(filed.kind, "thumbnail")
+            XCTAssertEqual(model.sourceItem, a, "while it's still open")
+        }
+    }
+
     /// A folder of `count` photographs, the first open, everything read.
     private func openFolder(_ count: Int) async throws -> (model: EditorModel, photos: [URL]) {
         let folder = try temporaryFolder("photos"), bin = try temporaryFolder("trash")

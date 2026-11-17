@@ -1793,6 +1793,8 @@ import UserNotifications
         context.written = edits; context.migrating = false
         context.exists = edits != nil || summary.rating > 0 || summary.flag != nil
         photoSidecar = context
+        // Saved: the strip shows the preview of them, if it's in.
+        saveOpenThumbnail(whileOpen: true)
         return Task { [weak self] in
             let failures = await sidecars.flush()
             for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
@@ -2649,13 +2651,20 @@ import UserNotifications
     }
 
     /// The open photograph's developed thumbnail, made from the preview on
-    /// screen, so it costs no render: on leaving it for another photograph
-    /// or the grid. One without edits only while it shows what a new
+    /// screen, so it costs no render: once the preview of its saved edits is
+    /// in (a render landing, or its sidecar written), so the strip
+    /// follows the edit, and on leaving it for another photograph or the
+    /// grid. Once per look. One without edits only while it shows what a new
     /// photograph opens with (it may predate a new default).
-    private func saveOpenThumbnail() {
+    /// `whileOpen`: filed as the edit settles, when the library's look may
+    /// not have caught up with the sidecar yet (an undone paste): only under
+    /// the look of the edits written for what's shown.
+    private func saveOpenThumbnail(whileOpen: Bool = false) {
         guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
               !brightnessMatchPending, let look = thumbnailLook(for: item), thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
               library.looks[item] != nil ? shownEditsSaved : Self.uneditedLook(of: state) == look,
+              !whileOpen || library.looks[item] == nil || photoSidecar.map({ $0.photo == source
+                  && PhotoSidecar.look(of: $0.written, defaultsVersion: $0.defaultsVersion) == look }) == true,
               let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
         #if DEBUG
         thumbnailSaved?(item, look, Self.userEdits(state), "thumbnail")
@@ -3584,6 +3593,9 @@ import UserNotifications
                 if revision == currentRevision, interactiveScale == nil {
                     renderID = id; previewCurrent = true; hideActivity()
                     surveyNegativeIfNeeded()
+                    // The strip and grid show the open photograph as edited,
+                    // not only once it's left (if its edits are saved already).
+                    saveOpenThumbnail(whileOpen: true)
                     showingCachedPreview = false
                     renderAtExportSize = result["export_resolution"].bool
                     renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
