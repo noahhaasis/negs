@@ -61,27 +61,25 @@ impl PhotoFacts {
         format!("{} s", one_decimal(seconds, decimal))
     }
 
+    /// The caption's items by part (`PhotoFacts.parts`), in `PARTS` order.
+    pub fn parts(&self, decimal: char) -> [Option<String>; 5] {
+        [
+            self.camera.clone(),
+            self.iso.map(|iso| format!("ISO {}", iso.round() as i64)),
+            self.exposure.map(|exposure| Self::shutter(exposure, decimal)),
+            self.aperture.map(|aperture| format!("f/{}", one_decimal(aperture, decimal))),
+            self.focal_length.map(|focal| format!("{} mm", one_decimal(focal, decimal))),
+        ]
+    }
+
     /// The caption's items, in order.
     pub fn items(&self, decimal: char) -> Vec<String> {
-        let mut items = vec![];
-        if let Some(camera) = &self.camera {
-            items.push(camera.clone());
-        }
-        if let Some(iso) = self.iso {
-            items.push(format!("ISO {}", iso.round() as i64));
-        }
-        if let Some(exposure) = self.exposure {
-            items.push(Self::shutter(exposure, decimal));
-        }
-        if let Some(aperture) = self.aperture {
-            items.push(format!("f/{}", one_decimal(aperture, decimal)));
-        }
-        if let Some(focal) = self.focal_length {
-            items.push(format!("{} mm", one_decimal(focal, decimal)));
-        }
-        items
+        self.parts(decimal).into_iter().flatten().collect()
     }
 }
+
+/// The parts' names, as the status line says what differs.
+pub const PARTS: [&str; 5] = ["camera", "ISO", "shutter", "aperture", "focal length"];
 
 /// At most one decimal, none when whole ("4", "2,8").
 fn one_decimal(value: f64, decimal: char) -> String {

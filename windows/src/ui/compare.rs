@@ -5,7 +5,13 @@
 //! film, printed on its paper. As a slider, one frame with the first left
 //! of a line that drags, the first's words on the left and the second's on
 //! the right. A click on the other photograph edits it. The tools (Side by
-//! side · Slider, Swap, Done) are in the status line; keys S, ← →, Esc, C.
+//! side · Slider, Swap, Fit · 100%, Done) are in the status line; keys S,
+//! ← →, Esc, C, Ctrl+0 and Ctrl+1.
+//!
+//! At 100% both are linked (`ZoomLink`): the open photograph one pixel to
+//! a screen pixel, the other as much past its fit, both about the same
+//! point. A drag pans both; in the slider the knob moves the line. A double
+//! click zooms between Fit and 100%.
 //!
 //! The pictures are drawn through the monitor's profile as the tray's
 //! tiles are (`previews::Bitmap`), with GDI's halftone stretch.
@@ -56,14 +62,73 @@ struct View {
     comparison: Option<rules::Comparison>,
     /// Where the photographs were last drawn, in DIPs.
     frames: [RectF; 2],
-    dragging: bool,
+    /// At 100% (`model.fit_image` off), the zoom past each fit, and the
+    /// point both are centred on, as fractions of the photographs.
+    actual: bool,
+    relative: f64,
+    centre: (f64, f64),
+    /// The zoom command last followed.
+    zoom_command: u64,
+    /// How far a screen pixel moves the centre across the open photograph.
+    pan_unit: (f64, f64),
+    /// A press in a frame, and what a drag from it does.
+    press: Option<Press>,
+    /// The side the open photograph is on, which 100% is a pixel to a pixel.
+    open: usize,
+    /// Side by side, one over the other.
+    column: bool,
 }
 
 impl Default for View {
     fn default() -> Self {
         let none = RectF::new(0.0, 0.0, 0.0, 0.0);
-        Self { hwnd: HWND::default(), bitmaps: [None, None], aspects: [1.5; 2], words: Default::default(), comparison: None, frames: [none, none], dragging: false }
+        Self {
+            hwnd: HWND::default(),
+            bitmaps: [None, None],
+            aspects: [1.5; 2],
+            words: Default::default(),
+            comparison: None,
+            frames: [none, none],
+            actual: false,
+            relative: 1.0,
+            centre: (0.5, 0.5),
+            zoom_command: 0,
+            pan_unit: (0.0, 0.0),
+            press: None,
+            open: 0,
+            column: false,
+        }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Press {
+    /// Where it went down, in pixels.
+    at: (i32, i32),
+    drag: Drag,
+    moved: bool,
+    /// The centre when it went down.
+    centre: (f64, f64),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Drag {
+    /// Moves the slider's line.
+    Split,
+    Pan,
+}
+
+/// The frame's part of `image` shown at `relative` past its fit, centred
+/// on `centre` where the photograph allows: (x, y, width, height) in its
+/// pixels.
+fn shown_part(frame: RECT, image: (f64, f64), relative: f64, centre: (f64, f64)) -> (f64, f64, f64, f64) {
+    let (fw, fh) = ((frame.right - frame.left) as f64, (frame.bottom - frame.top) as f64);
+    let (iw, ih) = image;
+    let scale = (fw / iw).max(fh / ih) * relative.max(1.0);
+    let (sw, sh) = ((fw / scale).min(iw), (fh / scale).min(ih));
+    let sx = (centre.0 * iw - sw / 2.0).clamp(0.0, iw - sw);
+    let sy = (centre.1 * ih - sh / 2.0).clamp(0.0, ih - sh);
+    (sx, sy, sw, sh)
 }
 
 thread_local! {
@@ -86,7 +151,8 @@ fn facts(path: &std::path::Path) -> Option<crate::photo_facts::PhotoFacts> {
                     let facts = crate::photo_facts::PhotoFacts::read(&path).unwrap_or_default();
                     post(move |app: &mut App| {
                         FACTS.with(|f| f.borrow_mut().insert(path, Some(facts)));
-                        app.model.dirty |= crate::model::dirty::COMPARE;
+                        // The captions, and the status line's "differ in".
+                        app.model.dirty |= crate::model::dirty::COMPARE | crate::model::dirty::STATUS;
                     });
                 })
                 .ok();
@@ -126,6 +192,7 @@ fn ensure(app: &App) -> HWND {
             hInstance: super::instance(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             lpszClassName: w!("NegsCompare"),
+            style: CS_DBLCLKS,
             ..Default::default()
         };
         RegisterClassExW(&class);
@@ -174,8 +241,18 @@ pub fn sync(app: &mut App) {
         v.bitmaps = bitmaps;
         v.aspects = aspects;
         v.words = words;
+        let open = |side: &Side| matches!(side, Side::Photo(item) if app.model.library_item().as_ref() == Some(item));
+        v.open = if open(&comparison.first) || !open(&comparison.second) { 0 } else { 1 };
         v.comparison = Some(comparison);
+        // Fit and 100% (Ctrl+0, Ctrl+1, the status line's words) zoom both.
+        if v.zoom_command != app.model.zoom_command {
+            v.zoom_command = app.model.zoom_command;
+            v.actual = !app.model.fit_image;
+            v.centre = (0.5, 0.5);
+        }
     });
+    super::status::set_fitting(app.model.fit_image);
+    sync_note(app);
     let hwnd = hwnd();
     if !hwnd.is_invalid() {
         unsafe {
@@ -274,16 +351,14 @@ fn label(p: &mut Painter, ink: &SheetInk, words: &Words, edge: f32, top: f32, ri
 }
 
 /// The columns `x0..x1` of `image` covering `frame` (its largest centred
-/// part with the frame's shape), as `draw_thumbnail` draws all of it.
-fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap) {
+/// part with the frame's shape, as `draw_thumbnail` draws all of it), or
+/// at 100% the part `shown_part` gives.
+fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap, relative: f64, centre: (f64, f64)) {
     let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
     if fw <= 0 || fh <= 0 || x1 <= x0 {
         return;
     }
-    let (iw, ih) = (image.width as f64, image.height as f64);
-    let scale = (fw as f64 / iw).max(fh as f64 / ih);
-    let (sw, sh) = ((fw as f64 / scale).min(iw), (fh as f64 / scale).min(ih));
-    let (sx, sy) = ((iw - sw) / 2.0, (ih - sh) / 2.0);
+    let (sx, sy, sw, sh) = shown_part(frame, (image.width as f64, image.height as f64), relative, centre);
     // The source columns under x0..x1.
     let u0 = sx + (x0 - frame.left) as f64 / fw as f64 * sw;
     let u1 = sx + (x1 - frame.left) as f64 / fw as f64 * sw;
@@ -347,21 +422,48 @@ fn paint(hwnd: HWND, dc: HDC) {
         } else {
             let (arrangement, f) = rules::layout((w, h), (v.aspects[0], v.aspects[1]));
             column = arrangement == rules::Arrangement::Column;
+            if v.column != column {
+                // The note and the status line say top and bottom.
+                v.column = column;
+                post(|app: &mut App| app.model.dirty |= crate::model::dirty::COMPARE | crate::model::dirty::STATUS);
+            }
             f.map(|f| RectF::new(f[0] as f32, f[1] as f32, f[2] as f32, f[3] as f32))
         };
         v.frames = frames;
+        // At 100%: the open photograph, first or second, a pixel to a pixel.
+        let open = if v.bitmaps[v.open].is_some() { v.open } else { 1 - v.open };
+        let (relative, centre) = match (&v.bitmaps[open], v.actual) {
+            (Some((_, image)), true) => {
+                let frame = px(frames[open]);
+                let (fw, fh) = ((frame.right - frame.left).max(1) as f64, (frame.bottom - frame.top).max(1) as f64);
+                let (iw, ih) = (image.width as f64, image.height as f64);
+                let relative = (1.0 / (fw / iw).max(fh / ih)).max(1.0);
+                let (_, _, sw, sh) = shown_part(frame, (iw, ih), relative, v.centre);
+                // The centre where the photograph allows, so a pan starts from what's seen.
+                let (hx, hy) = (sw / iw / 2.0, sh / ih / 2.0);
+                v.centre = (v.centre.0.clamp(hx, 1.0 - hx), v.centre.1.clamp(hy, 1.0 - hy));
+                v.pan_unit = (sw / iw / fw, sh / ih / fh);
+                (relative, v.centre)
+            }
+            _ => (1.0, (0.5, 0.5)),
+        };
+        v.relative = relative;
         if slider {
             let frame = px(frames[0]);
             let split = frame.left + ((frame.right - frame.left) as f64 * comparison.split).round() as i32;
             c.round_rect(draw::RectF::of(frame), 0.0, blank);
             for (i, (x0, x1)) in [(0, (frame.left, split)), (1, (split, frame.right))] {
                 if let Some((_, image)) = &v.bitmaps[i] {
-                    draw_part(&mut c, frame, x0, x1, image);
+                    draw_part(&mut c, frame, x0, x1, image, relative, centre);
                 }
             }
         } else {
             for i in 0..2 {
-                super::inspector::draw_thumbnail(&mut c, px(frames[i]), 0.0, v.bitmaps[i].as_ref().map(|(_, b)| b.as_ref()), false, blank, blank);
+                let frame = px(frames[i]);
+                match &v.bitmaps[i] {
+                    Some((_, image)) if relative > 1.0 => draw_part(&mut c, frame, frame.left, frame.right, image, relative, centre),
+                    _ => super::inspector::draw_thumbnail(&mut c, frame, 0.0, v.bitmaps[i].as_ref().map(|(_, b)| b.as_ref()), false, blank, blank),
+                }
             }
         }
         let words = v.words.clone();
@@ -521,36 +623,88 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_LBUTTONDOWN => {
                 let p = at(lparam, hwnd);
-                let (frames, comparison) = VIEW.with(|v| {
+                let (frames, comparison, actual, centre) = VIEW.with(|v| {
                     let v = v.borrow();
-                    (v.frames, v.comparison.clone())
+                    (v.frames, v.comparison.clone(), v.relative > 1.0, v.centre)
                 });
                 let Some(comparison) = comparison else { return LRESULT(0) };
-                if comparison.layout == Layout::Slider {
-                    if contains(&frames[0], p) {
-                        VIEW.with(|v| v.borrow_mut().dragging = true);
-                        SetCapture(hwnd);
-                        let split = ((p.0 - frames[0].x) / frames[0].w.max(1.0)) as f64;
-                        with_app(|app| app.model.move_split(split));
-                    }
-                } else if let Some(i) = frames.iter().position(|r| contains(r, p)) {
+                let slider = comparison.layout == Layout::Slider;
+                let Some(i) = frames.iter().position(|r| contains(r, p)) else { return LRESULT(0) };
+                if !slider && !actual {
+                    // Fitted side by side: a press edits it.
                     with_app(|app| app.model.activate_compared(i == 0));
+                    return LRESULT(0);
+                }
+                // Fitted, a drag anywhere moves the slider's line; at 100% only the knob does.
+                let f = frames[0];
+                let line = f.x + f.w * comparison.split as f32;
+                let on_knob = (p.0 - line).abs() <= 16.0 && (p.1 - (f.y + f.h / 2.0)).abs() <= 16.0;
+                let drag = if slider && (!actual || on_knob) { Drag::Split } else { Drag::Pan };
+                let pixels = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
+                VIEW.with(|v| v.borrow_mut().press = Some(Press { at: pixels, drag, moved: false, centre }));
+                SetCapture(hwnd);
+                if drag == Drag::Split && on_knob {
+                    with_app(|app| app.model.move_split(((p.0 - f.x) / f.w.max(1.0)) as f64));
                 }
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
-                if VIEW.with(|v| v.borrow().dragging) {
-                    let p = at(lparam, hwnd);
-                    let frame = VIEW.with(|v| v.borrow().frames[0]);
-                    let split = ((p.0 - frame.x) / frame.w.max(1.0)) as f64;
-                    with_app(|app| app.model.move_split(split));
+                let Some(mut press) = VIEW.with(|v| v.borrow().press) else { return LRESULT(0) };
+                let pixels = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
+                let (dx, dy) = (pixels.0 - press.at.0, pixels.1 - press.at.1);
+                if !press.moved && dx.abs() + dy.abs() <= (2.0 * draw::dpi_of(hwnd)).round() as i32 {
+                    return LRESULT(0);
+                }
+                press.moved = true;
+                VIEW.with(|v| v.borrow_mut().press = Some(press));
+                match press.drag {
+                    Drag::Split => {
+                        let p = at(lparam, hwnd);
+                        let frame = VIEW.with(|v| v.borrow().frames[0]);
+                        let split = ((p.0 - frame.x) / frame.w.max(1.0)) as f64;
+                        with_app(|app| app.model.move_split(split));
+                    }
+                    Drag::Pan => {
+                        VIEW.with(|v| {
+                            let mut v = v.borrow_mut();
+                            v.centre = (press.centre.0 - dx as f64 * v.pan_unit.0, press.centre.1 - dy as f64 * v.pan_unit.1);
+                        });
+                        let _ = InvalidateRect(hwnd, None, false);
+                    }
                 }
                 LRESULT(0)
             }
             WM_LBUTTONUP | WM_CAPTURECHANGED => {
-                VIEW.with(|v| v.borrow_mut().dragging = false);
+                let press = VIEW.with(|v| v.borrow_mut().press.take());
                 if msg == WM_LBUTTONUP {
                     let _ = ReleaseCapture();
+                    // A click without a drag edits the photograph under it, or on its side of the line.
+                    if press.is_some_and(|p| !p.moved) {
+                        let p = at(lparam, hwnd);
+                        let (frames, comparison) = VIEW.with(|v| {
+                            let v = v.borrow();
+                            (v.frames, v.comparison.clone())
+                        });
+                        if let Some(c) = comparison {
+                            let first = if c.layout == Layout::Slider {
+                                (p.0 - frames[0].x) / frames[0].w.max(1.0) < c.split as f32
+                            } else {
+                                !contains(&frames[1], p)
+                            };
+                            with_app(|app| app.model.activate_compared(first));
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONDBLCLK => {
+                // Fit ↔ 100%, both photographs.
+                let p = at(lparam, hwnd);
+                if VIEW.with(|v| v.borrow().frames.iter().any(|r| contains(r, p))) {
+                    with_app(|app| {
+                        let fit = !app.model.fit_image;
+                        app.model.zoom(fit);
+                    });
                 }
                 LRESULT(0)
             }
@@ -562,7 +716,12 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 let point = (p.x as f32 / s, p.y as f32 / s);
                 let (over_frame, slider) = VIEW.with(|v| {
                     let v = v.borrow();
-                    (v.frames.iter().any(|r| contains(r, point)), v.comparison.as_ref().is_some_and(|c| c.layout == Layout::Slider))
+                    let f = v.frames[0];
+                    // At 100% only the knob moves the slider's line.
+                    let line = v.comparison.as_ref().map(|c| f.x + f.w * c.split as f32);
+                    let on_knob = line.is_some_and(|x| (point.0 - x).abs() <= 16.0 && (point.1 - (f.y + f.h / 2.0)).abs() <= 16.0);
+                    let slider = v.comparison.as_ref().is_some_and(|c| c.layout == Layout::Slider) && (v.relative <= 1.0 || on_knob);
+                    (v.frames.iter().any(|r| contains(r, point)), slider)
                 });
                 let cursor = if over_frame && !slider { IDC_HAND } else if over_frame { IDC_SIZEWE } else { IDC_ARROW };
                 let _ = SetCursor(LoadCursorW(None, cursor).unwrap_or_default());
@@ -571,4 +730,206 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
+}
+
+// MARK: The panel's note
+
+/// The note's height under the pane header, in DIPs (`CompareEditingNote`).
+pub const NOTE_HEIGHT: f64 = 36.0;
+const NOTE_EDIT: u16 = 1;
+const EDITING: TextStyle = TextStyle::ui(12.0, 400);
+const NOTE_WORDS: TextStyle = TextStyle::serif(14.0, 400).italic();
+const NOTE_NUMBER: TextStyle = TextStyle::serif(14.0, 600);
+
+thread_local! {
+    static NOTE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+}
+
+fn note() -> HWND {
+    HWND(NOTE.with(std::cell::Cell::get) as *mut _)
+}
+
+/// "Editing ③ the left one" near the top of the panel while comparing,
+/// under the pane header. Against the original with the original active,
+/// "The original can't be edited." and Edit 3.
+pub fn layout_note(app: &App, rect: RECT, shown: bool) {
+    if !shown && note().is_invalid() {
+        return;
+    }
+    if note().is_invalid() {
+        unsafe {
+            let class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(note_proc),
+                hInstance: super::instance(),
+                hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+                lpszClassName: w!("NegsCompareNote"),
+                ..Default::default()
+            };
+            RegisterClassExW(&class);
+        }
+        let hwnd = super::create(w!("NegsCompareNote"), "", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), app.main, 0, HFONT::default());
+        let edit = super::create(w!("BUTTON"), "Edit", WS_CHILD | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), hwnd, NOTE_EDIT, HFONT::default());
+        draw::set_role(edit, draw::Role::WordButton);
+        draw::track_hover(edit);
+        super::dialogs::tooltip(edit, "Edit the developed photograph");
+        NOTE.with(|n| n.set(hwnd.0 as isize));
+    }
+    unsafe {
+        let _ = MoveWindow(note(), rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, true);
+        let _ = ShowWindow(note(), if shown { SW_SHOWNA } else { SW_HIDE });
+    }
+    sync_note(app);
+}
+
+/// The note's words, and Edit for the original's other side.
+fn note_words(app: &App) -> Option<(bool, String, String)> {
+    let c = app.model.comparison()?;
+    let original = c.active().is_original();
+    let number = |side: &Side| match side {
+        Side::Photo(item) | Side::Original(item) => app.model.frame_number(item),
+    };
+    let column = VIEW.with(|v| v.borrow().column);
+    let place = if c.layout == Layout::SideBySide && column {
+        if c.active_first { "top" } else { "bottom" }
+    } else if c.active_first {
+        "left"
+    } else {
+        "right"
+    };
+    Some(if original { (true, number(c.inactive()), String::new()) } else { (false, number(c.active()), format!("the {place} one")) })
+}
+
+thread_local! {
+    static NOTE_WORDS_SHOWN: RefCell<Option<(bool, String, String)>> = const { RefCell::new(None) };
+}
+
+fn sync_note(app: &App) {
+    let hwnd = note();
+    if hwnd.is_invalid() {
+        return;
+    }
+    let words = note_words(app);
+    if NOTE_WORDS_SHOWN.with(|w| w.replace(words.clone())) == words {
+        return;
+    }
+    let edit = unsafe { GetDlgItem(hwnd, NOTE_EDIT as i32).unwrap_or_default() };
+    let original = words.as_ref().is_some_and(|w| w.0);
+    if let Some((_, number, _)) = words.as_ref().filter(|w| w.0) {
+        let title = crate::platform::wide(&format!("Edit {number}"));
+        unsafe {
+            let _ = SetWindowTextW(edit, crate::platform::pcwstr(&title));
+        }
+    }
+    unsafe {
+        let _ = ShowWindow(edit, if original { SW_SHOWNA } else { SW_HIDE });
+    }
+    place_note_edit(hwnd);
+    unsafe {
+        let _ = InvalidateRect(hwnd, None, false);
+        let _ = InvalidateRect(edit, None, false);
+    }
+}
+
+/// Edit at the gutter on the right, its word's width.
+fn place_note_edit(hwnd: HWND) {
+    let edit = unsafe { GetDlgItem(hwnd, NOTE_EDIT as i32).unwrap_or_default() };
+    let s = draw::dpi_of(hwnd) as f64;
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
+    }
+    let margin = super::ink::MARGIN;
+    let width = super::ink::width(&draw::window_text(edit), &super::ink::WORD) as f64 + 2.0 * margin;
+    let right = client.right as f64 / s - super::ink::GUTTER + margin;
+    let height = 18.0 + 2.0 * margin;
+    unsafe {
+        let _ = MoveWindow(edit, ((right - width) * s).round() as i32, (((NOTE_HEIGHT - height) / 2.0) * s).round() as i32, (width * s).round() as i32, (height * s).round() as i32, true);
+    }
+}
+
+fn paint_note(hwnd: HWND, dc: HDC) {
+    let t = theme::tokens();
+    let s = draw::dpi_of(hwnd);
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
+    }
+    let words = NOTE_WORDS_SHOWN.with(|w| w.borrow().clone());
+    let mut c = Canvas::new(dc, client);
+    c.clear(theme::gdi(t.hex.panel));
+    let h = client.bottom as f32 / s;
+    c.d2d(s, t.plain, |p| {
+        let Some((original, number, place)) = words.clone() else { return };
+        let x = super::ink::GUTTER as f32;
+        let middle = h / 2.0;
+        let centred = |p: &mut Painter, text: &str, style: &TextStyle, x: f32, ink: u32| -> f32 {
+            let m = p.measure(text, style, 0.0);
+            // The x-height's middle on the row's.
+            p.text(text, style, x, (middle + style.size * 0.35 - m.baseline).round(), Ink::hex(ink));
+            m.width
+        };
+        if original {
+            centred(p, "The original can\u{2019}t be edited.", &NOTE_WORDS, x, t.hex.label);
+            return;
+        }
+        let mut x = x + centred(p, "Editing", &EDITING, x, t.hex.dim) + 8.0;
+        // The number in the pencil's ring (`CompareRing`, active).
+        let m = p.measure(&number, &NOTE_NUMBER, 0.0);
+        let ring = RectF::new(x, middle - 12.5, (m.width + 12.0).max(28.0), 25.0);
+        p.ring(ring, negs_marks::Radii::NUMBER, -0.8, Ink::hex(t.hex.accent));
+        p.text(&number, &NOTE_NUMBER, ring.x + (ring.w - m.width) / 2.0, (middle + NOTE_NUMBER.size * 0.35 - m.baseline).round(), Ink::hex(t.hex.paper));
+        x += ring.w + 8.0;
+        centred(p, &place, &NOTE_WORDS, x, t.hex.label);
+    });
+    c.present(dc);
+}
+
+extern "system" fn note_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let dc = BeginPaint(hwnd, &mut ps);
+                paint_note(hwnd, dc);
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            WM_ERASEBKGND => LRESULT(1),
+            WM_SIZE => {
+                place_note_edit(hwnd);
+                let _ = InvalidateRect(hwnd, None, false);
+                LRESULT(0)
+            }
+            WM_COMMAND => {
+                if (wparam.0 & 0xffff) as u16 == NOTE_EDIT {
+                    // The developed one, beside its original.
+                    with_app(|app| {
+                        if let Some(first) = app.model.comparison().map(|c| !c.active_first) {
+                            app.model.activate_compared(first);
+                        }
+                    });
+                }
+                LRESULT(0)
+            }
+            WM_CTLCOLORBTN => draw::button_brush(),
+            WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+/// What the two differ in, for the status line ("shutter and aperture"):
+/// nothing against the original, or while either's facts are unknown.
+pub fn differences(app: &App) -> String {
+    let Some(c) = app.model.comparison() else { return String::new() };
+    let (Side::Photo(a), Side::Photo(b)) = (&c.first, &c.second) else { return String::new() };
+    let (fa, fb) = (facts(&a.photo), facts(&b.photo));
+    let (sa, sb) = (app.model.compared_stocks(a), app.model.compared_stocks(b));
+    rules::differences(fa.as_ref(), fb.as_ref(), (&sa.0, &sb.0), (sa.1.as_deref(), sb.1.as_deref()))
+}
+
+/// Stacked: ← → step the bottom one.
+pub fn stacked(app: &App) -> bool {
+    app.model.comparison().is_some_and(|c| c.layout == Layout::SideBySide) && VIEW.with(|v| v.borrow().column)
 }

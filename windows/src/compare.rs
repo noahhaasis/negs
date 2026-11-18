@@ -112,6 +112,38 @@ pub fn word(selected: &[Item], number: &dyn Fn(&Item) -> String, can_compare: bo
 }
 
 /// The View menu's Compare: "Stop Comparing" while comparing.
+/// What two photographs differ in, as the status line says it after
+/// "Comparing 3 and 7 · differ in": "shutter", "film and paper", "ISO,
+/// shutter and film" (`CompareDifferences`). The facts count where either
+/// has them; nothing while either's facts are unknown.
+pub fn differences(
+    a: Option<&crate::photo_facts::PhotoFacts>,
+    b: Option<&crate::photo_facts::PhotoFacts>,
+    film: (&str, &str),
+    paper: (Option<&str>, Option<&str>),
+) -> String {
+    let mut names: Vec<&str> = vec![];
+    if let (Some(a), Some(b)) = (a, b) {
+        let (a, b) = (a.parts('.'), b.parts('.'));
+        for (i, name) in crate::photo_facts::PARTS.into_iter().enumerate() {
+            if (a[i].is_some() || b[i].is_some()) && a[i] != b[i] {
+                names.push(name);
+            }
+        }
+    }
+    if film.0 != film.1 {
+        names.push("film");
+    }
+    if paper.0 != paper.1 {
+        names.push("paper");
+    }
+    match names.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.to_string(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 pub fn menu_title(comparing: bool) -> &'static str {
     if comparing { "Stop C&omparing\tC" } else { "C&ompare\tC" }
 }
@@ -310,6 +342,21 @@ mod tests {
 
     fn number(i: &Item) -> String {
         i.photo.to_string_lossy().trim_start_matches('p').to_string()
+    }
+
+    #[test]
+    fn the_status_line_says_what_differs() {
+        use crate::photo_facts::PhotoFacts;
+        let a = PhotoFacts { camera: Some("Nikon D750".into()), iso: Some(400.0), exposure: Some(1.0 / 160.0), aperture: Some(4.0), focal_length: None };
+        let b = PhotoFacts { exposure: Some(1.0 / 250.0), aperture: Some(5.6), ..a.clone() };
+        assert_eq!(differences(Some(&a), Some(&b), ("Portra", "Portra"), (Some("Endura"), Some("Endura"))), "shutter and aperture");
+        assert_eq!(differences(Some(&a), Some(&a), ("Portra", "Gold"), (Some("Endura"), None)), "film and paper");
+        let c = PhotoFacts { iso: Some(800.0), ..b.clone() };
+        assert_eq!(differences(Some(&a), Some(&c), ("Portra", "Gold"), (None, None)), "ISO, shutter, aperture and film");
+        // A part only one has differs; unknown facts don't, yet.
+        let d = PhotoFacts { focal_length: Some(50.0), ..a.clone() };
+        assert_eq!(differences(Some(&a), Some(&d), ("P", "P"), (None, None)), "focal length");
+        assert_eq!(differences(Some(&a), None, ("P", "P"), (None, None)), "");
     }
 
     #[test]

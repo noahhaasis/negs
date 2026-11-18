@@ -725,9 +725,12 @@ impl App {
                 Tone::Dim,
             ));
         } else if let Some(c) = model.comparison() {
-            left.push(Span::new(model.compare_summary(), Tone::Label));
-            if !c.against_original() {
-                left.push(Span::new("    ← → steps the right one", Tone::Dim));
+            let differences = compare::differences(self);
+            let summary = model.compare_summary();
+            left.push(Span::new(if differences.is_empty() { summary } else { format!("{summary} · differ in {differences}") }, Tone::Label));
+            if !c.against_original() && model.shown_items().len() > 2 {
+                let place = if compare::stacked(self) { "bottom" } else { "right" };
+                left.push(Span::new(format!("    ← → steps the {place} one"), Tone::Dim));
             }
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
@@ -834,7 +837,11 @@ impl App {
             let panes_height = if shows_panes { self.px(panes::HEIGHT) } else { 0 };
             let _ = MoveWindow(self.panes, column + splitter, top, inspector_width, panes_height, true);
             let _ = ShowWindow(self.panes, if shows_panes { SW_SHOWNA } else { SW_HIDE });
-            let panel_top = top + panes_height;
+            // Which photograph the panel edits, while comparing.
+            let note_height = if shows_panes && comparing { self.px(compare::NOTE_HEIGHT) } else { 0 };
+            let note = RECT { left: column + splitter, top: top + panes_height, right: column + splitter + inspector_width, bottom: top + panes_height + note_height };
+            compare::layout_note(self, note, note_height > 0);
+            let panel_top = top + panes_height + note_height;
             self.inspector.layout(column + splitter, panel_top, inspector_width, bottom - panel_top, shows_inspector && !shows_presets);
             let rect = RECT { left: column + splitter, top: panel_top, right: column + splitter + inspector_width, bottom };
             presets::layout(self, rect, shows_presets && !image_only);

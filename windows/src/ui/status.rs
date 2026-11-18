@@ -92,10 +92,25 @@ enum Word {
     Slider,
     Swap,
     Done,
+    /// Fit and 100% while comparing: both photographs.
+    FitBoth,
+    ActualBoth,
 }
 
 impl Word {
-    const ALL: [Word; 9] = [Word::Original, Word::OriginalMenu, Word::Fit, Word::Actual, Word::Cancel, Word::SideBySide, Word::Slider, Word::Swap, Word::Done];
+    const ALL: [Word; 11] = [
+        Word::Original,
+        Word::OriginalMenu,
+        Word::Fit,
+        Word::Actual,
+        Word::Cancel,
+        Word::SideBySide,
+        Word::Slider,
+        Word::Swap,
+        Word::Done,
+        Word::FitBoth,
+        Word::ActualBoth,
+    ];
 
     fn tip(self) -> &'static str {
         match self {
@@ -108,6 +123,8 @@ impl Word {
             Word::Slider => "Show the two in one frame with a line between them (S)",
             Word::Swap => "Swap the two photographs' places",
             Word::Done => "Stop comparing (Esc)",
+            Word::FitBoth => "Fit both photographs (Ctrl+0)",
+            Word::ActualBoth => "Both at actual size (Ctrl+1)",
         }
     }
 }
@@ -239,9 +256,12 @@ fn paint(hwnd: HWND, dc: HDC) {
             *right -= 14.0;
         };
         if let Some(slider) = line.tools.and_then(|t| t.compare) {
-            // Side by side  Slider [S] | Swap | Done [Esc] (`CompareTools`).
+            // Side by side  Slider [S] | Swap | Fit  100% | Done [Esc] (`CompareTools`).
             cap(p, "Esc", &mut right);
             word(p, "Done", Some(Word::Done), Tone::Dim, true, &mut right, 14.0);
+            rule(p, &mut right);
+            word(p, "100%", Some(Word::ActualBoth), if fitting { Tone::Dim } else { Tone::Paper }, true, &mut right, 14.0);
+            word(p, "Fit", Some(Word::FitBoth), if fitting { Tone::Paper } else { Tone::Dim }, true, &mut right, 14.0);
             rule(p, &mut right);
             word(p, "Swap", Some(Word::Swap), Tone::Dim, true, &mut right, 14.0);
             rule(p, &mut right);
@@ -384,8 +404,8 @@ fn original_menu(hwnd: HWND) {
 
 fn act(word: Word) {
     let command = match word {
-        Word::Fit => id::FIT,
-        Word::Actual => id::ACTUAL,
+        Word::Fit | Word::FitBoth => id::FIT,
+        Word::Actual | Word::ActualBoth => id::ACTUAL,
         Word::Cancel => id::CANCEL_EXPORT,
         Word::SideBySide => return compare_tool(super::compare::Tool::SideBySide),
         Word::Slider => return compare_tool(super::compare::Tool::Slider),
