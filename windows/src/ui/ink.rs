@@ -504,7 +504,7 @@ pub fn paint_button(draw: &NMCUSTOMDRAW, role: Role) {
 pub fn draw_item(item: &DRAWITEMSTRUCT) -> bool {
     let hwnd = item.hwndItem;
     let Some(role) = draw::role_of(hwnd) else { return false };
-    if !matches!(role, Role::Label | Role::Section | Role::Hint | Role::Readout | Role::EditCount | Role::Summary | Role::Unit | Role::Module | Role::Foldout | Role::Well) {
+    if !matches!(role, Role::Label | Role::Section | Role::Hint | Role::Readout | Role::EditCount | Role::Summary | Role::Unit | Role::Module | Role::Well) {
         return false;
     }
     let s = draw::dpi_of(hwnd);
@@ -577,20 +577,6 @@ pub fn draw_item(item: &DRAWITEMSTRUCT) -> bool {
                     p.text(word, &EDITS, x + n.width + 4.0, y + n.baseline - rest.baseline, Ink::hex(t.hex.dim));
                 }
                 Role::Module => paint_module(p, text, look, w, h, hot, pressed, focused, disabled, &t),
-                Role::Foldout => {
-                    // A pinned stock: its name in the serif, a chevron after it.
-                    let metrics = p.measure(text, &LABEL, 0.0);
-                    p.text(text, &LABEL, m, centred(h, &metrics, LABEL.size), Ink::hex(if hot { t.hex.paper } else { t.hex.label }).alpha(alpha));
-                    let name = p.measure(&look.summary, &VALUE, 0.0);
-                    let right = w - m - 11.0;
-                    p.clipped(RectF::new(m + metrics.width + 8.0, 0.0, (right - m - metrics.width - 8.0).max(0.0), h), |p| {
-                        p.text(&look.summary, &VALUE, (right - name.width).round(), centred(h, &name, VALUE.size), Ink::hex(t.hex.paper).alpha(alpha));
-                    });
-                    chevron(p, w - m - 8.0, h / 2.0, look.open, Ink::hex(if hot { t.hex.label } else { t.hex.dim }).alpha(alpha));
-                    if focused {
-                        focus_box(p, RectF::new(0.0, 0.0, w, h), &t);
-                    }
-                }
                 Role::Well => {
                     // A colour well: the colour's name, then a round swatch.
                     let swatch = 14.0;

@@ -31,6 +31,7 @@ mod strip;
 mod theme;
 mod titlebar;
 mod tone_graph;
+mod tray;
 mod view_modes;
 
 use std::cell::{Cell, RefCell};
@@ -617,6 +618,9 @@ impl App {
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
             strip::sync(self);
         }
+        if flags & (dirty::TRAY | dirty::PREVIEWS | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME | dirty::STRUCTURE) != 0 {
+            tray::sync(self);
+        }
         // What the preview tiles show follows the edit, the panels and the main render.
         let previews = dirty::PREVIEWS | dirty::INSPECTOR | dirty::STRUCTURE | dirty::CHROME | dirty::LAYOUT | dirty::PRESETS | dirty::CANVAS;
         if flags & previews != 0 && self.model.prefs.previews {
@@ -625,7 +629,7 @@ impl App {
                 self.follow_preview_monitor();
             }
             if self.model.pump_previews() || flags & dirty::PREVIEWS != 0 {
-                inspector::redraw_previews(self);
+                tray::redraw(self);
                 presets::redraw_previews(self);
             }
         }
@@ -752,13 +756,17 @@ impl App {
             let splitter = if shows_inspector { self.px(SPLITTER) } else { 0 };
             let column = (client.right - inspector_width - splitter).max(0);
             let photo = self.model.source.is_some();
+            // The film or paper tray takes the strip's and the status line's place.
+            let shows_tray = photo && !self.drop_target_active && self.model.tray_shown().is_some();
+            let tray_height = if shows_tray { self.px(crate::tray_rules::HEIGHT) } else { 0 };
             // The status line under the strip, with a photograph open; both
             // step aside in Image Only and while a file is dragged in.
-            let chrome = photo && !image_only && !self.drop_target_active;
+            let chrome = photo && !image_only && !self.drop_target_active && !shows_tray;
             let status_height = if chrome { self.px(status::HEIGHT) } else { 0 };
             let show_strip = self.model.prefs.filmstrip_visible && chrome;
             let strip_height = if show_strip { self.px(112.0) } else { 0 };
-            let canvas_bottom = (bottom - status_height - strip_height).max(top);
+            let canvas_bottom = (bottom - status_height - strip_height - tray_height).max(top);
+            tray::layout(self, RECT { left: 0, top: bottom - tray_height, right: column, bottom }, shows_tray);
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
             let _ = MoveWindow(self.empty, 0, top, column, bottom - top, true);
             let _ = ShowWindow(self.canvas, if photo { SW_SHOWNA } else { SW_HIDE });
@@ -818,6 +826,13 @@ impl App {
     }
 
     pub fn command(&mut self, command: u16) {
+        // A command keeps the stock being tried and closes the tray, but
+        // editing the text being typed doesn't. The library's commands too
+        // (Undo with a library step on top undoes after the visit's step).
+        let editing = matches!(command, id::CUT | id::COPY | id::PASTE | id::DELETE | id::SELECT_ALL) && text_focus();
+        if !editing {
+            self.model.end_tray(true);
+        }
         if library::command(self, command) {
             return;
         }
@@ -1050,7 +1065,9 @@ impl App {
         }
         self.save_window();
         // The open photograph's edits go to its sidecar first; Negs stays open
-        // if they can't, as it does for the session.
+        // if they can't, as it does for the session. Quitting keeps the
+        // stock the tray is trying, as any other command does.
+        self.model.end_tray(true);
         if let Err(error) = self.model.library_save_now() {
             if !ending_session {
                 self.model.error = Some(error);
@@ -1564,6 +1581,15 @@ fn pre_translate(msg: &MSG) -> bool {
         if matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MOUSEWHEEL) {
             app.report.stamp("first_input_received");
         }
+        // The tray's keys come first (§5.2: after an alert and typing), and
+        // a press outside it keeps its stock and closes it.
+        if tray::key(app, msg) {
+            return true;
+        }
+        if matches!(msg.message, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) && app.model.tray().is_some() && !tray::keeps_open(app, msg) {
+            app.model.end_tray(true);
+        }
+        // Rating keys never reach the library while typing (in the tray's Search too).
         if app.original_key(msg) || view_modes::key(app, msg, text_focus()) || library::key(app, msg) {
             return true;
         }
@@ -1736,6 +1762,13 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             WM_NOTIFY => {
                 if let Some(result) = titlebar::dropdown(hwnd, lparam) {
                     return result;
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_ENTERMENULOOP => {
+                // A menu keeps the stock being tried and closes the tray.
+                if with_app(|app| app.model.end_tray(true)).is_none() {
+                    post(|app: &mut App| app.model.end_tray(true));
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }

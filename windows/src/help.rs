@@ -15,6 +15,9 @@ pub fn group(title: &str) -> Option<&'static str> {
 
 pub const FILM: &str = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data.";
 pub const PAPER: &str = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless the lock on “printed on”, under the photograph, is closed.";
+/// The paper lock, under the photograph and in the paper tray's foot: open, then closed.
+pub const PAPER_LOCK: &str = "Keep this paper when you change film. Open, a new film brings the paper made for it.";
+pub const PAPER_KEPT: &str = "This paper stays when you change film. Click to let a new film bring the paper made for it.";
 
 const PATHS: &[(&str, &str)] = &[
     // Prep: white balance and brightness
@@ -173,6 +176,7 @@ mod tests {
         // still the Settings toggle, so only the clause before "unless" is shared.
         let paper = PAPER.split(", unless").next().unwrap();
         assert!(swift.contains(&format!("static let film = \"{FILM}\"")) && swift.contains(&format!("static let paper = \"{paper}, unless ")));
+        assert!(swift.contains(&format!("static let paperLock = \"{PAPER_LOCK}\"")) && swift.contains(&format!("static let paperKept = \"{PAPER_KEPT}\"")));
     }
 
     /// Every inspector control and group explains itself (`ControlHelpTests`).

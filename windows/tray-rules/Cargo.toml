@@ -1,0 +1,16 @@
+# The film and paper tray's rules (windows/src/tray_rules.rs), compiled
+# from the app's own source so their tests run on any OS:
+#   cargo test --manifest-path windows/tray-rules/Cargo.toml --target-dir target/tray-rules
+[package]
+name = "negs-windows-tray-rules"
+version = "0.17.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+# Its own workspace: not part of the app's.
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+doctest = false

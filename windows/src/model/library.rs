@@ -342,7 +342,9 @@ impl Model {
         if self.shelf.blocked.as_ref() == Some(open) {
             return;
         }
-        let mut state = self.state.clone();
+        // While the tray is open the stocks tried aren't edits yet: the
+        // sidecar keeps the edit from before it until one is kept (`end_tray`).
+        let mut state = self.previews.tray.as_ref().map_or_else(|| self.state.clone(), |t| t.before.clone());
         if let Some(session) = &self.crop_session {
             state.crop = session.settings();
         }

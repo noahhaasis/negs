@@ -322,7 +322,7 @@ lifecycle_test! {
         // Settings › previews off, end to end: thumbnails made, then turned off.
         h.clear_logs();
         h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        h.edit(|m| m.open_tray(false));
         let started = std::time::Instant::now();
         h.idle();
         let thumbnails = h.command_names().iter().filter(|c| *c == "thumbnail").count();
@@ -1480,7 +1480,7 @@ fn nothing_else_runs_between_the_quick_and_settled_frames(matched: bool) {
     let Some(mut h) = Harness::start(harness::prefs(matched)) else { return };
     open_quick(&mut h, matched);
     h.edit(|m| m.set_previews(true));
-    h.edit(|m| m.toggle_foldout(false));
+    h.edit(|m| m.open_tray(false));
     h.idle();
     assert!(h.command_names().iter().any(|c| c == "thumbnail"), "the grid's thumbnails were made");
     h.clear_logs();
@@ -1782,12 +1782,21 @@ lifecycle_test! {
 
 // MARK: Film search with the held and quick frames (chunk C)
 
-/// Searches the Film grid for `query` as typing in the field does
-/// (`inspector::film_search_changed`; the headless app has no grid
-/// windows, so only the model's part runs), then refreshes.
+/// Searches the open film tray for `query` as typing in its field does
+/// (`ui::tray`; the headless app has no tray window, so only the model's
+/// part runs), then refreshes.
 fn search_films(h: &mut Harness, query: &str) {
-    crate::ui::inspector::film_search_changed(&mut h.app, query.to_owned());
-    h.edit(|_| {});
+    h.edit(|m| m.set_tray_query(query));
+}
+
+/// Opens the film tray already searching for `query`, as typing the moment
+/// it opens would: its first thumbnails are the matches'.
+fn open_searching(h: &mut Harness, query: &str) {
+    h.edit(|m| m.set_previews(true));
+    h.edit(|m| {
+        m.open_tray(false);
+        m.set_tray_query(query);
+    });
 }
 
 /// The films the Film grid lists for `query`, in its order.
@@ -1823,33 +1832,31 @@ fn thumbnails_after_the_settled_render(h: &Harness, matches: &[String]) -> usize
     thumbnails.len()
 }
 
-/// Large photo, match on, Film grid open and searching: Return in the field
-/// (`inspector::choose_first_match`) chooses the first match. The canvas
-/// goes previous → matched quick → settled. The search is widened while
-/// the held quick frame's solve runs, and the new matches' thumbnails are
-/// made only after the settled frame, at the matched exposure: the solve
-/// leaves the helper free, so this is where `previews_may_render`'s
-/// `preview_current` matters.
+/// Large photo, match on, film tray open and searching: Return in the field
+/// (`Model::tray_submit`) tries the first match. The canvas goes previous →
+/// matched quick → settled. The search is widened while the held quick
+/// frame's solve runs, and the new matches' thumbnails are made only after
+/// the settled frame, at the matched exposure: the solve leaves the helper
+/// free, so this is where `previews_may_render`'s `preview_current`
+/// matters. Keeping the film then is one undo step.
 lifecycle_test! {
     fn a_searched_film_chosen_with_the_match_on_shows_the_matched_quick_frame_then_settles() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         open_quick(&mut h, true);
         let query = "superia 200";
-        search_films(&mut h, query);
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, query);
         h.idle();
         let matches = film_matches(h.model(), query);
         assert_eq!(matches.first().map(String::as_str), Some(SUPERIA), "{matches:?}");
         assert_eq!(thumbnails_after_the_settled_render(&h, &matches), matches.len(), "only the matches' thumbnails");
         let (gold_ev, generation) = (matched_ev(h.model()), h.model().source_generation);
+        let undo = h.model().undo_title().map(str::to_owned);
         h.clear_logs();
 
-        crate::ui::inspector::choose_first_match(&mut h.app);
-        h.edit(|_| {});
+        h.edit(|m| m.tray_submit());
         let edited = h.model().revision;
         assert_eq!(h.model().state.film, SUPERIA);
-        assert_eq!(h.model().undo_title(), Some("Change Film"));
+        assert_eq!(h.model().undo_title().map(str::to_owned), undo, "a try isn't an undo step");
         assert_eq!(until_held(&mut h).kind, FrameKind::Quick);
         let wider = "superia";
         search_films(&mut h, wider);
@@ -1860,27 +1867,25 @@ lifecycle_test! {
         let m = h.model();
         assert!((matched_ev(m) - gold_ev).abs() >= 0.05, "the film change moves the match");
         assert!(m.preview_current && m.held_frame().is_none() && m.revision == edited + 1);
-        assert_eq!(m.previews.film_query, wider);
+        assert_eq!(m.tray().map(|t| t.query.as_str()), Some(wider));
         let matched = edited + 1;
         assert_eq!(h.renders(), [quick(edited, generation), quick(matched, generation), settled(matched, generation)]);
         assert_eq!(presented(&h), [(matched, FrameKind::Quick), (matched, FrameKind::Settled)], "previous, matched quick, settled");
         // The matched exposure makes every match's thumbnail stale.
         assert_eq!(thumbnails_after_the_settled_render(&h, &superias), superias.len());
+        h.edit(|m| m.end_tray(true));
+        assert_eq!(h.model().undo_title(), Some("Change Film"));
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
 
-/// A search typed while a quick frame shows asks for no thumbnail until
-/// the settled frame, and then only for its matches.
+/// The tray opened with a search while a quick frame shows asks for no
+/// thumbnail until the settled frame, and then only for its matches.
 lifecycle_test! {
     fn searching_while_a_quick_frame_shows_waits_for_the_settled_frame() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
-        // The search first: it lasts while the foldout is closed, and the
-        // grid then asks only for its matches from the start.
-        search_films(&mut h, "portra");
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, "portra");
         h.idle();
         let portras = film_matches(h.model(), "portra");
         assert!(portras.len() >= 2, "{portras:?}");
@@ -1888,10 +1893,12 @@ lifecycle_test! {
         h.clear_logs();
 
         let generation = h.model().source_generation;
+        // An edit closes the tray, keeping its stock.
         h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        assert!(h.model().tray().is_none());
         let edited = h.model().revision;
         until_quick(&mut h);
-        search_films(&mut h, "gold");
+        open_searching(&mut h, "gold");
         assert!(!h.model().preview_current);
         h.idle();
         let golds = film_matches(h.model(), "gold");
@@ -1910,18 +1917,16 @@ lifecycle_test! {
     fn starring_a_match_during_the_settled_render_leaves_it_alone() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
-        // The search first: it lasts while the foldout is closed, and the
-        // grid then asks only for its matches from the start.
-        search_films(&mut h, "portra");
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, "portra");
         h.idle();
         let portras = film_matches(h.model(), "portra");
         let starred = portras.iter().find(|id| !h.app.model.prefs.is_favorite(id, false)).expect("an unstarred Portra").clone();
         h.clear_logs();
 
         let generation = h.model().source_generation;
+        // An edit closes the tray; it opens again, searching, before the settled render.
         h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        open_searching(&mut h, "portra");
         let edited = h.model().revision;
         h.run_until("the settled render", |m| m.rendering && m.render_log.last().is_some_and(|r| r.kind == FrameKind::Settled && r.revision == m.revision));
         h.edit(|m| m.toggle_favorite(&starred, false));
@@ -1937,20 +1942,19 @@ lifecycle_test! {
 }
 
 /// Clearing a search once idle asks for the other films' thumbnails at the
-/// current state: an edit made while searching re-made only the matches,
-/// so without the field's `dirty::PREVIEWS` mark the rest would keep the old
-/// exposure until something unrelated refreshed the grid.
+/// current state: after an edit the tray reopened searching re-made only
+/// the matches, so without the field's `dirty::PREVIEWS` mark the rest
+/// would keep the old exposure until something unrelated refreshed the tray.
 lifecycle_test! {
     fn clearing_a_search_remakes_the_other_films_thumbnails_at_the_new_state() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
-        search_films(&mut h, "portra");
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, "portra");
         h.idle();
         let portras = film_matches(h.model(), "portra");
         h.clear_logs();
         h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        open_searching(&mut h, "portra");
         h.idle();
         assert_eq!(thumbnails_after_the_settled_render(&h, &portras), portras.len(), "the edit re-made the matches only");
         h.clear_logs();
@@ -1963,5 +1967,58 @@ lifecycle_test! {
             assert_eq!(command["params"]["camera"]["exposure_compensation_ev"], serde_json::json!(0.5), "{}", command["film"]);
         }
         assert!(h.renders().is_empty() && h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+// MARK: The tray and the sidecar
+
+lifecycle_test! {
+    /// Stocks tried in the tray reach the photograph's sidecar only when one
+    /// is kept, in one write a second later; Esc leaves an unedited
+    /// photograph without a sidecar. The visit is one undo step.
+    fn a_tray_visit_reaches_the_sidecar_once_when_kept() {
+        use std::time::Duration;
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let folder = std::env::temp_dir().join(format!("negs-harness-tray-sidecar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let photo = folder.join("tray.png");
+        std::fs::copy(&h.photo, &photo).unwrap();
+        let sidecar = negs_library::sidecar::sidecar_path(&photo);
+        h.model().shelf.enabled = true;
+        h.open(&photo);
+        assert!(h.model().shelf.library.is_some(), "the photograph's folder is the library");
+        h.edit(|m| m.set_previews(true));
+        let before = h.model().state.film.clone();
+        let films: Vec<String> = h.model().films().iter().map(|s| s.id.clone()).filter(|id| *id != before).take(3).collect();
+        assert_eq!(films.len(), 3);
+        h.edit(|m| m.open_tray(false));
+        for film in &films {
+            h.edit(|m| m.try_stock(film));
+            h.fire_timers(Duration::from_secs(2));
+        }
+        assert!(!sidecar.exists(), "tried stocks aren't saved");
+        h.edit(|m| m.end_tray(false));
+        h.fire_timers(Duration::from_secs(2));
+        assert_eq!(h.model().state.film, before);
+        assert!(!sidecar.exists(), "Esc leaves no sidecar");
+        assert!(h.model().undo.undo.is_empty(), "nor an undo step");
+        h.edit(|m| m.open_tray(false));
+        h.edit(|m| m.try_stock(&films[0]));
+        h.edit(|m| m.try_stock(&films[1]));
+        h.fire_timers(Duration::from_secs(2));
+        assert!(!sidecar.exists(), "still trying");
+        h.edit(|m| m.end_tray(true));
+        h.fire_timers(Duration::from_secs(2));
+        let text = std::fs::read_to_string(&sidecar).expect("kept: the sidecar is written");
+        assert!(text.contains(&films[1]) && !text.contains(&films[0]), "{text}");
+        let written = std::fs::metadata(&sidecar).unwrap().modified().unwrap();
+        h.fire_timers(Duration::from_secs(3));
+        assert_eq!(std::fs::metadata(&sidecar).unwrap().modified().unwrap(), written, "written once");
+        assert_eq!(h.model().undo.undo.len(), 1, "one undo step for the visit");
+        h.edit(|m| m.perform_undo());
+        assert_eq!(h.model().state.film, before);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }
