@@ -10,5 +10,7 @@ pub mod crop;
 pub mod json;
 #[path = "../../src/model/library_map.rs"]
 pub mod library_map;
+#[path = "../../src/negative.rs"]
+pub mod negative;
 #[path = "../../src/state.rs"]
 pub mod state;

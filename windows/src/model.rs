@@ -579,6 +579,8 @@ pub struct Model {
     visible_presets: Option<std::ops::Range<usize>>,
     /// The film, paper and preset thumbnails.
     pub previews: Previews,
+    /// Your negative's requests and what they found (`model/negative.rs`).
+    pub negative: negative::Memory,
     /// Lab › Film format › Custom picked while the value is still a format's,
     /// so the slider stays. Start fresh and Reset Adjustments clear it, as
     /// they do the edits.
@@ -731,6 +733,7 @@ impl Model {
             applied_presets: HashMap::new(),
             visible_presets: None,
             previews: Previews::default(),
+            negative: Default::default(),
             custom_film_format: false,
             matching_brightness: false,
             match_request: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -1182,11 +1185,15 @@ impl Model {
         if space {
             self.choose_preview_space(COLOR_SPACES[0]);
         }
+        // A negative's base and balance are this frame's measurements: found again.
+        let paths: Vec<&str> = targets.iter().filter_map(|t| if let Target::Param(p) = t { Some(*p) } else { None }).collect();
+        self.refind_negative(Some(&paths));
         self.mark(dirty::INSPECTOR | dirty::STRUCTURE);
     }
     pub fn reset_value(&mut self, path: &str) {
         let value = self.default_value(path).clone();
         self.set(path, value);
+        self.refind_negative(Some(&[path]));
     }
 
     pub fn begin_interaction(&mut self) {
@@ -1219,12 +1226,12 @@ impl Model {
     }
 
     pub fn choose_film(&mut self, stock: &str) {
-        let next = state::choosing(&self.state, stock, false, self.prefs.keep_paper, &self.stocks);
+        let next = self.choosing_stock(&self.state, stock, false, false);
         self.apply(next, "Change Film");
     }
 
     pub fn choose_paper(&mut self, stock: &str) {
-        let next = state::choosing(&self.state, stock, true, self.prefs.keep_paper, &self.stocks);
+        let next = self.choosing_stock(&self.state, stock, true, false);
         self.apply(next, "Change Paper");
     }
 
@@ -1384,9 +1391,17 @@ impl Model {
         json::set(&mut next.params, state::SIZE_TARGET, self.state.value(state::SIZE_TARGET).clone());
         let positive = self.stocks.iter().find(|s| !s.paper && s.id == next.film).is_some_and(|s| s.positive);
         json::set(&mut next.params, "io.scan_film", Value::Bool(positive));
+        // Like the film, reading a negative stays; its base and balance are found again.
+        let negative = self.is_negative();
+        if negative {
+            next = self.negative_state(&next);
+        }
         self.custom_film_format = false;
         self.mark(dirty::STRUCTURE);
         self.apply(next, "Reset Adjustments");
+        if negative {
+            self.refind_negative(None);
+        }
     }
 
     fn apply(&mut self, next: EditState, action: impl Into<Cow<'static, str>>) {
@@ -1411,7 +1426,7 @@ impl Model {
         let structure = self.structure_key(&next) != self.structure_key(&self.state);
         let crop_changed = next.crop != self.state.crop;
         let rotation_changed = next.orientation() != self.state.orientation();
-        self.state = next;
+        let old = std::mem::replace(&mut self.state, next);
         if rotation_changed {
             let (shown, rotation, flip) = (self.shown_image_size(), self.rotation(), self.state.flip());
             if let Some(session) = &mut self.crop_session {
@@ -1430,6 +1445,10 @@ impl Model {
         self.settle_outputs();
         // Saved to the photograph's sidecar a second after the last change.
         self.library_edited();
+        if crate::negative::is_negative(&self.state) || crate::negative::is_negative(&old) {
+            let undoing = std::mem::take(&mut self.negative.undoing);
+            self.follow_negative(&old, undoing);
+        }
     }
 
     /// What decides which inspector rows exist.
@@ -1463,6 +1482,7 @@ impl Model {
         let previous = self.with_preferences(previous);
         if previous != self.state {
             self.undo.redo.push((Step::Edit(self.state.clone()), action));
+            self.negative.undoing = true;
             self.replace_state(previous);
         }
         self.mark(dirty::CHROME | dirty::ZOOM);
@@ -1481,6 +1501,7 @@ impl Model {
         let next = self.with_preferences(next);
         if next != self.state {
             self.undo.undo.push((Step::Edit(self.state.clone()), action));
+            self.negative.undoing = true;
             self.replace_state(next);
         }
         self.mark(dirty::CHROME);
@@ -1724,6 +1745,8 @@ impl Model {
         next.film = film;
         next.paper = paper;
         next.params = result["params"].clone();
+        // On a negative a preset brings the look and the paper, never how it's read.
+        let next = crate::negative::keeping_negative(&next, &self.state);
         self.apply(next, format!("Apply Preset “{name}”"));
         if let Some(source) = self.source.clone() {
             self.applied_presets.insert(source, preset);
@@ -2017,6 +2040,7 @@ impl Model {
         self.drop_held("open");
         self.brightness_failure = None;
         self.source_generation += 1;
+        self.forget_negative();
         let generation = self.source_generation;
         let restoring = session.is_some();
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
@@ -2344,7 +2368,7 @@ impl Model {
                     continue;
                 }
                 let Some(stock) = self.stocks.iter().find(|s| s.paper == paper && s.id == entry.id) else { continue };
-                let command = previews::stock_command(&state, stock, &self.stocks, self.prefs.keep_paper, source, generation);
+                let command = self.tile_command(&state, stock, source, generation);
                 wanted.push((Target::Stock { id: stock.id.clone(), paper }, previews::Key::new(generation, &command), command));
                 listed.push(entry.id);
             }
@@ -4404,6 +4428,9 @@ mod tests {
 
 // The film and paper tray: trying, keeping and going back.
 mod tray;
+
+// Your negative: the base, the balance, the pickers.
+pub mod negative;
 
 #[cfg(test)]
 pub mod harness;

@@ -1659,6 +1659,10 @@ fn pre_translate(msg: &MSG) -> bool {
                 return true;
             }
         }
+        // A picker waiting for a click on the negative.
+        if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && app.model.cancel_negative_pick() {
+            return true;
+        }
         // Escape's next use (§5.2): leaving Image Only.
         if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && view_modes::escape(app) {
             return true;

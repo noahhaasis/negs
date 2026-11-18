@@ -2024,6 +2024,51 @@ lifecycle_test! {
 }
 
 lifecycle_test! {
+    /// Your negative from the film's menu: read as Portra 400 (the photograph's
+    /// film isn't a colour negative), its base found and the print balanced
+    /// and metered as part of the same undo step; Auto is a step of its own;
+    /// another film prints it as a scene again, and Undo brings the negative
+    /// back with its base, without asking again.
+    fn your_negative_reads_the_scan_and_undo_brings_it_back() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let photo = h.photo.clone();
+        h.open(&photo);
+        let slide = h.model().stocks.iter().find(|s| !s.paper && s.positive).map(|s| s.id.clone()).expect("a slide film");
+        h.edit(|m| m.choose_film(&slide));
+        h.idle();
+        let default_base = crate::json::get(&h.model().defaults, "film_render.base").clone();
+        h.edit(|m| m.choose_negative());
+        h.idle();
+        let m = h.model();
+        assert!(m.is_negative());
+        assert_eq!(m.state.film, crate::negative::DEFAULT_FILM);
+        assert_eq!(m.value("io.scan_film"), &serde_json::json!(false));
+        assert_eq!(m.undo_title(), Some("Read as Negative"), "the base is part of the step");
+        assert!(!crate::negative::same_base(m.value("film_render.base"), &default_base), "the base was found");
+        assert!(m.negative_base().is_some() && !m.negative_busy());
+        let found = m.state.clone();
+        let names = h.command_names();
+        assert!(names.iter().any(|c| c == "negative_base") && names.iter().any(|c| c == "negative_meter"), "{names:?}");
+
+        h.edit(|m| m.auto_print_negative());
+        h.idle();
+        assert_eq!(h.model().undo_title(), Some("Auto Print"));
+        h.edit(|m| m.perform_undo());
+        h.idle();
+        assert_eq!(h.model().state, found);
+
+        h.edit(|m| m.choose_film(&slide));
+        h.idle();
+        assert!(!h.model().is_negative(), "another film prints a scene again");
+        h.clear_logs();
+        h.edit(|m| m.perform_undo());
+        h.idle();
+        assert_eq!(h.model().state, found, "Undo brings the negative back as it was");
+        assert!(h.command_names().iter().all(|c| c != "negative_base"), "{:?}", h.command_names());
+    }
+}
+
+lifecycle_test! {
     /// Flip (`io.flip`) starts cropping like a turn: Cancel takes it back,
     /// Done keeps it with the crop as one undo step. It never develops again
     /// (the canvas mirrors the preview), and Save Preview mirrors the file

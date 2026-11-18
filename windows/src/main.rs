@@ -16,6 +16,7 @@ mod histogram;
 mod icc;
 mod json;
 mod model;
+mod negative;
 mod photo_facts;
 mod picture;
 mod platform;

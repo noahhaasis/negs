@@ -60,6 +60,8 @@ pub struct TileLook {
     pub favourite: bool,
     /// Under the pointer: its name lit and its star shown.
     pub hot: bool,
+    /// Words on the blank instead of a picture (Your negative); no star.
+    pub words: Option<&'static str>,
 }
 
 /// What a click in the foot reaches.
@@ -168,7 +170,7 @@ pub fn sync(app: &mut App) {
     let opened = OPEN.replace(Some(paper)) != Some(paper);
     let sections = model.tray_sections();
     let thumbs = thumbs(model, paper, &sections);
-    let current = if paper { model.state.paper.clone() } else { model.state.film.clone() };
+    let current = model.tray_current(paper, visit.read_as);
     let favourites = sections.iter().flat_map(|s| &s.stocks).filter(|e| model.prefs.is_favorite(&e.id, paper)).map(|e| e.id.clone()).collect();
     let mut client = RECT::default();
     unsafe {
@@ -432,6 +434,13 @@ pub fn paint_tiles(c: &mut Canvas, s: f32, t: &Tokens, looks: &[TileLook]) {
                 // `PencilRing`, 7 out at the sides, 6 above, 1 below, tilted −1°.
                 p.ring(RectF::new(r.x - 7.0, r.y - 6.0, r.w + 14.0, r.h + 7.0), negs_marks::Radii::BOX, -1.0, Ink::hex(t.film.accent));
             }
+            if let Some(words) = look.words {
+                // `NegativeTile`: serif 15 italic, centred, 18 in from the sides.
+                let style = TextStyle::serif(15.0, 400).italic();
+                let width = r.w - 36.0;
+                let m = p.measure_in(words, &style, width, super::d2d::Align::Center);
+                p.text_in(words, &style, RectF::new(r.x + 18.0, r.y + (r.h - m.height) / 2.0, width, m.height + 4.0), super::d2d::Align::Center, Ink::hex(t.film.label));
+            }
             let style = if look.selected { NAME_SELECTED } else { NAME };
             let ink = if look.selected { t.film.paper } else if look.before || look.hot { t.film.label } else { t.film.dim };
             let before = if look.before { p.measure("before", &BEFORE, 0.0).width + 6.0 } else { 0.0 };
@@ -444,7 +453,7 @@ pub fn paint_tiles(c: &mut Canvas, s: f32, t: &Tokens, looks: &[TileLook]) {
                 let b = p.measure("before", &BEFORE, 0.0);
                 p.text("before", &BEFORE, r.x + drawn.width + 6.0, y + m.baseline - b.baseline, Ink::hex(t.film.dim));
             }
-            if look.favourite || look.hot {
+            if (look.favourite || look.hot) && look.words.is_none() {
                 let (sx, sy, _, _) = rules::star_rect(0.0);
                 p.clipped(r, |p| star(p, r.x + sx as f32, r.y + (sy - rules::TOP) as f32, look.favourite, t));
             }
@@ -493,6 +502,7 @@ fn paint(hwnd: HWND, dc: HDC) {
                     before: visit.shows_before(&entry.id, &v.current),
                     favourite: v.favourites.contains(&entry.id),
                     hot,
+                    words: (entry.id == rules::YOUR_NEGATIVE).then_some(crate::negative::TILE_TEXT),
                 });
             }
         }
@@ -694,13 +704,13 @@ fn click(x: f32, y: f32) {
         return;
     };
     match hit {
-        Hit::Star(..) => {
+        Hit::Star(..) if id != rules::YOUR_NEGATIVE => {
             with_app(|app| {
                 app.model.toggle_favorite(&id, paper);
                 app.model.dirty |= crate::model::dirty::TRAY;
             });
         }
-        Hit::Tile(..) => {
+        Hit::Tile(..) | Hit::Star(..) => {
             with_app(|app| app.model.choose_tile(&id, favourites));
         }
     }

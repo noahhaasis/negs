@@ -398,3 +398,61 @@ fn colour_filter_hints_read_as_the_macs() {
     assert_eq!(ColorFilter::hint(Some(&yellow), None, "Portra", false, '.'), ColorFilter::effect("hoya_y2"));
     assert_eq!(ColorFilter::help(Some(&yellow)), "Yellow · Hoya Y2. Darkens blue sky a touch so clouds stand out. The everyday filter.");
 }
+
+/// Your negative's rules (`NegativeScan`): what entering and leaving set,
+/// what a preset keeps, what finds the base again, the crop to the picture
+/// and Prep's sentence about the base.
+#[test]
+fn a_negative_reads_and_leaves_as_the_macs() {
+    use negs_windows_library_map::crop::Orientation;
+    use negs_windows_library_map::negative::{self as neg, BaseStatus};
+    let defaults = json!({"workflow": {"route": "input > film > print > scan"}, "film_render": {"base": {"scale": 1.0}, "convert": {"scan_illuminant": "D55"}},
+        "enlarger": {"m_filter_shift": 0.0, "y_filter_shift": 0.0, "print_exposure": 1.0}});
+    let mut negative = EditState::default();
+    negative.film = "kodak_portra_400".into();
+    negative.params = json!({"workflow": {"route": neg::ROUTE}, "film_render": {"base": {"scale": 1.3}, "convert": {"scan_illuminant": "D50"}},
+        "enlarger": {"m_filter_shift": 4.4, "y_filter_shift": -1.8, "print_exposure": 0.87}, "io": {"raw_white_balance": {"mode": "daylight"}}});
+    assert!(neg::is_negative(&negative));
+    let scene = neg::leaving(&negative, &defaults);
+    assert!(!neg::is_negative(&scene));
+    assert_eq!(scene.value("enlarger.print_exposure"), &json!(1.0));
+    assert_eq!(scene.value("film_render.convert.scan_illuminant"), &json!("D55"));
+    assert_eq!(neg::key(&scene), None);
+
+    // A preset brings the look and the paper, never how it's read or its balance.
+    let mut applied = scene.clone();
+    applied.film = "fuji_velvia".into();
+    applied.paper = "endura".into();
+    negs_windows_library_map::json::set(&mut applied.params, "film_render.grain.amount", json!(0.5));
+    let kept = neg::keeping_negative(&applied, &negative);
+    assert_eq!((kept.film.as_str(), kept.paper.as_str()), ("kodak_portra_400", "endura"));
+    assert_eq!(kept.value("enlarger.m_filter_shift"), &json!(4.4));
+    assert_eq!(kept.value("film_render.grain.amount"), &json!(0.5));
+    assert_eq!(kept.value("io.scan_film"), &json!(false));
+    assert_eq!(neg::keeping_negative(&applied, &scene), applied, "a scene takes the preset whole");
+
+    // The base is found again for a new film, backlight or white balance; not a paper.
+    let mut other = negative.clone();
+    other.paper = "endura".into();
+    assert_eq!(neg::key(&other), neg::key(&negative));
+    negs_windows_library_map::json::set(&mut other.params, neg::SCAN_ILLUMINANT, json!("D65"));
+    assert_ne!(neg::key(&other), neg::key(&negative));
+    assert!(neg::is_found("enlarger.print_exposure") && neg::is_found("enlarger") && neg::is_found("film_render.base.scale"));
+    assert!(!neg::is_found("film_render.grain.amount"));
+
+    let picture = json!({"x0": 0.05, "y0": 0.1, "x1": 0.95, "y1": 0.9, "angle_deg": 50.0});
+    let crop = neg::crop(&picture).expect("a picture");
+    assert!((crop.rect.width - 0.9).abs() < 1e-12 && crop.angle == 45.0, "levelled at most as far as Straighten goes");
+    assert_eq!(neg::bounds(&picture), Some(json!([0.05, 0.1, 0.95, 0.9])));
+    assert_eq!(neg::crop(&json!({"x0": 0.5, "y0": 0.1, "x1": 0.4, "y1": 0.9})), None);
+
+    let found = BaseStatus::of(&json!({"found": true, "picked": false, "edge": "left"}));
+    assert_eq!(found.sentence(Orientation::default()), "Film base found along the left edge.");
+    // As shown: a quarter turn clockwise puts the left edge at the top; a flip on the right.
+    assert_eq!(found.sentence(Orientation::new(1, false)), "Film base found along the top edge.");
+    assert_eq!(found.sentence(Orientation::new(0, true)), "Film base found along the right edge.");
+    let guess = BaseStatus::of(&json!({"found": false, "picked": false, "edge": null}));
+    assert!(guess.guessed());
+    assert_eq!(guess.sentence(Orientation::default()), "No clear film found: the base is a guess from the thinnest part of the picture.");
+    assert!(neg::same_base(&json!({"scale": 1.0}), &json!({"scale": 1.0 + 1e-12})));
+}

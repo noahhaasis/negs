@@ -673,7 +673,10 @@ fn print_words(app: &App) -> PrintWords {
         scanning: crate::json::boolean(model.value("io.scan_film")),
         original: model.holding_original && model.original.is_some(),
         keep_paper: model.prefs.keep_paper,
-        tray: model.tray_shown(),
+        tray: model.tray_shown().filter(|_| !model.tray().is_some_and(|t| t.read_as)),
+        negative: model.is_negative(),
+        read_as_open: model.tray_shown() == Some(false) && model.tray().is_some_and(|t| t.read_as),
+        prompt: model.negative_pick().map(|p| p.prompt()),
     }
 }
 
@@ -1075,6 +1078,19 @@ fn turn_half(draws: &mut [Draw], c: (f64, f64)) {
 impl View {
     /// The print (the photograph with its border) on screen, cut to its
     /// band, on whole pixels; None before there's a document.
+    /// Where (x, y) falls on the photograph as shown, as fractions of it
+    /// from its top left (outside it, beyond 0…1).
+    fn shown_fraction(&self, x: f64, y: f64) -> Option<[f64; 2]> {
+        let (dw, dh) = self.document;
+        let (pw, ph) = self.photo_display;
+        if pw <= 0.0 || ph <= 0.0 {
+            return None;
+        }
+        let (ox, oy) = self.document_origin();
+        let (left, top) = (ox + (dw - pw) / 2.0 * self.zoom, oy + (dh - ph) / 2.0 * self.zoom);
+        Some([(x - left) / (pw * self.zoom), (y - top) / (ph * self.zoom)])
+    }
+
     fn print_rect(&self) -> Option<Rect> {
         let (dw, dh) = self.document;
         if dw <= 0.0 || self.width == 0 {
@@ -1747,6 +1763,17 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 let (x, y) = point(lparam);
                 if with_view(|v| v.press_retry(x as f64, y as f64)).unwrap_or(false) {
                     SetCapture(hwnd);
+                    return LRESULT(0);
+                }
+                // Prep's pickers: the click reads the negative there.
+                if with_app(|app| app.model.negative_pick().is_some()).unwrap_or(false) {
+                    let shown = with_view(|v| v.shown_fraction(x as f64, y as f64)).flatten();
+                    post(move |app: &mut App| match shown {
+                        Some(shown) => app.model.picked_shown_point(shown),
+                        None => {
+                            app.model.cancel_negative_pick();
+                        }
+                    });
                     return LRESULT(0);
                 }
                 // The label's names, the lock, a trim mark or a turn arrow:

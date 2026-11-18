@@ -92,6 +92,7 @@ const PATHS: &[(&str, &str)] = &[
     ("enlarger.print_exposure", "The enlarger’s exposure time. 1 is a normal print; higher prints darker, lower lighter, as with a real enlarger."),
     ("enlarger.m_filter_shift", "Magenta filtration of the enlarger, in Kodak CC units from neutral. More magenta in the light makes the print greener; less makes it more magenta."),
     ("enlarger.y_filter_shift", "Yellow filtration of the enlarger, in Kodak CC units from neutral. More yellow in the light makes the print bluer; less makes it more yellow."),
+    ("film_render.convert.scan_illuminant", "The light behind the negative while it was photographed or scanned. Daylight suits most light pads and scanners."),
     ("enlarger.print_exposure_compensation", "Prints the negative to the same mid-grey whatever its Negative exposure, as a printer would. Off, Negative exposure changes the print’s brightness, as with a fixed enlarger setting."),
     ("enlarger.preflash_exposure", "A brief, even exposure of the paper before the print: lifts the deepest shadows and lowers contrast. 0 is off."),
     ("enlarger.preflash_m_filter_shift", "Magenta filtration for the preflash alone, in Kodak CC units, to tint the lifted shadows."),
