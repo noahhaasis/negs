@@ -6,6 +6,7 @@
 mod border;
 mod brightness;
 mod crop;
+mod edited_store;
 mod edits;
 mod engine;
 mod exact_fit;
@@ -23,6 +24,7 @@ mod presets;
 mod previews;
 mod rendered_preview;
 mod session;
+mod sheet_rules;
 mod state;
 mod thumbnail;
 mod tone_graph;

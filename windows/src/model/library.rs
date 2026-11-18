@@ -44,6 +44,8 @@ pub struct Shelf {
     serial: u64,
     /// Off in the Windows test suite, whose photographs are scratch files.
     pub enabled: bool,
+    /// The grid shows: ratings, flags and edits act on its selection.
+    pub in_grid: bool,
 }
 
 impl Default for Shelf {
@@ -63,6 +65,7 @@ impl Default for Shelf {
             note: None,
             serial: 0,
             enabled: !cfg!(test),
+            in_grid: false,
         }
     }
 }
@@ -91,6 +94,12 @@ impl Model {
     /// Rating and flag commands act on the open photograph only, as in the
     /// Mac's edit view: a forgotten selection never rates twenty photographs.
     pub fn rating_targets(&self) -> Vec<Item> {
+        if self.shelf.in_grid {
+            let targets = self.shelf.selection.ordered(&self.shown_items());
+            if !targets.is_empty() {
+                return targets;
+            }
+        }
         self.library_item().into_iter().collect()
     }
 
@@ -98,7 +107,7 @@ impl Model {
     /// strip's selection while it shows, else the open photograph.
     pub fn edit_targets(&self) -> Vec<Item> {
         let Some(open) = self.library_item() else { return vec![] };
-        if !self.prefs.filmstrip_visible || self.shelf.selection.selected().is_empty() {
+        if !(self.prefs.filmstrip_visible || self.shelf.in_grid) || self.shelf.selection.selected().is_empty() {
             return vec![open];
         }
         let targets = self.shelf.selection.ordered(&self.shown_items());

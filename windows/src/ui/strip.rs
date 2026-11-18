@@ -1,20 +1,25 @@
-//! The film strip under the canvas (`PhotoBrowser.swift`): every supported
-//! photograph in the current photograph's folder, in Explorer's order, with
-//! thumbnails decoded lazily for the visible cells, one at a time, from a
-//! bounded cache. Click one to open it; Left and Right open the neighbours.
-//! OS folder notifications keep the list live; never a full development.
-//! With the folder's library it lists what the library shows (the filter's
-//! photographs, a RAW+JPEG pair as one, duplicates), with each one's rating
-//! and flag, and Ctrl and Shift select several for Paste Edits and the rest.
+//! The film strip under the canvas (`PhotoBrowser.swift`): the folder's
+//! photographs as the library shows them (the filter's, a RAW+JPEG pair as
+//! one, duplicates), each frame at its photograph's own proportions on
+//! black film, the open one whole with the pencil under it, the rest
+//! dimmed; the hand-drawn stars, the pick's box and the reject's cross
+//! from `windows/marks`, their halo a real blur. 158 DIP with the status
+//! line's 28 under it: the tray's 186, so the photograph keeps its size
+//! when the tray opens. The leader, a tongue at its right end over the
+//! canvas, hides and shows it.
+//!
+//! Painted by Direct2D on the GPU (`surface.rs`), only the frames in view;
+//! it repaints when what it shows changes, never for a slider. Thumbnails
+//! come from `thumbs.rs`. The library's folder watcher keeps it current;
+//! before the library opens (the catalog is still coming) the folder is
+//! listed once.
 
-use std::collections::{HashMap, VecDeque};
-use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::time::Instant;
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::UI::Controls::SetScrollInfo;
+use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::StrCmpLogicalW;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -22,90 +27,68 @@ use windows::core::w;
 
 use negs_library::{Flag, Item, Summary};
 
+use super::d2d::{BoxInk, Ink, Painter, RectF};
+use super::surface::Surface;
+use super::theme::{self, Tokens};
+use super::thumbs::{self, Thumbs, Want};
 use super::{App, post, with_app};
-use crate::model::is_photo;
+use crate::model::{dirty, is_photo};
 use crate::platform::{pcwstr, wide};
+use crate::sheet_rules::{self as rules, StripLayout, ThumbSize};
 
-const CELL: f64 = 96.0;
-const THUMB_HEIGHT: f64 = 68.0;
-const GAP: f64 = 8.0;
-const PAD: f64 = 12.0;
-const CACHE: usize = 160;
-
-#[derive(Default, PartialEq)]
-enum Status {
-    #[default]
-    Loading,
-    Failed,
-    Ready,
-}
-
-struct Thumb {
-    bitmap: HBITMAP,
-    width: i32,
-    height: i32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct PhotoFile {
-    path: PathBuf,
-    size: u64,
-    modified: u64,
-}
-
-#[derive(Clone)]
-struct ThumbnailRequest {
-    file: PhotoFile,
-    generation: u64,
-}
+const TIMER_GLIDE: usize = 1;
+const STAR: f32 = negs_marks::STAR_SIZE as f32;
+const STAR_GAP: f32 = negs_marks::STAR_GAP as f32;
 
 /// One frame of the strip.
 #[derive(Clone, Debug, PartialEq)]
-struct Cell {
-    item: Item,
-    name: String,
-    summary: Summary,
+pub struct Cell {
+    pub want: Want,
+    pub name: String,
+    pub summary: Summary,
     /// The open photograph.
-    open: bool,
+    pub open: bool,
     /// In the library's selection, for Paste Edits and the rest.
-    selected: bool,
+    pub selected: bool,
+    /// A RAW with its camera JPEG: the "+J" badge.
+    pub pair: bool,
 }
 
 #[derive(Default)]
 pub struct Strip {
-    folder: Option<PathBuf>,
+    /// Before the library: the folder listed once, and its photographs.
+    listed: Option<PathBuf>,
     files: Vec<PathBuf>,
-    cells: Vec<Cell>,
-    versions: HashMap<PathBuf, PhotoFile>,
-    watch: Option<super::folder_watch::FolderWatch>,
-    status: Status,
-    scroll: i32,
-    thumbs: HashMap<PathBuf, Option<Thumb>>,
-    order: VecDeque<PathBuf>,
-    selected: Option<Item>,
-    requests: Option<Arc<(Mutex<Vec<ThumbnailRequest>>, Condvar)>>,
-    generation: u64,
-}
-
-impl Drop for Strip {
-    fn drop(&mut self) {
-        for thumb in self.thumbs.values().flatten() {
-            unsafe { let _ = DeleteObject(thumb.bitmap); }
-        }
-    }
+    pub cells: Vec<Cell>,
+    pub layout: StripLayout,
+    /// DIPs from the row's left edge.
+    pub scroll: f64,
+    glide: Option<(f64, f64, Instant)>,
+    hover: Option<usize>,
+    pressed: Option<usize>,
+    open: Option<Item>,
+    surface: Surface,
+    /// `Thumbs::revision` when last painted.
+    painted: u64,
+    leader: HWND,
+    leader_hover: bool,
+    leader_shown: bool,
+    leader_place: (i32, i32),
 }
 
 pub fn register() {
     unsafe {
-        let class = WNDCLASSEXW {
-            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-            lpfnWndProc: Some(proc_),
-            hInstance: super::instance(),
-            lpszClassName: w!("NegsStrip"),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            ..Default::default()
-        };
-        RegisterClassExW(&class);
+        for (name, proc) in [(w!("NegsStrip"), Some(proc_ as unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT)), (w!("NegsStripLeader"), Some(leader_proc as unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT))] {
+            let class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: proc,
+                hInstance: super::instance(),
+                lpszClassName: name,
+                hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+                ..Default::default()
+            };
+            RegisterClassExW(&class);
+        }
     }
 }
 
@@ -115,401 +98,316 @@ fn natural_order(a: &Path, b: &Path) -> std::cmp::Ordering {
     unsafe { StrCmpLogicalW(pcwstr(&x), pcwstr(&y)).cmp(&0) }
 }
 
-fn scan(folder: &Path) -> std::io::Result<Vec<PhotoFile>> {
+fn scan(folder: &Path) -> Vec<PathBuf> {
+    use std::os::windows::fs::MetadataExt;
     const HIDDEN: u32 = 0x2;
     const SYSTEM: u32 = 0x4;
-    let mut files: Vec<PhotoFile> = std::fs::read_dir(folder)?
+    let Ok(read) = std::fs::read_dir(folder) else { return vec![] };
+    let mut files: Vec<PathBuf> = read
         .flatten()
-        .filter_map(|entry| {
-            let path = folder.join(entry.file_name());
-            if !is_photo(&path) { return None; }
-            let metadata = entry.metadata().ok()?;
-            (metadata.is_file() && metadata.file_attributes() & (HIDDEN | SYSTEM) == 0).then(|| PhotoFile {
-                path, size: metadata.len(), modified: metadata.last_write_time(),
-            })
-        })
+        .filter(|e| e.metadata().is_ok_and(|m| m.is_file() && m.file_attributes() & (HIDDEN | SYSTEM) == 0))
+        .map(|e| folder.join(e.file_name()))
+        .filter(|p| is_photo(p))
         .collect();
-    files.sort_by(|a, b| natural_order(&a.path, &b.path));
-    Ok(files)
+    files.sort_by(|a, b| natural_order(a, b));
+    files
 }
 
-impl Strip {
-    fn px(&self, dpi: u32, dip: f64) -> i32 {
-        (dip * dpi as f64 / 96.0).round() as i32
-    }
+fn scale(hwnd: HWND) -> f64 {
+    unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) }.max(96) as f64 / 96.0
+}
 
-    fn content_width(&self, dpi: u32) -> i32 {
-        let n = self.cells.len() as f64;
-        self.px(dpi, PAD * 2.0 + n * CELL + (n - 1.0).max(0.0) * GAP)
+fn visible_width(hwnd: HWND) -> f64 {
+    let mut r = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut r);
     }
+    r.right as f64 / scale(hwnd)
+}
 
-    fn cell_x(&self, dpi: u32, index: usize) -> i32 {
-        self.px(dpi, PAD + index as f64 * (CELL + GAP)) - self.scroll
-    }
-
-    fn index_at(&self, dpi: u32, x: i32) -> Option<usize> {
-        let content = x + self.scroll - self.px(dpi, PAD);
-        if content < 0 {
-            return None;
-        }
-        let pitch = self.px(dpi, CELL + GAP);
-        let index = (content / pitch) as usize;
-        (index < self.cells.len() && content % pitch < self.px(dpi, CELL)).then_some(index)
+fn invalidate(hwnd: HWND) {
+    unsafe {
+        let _ = InvalidateRect(hwnd, None, false);
     }
 }
 
-/// Follow the current folder and keep the watch alive only while visible.
+/// Follows the model: what it lists, the open frame, the selection and
+/// the marks; asks for the thumbnails in view and around it. Repaints only
+/// when one of those changed.
 pub fn sync(app: &mut App) {
     let visible = app.model.prefs.filmstrip_visible && app.model.source.is_some();
     unsafe {
         let _ = EnableWindow(app.strip, !app.model.cropping());
     }
+    sync_leader(app);
     if !visible {
-        let strip = &mut app.strip_view;
-        if strip.folder.take().is_some() {
-            strip.generation += 1;
-            strip.watch = None;
-            if let Some(requests) = &strip.requests { requests.0.lock().unwrap().clear(); }
-        }
+        app.strip_view.surface.release();
         return;
     }
-    let source = app.model.source.clone();
-    let folder = source.as_ref().and_then(|s| s.parent()).map(Path::to_path_buf);
-    let strip = &mut app.strip_view;
-    if folder != strip.folder {
-        strip.folder = folder.clone();
-        strip.files.clear();
-        strip.status = Status::Loading;
-        strip.generation += 1;
-        let generation = strip.generation;
-        strip.watch = None;
-        if let Some(folder) = folder {
-            // Bound the UI mailbox to one snapshot even if a modal operation
-            // stalls the UI while a large batch of photographs arrives.
-            let pending = Arc::new(Mutex::new(None));
-            let watch_folder = folder.clone();
-            strip.watch = super::folder_watch::FolderWatch::start(&watch_folder, move || {
-                let result = scan(&folder);
-                let enqueue = pending.lock().unwrap().replace(result).is_none();
-                if enqueue {
-                    let pending = pending.clone();
-                    post(move |app: &mut App| {
-                        let result = pending.lock().unwrap().take().unwrap();
-                        if app.strip_view.generation != generation { return; }
-                        apply_snapshot(app, result);
-                    });
+    // Before the library opens: the folder, listed once on a thread.
+    let folder = app.model.source.as_ref().and_then(|s| s.parent()).map(Path::to_path_buf);
+    if app.model.shelf.library.is_none() && folder.is_some() && app.strip_view.listed != folder {
+        app.strip_view.listed = folder.clone();
+        app.strip_view.files.clear();
+        let folder = folder.unwrap();
+        std::thread::spawn(move || {
+            let files = scan(&folder);
+            post(move |app: &mut App| {
+                if app.strip_view.listed.as_deref() == Some(folder.as_path()) {
+                    app.strip_view.files = files;
+                    app.model.dirty |= dirty::STRIP;
                 }
-            }).ok();
-            if strip.watch.is_none() { strip.status = Status::Failed; }
-        }
-    }
-    relist(app);
-    let open = app.strip_view.cells.iter().find(|c| c.open).map(|c| c.item.clone());
-    if app.strip_view.selected != open {
-        app.strip_view.selected = open;
-        center_selection(app);
-    }
-    request_visible(app);
-    unsafe {
-        let _ = InvalidateRect(app.strip, None, false);
-    }
-}
-
-fn apply_snapshot(app: &mut App, result: std::io::Result<Vec<PhotoFile>>) {
-    let strip = &mut app.strip_view;
-    let initial = strip.status == Status::Loading;
-    match result {
-        Ok(files) => {
-            let versions: HashMap<_, _> = files.iter().map(|file| (file.path.clone(), file.clone())).collect();
-            // Keep existing bitmap objects for unchanged files; discard stale
-            // successes and failures, including interrupted/unfinished copies.
-            strip.thumbs.retain(|path, thumb| {
-                if versions.contains_key(path) && versions.get(path) == strip.versions.get(path) { return true; }
-                if let Some(thumb) = thumb { unsafe { let _ = DeleteObject(thumb.bitmap); } }
-                false
             });
-            strip.order.retain(|path| strip.thumbs.contains_key(path));
-            strip.files = files.into_iter().map(|file| file.path).collect();
-            strip.versions = versions;
-            strip.status = Status::Ready;
+        });
+    }
+    let changed = relist(app);
+    request(app);
+    if changed || app.strip_view.painted != app.thumbs.revision {
+        invalidate(app.strip);
+    }
+}
+
+/// The cells the model shows now; true if they or their layout changed.
+fn relist(app: &mut App) -> bool {
+    let model = &app.model;
+    let source = model.source.clone();
+    let cells: Vec<Cell> = match &model.shelf.library {
+        Some(library) => {
+            let open = library.open_item().cloned();
+            let unedited = thumbs::unedited_look(model);
+            model
+                .shown_items()
+                .into_iter()
+                .map(|item| Cell {
+                    want: thumbs::want(model, &item, unedited.as_deref()),
+                    name: library.name(&item),
+                    summary: library.summary(&item),
+                    open: open.as_ref() == Some(&item),
+                    selected: model.shelf.selection.contains(&item),
+                    pair: library.companion(&item.photo).is_some(),
+                })
+                .collect()
         }
-        Err(_) => strip.status = Status::Failed,
-    }
-    relist(app);
-    if initial { center_selection(app); } else { clamp_scroll(app); }
-    request_visible(app);
-    unsafe { let _ = InvalidateRect(app.strip, None, false); }
-}
-
-fn center_selection(app: &mut App) {
-    let dpi = app.dpi;
-    let mut r = RECT::default();
-    unsafe {
-        let _ = GetClientRect(app.strip, &mut r);
-    }
-    let strip = &mut app.strip_view;
-    if let Some(index) = strip.cells.iter().position(|c| c.open) {
-        let middle = strip.px(dpi, PAD + index as f64 * (CELL + GAP) + CELL / 2.0);
-        strip.scroll = middle - r.right / 2;
-    }
-    clamp_scroll(app);
-}
-
-fn clamp_scroll(app: &mut App) {
-    let mut r = RECT::default();
-    unsafe {
-        let _ = GetClientRect(app.strip, &mut r);
-    }
-    let dpi = app.dpi;
-    let strip = &mut app.strip_view;
-    let content = strip.content_width(dpi);
-    strip.scroll = strip.scroll.clamp(0, (content - r.right).max(0));
-    let info = SCROLLINFO {
-        cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
-        fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
-        nMin: 0,
-        nMax: content,
-        nPage: r.right.max(0) as u32,
-        nPos: strip.scroll,
-        ..Default::default()
-    };
-    unsafe {
-        SetScrollInfo(app.strip, SB_HORZ, &info, true);
-    }
-}
-
-/// Asks the worker for the visible cells' thumbnails, newest request first.
-fn request_visible(app: &mut App) {
-    let dpi = app.dpi;
-    let mut r = RECT::default();
-    unsafe {
-        let _ = GetClientRect(app.strip, &mut r);
-    }
-    let strip = &mut app.strip_view;
-    let mut wanted_paths: Vec<PathBuf> = (0..strip.cells.len())
-        .filter(|&i| {
-            let x = strip.cell_x(dpi, i);
-            x + strip.px(dpi, CELL) >= 0 && x <= r.right
-        })
-        .map(|i| strip.cells[i].item.photo.clone())
-        .collect();
-    // A photograph and its duplicates share one picture.
-    wanted_paths.dedup();
-    let wanted: Vec<ThumbnailRequest> = wanted_paths
-        .into_iter()
-        .filter(|p| !strip.thumbs.contains_key(p))
-        .filter_map(|p| strip.versions.get(&p).cloned())
-        .map(|file| ThumbnailRequest { file, generation: strip.generation })
-        .collect();
-    let requests = strip.requests.get_or_insert_with(|| {
-        let requests: Arc<(Mutex<Vec<ThumbnailRequest>>, Condvar)> = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
-        let worker = requests.clone();
-        let pixels = (192.0 * dpi as f64 / 96.0) as i32;
-        std::thread::Builder::new()
-            .name("thumbnails".into())
-            .spawn(move || {
-                crate::thumbnail::com_thread();
-                loop {
-                    let request = {
-                        let (queue, ready) = &*worker;
-                        let mut queue = queue.lock().unwrap();
-                        while queue.is_empty() {
-                            queue = ready.wait(queue).unwrap();
-                        }
-                        queue.remove(0)
-                    };
-                    let thumb = crate::thumbnail::strip_thumbnail(&request.file.path, pixels);
-                    post(move |app: &mut App| store(app, request, thumb));
-                }
+        None => app
+            .strip_view
+            .files
+            .iter()
+            .map(|path| Cell {
+                want: Want { item: Item::photo(path), key: None, loose: None },
+                name: crate::model::file_name(path),
+                summary: Summary::default(),
+                open: source.as_ref().is_some_and(|s| crate::session::same_path(s, path)),
+                selected: false,
+                pair: false,
             })
-            .ok();
-        requests
-    });
-    let (queue, ready) = &**requests;
-    let mut queue = queue.lock().unwrap();
-    // Cells that scrolled away are no longer wanted.
-    queue.clear();
-    queue.extend(wanted);
-    ready.notify_one();
-}
-
-fn store(app: &mut App, request: ThumbnailRequest, thumb: Option<(Vec<u8>, u32, u32)>) {
-    let strip = &mut app.strip_view;
-    if strip.generation != request.generation || strip.versions.get(&request.file.path) != Some(&request.file) { return; }
-    let path = request.file.path;
-    let bitmap = thumb.and_then(|(rgba, w, h)| unsafe {
-        let info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: w as i32,
-                biHeight: -(h as i32),
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
-        let target = std::slice::from_raw_parts_mut(bits as *mut u8, rgba.len());
-        for (out, p) in target.chunks_exact_mut(4).zip(rgba.chunks_exact(4)) {
-            out.copy_from_slice(&[p[2], p[1], p[0], 255]);
-        }
-        Some(Thumb { bitmap, width: w as i32, height: h as i32 })
-    });
-    if let Some(Some(old)) = strip.thumbs.insert(path.clone(), bitmap) {
-        unsafe { let _ = DeleteObject(old.bitmap); }
-    }
-    strip.order.retain(|old| old != &path);
-    strip.order.push_back(path);
-    while strip.order.len() > CACHE {
-        if let Some(old) = strip.order.pop_front() {
-            if let Some(Some(thumb)) = strip.thumbs.remove(&old) {
-                unsafe {
-                    let _ = DeleteObject(thumb.bitmap);
-                }
-            }
-        }
-    }
-    unsafe {
-        let _ = InvalidateRect(app.strip, None, false);
-    }
-}
-
-fn middle_truncated(dc: HDC, name: &str, width: i32) -> String {
-    let fits = |s: &str| {
-        let w = wide(s);
-        let mut size = SIZE::default();
-        unsafe {
-            let _ = GetTextExtentPoint32W(dc, &w[..w.len() - 1], &mut size);
-        }
-        size.cx <= width
+            .collect(),
     };
-    if fits(name) {
-        return name.into();
-    }
-    let chars: Vec<char> = name.chars().collect();
-    for keep in (1..chars.len()).rev() {
-        let head = keep.div_ceil(2);
-        let tail = keep - head;
-        let text = format!("{}…{}", chars[..head].iter().collect::<String>(), chars[chars.len() - tail..].iter().collect::<String>());
-        if fits(&text) {
-            return text;
+    let widths: Vec<f64> = cells.iter().map(|c| rules::frame_width(app.thumbs.ratio(&c.want))).collect();
+    let strip = &mut app.strip_view;
+    let layout = StripLayout::new(widths);
+    let visible = visible_width(app.strip);
+    let open_index = cells.iter().position(|c| c.open);
+    let open_item = open_index.map(|i| cells[i].want.item.clone());
+    let same_list = strip.cells.len() == cells.len() && strip.cells.iter().zip(&cells).all(|(a, b)| a.want.item == b.want.item);
+    let mut changed = strip.cells != cells || strip.layout != layout;
+    if open_item != strip.open {
+        // Another photograph opened: it glides to the middle (at once the
+        // first time, or when it's far away).
+        let target = open_index.map_or(0.0, |i| rules::centred(layout.middle(i), visible, layout.width));
+        let near = strip.open.is_some() && (target - strip.scroll).abs() < visible * 1.5;
+        strip.glide = None;
+        if near {
+            strip.glide = Some((strip.scroll, target, Instant::now()));
+            unsafe {
+                SetTimer(app.strip, TIMER_GLIDE, 15, None);
+            }
+        } else {
+            strip.scroll = target;
+        }
+        strip.open = open_item;
+        changed = true;
+    } else if same_list && strip.layout != layout {
+        // Shapes were read: the frame in the middle stays where it is.
+        let anchor = open_index.or_else(|| strip.layout.index_at(strip.scroll + visible / 2.0)).unwrap_or(0);
+        if anchor < layout.count() {
+            strip.scroll = rules::hold(&strip.layout, &layout, anchor, strip.scroll, visible);
         }
     }
-    "…".into()
+    strip.cells = cells;
+    strip.layout = layout;
+    clamp(strip, visible);
+    changed
 }
 
-fn paint(app: &App, hwnd: HWND) {
-    unsafe {
-        let mut ps = PAINTSTRUCT::default();
-        let screen = BeginPaint(hwnd, &mut ps);
-        let mut r = RECT::default();
-        let _ = GetClientRect(hwnd, &mut r);
-        let dc = CreateCompatibleDC(screen);
-        let buffer = CreateCompatibleBitmap(screen, r.right.max(1), r.bottom.max(1));
-        let old_buffer = SelectObject(dc, buffer);
-        let p = super::theme::palette();
-        FillRect(dc, &r, super::theme::brush(p.window));
-        let strip = &app.strip_view;
-        let dpi = app.dpi;
-        let px = |dip: f64| strip.px(dpi, dip);
-        let old_font = SelectObject(dc, app.fonts.small);
-        SetBkMode(dc, TRANSPARENT);
-        let enabled = IsWindowEnabled(hwnd).as_bool();
-        let message = match strip.status {
-            Status::Loading => Some("Loading…"),
-            Status::Failed => Some("This folder couldn’t be read."),
-            Status::Ready if strip.cells.is_empty() && !strip.files.is_empty() => Some("No photographs match the filter."),
-            Status::Ready if strip.cells.is_empty() => Some("No supported photographs in this folder."),
-            Status::Ready => None,
-        };
-        if let Some(message) = message {
-            let mut text = wide(message);
-            let len = text.len() - 1;
-            SetTextColor(dc, COLORREF(p.secondary));
-            let mut tr = r;
-            DrawTextW(dc, &mut text[..len], &mut tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        }
-        let accent = super::canvas::accent_color();
-        let accent = COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16);
-        let mem = CreateCompatibleDC(dc);
-        SetStretchBltMode(dc, HALFTONE);
-        for (i, shown) in strip.cells.iter().enumerate() {
-            let path = &shown.item.photo;
-            let x = strip.cell_x(dpi, i);
-            if x + px(CELL) < 0 || x > r.right {
-                continue;
-            }
-            let top = px(8.0);
-            let cell = RECT { left: x, top, right: x + px(CELL), bottom: top + px(THUMB_HEIGHT) };
-            FillRect(dc, &cell, super::theme::brush(p.well));
-            match strip.thumbs.get(path) {
-                Some(Some(thumb)) => {
-                    let inner = (cell.right - cell.left - px(6.0), cell.bottom - cell.top - px(6.0));
-                    let scale = (inner.0 as f64 / thumb.width as f64).min(inner.1 as f64 / thumb.height as f64);
-                    let (w, h) = ((thumb.width as f64 * scale) as i32, (thumb.height as f64 * scale) as i32);
-                    let old = SelectObject(mem, thumb.bitmap);
-                    let _ = StretchBlt(dc, cell.left + (cell.right - cell.left - w) / 2, cell.top + (cell.bottom - cell.top - h) / 2, w, h, mem, 0, 0, thumb.width, thumb.height, SRCCOPY);
-                    SelectObject(mem, old);
-                }
-                _ => {
-                    let mut glyph = wide("\u{E8B9}");
-                    let len = glyph.len() - 1;
-                    let old = SelectObject(dc, app.fonts.glyph);
-                    SetTextColor(dc, COLORREF(p.disabled));
-                    let mut gr = cell;
-                    DrawTextW(dc, &mut glyph[..len], &mut gr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                    SelectObject(dc, old);
-                }
-            }
-            let selected = shown.open;
-            marks(dc, app, shown, cell, px);
-            if selected || shown.selected {
-                // The open one in the accent; others selected in a thin rule.
-                let pen = if selected { CreatePen(PS_SOLID, px(2.0), accent) } else { CreatePen(PS_SOLID, px(1.0), COLORREF(p.secondary)) };
-                let old = SelectObject(dc, pen);
-                let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-                let _ = RoundRect(dc, cell.left, cell.top, cell.right, cell.bottom, px(8.0), px(8.0));
-                SelectObject(dc, old_brush);
-                SelectObject(dc, old);
-                let _ = DeleteObject(pen);
-            }
-            let rejected = shown.summary.flag == Some(Flag::Reject);
-            let shown = middle_truncated(dc, &shown.name, px(CELL));
-            let mut text = wide(&shown);
-            let len = text.len() - 1;
-            SetTextColor(dc, COLORREF(if !enabled || (rejected && !selected) { p.disabled } else if selected { p.text } else { p.secondary }));
-            let mut tr = RECT { left: x - px(4.0), top: cell.bottom + px(4.0), right: x + px(CELL + 4.0), bottom: cell.bottom + px(22.0) };
-            DrawTextW(dc, &mut text[..len], &mut tr, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
-        }
-        if GetFocus() == hwnd {
-            let _ = DrawFocusRect(dc, &RECT { left: 2, top: 2, right: r.right - 2, bottom: r.bottom - 2 });
-        }
-        let _ = DeleteDC(mem);
-        SelectObject(dc, old_font);
-        let _ = BitBlt(screen, 0, 0, r.right, r.bottom, dc, 0, 0, SRCCOPY);
-        SelectObject(dc, old_buffer);
-        let _ = DeleteObject(buffer);
-        let _ = DeleteDC(dc);
-        let _ = EndPaint(hwnd, &ps);
+fn clamp(strip: &mut Strip, visible: f64) {
+    strip.scroll = strip.scroll.max(0.0).min((strip.layout.width - visible).max(0.0));
+}
+
+/// The thumbnails in view first, then ±32 around the middle; the pump
+/// develops what's missing.
+fn request(app: &mut App) {
+    let strip = &app.strip_view;
+    let visible = visible_width(app.strip);
+    let range = strip.layout.indices(strip.scroll, strip.scroll + visible);
+    let on_screen: Vec<usize> = range.clone().collect();
+    let open = strip.cells.iter().position(|c| c.open);
+    let ahead = rules::prefetch_order(strip.cells.len(), &on_screen, open);
+    let wants: Vec<&Want> = on_screen.iter().chain(&ahead).map(|&i| &strip.cells[i].want).collect();
+    // Launch's develop first: reading previews beside it cost it 3 %.
+    if app.model.first_render_shown || app.model.render_failed {
+        app.thumbs.read(&wants, ThumbSize::Strip);
     }
+    let all: Vec<Want> = strip.cells.iter().map(|c| c.want.clone()).collect();
+    app.thumbs.pump(&app.model, &all, range, open);
+}
+
+/// The device is made, or made again.
+pub fn surfaces_ready(app: &mut App) {
+    app.thumbs.device_lost();
+    app.model.dirty |= dirty::STRIP;
+    let ((column, edge), shown) = (app.strip_view.leader_place, app.strip_view.leader_shown);
+    layout_leader(app, column, edge, shown);
+    invalidate(app.strip);
+    super::grid::surfaces_ready(app);
 }
 
 pub fn resized(app: &mut App) {
-    clamp_scroll(app);
-    request_visible(app);
+    let visible = visible_width(app.strip);
+    let strip = &mut app.strip_view;
+    // After a resize the open frame glides back to the middle.
+    if let Some(i) = strip.cells.iter().position(|c| c.open) {
+        let target = rules::centred(strip.layout.middle(i), visible, strip.layout.width);
+        if (target - strip.scroll).abs() > 0.5 {
+            strip.glide = Some((strip.scroll, target, Instant::now()));
+            unsafe {
+                SetTimer(app.strip, TIMER_GLIDE, 15, None);
+            }
+        }
+    }
+    clamp(&mut app.strip_view, visible);
+    request(app);
+    invalidate(app.strip);
 }
 
-fn scroll_by(app: &mut App, delta: i32) {
-    app.strip_view.scroll += delta;
-    clamp_scroll(app);
-    request_visible(app);
-    unsafe {
-        let _ = InvalidateRect(app.strip, None, false);
+fn glide(app: &mut App) {
+    let Some((from, to, started)) = app.strip_view.glide else {
+        unsafe {
+            let _ = KillTimer(app.strip, TIMER_GLIDE);
+        }
+        return;
+    };
+    let t = started.elapsed().as_secs_f64() * 1000.0 / rules::GLIDE_MS;
+    app.strip_view.scroll = from + (to - from) * rules::smoothstep(t);
+    if t >= 1.0 {
+        app.strip_view.glide = None;
+        unsafe {
+            let _ = KillTimer(app.strip, TIMER_GLIDE);
+        }
+        request(app);
+    }
+    invalidate(app.strip);
+}
+
+fn scroll_by(app: &mut App, delta: f64) {
+    let visible = visible_width(app.strip);
+    let strip = &mut app.strip_view;
+    strip.glide = None;
+    strip.scroll += delta;
+    clamp(strip, visible);
+    request(app);
+    invalidate(app.strip);
+}
+
+// MARK: Painting
+
+/// One frame: its picture (or bare film until it's read), dimmed as the
+/// strip dims it, its marks, the badge, the edited dot. Shared with the
+/// grid's flight, which draws the strip's frames as they leave.
+pub fn paint_frame(p: &mut Painter, thumbs: &mut Thumbs, cell: &Cell, r: RectF, opacity: f32, t: &Tokens, in_strip: bool) {
+    let size = if in_strip { ThumbSize::Strip } else { ThumbSize::for_rows(r.h as f64, 1.0) };
+    match thumbs.shown(&cell.want, size) {
+        Some(image) => p.picture(image.bitmap(), (image.width, image.height), r, opacity),
+        None => p.fill_rect(r, Ink::hex(t.film.panel).alpha(opacity)),
+    }
+    marks(p, cell, r, t, in_strip);
+}
+
+/// `PhotoMarks`: the reject's cross over the picture, the stars at its
+/// foot, with their halo; the edited dot and the "+J" badge without.
+pub fn marks(p: &mut Painter, cell: &Cell, r: RectF, t: &Tokens, in_strip: bool) {
+    let s = &cell.summary;
+    let paper = Ink::hex(t.film.paper);
+    if s.flag == Some(Flag::Reject) {
+        p.cross(&cell.name, r, paper, true);
+    }
+    for i in 0..s.rating.min(5) as usize {
+        let cx = r.x + 10.0 + i as f32 * (STAR + STAR_GAP) + STAR / 2.0;
+        let cy = r.y + r.h - 10.0 - STAR / 2.0;
+        p.star(&cell.name, i, cx, cy, paper, true);
+    }
+    if s.edited {
+        p.fill_ellipse(r.x + r.w - 11.0 - 3.5, r.y + 11.0 + 3.5, 3.5, 3.5, Ink::hex(t.film.accent));
+    }
+    if cell.pair {
+        let word = if in_strip { "+J" } else { "+JPG" };
+        let style = super::d2d::TextStyle::ui(10.0, 600);
+        let m = p.measure(word, &style, 0.0);
+        let inset = if in_strip { 5.0 } else { 7.0 };
+        let badge = RectF::new(r.x + r.w - inset - m.width - 8.0, r.y + r.h - inset - 15.0, m.width + 8.0, 15.0);
+        p.fill_round_rect(badge, 3.0, Ink::hex(0x000000).alpha(0.6));
+        p.text(word, &style, badge.x + 4.0, badge.y + (15.0 - m.height) / 2.0, paper);
     }
 }
+
+fn paint(app: &mut App, hwnd: HWND) {
+    let t = theme::tokens();
+    let s = scale(hwnd);
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
+    }
+    let (w, h) = (client.right as f64 / s, client.bottom as f64 / s);
+    let App { strip_view: strip, thumbs, .. } = app;
+    let range = strip.layout.indices(strip.scroll - rules::STRIP_MARGIN, strip.scroll + w + rules::STRIP_MARGIN);
+    let selecting = strip.cells.iter().filter(|c| c.selected).count() > 1;
+    let Strip { cells, layout, scroll, hover, pressed, surface, .. } = strip;
+    let painted = surface.paint(hwnd, (client.right.max(1) as u32, client.bottom.max(1) as u32), s as f32, t.plain, |p| {
+        p.fill_rect(RectF::new(0.0, 0.0, w as f32, h as f32), Ink::hex(t.film.film));
+        for i in range.clone() {
+            let cell = &cells[i];
+            let r = RectF::new((layout.xs[i] - *scroll) as f32, rules::STRIP_TOP as f32, layout.widths[i] as f32, rules::PICTURE as f32);
+            let rejected = cell.summary.flag == Some(Flag::Reject);
+            let opacity = rules::strip_opacity(cell.open, cell.selected && selecting, rejected, *hover == Some(i), *pressed == Some(i));
+            paint_frame(p, thumbs, cell, r, opacity as f32, &t, true);
+            if cell.summary.flag == Some(Flag::Pick) {
+                p.pick_box(BoxInk::Strip, &cell.name, r, Ink::hex(t.film.paper), true);
+            }
+            if selecting && cell.selected && !cell.open {
+                p.pick_box(BoxInk::Selection, &cell.name, r, Ink::hex(t.film.accent), false);
+            }
+            if cell.open {
+                let pencil = RectF::new(r.x, r.y + r.h + rules::PENCIL_DROP as f32, r.w, rules::PENCIL_WIDTH as f32 + 2.0);
+                p.underline(pencil, &t, true);
+            }
+        }
+    });
+    if painted {
+        app.strip_view.painted = app.thumbs.revision;
+        unsafe {
+            let _ = ValidateRect(hwnd, None);
+        }
+    } else {
+        // Plain film until the device is made.
+        unsafe {
+            let mut ps = PAINTSTRUCT::default();
+            let dc = BeginPaint(hwnd, &mut ps);
+            FillRect(dc, &client, theme::brush(theme::gdi(t.film.film)));
+            let _ = EndPaint(hwnd, &ps);
+        }
+    }
+}
+
+// MARK: Input
 
 fn open_neighbour(app: &mut App, step: isize) {
     if app.model.cropping() {
@@ -522,104 +420,62 @@ fn open_neighbour(app: &mut App, step: isize) {
     let Some(index) = strip.cells.iter().position(|c| c.open) else { return };
     let next = index as isize + step;
     if next >= 0 && (next as usize) < strip.cells.len() {
-        let path = strip.cells[next as usize].item.photo.clone();
+        let path = strip.cells[next as usize].want.item.photo.clone();
         app.model.open(&path);
-    }
-}
-
-/// What the strip lists: the library's photographs, else the folder's files.
-fn relist(app: &mut App) {
-    let model = &app.model;
-    let source = model.source.clone();
-    let cells: Vec<Cell> = match &model.shelf.library {
-        Some(library) => {
-            let open = library.open_item().cloned();
-            model
-                .shown_items()
-                .into_iter()
-                .map(|item| Cell {
-                    name: library.name(&item),
-                    summary: library.summary(&item),
-                    open: open.as_ref() == Some(&item),
-                    selected: model.shelf.selection.contains(&item),
-                    item,
-                })
-                .collect()
-        }
-        None => app
-            .strip_view
-            .files
-            .iter()
-            .map(|path| Cell {
-                item: Item::photo(path),
-                name: crate::model::file_name(path),
-                summary: Summary::default(),
-                open: source.as_ref().is_some_and(|s| crate::session::same_path(s, path)),
-                selected: false,
-            })
-            .collect(),
-    };
-    if app.strip_view.cells != cells {
-        app.strip_view.cells = cells;
-        clamp_scroll(app);
-        unsafe {
-            let _ = InvalidateRect(app.strip, None, false);
-        }
-    }
-}
-
-/// A frame's rating and flag, small, over its picture's foot: the stars at
-/// the left, a pick's flag or a reject's cross at the right.
-unsafe fn marks(dc: HDC, app: &App, cell: &Cell, frame: RECT, px: impl Fn(f64) -> i32) {
-    let p = super::theme::palette();
-    let summary = &cell.summary;
-    let flag = match summary.flag {
-        Some(Flag::Pick) => Some("\u{E7C1}"),
-        Some(Flag::Reject) => Some("\u{E711}"),
-        None => None,
-    };
-    if summary.rating == 0 && flag.is_none() {
-        return;
-    }
-    let band = RECT { left: frame.left, top: frame.bottom - px(15.0), right: frame.right, bottom: frame.bottom };
-    unsafe {
-        FillRect(dc, &band, super::theme::brush(p.window));
-        SetTextColor(dc, COLORREF(p.text));
-        if summary.rating > 0 {
-            let mut stars = wide("★".repeat(summary.rating as usize));
-            let len = stars.len() - 1;
-            let mut r = RECT { left: band.left + px(4.0), ..band };
-            DrawTextW(dc, &mut stars[..len], &mut r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        }
-        if let Some(glyph) = flag {
-            let old = SelectObject(dc, app.fonts.glyph);
-            let mut text = wide(glyph);
-            let len = text.len() - 1;
-            let mut r = RECT { right: band.right - px(4.0), ..band };
-            DrawTextW(dc, &mut text[..len], &mut r, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-            SelectObject(dc, old);
-        }
     }
 }
 
 /// A click (`EditorModel.click`): Ctrl adds or takes it from the selection,
 /// Shift selects up to it, and a plain click selects and opens it.
-fn click(app: &mut App, cell: Cell) {
+pub fn click(app: &mut App, item: &Item, open: bool) {
     let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) < 0 };
     let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) < 0 };
     let order = app.model.shown_items();
     let selection = &mut app.model.shelf.selection;
     if ctrl {
-        selection.toggle(&cell.item, Some(&order));
+        selection.toggle(item, Some(&order));
     } else if shift {
-        selection.extend_to(&cell.item, &order);
+        selection.extend_to(item, &order);
     } else {
-        selection.select(&cell.item);
-        if !cell.open {
-            app.model.open_item(cell.item);
+        selection.select(item);
+        if open {
+            app.model.open_item(item.clone());
         }
     }
-    app.model.dirty |= crate::model::dirty::STRIP | crate::model::dirty::CHROME;
+    app.model.dirty |= dirty::STRIP | dirty::CHROME;
+}
+
+/// The Photo menu's library commands at the pointer, for the clicked
+/// photograph and the selection it's in (else it alone, as in Explorer).
+pub fn context_menu(app: &mut App, hwnd: HWND, item: &Item, screen: POINT) {
+    if !app.model.shelf.selection.contains(item) {
+        app.model.shelf.selection.select(item);
+        app.model.dirty |= dirty::STRIP | dirty::CHROME;
+    }
+    unsafe {
+        let Ok(menu) = CreatePopupMenu() else { return };
+        super::library::add_menu(menu);
+        super::library::update_menu(app, menu);
+        let command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, 0, hwnd, None);
+        let _ = DestroyMenu(menu);
+        if command.0 != 0 {
+            let _ = PostMessageW(app.main, WM_COMMAND, WPARAM(command.0 as usize), LPARAM(0));
+        }
+    }
+}
+
+fn index_at(app: &App, hwnd: HWND, lparam: LPARAM) -> Option<usize> {
+    let s = scale(hwnd);
+    let (x, y) = ((lparam.0 & 0xffff) as i16 as f64 / s, ((lparam.0 >> 16) & 0xffff) as i16 as f64 / s);
+    let strip = &app.strip_view;
+    (y >= rules::STRIP_TOP && y <= rules::STRIP_TOP + rules::PICTURE).then(|| strip.layout.hit(x + strip.scroll)).flatten()
+}
+
+fn set_hover(app: &mut App, hover: Option<usize>) {
+    if app.strip_view.hover != hover {
+        app.strip_view.hover = hover;
+        invalidate(app.strip);
+    }
 }
 
 extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -635,52 +491,73 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_ERASEBKGND => LRESULT(1),
             WM_SIZE => {
+                with_app(resized);
+                LRESULT(0)
+            }
+            WM_TIMER if wparam.0 == TIMER_GLIDE => {
+                with_app(glide);
+                LRESULT(0)
+            }
+            WM_MOUSEMOVE => {
+                let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                let _ = TrackMouseEvent(&mut track);
                 with_app(|app| {
-                    clamp_scroll(app);
-                    request_visible(app);
+                    let hover = index_at(app, hwnd, lparam);
+                    set_hover(app, hover);
+                });
+                LRESULT(0)
+            }
+            WM_MOUSELEAVE => {
+                with_app(|app| {
+                    app.strip_view.pressed = None;
+                    set_hover(app, None);
                 });
                 LRESULT(0)
             }
             WM_LBUTTONDOWN => {
                 let _ = SetFocus(hwnd);
-                let x = (lparam.0 & 0xffff) as i16 as i32;
                 with_app(|app| {
                     if app.model.cropping() {
                         return;
                     }
-                    if let Some(index) = app.strip_view.index_at(app.dpi, x) {
-                        let cell = app.strip_view.cells[index].clone();
-                        if app.model.shelf.library.is_some() {
-                            return click(app, cell);
-                        }
-                        if !cell.open {
-                            app.model.open(&cell.item.photo);
-                        }
+                    app.strip_view.pressed = index_at(app, hwnd, lparam);
+                    invalidate(hwnd);
+                });
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                with_app(|app| {
+                    let pressed = app.strip_view.pressed.take();
+                    invalidate(hwnd);
+                    let Some(index) = pressed.filter(|&i| index_at(app, hwnd, lparam) == Some(i)) else { return };
+                    let cell = app.strip_view.cells[index].clone();
+                    if app.model.shelf.library.is_some() {
+                        return click(app, &cell.want.item, !cell.open);
+                    }
+                    if !cell.open {
+                        app.model.open(&cell.want.item.photo);
                     }
                 });
                 LRESULT(0)
             }
-            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
-                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as i32;
+            WM_RBUTTONUP => {
                 with_app(|app| {
-                    let step = app.px(80.0) * delta / 120;
-                    scroll_by(app, if msg == WM_MOUSEHWHEEL { step } else { -step });
+                    if app.model.cropping() || app.model.shelf.library.is_none() {
+                        return;
+                    }
+                    let Some(index) = index_at(app, hwnd, lparam) else { return };
+                    let item = app.strip_view.cells[index].want.item.clone();
+                    let mut point = POINT { x: (lparam.0 & 0xffff) as i16 as i32, y: ((lparam.0 >> 16) & 0xffff) as i16 as i32 };
+                    let _ = ClientToScreen(hwnd, &mut point);
+                    context_menu(app, hwnd, &item, point);
                 });
                 LRESULT(0)
             }
-            WM_HSCROLL => {
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as f64;
                 with_app(|app| {
-                    let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
-                    let _ = GetScrollInfo(hwnd, SB_HORZ, &mut info);
-                    let target = match SCROLLBAR_COMMAND((wparam.0 & 0xffff) as i32) {
-                        SB_LINELEFT => info.nPos - app.px(40.0),
-                        SB_LINERIGHT => info.nPos + app.px(40.0),
-                        SB_PAGELEFT => info.nPos - info.nPage as i32,
-                        SB_PAGERIGHT => info.nPos + info.nPage as i32,
-                        SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos,
-                        _ => info.nPos,
-                    };
-                    scroll_by(app, target - app.strip_view.scroll);
+                    let step = 80.0 * delta / 120.0;
+                    scroll_by(app, if msg == WM_MOUSEHWHEEL { step } else { -step });
                 });
                 LRESULT(0)
             }
@@ -698,7 +575,11 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_SETFOCUS | WM_KILLFOCUS => {
-                let _ = InvalidateRect(hwnd, None, false);
+                invalidate(hwnd);
+                LRESULT(0)
+            }
+            WM_DESTROY => {
+                with_app(|app| app.strip_view.surface.release());
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -706,79 +587,130 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::mpsc::{self, Receiver};
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-    use super::super::folder_watch::FolderWatch;
+// MARK: The leader
 
-    struct TestFolder(PathBuf);
-
-    impl TestFolder {
-        fn new() -> Self {
-            let folder = std::env::temp_dir().join(format!("negs-strip-{}-{}", std::process::id(),
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
-            std::fs::create_dir(&folder).unwrap();
-            Self(folder)
-        }
+/// Where the leader stands: on the strip's top edge at its right end, or
+/// on the status line's with the strip hidden, over the canvas.
+pub fn layout_leader(app: &mut App, column: i32, edge: i32, shown: bool) {
+    app.strip_view.leader_place = (column, edge);
+    app.strip_view.leader_shown = shown;
+    // Made once the window is up (`surfaces_ready`): launch doesn't wait.
+    if app.strip_view.leader.is_invalid() && !super::surface::ready() {
+        return;
     }
-
-    impl Drop for TestFolder {
-        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    let leader = ensure_leader(app);
+    let s = app.scale();
+    let (w, h) = ((rules::LEADER_WIDTH * s).round() as i32, (rules::LEADER_RAISED * s).round() as i32);
+    app.strip_view.leader_shown = shown;
+    unsafe {
+        let _ = SetWindowPos(leader, HWND_TOP, column - w, edge - h, w, h, SWP_NOACTIVATE | if shown { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW });
     }
+    shape_leader(app);
+}
 
-    fn receive_until(receiver: &Receiver<Vec<PhotoFile>>, predicate: impl Fn(&[PhotoFile]) -> bool) -> Vec<PhotoFile> {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let files = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .expect("Folder did not update within five seconds");
-            if predicate(&files) { return files; }
+fn sync_leader(app: &mut App) {
+    let shown = app.strip_view.leader_shown && !app.model.cropping() && !super::grid::shown(app);
+    let leader = app.strip_view.leader;
+    if !leader.is_invalid() {
+        unsafe {
+            let _ = ShowWindow(leader, if shown { SW_SHOWNA } else { SW_HIDE });
         }
+        invalidate(leader);
     }
+}
 
-    #[test]
-    fn folder_watch_tracks_copies_renames_deletes_and_bursts() {
-        let folder = TestFolder::new();
-        let first = folder.0.join("Photo1.png");
-        let second = folder.0.join("Photo2.png");
-        std::fs::write(&first, []).unwrap();
-        let (sender, receiver) = mpsc::channel();
-        let directory = folder.0.clone();
-        let watch = FolderWatch::start(&folder.0, move || { let _ = sender.send(scan(&directory).unwrap()); }).unwrap();
-        receive_until(&receiver, |files| files.len() == 1);
-        std::fs::write(&second, []).unwrap();
-        receive_until(&receiver, |files| files.len() == 2);
-        std::fs::write(&second, [7; 512]).unwrap();
-        receive_until(&receiver, |files| files.iter().any(|f| f.path == second && f.size == 512));
-        let renamed = folder.0.join("Photo10.png");
-        std::fs::rename(&first, &renamed).unwrap();
-        let files = receive_until(&receiver, |files| files.iter().any(|f| f.path == renamed));
-        assert_eq!(files.iter().map(|f| &f.path).collect::<Vec<_>>(), [&second, &renamed]);
-        std::fs::remove_file(&second).unwrap();
-        receive_until(&receiver, |files| files.len() == 1);
-        for index in 20..140 {
-            std::fs::write(folder.0.join(format!("Photo{index}.jpg")), []).unwrap();
+fn ensure_leader(app: &mut App) -> HWND {
+    if app.strip_view.leader.is_invalid() {
+        let parent = unsafe { GetParent(app.strip) }.unwrap_or_default();
+        app.strip_view.leader = unsafe {
+            CreateWindowExW(WINDOW_EX_STYLE(0), w!("NegsStripLeader"), w!("Hide Film Strip"), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 1, 1, parent, None, super::instance(), None)
         }
-        receive_until(&receiver, |files| files.len() == 121);
-        drop(watch);
-        loop {
-            match receiver.recv_timeout(Duration::from_secs(2)) {
-                Ok(_) => {},
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(error) => panic!("Watch did not stop: {error}"),
+        .unwrap_or_default();
+    }
+    app.strip_view.leader
+}
+
+/// The tongue as the window's shape: `polygon(0 100%, 28px 0, 100% 0,
+/// 100% 100%)`, 24 DIP tall, 30 under the pointer.
+fn shape_leader(app: &App) {
+    let leader = app.strip_view.leader;
+    let s = app.scale();
+    let (w, h) = ((rules::LEADER_WIDTH * s).round() as i32, (rules::LEADER_RAISED * s).round() as i32);
+    let tall = ((if app.strip_view.leader_hover { rules::LEADER_RAISED } else { rules::LEADER_HEIGHT }) * s).round() as i32;
+    let slant = (rules::LEADER_SLANT * s).round() as i32;
+    let points = [POINT { x: 0, y: h }, POINT { x: slant, y: h - tall }, POINT { x: w, y: h - tall }, POINT { x: w, y: h }];
+    unsafe {
+        let region = CreatePolygonRgn(&points, WINDING);
+        SetWindowRgn(leader, region, true);
+    }
+}
+
+fn paint_leader(app: &App, hwnd: HWND) {
+    let t = theme::tokens();
+    let s = scale(hwnd) as f32;
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
+        let mut ps = PAINTSTRUCT::default();
+        let dc = BeginPaint(hwnd, &mut ps);
+        let mut c = super::draw::Canvas::new(dc, client);
+        c.clear(theme::gdi(t.film.film));
+        let hover = app.strip_view.leader_hover;
+        let shown = app.model.prefs.filmstrip_visible;
+        c.d2d(s, t.plain, |p| {
+            let w = client.right as f32 / s;
+            let top = (rules::LEADER_RAISED - if hover { rules::LEADER_RAISED } else { rules::LEADER_HEIGHT }) as f32;
+            // The chevron: 12.7 × 6.4, in a 9 DIP box 22 from the right, 10 down.
+            let (cx, cy) = (w - 22.0 - 4.5, top + 10.0 + 4.5 - if hover { 1.0 } else { 0.0 });
+            let (dx, dy) = (6.35, if shown { -3.2 } else { 3.2 });
+            let ink = Ink::hex(if hover { t.film.paper } else { t.film.label });
+            p.line((cx - dx, cy + dy), (cx, cy - dy), 2.0, ink);
+            p.line((cx, cy - dy), (cx + dx, cy + dy), 2.0, ink);
+        });
+        c.present(dc);
+        let _ = EndPaint(hwnd, &ps);
+    }
+}
+
+extern "system" fn leader_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_PAINT => {
+                if with_app(|app| paint_leader(app, hwnd)).is_none() {
+                    let mut ps = PAINTSTRUCT::default();
+                    BeginPaint(hwnd, &mut ps);
+                    let _ = EndPaint(hwnd, &ps);
+                }
+                LRESULT(0)
             }
+            WM_ERASEBKGND => LRESULT(1),
+            WM_MOUSEMOVE => {
+                let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                let _ = TrackMouseEvent(&mut track);
+                with_app(|app| {
+                    if !app.strip_view.leader_hover {
+                        app.strip_view.leader_hover = true;
+                        shape_leader(app);
+                        invalidate(hwnd);
+                    }
+                });
+                LRESULT(0)
+            }
+            WM_MOUSELEAVE => {
+                with_app(|app| {
+                    app.strip_view.leader_hover = false;
+                    shape_leader(app);
+                    invalidate(hwnd);
+                });
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                with_app(|app| {
+                    let _ = PostMessageW(app.main, WM_COMMAND, WPARAM(super::id::FILMSTRIP as usize), LPARAM(0));
+                });
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
-    }
-
-    #[test]
-    fn folder_watch_is_idle_and_cancels_without_another_file_event() {
-        let folder = TestFolder::new();
-        let (sender, receiver) = mpsc::channel();
-        let watch = FolderWatch::start(&folder.0, move || { let _ = sender.send(()); }).unwrap();
-        receiver.recv_timeout(Duration::from_secs(5)).unwrap(); // initial scan
-        assert_eq!(receiver.recv_timeout(Duration::from_millis(500)), Err(mpsc::RecvTimeoutError::Timeout));
-        drop(watch);
-        assert_eq!(receiver.recv_timeout(Duration::from_secs(2)), Err(mpsc::RecvTimeoutError::Disconnected));
     }
 }

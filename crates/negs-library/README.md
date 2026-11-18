@@ -84,6 +84,12 @@ for item in library.shown(library.open_item()) {
     let look = library.look(&item);           // names its edited thumbnail
 }
 
+// Developing a thumbnail (nothing opened or written): the stored edits as
+// opening would show them, else the unedited state and its look.
+let (state, match_solved) = library.thumbnail_state(&item)
+    .unwrap_or((library.unedited_state(), false));
+let unedited = thumbnail::unedited_look(&library.unedited_state());
+
 // The edit view.
 let opened = library.open(&item);             // saves the one before
 show(opened.state); if let Some(p) = opened.problem { say_once(p) }

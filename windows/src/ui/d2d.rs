@@ -179,6 +179,7 @@ struct WarpTarget {
     rt: ID2D1RenderTarget,
     brush: ID2D1SolidColorBrush,
     bitmaps: Option<(ID2D1Bitmap1, ID2D1Bitmap1, u32, u32)>,
+    halos: Halos,
 }
 
 impl WarpTarget {
@@ -187,7 +188,7 @@ impl WarpTarget {
             let context = warp.0.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
             let brush = context.CreateSolidColorBrush(&Ink::hex(0).color(), None)?;
             let rt = context.cast()?;
-            Ok(Self { context, rt, brush, bitmaps: None })
+            Ok(Self { context, rt, brush, bitmaps: None, halos: Halos::default() })
         }
     }
 
@@ -245,7 +246,8 @@ fn paint_warp(device: &mut Device, shared: &'static Shared, (bits, stride): (*mu
         target.context.SetTransform(&IDENTITY);
         target.context.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
     }
-    let mut painter = Painter { shared, rt: &target.rt, brush: &target.brush, caches, plain };
+    let WarpTarget { context, rt, brush, halos, .. } = target;
+    let mut painter = Painter { shared, rt, brush, caches, plain, fx: Some(Fx { context, halos }) };
     draw(&mut painter);
     let ended = unsafe { target.context.EndDraw(None, None) };
     unsafe {
@@ -282,6 +284,11 @@ impl Shared {
         let fonts = Fonts::new(&dwrite);
         let cost = Cost { d2d: made_d2d - start, dwrite: made_dwrite - made_d2d, fonts: made_dwrite.elapsed(), thread };
         Ok(Self { d2d, dwrite, fonts, cost })
+    }
+
+    /// The multithreaded factory, for devices made over Direct3D.
+    pub fn factory(&self) -> &ID2D1Factory {
+        &self.d2d
     }
 
     pub fn serif(&self) -> &Serif {
@@ -630,7 +637,7 @@ fn paint_with(dc: HDC, pixels: Option<(*mut u8, usize)>, w: i32, h: i32, scale: 
                 target.dc.SetTransform(&IDENTITY);
                 target.dc.SetTextAntialiasMode(if layer { D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE } else { D2D1_TEXT_ANTIALIAS_MODE_DEFAULT });
             }
-            let mut painter = Painter { shared, rt: &target.rt, brush: &target.brush, caches: &mut device.caches, plain };
+            let mut painter = Painter { shared, rt: &target.rt, brush: &target.brush, caches: &mut device.caches, plain, fx: None };
             draw(&mut painter);
             match unsafe { target.dc.EndDraw(None, None) } {
                 Ok(()) => return true,
@@ -857,9 +864,96 @@ fn draw_on(rt: &ID2D1RenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1PathGe
     }
 }
 
-/// A mark's dark halo (drop-shadow 1.5 pt black at 0.95, then 4 pt at 0.45
-/// on macOS), here as two soft outlines under it: Direct2D's shadow effect
-/// needs a device context, which a DC target over GDI doesn't give.
+/// The marks' halos on one device context (`PhotoMarks`' two `.shadow`s:
+/// black at 0.95 blurred σ 0.75 DIP, then at 0.45 blurred σ 2): each
+/// shape's pair of shadow effects over a command list holding it, made the
+/// first time and drawn wherever the shape goes.
+#[derive(Default)]
+pub struct Halos {
+    made: HashMap<u64, Halo>,
+}
+
+struct Halo {
+    _effects: [ID2D1Effect; 2],
+    images: [ID2D1Image; 2],
+}
+
+impl Halos {
+    /// `fill` gives the shape's geometry, asked only the first time.
+    fn get_or_make(&mut self, context: &ID2D1DeviceContext, brush: &ID2D1SolidColorBrush, id: u64, fill: impl FnOnce() -> Vec<ID2D1PathGeometry>) -> Option<&Halo> {
+        if !self.made.contains_key(&id) {
+            if self.made.len() >= MOST_SHAPES {
+                self.made.clear();
+            }
+            let halo = Self::make(context, brush, &fill()).ok()?;
+            self.made.insert(id, halo);
+        }
+        self.made.get(&id)
+    }
+
+    fn make(context: &ID2D1DeviceContext, brush: &ID2D1SolidColorBrush, fill: &[ID2D1PathGeometry]) -> windows::core::Result<Halo> {
+        unsafe {
+            let list = context.CreateCommandList()?;
+            let old = context.GetTarget()?;
+            let mut transform = IDENTITY;
+            context.GetTransform(&mut transform);
+            context.SetTarget(&list);
+            context.SetTransform(&IDENTITY);
+            brush.SetColor(&Ink::hex(0).color());
+            for g in fill {
+                context.FillGeometry(g, brush, None);
+            }
+            context.SetTarget(&old);
+            context.SetTransform(&transform);
+            list.Close()?;
+            let shadow = |sigma: f32, alpha: f32| -> windows::core::Result<(ID2D1Effect, ID2D1Image)> {
+                let effect = context.CreateEffect(&CLSID_D2D1Shadow)?;
+                effect.SetInput(0, &list, true);
+                effect.SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION.0 as u32, D2D1_PROPERTY_TYPE_FLOAT, &sigma.to_le_bytes())?;
+                let color: Vec<u8> = [0.0f32, 0.0, 0.0, alpha].iter().flat_map(|c| c.to_le_bytes()).collect();
+                effect.SetValue(D2D1_SHADOW_PROP_COLOR.0 as u32, D2D1_PROPERTY_TYPE_VECTOR4, &color)?;
+                let image = effect.GetOutput()?;
+                Ok((effect, image))
+            };
+            let (soft, soft_image) = shadow(2.0, 0.45)?;
+            let (hard, hard_image) = shadow(0.75, 0.95)?;
+            Ok(Halo { _effects: [soft, hard], images: [soft_image, hard_image] })
+        }
+    }
+}
+
+/// A device context's own: what its halos and pictures need.
+pub struct Fx<'a> {
+    pub context: &'a ID2D1DeviceContext,
+    pub halos: &'a mut Halos,
+}
+
+/// Paints with `context` (a device context already drawing, its target
+/// set, its DPI the window's): the GPU surfaces' way in. The halos are a
+/// real blur there, and pictures can be drawn.
+pub fn paint_context(context: &ID2D1DeviceContext, brush: &ID2D1SolidColorBrush, halos: &mut Halos, plain: bool, draw: impl FnOnce(&mut Painter)) -> bool {
+    let Some(shared) = shared() else { return false };
+    let Ok(rt) = context.cast::<ID2D1RenderTarget>() else { return false };
+    DEVICE.with(|cell| {
+        let Ok(mut device) = cell.try_borrow_mut() else { return false };
+        let mut painter = Painter { shared, rt: &rt, brush, caches: &mut device.caches, plain, fx: Some(Fx { context, halos }) };
+        draw(&mut painter);
+        true
+    })
+}
+
+fn draw_halo(context: &ID2D1DeviceContext, halo: &Halo, transform: Matrix3x2) {
+    unsafe {
+        context.SetTransform(&transform);
+        for image in &halo.images {
+            context.DrawImage(image, None, None, D2D1_INTERPOLATION_MODE_LINEAR, D2D1_COMPOSITE_MODE_SOURCE_OVER);
+        }
+        context.SetTransform(&IDENTITY);
+    }
+}
+
+/// A mark's dark halo where no device context is (a DC target over GDI):
+/// two soft outlines under it, standing in for the blur.
 fn halo_on(rt: &ID2D1RenderTarget, brush: &ID2D1SolidColorBrush, g: &ID2D1PathGeometry, transform: Matrix3x2, round: Option<&ID2D1StrokeStyle>) {
     draw_on(rt, brush, g, transform, Some(4.0), round, Ink::hex(0).alpha(0.22));
     draw_on(rt, brush, g, transform, Some(1.5), round, Ink::hex(0).alpha(0.6));
@@ -874,11 +968,48 @@ pub struct Painter<'a> {
     brush: &'a ID2D1SolidColorBrush,
     caches: &'a mut Caches,
     plain: bool,
+    /// On a device context: blurred halos and pictures.
+    fx: Option<Fx<'a>>,
 }
 
 impl Painter<'_> {
     pub fn plain(&self) -> bool {
         self.plain
+    }
+
+    /// `bitmap` (`size` pixels, made at 96 DPI on this painter's device)
+    /// filling `r` as `.aspectRatio(contentMode: .fill)` does: cropped to
+    /// `r`'s proportions about its centre, at `opacity`. Only on a device
+    /// context.
+    pub fn picture(&mut self, bitmap: &ID2D1Bitmap1, size: (u32, u32), r: RectF, opacity: f32) {
+        let Some(fx) = &self.fx else { return };
+        let (bw, bh) = (size.0.max(1) as f32, size.1.max(1) as f32);
+        let scale = (r.w / bw).max(r.h / bh).max(f32::MIN_POSITIVE);
+        let (sw, sh) = ((r.w / scale).min(bw), (r.h / scale).min(bh));
+        let source = D2D_RECT_F { left: (bw - sw) / 2.0, top: (bh - sh) / 2.0, right: (bw + sw) / 2.0, bottom: (bh + sh) / 2.0 };
+        unsafe { fx.context.DrawBitmap(bitmap, Some(&r.d2d()), opacity, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, Some(&source), None) };
+    }
+
+    /// Draws `draw` at `opacity` as one layer (a fading flyer's boxes).
+    pub fn faded(&mut self, opacity: f32, draw: impl FnOnce(&mut Self)) {
+        if opacity >= 1.0 {
+            return draw(self);
+        }
+        let Some(fx) = &self.fx else { return draw(self) };
+        let params = D2D1_LAYER_PARAMETERS1 {
+            contentBounds: D2D_RECT_F { left: -1e7, top: -1e7, right: 1e7, bottom: 1e7 },
+            geometricMask: std::mem::ManuallyDrop::new(None),
+            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            maskTransform: IDENTITY,
+            opacity,
+            opacityBrush: std::mem::ManuallyDrop::new(None),
+            layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+        };
+        unsafe { fx.context.PushLayer(&params, None::<&ID2D1Layer>) };
+        draw(self);
+        if let Some(fx) = &self.fx {
+            unsafe { fx.context.PopLayer() };
+        }
     }
 
     fn ink(&self, ink: Ink) -> &ID2D1SolidColorBrush {
@@ -952,7 +1083,15 @@ impl Painter<'_> {
         draw_on(self.rt, self.brush, g, transform, stroke, style, ink);
     }
 
-    fn halo(&mut self, g: &ID2D1PathGeometry, transform: Matrix3x2) {
+    /// The halo under a mark (`id` names its shape): blurred on a device
+    /// context, else two soft outlines.
+    fn halo(&mut self, id: u64, g: &ID2D1PathGeometry, transform: Matrix3x2) {
+        if let Some(Fx { context, halos }) = &mut self.fx {
+            if let Some(halo) = halos.get_or_make(context, self.brush, id, || vec![g.clone()]) {
+                draw_halo(context, halo, transform);
+                return;
+            }
+        }
         let round = self.round();
         halo_on(self.rt, self.brush, g, transform, round.as_ref());
     }
@@ -1006,7 +1145,7 @@ impl Painter<'_> {
         let g = g.clone();
         let at = moved(cx as f64, cy as f64);
         if halo {
-            self.halo(&g, at);
+            self.halo(id, &g, at);
         }
         self.draw(&g, at, None, None, ink);
     }
@@ -1016,7 +1155,7 @@ impl Painter<'_> {
         let (w, h) = (r.w as f64, r.h as f64);
         let id = key(("cross", name, q(w), q(h)));
         let round = self.round();
-        let Painter { shared, rt, brush, caches, .. } = self;
+        let Painter { shared, rt, brush, caches, fx, .. } = self;
         let made = shape_in(caches, &shared.d2d, id, |f| {
             let strokes = negs_marks::cross_strokes(w, h, name);
             strokes.iter().map(|s| geometry(f, &Path::polygon(&s.outline).0, true).ok().map(|g| (g, s.opacity as f32))).collect::<Option<Vec<_>>>().map(Shape::Strokes)
@@ -1024,8 +1163,13 @@ impl Painter<'_> {
         let Some(Shape::Strokes(strokes)) = made else { return };
         let at = moved(r.x as f64, r.y as f64);
         if halo {
-            for (g, _) in strokes {
-                halo_on(rt, brush, g, at, round.as_ref());
+            let blurred = fx.as_mut().and_then(|Fx { context, halos }| {
+                halos.get_or_make(context, brush, id, || strokes.iter().map(|(g, _)| g.clone()).collect()).map(|h| draw_halo(context, h, at))
+            });
+            if blurred.is_none() {
+                for (g, _) in strokes.iter() {
+                    halo_on(rt, brush, g, at, round.as_ref());
+                }
             }
         }
         for (g, opacity) in strokes {
@@ -1061,7 +1205,7 @@ impl Painter<'_> {
         let (g, tilt) = (g.clone(), *tilt);
         let at = turned(tilt, w / 2.0, h / 2.0, r.x as f64, r.y as f64);
         if halo {
-            self.halo(&g, at);
+            self.halo(id, &g, at);
         }
         self.draw(&g, at, None, None, ink);
     }

@@ -12,6 +12,27 @@ pub fn look(edits: &Json, defaults_version: i64) -> String {
     digest16(both.to_compact_sorted().as_bytes())
 }
 
+/// Names the thumbnail of a photograph without stored edits, developed as
+/// `state` (`EditorModel.uneditedLook`): a hash of its edits without Image
+/// Size and the output colour, which follow the photograph before and
+/// don't change a thumbnail. Each platform's own (the Mac hashes its own
+/// encoding); thumbnails are a cache per machine.
+pub fn unedited_look(state: &crate::EditState) -> String {
+    let mut plain = state.user_edits();
+    for path in [crate::edits::IMAGE_SIZE_PATH, "io.output_color_space", "io.output_cctf_encoding"] {
+        plain.params.set_at(path, Json::Null);
+    }
+    let edits = Json::from_pairs([
+        ("film", Json::string(&plain.film)),
+        ("paper", Json::string(&plain.paper)),
+        ("params", plain.params),
+        ("crop", plain.crop),
+        ("border", plain.border),
+        ("match", Json::Bool(plain.brightness_match.is_some())),
+    ]);
+    digest16(Json::from_pairs([("unedited", edits)]).to_compact_sorted().as_bytes())
+}
+
 /// Seconds since 1970, as `Date.timeIntervalSince1970`.
 pub fn seconds_since_1970(time: SystemTime) -> f64 {
     match time.duration_since(UNIX_EPOCH) {

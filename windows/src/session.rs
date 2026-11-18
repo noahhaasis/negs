@@ -153,6 +153,8 @@ impl SessionStore {
 pub struct Preferences {
     pub recent_files: Vec<PathBuf>,
     pub filmstrip_visible: bool,
+    /// The grid's row height (its Size).
+    pub grid_size: f64,
     /// Comma-separated titles of the expanded groups.
     pub expanded_adjustments: String,
     pub inspector_tab: String,
@@ -258,6 +260,7 @@ impl Default for Preferences {
         Self {
             recent_files: vec![],
             filmstrip_visible: true,
+            grid_size: crate::sheet_rules::GRID_DEFAULT,
             expanded_adjustments: "Enlarger".into(),
             inspector_tab: "Prep".into(),
             inspector_tab_chosen: false,

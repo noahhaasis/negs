@@ -96,6 +96,12 @@ pub fn add_menu(photo: HMENU) {
     append(photo, ADVANCE, "Advance After Ra&ting");
     separator(photo);
     let filter = submenu(photo, "F&ilter");
+    add_filter_items(filter);
+    append(photo, CLEAR_FILTER, "C&lear Filter");
+}
+
+/// The Filter submenu's items, also the grid sentence's menu.
+pub fn add_filter_items(filter: HMENU) {
     for (i, (_, title)) in Filter::rating_choices().iter().enumerate() {
         append(filter, FILTER_RATING + i as u16, title);
     }
@@ -106,7 +112,6 @@ pub fn add_menu(photo: HMENU) {
     separator(filter);
     append(filter, FILTER_EDITED, "Edited");
     append(filter, FILTER_UNEDITED, "Unedited");
-    append(photo, CLEAR_FILTER, "C&lear Filter");
 }
 
 /// The library's shortcuts with Ctrl, as accelerators: never while a text

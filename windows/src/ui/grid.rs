@@ -1,0 +1,774 @@
+//! The grid (`LibraryGrid.swift`, `SheetFlight.swift`): the folder's
+//! photographs as a contact sheet over the whole window under the title
+//! bar, packed edge to edge in rows at their own proportions, the sentence
+//! over it ("Showing all ⌄ 12 photographs", the filter's words to change
+//! it, × to clear it) and the foot under it (the count, the Size slider).
+//! G shows it and hides it, E, Enter, Esc and a double click go back to the
+//! photograph; click, Ctrl, Shift, a band and the arrows select; Ctrl+plus,
+//! minus and the wheel change the size. It unfolds out of the strip and
+//! folds back into it: the window grows from the strip's band as the
+//! frames fly to their places.
+//!
+//! Made on first use; only the rows in view are painted, through Direct2D
+//! on the GPU (`surface.rs`), with the strip's frames and marks.
+
+use std::time::Instant;
+
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::w;
+
+use negs_library::{Flag, Item};
+
+use super::d2d::{BoxInk, Ink, Painter, RectF, TextStyle};
+use super::strip::{self, Cell};
+use super::surface::Surface;
+use super::theme::{self, Tokens};
+use super::{App, with_app};
+use crate::model::dirty;
+use crate::sheet_rules::{self as rules, Part, Rect, SheetLayout, ThumbSize};
+
+const TIMER_FLIGHT: usize = 1;
+const SENTENCE: TextStyle = TextStyle::serif(17.0, 400).italic();
+const FOOT: TextStyle = TextStyle::ui(12.0, 400);
+/// The Size slider's track at the foot's right.
+const SLIDER: f64 = 72.0;
+
+struct Flight {
+    opening: bool,
+    started: Instant,
+    /// Each cell's place in the strip (window DIPs), by index.
+    from: Vec<Option<Rect>>,
+    longest: f64,
+    current: Option<usize>,
+}
+
+#[derive(Default)]
+pub struct Grid {
+    hwnd: HWND,
+    shown: bool,
+    cells: Vec<Cell>,
+    layout: SheetLayout,
+    scroll: f64,
+    /// The window's whole rect (pixels, in the main window) and the strip's band.
+    rect: RECT,
+    band: RECT,
+    surface: Surface,
+    flight: Option<Flight>,
+    /// A band selection: where it started (sheet DIPs) and the selection under it.
+    dragging: Option<((f64, f64), (f64, f64), std::collections::HashSet<Item>)>,
+    sliding: bool,
+    /// The sentence's words that act, as painted.
+    places: Vec<(RectF, Act)>,
+    painted: u64,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Act {
+    Filter,
+    Clear,
+    Size,
+}
+
+pub fn shown(app: &App) -> bool {
+    app.grid.as_ref().is_some_and(|g| g.shown)
+}
+
+fn scale(hwnd: HWND) -> f64 {
+    unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) }.max(96) as f64 / 96.0
+}
+
+fn invalidate(hwnd: HWND) {
+    unsafe {
+        let _ = InvalidateRect(hwnd, None, false);
+    }
+}
+
+fn register() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| unsafe {
+        let class = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(proc_),
+            hInstance: super::instance(),
+            lpszClassName: w!("NegsGrid"),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            style: CS_DBLCLKS,
+            ..Default::default()
+        };
+        RegisterClassExW(&class);
+    });
+}
+
+/// Where the grid goes: `rect` under the title bar; the strip's band for
+/// the flight. Nothing before its first use.
+pub fn layout(app: &mut App, rect: RECT) {
+    let mut band = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(app.strip, &mut band);
+        let mut status = RECT::default();
+        let _ = GetWindowRect(app.status, &mut status);
+        let mut points = [POINT { x: band.left, y: band.top }, POINT { x: status.right.max(band.right), y: status.bottom.max(band.bottom) }];
+        MapWindowPoints(None, app.main, &mut points);
+        band = RECT { left: points[0].x, top: points[0].y, right: points[1].x, bottom: points[1].y };
+    }
+    let Some(grid) = app.grid.as_mut() else { return };
+    grid.rect = rect;
+    grid.band = band;
+    if grid.shown && grid.flight.is_none() {
+        let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
+        unsafe {
+            let _ = SetWindowPos(grid.hwnd, HWND_TOP, rect.left, rect.top, w, h, SWP_NOACTIVATE);
+        }
+        relayout(app);
+    }
+}
+
+/// The device is made again.
+pub fn surfaces_ready(app: &mut App) {
+    if let Some(grid) = &app.grid {
+        invalidate(grid.hwnd);
+    }
+}
+
+fn sheet_size(grid: &Grid) -> (f64, f64) {
+    let s = scale(grid.hwnd);
+    let (w, h) = ((grid.rect.right - grid.rect.left) as f64 / s, (grid.rect.bottom - grid.rect.top) as f64 / s);
+    (w, (h - rules::SENTENCE - rules::FOOT).max(0.0))
+}
+
+/// Follows the model: the photographs, their marks and shapes, the
+/// selection. Lays the sheet out again keeping the photograph in view
+/// where it was.
+pub fn sync(app: &mut App) {
+    if !shown(app) {
+        return;
+    }
+    let model = &app.model;
+    let Some(library) = &model.shelf.library else { return close(app, false) };
+    let open = library.open_item().cloned();
+    let unedited = super::thumbs::unedited_look(model);
+    let cells: Vec<Cell> = model
+        .shown_items()
+        .into_iter()
+        .map(|item| Cell {
+            want: super::thumbs::want(model, &item, unedited.as_deref()),
+            name: library.name(&item),
+            summary: library.summary(&item),
+            open: open.as_ref() == Some(&item),
+            selected: model.shelf.selection.contains(&item),
+            pair: library.companion(&item.photo).is_some(),
+        })
+        .collect();
+    let grid = app.grid.as_mut().unwrap();
+    let changed = grid.cells != cells;
+    grid.cells = cells;
+    let laid = relayout(app);
+    request(app);
+    let grid = app.grid.as_mut().unwrap();
+    if changed || laid || grid.painted != app.thumbs.revision {
+        invalidate(grid.hwnd);
+    }
+}
+
+/// Packs the rows anew; true if they moved. The photograph a third of the
+/// way down the view keeps its place (`keep_anchor`).
+fn relayout(app: &mut App) -> bool {
+    let size = app.model.prefs.grid_size;
+    let Some(grid) = app.grid.as_mut() else { return false };
+    let ratios: Vec<f64> = grid.cells.iter().map(|c| app.thumbs.ratio(&c.want).unwrap_or(rules::FALLBACK_RATIO)).collect();
+    let (width, viewport) = sheet_size(grid);
+    let layout = SheetLayout::new(&ratios, width, size);
+    if layout == grid.layout {
+        return false;
+    }
+    let anchor = grid.layout.hit(width / 2.0, grid.scroll + viewport / 3.0).or_else(|| grid.layout.nearest(width / 2.0, grid.scroll + viewport / 3.0));
+    if let (Some(index), true) = (anchor, grid.layout.frames.len() == layout.frames.len()) {
+        let f = grid.layout.frames[index];
+        let down = ((grid.scroll + viewport / 3.0 - f.y) / f.h.max(1.0)).clamp(0.0, 1.0);
+        grid.scroll = rules::keep_anchor(&layout, index, down, f.y + f.h * down - grid.scroll, viewport);
+    }
+    grid.layout = layout;
+    clamp(grid);
+    true
+}
+
+fn clamp(grid: &mut Grid) {
+    let (_, viewport) = sheet_size(grid);
+    grid.scroll = grid.scroll.max(0.0).min((grid.layout.height - viewport).max(0.0));
+}
+
+fn on_screen(grid: &Grid) -> std::ops::Range<usize> {
+    let (_, viewport) = sheet_size(grid);
+    grid.layout.indices(grid.scroll, grid.scroll + viewport)
+}
+
+/// The rows in view, then ±32 around them; the pump develops what's missing.
+fn request(app: &mut App) {
+    let Some(grid) = app.grid.as_ref() else { return };
+    let range = on_screen(grid);
+    let shown: Vec<usize> = range.clone().collect();
+    let open = grid.cells.iter().position(|c| c.open);
+    let ahead = rules::prefetch_order(grid.cells.len(), &shown, open);
+    let wants: Vec<&super::thumbs::Want> = shown.iter().chain(&ahead).map(|&i| &grid.cells[i].want).collect();
+    app.thumbs.read(&wants, ThumbSize::for_rows(app.model.prefs.grid_size, scale(grid.hwnd)));
+    let all: Vec<super::thumbs::Want> = grid.cells.iter().map(|c| c.want.clone()).collect();
+    app.thumbs.pump(&app.model, &all, range, open);
+}
+
+// MARK: Showing and hiding
+
+/// G: the grid, unfolding out of the strip (made the first time).
+pub fn open(app: &mut App) {
+    if shown(app) || app.model.shelf.library.is_none() || app.model.cropping() || app.model.source.is_none() {
+        return;
+    }
+    if app.grid.is_none() {
+        register();
+        let hwnd = unsafe {
+            CreateWindowExW(WINDOW_EX_STYLE(0), w!("NegsGrid"), w!("Grid"), WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 1, 1, app.main, None, super::instance(), None)
+        }
+        .unwrap_or_default();
+        app.grid = Some(Grid { hwnd, ..Default::default() });
+        app.layout();
+    }
+    app.model.shelf.in_grid = true;
+    app.model.dirty |= dirty::STRIP | dirty::CHROME;
+    let grid = app.grid.as_mut().unwrap();
+    grid.shown = true;
+    grid.cells.clear();
+    grid.layout = SheetLayout::default();
+    sync(app);
+    // The open photograph's row in the middle.
+    let grid = app.grid.as_mut().unwrap();
+    let (_, viewport) = sheet_size(grid);
+    if let Some(row) = grid.cells.iter().position(|c| c.open).and_then(|i| grid.layout.row_of(i)) {
+        grid.scroll = grid.layout.centre_row(row, viewport);
+        clamp(grid);
+    }
+    start_flight(app, true);
+    unsafe {
+        let _ = SetFocus(app.grid.as_ref().unwrap().hwnd);
+    }
+}
+
+/// E, Enter, Esc, a double click: back to the photograph, folding into the
+/// strip. `open` the anchor first, if it's another.
+pub fn close(app: &mut App, open_anchor: bool) {
+    if !shown(app) {
+        return;
+    }
+    if open_anchor {
+        let current = app.model.shelf.selection.current().cloned();
+        if let Some(item) = current.filter(|i| app.model.library_item().as_ref() != Some(i)) {
+            app.model.open_item(item);
+        }
+    }
+    app.model.shelf.in_grid = false;
+    app.model.dirty |= dirty::STRIP | dirty::CHROME;
+    start_flight(app, false);
+    unsafe {
+        let _ = SetFocus(app.strip);
+    }
+}
+
+pub fn toggle(app: &mut App) {
+    if shown(app) { close(app, true) } else { open(app) }
+}
+
+fn start_flight(app: &mut App, opening: bool) {
+    let reduce = !unsafe {
+        let mut on = BOOL(1);
+        let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut on as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+        on.as_bool()
+    };
+    let strip_shown = app.model.prefs.filmstrip_visible;
+    let grid = app.grid.as_mut().unwrap();
+    let s = scale(grid.hwnd);
+    // The strip's frames in the grid window's DIPs.
+    let (ox, oy) = ((grid.band.left - grid.rect.left) as f64 / s, (grid.band.top - grid.rect.top) as f64 / s);
+    let strip = &app.strip_view;
+    let from: Vec<Option<Rect>> = grid
+        .cells
+        .iter()
+        .map(|c| {
+            let i = strip.cells.iter().position(|s| s.want.item == c.want.item)?;
+            (strip_shown && i < strip.layout.count())
+                .then(|| Rect::new(ox + strip.layout.xs[i] - strip.scroll, oy + rules::STRIP_TOP, strip.layout.widths[i], rules::PICTURE))
+        })
+        .collect();
+    let current = grid.cells.iter().position(|c| c.open);
+    let range = on_screen(grid);
+    let longest = range.map(|i| rules::flight_delay(i, current)).fold(0.0, f64::max);
+    if reduce {
+        grid.flight = None;
+        finish_flight(app, opening);
+        return;
+    }
+    grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current });
+    unsafe {
+        let _ = ShowWindow(grid.hwnd, SW_SHOWNA);
+        SetTimer(grid.hwnd, TIMER_FLIGHT, 8, None);
+    }
+    tick(app);
+}
+
+fn finish_flight(app: &mut App, opening: bool) {
+    let grid = app.grid.as_mut().unwrap();
+    grid.flight = None;
+    unsafe {
+        let _ = KillTimer(grid.hwnd, TIMER_FLIGHT);
+    }
+    if opening {
+        let r = grid.rect;
+        unsafe {
+            let _ = SetWindowPos(grid.hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+        invalidate(grid.hwnd);
+    } else {
+        grid.shown = false;
+        grid.surface.release();
+        unsafe {
+            let _ = ShowWindow(grid.hwnd, SW_HIDE);
+        }
+    }
+    app.model.dirty |= dirty::STRIP | dirty::CHROME;
+}
+
+fn pixels(r: &RECT) -> Rect {
+    Rect::new(r.left as f64, r.top as f64, (r.right - r.left) as f64, (r.bottom - r.top) as f64)
+}
+
+/// One frame of the flight: the window moved to the sheet's growing edge
+/// (its swap chain stays the whole window's), then painted.
+fn tick(app: &mut App) {
+    let grid = app.grid.as_mut().unwrap();
+    let Some(flight) = &grid.flight else { return };
+    let elapsed = flight.started.elapsed().as_secs_f64() * 1000.0;
+    let length = rules::flight_length(flight.longest);
+    let opening = flight.opening;
+    if elapsed >= length {
+        return finish_flight(app, opening);
+    }
+    let along = if opening { elapsed } else { length - elapsed };
+    let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
+    unsafe {
+        let _ = SetWindowPos(grid.hwnd, HWND_TOP, mask.x.round() as i32, mask.y.round() as i32, mask.w.round().max(1.0) as i32, mask.h.round().max(1.0) as i32, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+    invalidate(grid.hwnd);
+}
+
+// MARK: Painting
+
+fn paint(app: &mut App, hwnd: HWND) {
+    let t = theme::tokens();
+    let s = scale(hwnd);
+    let App { grid, thumbs, model, .. } = app;
+    let Some(grid) = grid.as_mut() else { return };
+    let full = (grid.rect.right - grid.rect.left, grid.rect.bottom - grid.rect.top);
+    let (w, h) = (full.0 as f64 / s, full.1 as f64 / s);
+    let mut window = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(hwnd, &mut window);
+        let mut points = [POINT { x: window.left, y: window.top }];
+        MapWindowPoints(None, model_main(hwnd), &mut points);
+        window.left = points[0].x;
+        window.top = points[0].y;
+    }
+    // During the flight the window is the mask: the sheet is drawn where it
+    // will stand, offset by how far the mask's corner is from the sheet's.
+    let (ox, oy) = (-((window.left - grid.rect.left) as f64) / s, -((window.top - grid.rect.top) as f64) / s);
+    let (_, viewport) = sheet_size(grid);
+    let filter = model.library_filter();
+    let total = model.shelf.library.as_ref().map_or(0, |l| l.items().len());
+    let selected = model.shelf.selection.selected().len();
+    let parts = rules::sentence(&filter, grid.cells.len(), total);
+    let foot = rules::foot(grid.cells.len(), total, selected, filter.active());
+    let size = model.prefs.grid_size;
+    let elapsed = grid.flight.as_ref().map(|f| {
+        let e = f.started.elapsed().as_secs_f64() * 1000.0;
+        if f.opening { e } else { rules::flight_length(f.longest) - e }
+    });
+    let range = grid.layout.indices(grid.scroll - rules::GRID_MARGIN, grid.scroll + viewport + rules::GRID_MARGIN);
+    let mut places = std::mem::take(&mut grid.places);
+    places.clear();
+    let Grid { cells, layout, scroll, surface, flight, .. } = grid;
+    // A fold's last 180 ms fade the sheet off the strip.
+    let fade = match (&*flight, elapsed) {
+        (Some(f), Some(e)) if !f.opening => (e / rules::FOLD_FADE_MS).clamp(0.0, 1.0) as f32,
+        _ => 1.0,
+    };
+    let painted = surface.paint(hwnd, (full.0.max(1) as u32, full.1.max(1) as u32), s as f32, t.plain, |p| {
+      p.fill_rect(RectF::new(-ox as f32, -oy as f32, w as f32 * 2.0, h as f32 * 2.0), Ink::hex(t.film.film));
+      p.faded(fade, |p| {
+        let (ox, oy) = (ox as f32, oy as f32);
+        p.fill_rect(RectF::new(ox, oy, w as f32, h as f32), Ink::hex(t.hex.grid));
+        let top = rules::SENTENCE - *scroll;
+        let boxes = elapsed.map_or(1.0, |e| ((e / rules::FLIGHT_MS - rules::BOXES_FROM) / (1.0 - rules::BOXES_FROM)).clamp(0.0, 1.0)) as f32;
+        p.clipped(RectF::new(ox, oy + rules::SENTENCE as f32, w as f32, viewport as f32), |p| {
+            for i in range.clone() {
+                let cell = &cells[i];
+                let f = layout.frames[i];
+                let to = Rect::new(f.x, f.y + top, f.w, f.h);
+                let r = match (elapsed, flight.as_ref().and_then(|fl| fl.from.get(i).copied().flatten())) {
+                    (Some(e), Some(from)) => rules::flyer_at(&from, &to, e, rules::flight_delay(i, flight.as_ref().unwrap().current)),
+                    _ => to,
+                };
+                let r = RectF::new(r.x as f32 + ox, r.y as f32 + oy, r.w as f32, r.h as f32);
+                let opacity = if cell.summary.flag == Some(Flag::Reject) { rules::reject_opacity(false, false) as f32 } else { 1.0 };
+                strip::paint_frame(p, thumbs, cell, r, opacity, &t, false);
+                if boxes > 0.0 {
+                    if cell.summary.flag == Some(Flag::Pick) {
+                        p.pick_box(BoxInk::Grid, &cell.name, r, Ink::hex(t.film.paper).alpha(boxes), true);
+                    }
+                    if cell.selected {
+                        p.pick_box(BoxInk::Selection, &cell.name, r, Ink::hex(t.hex.accent).alpha(boxes), false);
+                    }
+                }
+            }
+        });
+        sentence(p, &parts, &t, ox, oy, &mut places);
+        foot_line(p, &foot, size, &t, ox, oy + (h - rules::FOOT) as f32, w as f32, &mut places);
+      });
+    });
+    grid.places = places;
+    if painted {
+        grid.painted = app.thumbs.revision;
+        unsafe {
+            let _ = ValidateRect(hwnd, None);
+        }
+    } else {
+        unsafe {
+            let mut ps = PAINTSTRUCT::default();
+            let dc = BeginPaint(hwnd, &mut ps);
+            let mut client = RECT::default();
+            let _ = GetClientRect(hwnd, &mut client);
+            FillRect(dc, &client, theme::brush(theme::gdi(t.hex.grid)));
+            let _ = EndPaint(hwnd, &ps);
+        }
+    }
+}
+
+fn model_main(hwnd: HWND) -> HWND {
+    unsafe { GetParent(hwnd) }.unwrap_or_default()
+}
+
+/// The sentence: dim italic words, the filter's words in the label's ink
+/// with the pencil under them while filtered, the × to clear.
+fn sentence(p: &mut Painter, parts: &[Part], t: &Tokens, ox: f32, oy: f32, places: &mut Vec<(RectF, Act)>) {
+    let baseline = oy + 30.0;
+    let mut x = ox + 18.0;
+    for part in parts {
+        let (text, ink, act) = match part {
+            Part::Words(words) => (words.as_str(), t.hex.dim, None),
+            Part::Filter { word, .. } => (word.as_str(), t.hex.label, Some(Act::Filter)),
+            Part::Clear => ("  ×", t.hex.dim, Some(Act::Clear)),
+        };
+        let m = p.measure(text, &SENTENCE, 0.0);
+        p.text(text, &SENTENCE, x, baseline - m.baseline, Ink::hex(ink));
+        if let Part::Filter { on, .. } = part {
+            if *on {
+                p.underline(RectF::new(x, baseline + 1.0, m.width, 5.0), t, false);
+            } else {
+                p.fill_rect(RectF::new(x, baseline + 2.0, m.width, 1.0), Ink::hex(t.hex.dim));
+            }
+            // The chevron, 7 × 3.5, drawn: Newsreader has no ⌄.
+            let (cx, cy) = (x + m.width + 8.0, baseline - 4.0);
+            p.line((cx - 3.5, cy - 1.75), (cx, cy + 1.75), 1.2, Ink::hex(t.hex.dim));
+            p.line((cx, cy + 1.75), (cx + 3.5, cy - 1.75), 1.2, Ink::hex(t.hex.dim));
+            places.push((RectF::new(x - 4.0, oy, m.width + 20.0, rules::SENTENCE as f32), Act::Filter));
+            x += 14.0;
+        } else if let Some(act) = act {
+            places.push((RectF::new(x, oy, m.width + 6.0, rules::SENTENCE as f32), act));
+        }
+        x += m.width;
+    }
+}
+
+/// The foot: the count at the left, Size and its slider at the right.
+#[allow(clippy::too_many_arguments)]
+fn foot_line(p: &mut Painter, count: &str, size: f64, t: &Tokens, ox: f32, y: f32, w: f32, places: &mut Vec<(RectF, Act)>) {
+    let h = rules::FOOT as f32;
+    let m = p.measure(count, &FOOT, 0.0);
+    let baseline = y + (h / 2.0 + FOOT.size * 0.36).round();
+    p.text(count, &FOOT, ox + 14.0, baseline - m.baseline, Ink::hex(t.hex.dim));
+    let track = RectF::new(ox + w - 18.0 - SLIDER as f32, y + h / 2.0, SLIDER as f32, 1.0);
+    p.fill_rect(track, Ink::hex(t.hex.track));
+    let knob = track.x + track.w * rules::size_fraction(size) as f32;
+    p.fill_ellipse(knob, track.y, 5.5, 5.5, Ink::hex(t.hex.label));
+    p.fill_ellipse(knob, track.y, 4.0, 4.0, Ink::hex(t.hex.grid));
+    let label = p.measure("Size", &FOOT, 0.0);
+    p.text("Size", &FOOT, track.x - 14.0 - label.width, baseline - label.baseline, Ink::hex(t.hex.dim));
+    places.push((RectF::new(track.x - 6.0, y, track.w + 12.0, h), Act::Size));
+}
+
+// MARK: Input
+
+fn point(hwnd: HWND, lparam: LPARAM) -> (f64, f64) {
+    let s = scale(hwnd);
+    ((lparam.0 & 0xffff) as i16 as f64 / s, ((lparam.0 >> 16) & 0xffff) as i16 as f64 / s)
+}
+
+/// The cell under a point in the window, if it's on the sheet.
+fn cell_at(grid: &Grid, (x, y): (f64, f64)) -> Option<usize> {
+    let (_, viewport) = sheet_size(grid);
+    (y >= rules::SENTENCE && y < rules::SENTENCE + viewport).then(|| grid.layout.hit(x, y - rules::SENTENCE + grid.scroll)).flatten()
+}
+
+fn act_at(grid: &Grid, (x, y): (f64, f64)) -> Option<Act> {
+    let (x, y) = (x as f32, y as f32);
+    grid.places.iter().find(|(r, _)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h).map(|(_, a)| *a)
+}
+
+fn set_size(app: &mut App, size: f64) {
+    let size = rules::clamp_size(size);
+    if (size - app.model.prefs.grid_size).abs() < 0.5 {
+        return;
+    }
+    app.model.prefs.grid_size = size;
+    app.model.prefs.save();
+    relayout(app);
+    request(app);
+    if let Some(g) = &app.grid {
+        invalidate(g.hwnd);
+    }
+}
+
+fn slide(app: &mut App, x: f64) {
+    let Some(grid) = &app.grid else { return };
+    let s = scale(grid.hwnd);
+    let w = (grid.rect.right - grid.rect.left) as f64 / s;
+    let left = w - 18.0 - SLIDER;
+    set_size(app, rules::size_at((x - left) / SLIDER));
+}
+
+fn scroll_by(app: &mut App, delta: f64) {
+    let Some(grid) = app.grid.as_mut() else { return };
+    grid.scroll += delta;
+    clamp(grid);
+    invalidate(grid.hwnd);
+    request(app);
+}
+
+/// Scrolls `index` into view, with room for its box.
+fn reveal(app: &mut App, index: usize) {
+    let Some(grid) = app.grid.as_mut() else { return };
+    let (_, viewport) = sheet_size(grid);
+    grid.scroll = grid.layout.reveal(index, grid.scroll, viewport);
+    clamp(grid);
+    invalidate(grid.hwnd);
+    request(app);
+}
+
+fn filter_menu(app: &mut App, hwnd: HWND) {
+    unsafe {
+        let Ok(menu) = CreatePopupMenu() else { return };
+        super::library::add_filter_items(menu);
+        super::library::update_menu(app, menu);
+        let mut cursor = POINT::default();
+        let _ = GetCursorPos(&mut cursor);
+        let command = TrackPopupMenu(menu, TPM_RETURNCMD, cursor.x, cursor.y, 0, hwnd, None);
+        let _ = DestroyMenu(menu);
+        if command.0 != 0 {
+            let _ = PostMessageW(app.main, WM_COMMAND, WPARAM(command.0 as usize), LPARAM(0));
+        }
+    }
+}
+
+/// The grid's keys, before the window's own. G anywhere in the edit view.
+pub fn key(app: &mut App, msg: &MSG, typing: bool) -> bool {
+    if msg.message != WM_KEYDOWN || typing {
+        return false;
+    }
+    let down = |k: VIRTUAL_KEY| unsafe { GetKeyState(k.0 as i32) < 0 };
+    let key = VIRTUAL_KEY(msg.wParam.0 as u16);
+    if key == VIRTUAL_KEY(b'G' as u16) && !down(VK_CONTROL) && !down(VK_MENU) {
+        toggle(app);
+        return true;
+    }
+    if !shown(app) {
+        return false;
+    }
+    let ctrl = down(VK_CONTROL);
+    let shift = down(VK_SHIFT);
+    let order = app.model.shown_items();
+    let current = app.model.shelf.selection.current().and_then(|c| order.iter().position(|i| i == c)).or_else(|| app.grid.as_ref()?.cells.iter().position(|c| c.open));
+    let layout_step = |by: isize| -> Option<usize> { app.grid.as_ref()?.layout.vertical(current?, by) };
+    let target = match key {
+        VK_ESCAPE | VK_RETURN => {
+            close(app, key == VK_RETURN);
+            return true;
+        }
+        k if k == VIRTUAL_KEY(b'E' as u16) && !ctrl => {
+            close(app, true);
+            return true;
+        }
+        k if k == VIRTUAL_KEY(b'A' as u16) && ctrl => {
+            app.model.shelf.selection.select_all(&order);
+            app.model.dirty |= dirty::STRIP | dirty::CHROME;
+            return true;
+        }
+        VK_OEM_PLUS | VK_ADD if ctrl => {
+            set_size(app, app.model.prefs.grid_size + rules::GRID_SIZE_STEP);
+            return true;
+        }
+        VK_OEM_MINUS | VK_SUBTRACT if ctrl => {
+            set_size(app, app.model.prefs.grid_size - rules::GRID_SIZE_STEP);
+            return true;
+        }
+        VK_LEFT => current.map(|c| c.saturating_sub(1)),
+        VK_RIGHT => current.map(|c| (c + 1).min(order.len().saturating_sub(1))),
+        VK_UP => layout_step(-1),
+        VK_DOWN => layout_step(1),
+        VK_HOME => Some(0),
+        VK_END => order.len().checked_sub(1),
+        VK_PRIOR | VK_NEXT => {
+            let Some(grid) = &app.grid else { return true };
+            let (_, viewport) = sheet_size(grid);
+            scroll_by(app, if key == VK_PRIOR { -viewport } else { viewport });
+            return true;
+        }
+        _ => return false,
+    };
+    if let Some(index) = target.filter(|&i| i < order.len()) {
+        let item = &order[index];
+        if shift {
+            app.model.shelf.selection.extend_to(item, &order);
+        } else {
+            app.model.shelf.selection.select(item);
+        }
+        app.model.dirty |= dirty::STRIP | dirty::CHROME;
+        reveal(app, index);
+    }
+    true
+}
+
+extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_PAINT => {
+                if with_app(|app| paint(app, hwnd)).is_none() {
+                    let mut ps = PAINTSTRUCT::default();
+                    BeginPaint(hwnd, &mut ps);
+                    let _ = EndPaint(hwnd, &ps);
+                }
+                LRESULT(0)
+            }
+            WM_ERASEBKGND => LRESULT(1),
+            WM_TIMER if wparam.0 == TIMER_FLIGHT => {
+                with_app(tick);
+                LRESULT(0)
+            }
+            WM_LBUTTONDOWN => {
+                let _ = SetFocus(hwnd);
+                SetCapture(hwnd);
+                with_app(|app| {
+                    let Some(grid) = app.grid.as_mut() else { return };
+                    if grid.flight.is_some() {
+                        return;
+                    }
+                    let at = point(hwnd, lparam);
+                    match act_at(grid, at) {
+                        Some(Act::Filter) => return filter_menu(app, hwnd),
+                        Some(Act::Clear) => return app.model.set_library_filter(negs_library::Filter::default()),
+                        Some(Act::Size) => {
+                            grid.sliding = true;
+                            return slide(app, at.0);
+                        }
+                        None => {}
+                    }
+                    match cell_at(grid, at) {
+                        Some(index) => {
+                            let item = grid.cells[index].want.item.clone();
+                            strip::click(app, &item, false);
+                        }
+                        None => {
+                            // A band from the gaps: Ctrl adds to what's selected.
+                            let sheet = (at.0, at.1 - rules::SENTENCE + grid.scroll);
+                            let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
+                            let base = if ctrl { app.model.shelf.selection.selected().clone() } else { Default::default() };
+                            grid.dragging = Some((sheet, sheet, base));
+                            if !ctrl {
+                                app.model.shelf.selection.deselect_all();
+                                app.model.dirty |= dirty::STRIP | dirty::CHROME;
+                            }
+                        }
+                    }
+                });
+                LRESULT(0)
+            }
+            WM_MOUSEMOVE => {
+                with_app(|app| {
+                    let Some(grid) = app.grid.as_mut() else { return };
+                    let at = point(hwnd, lparam);
+                    if grid.sliding {
+                        return slide(app, at.0);
+                    }
+                    let Some((start, _, base)) = grid.dragging.clone() else { return };
+                    let now = (at.0, at.1 - rules::SENTENCE + grid.scroll);
+                    grid.dragging = Some((start, now, base.clone()));
+                    let band = Rect::spanning(start, now);
+                    let items: Vec<Item> = grid.layout.indices_in(&band).into_iter().map(|i| grid.cells[i].want.item.clone()).collect();
+                    app.model.shelf.selection.band(&items, &base);
+                    app.model.dirty |= dirty::STRIP | dirty::CHROME;
+                });
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                let _ = ReleaseCapture();
+                with_app(|app| {
+                    if let Some(grid) = app.grid.as_mut() {
+                        grid.dragging = None;
+                        grid.sliding = false;
+                    }
+                });
+                LRESULT(0)
+            }
+            WM_LBUTTONDBLCLK => {
+                with_app(|app| {
+                    let Some(grid) = app.grid.as_ref() else { return };
+                    if let Some(index) = cell_at(grid, point(hwnd, lparam)) {
+                        let item = grid.cells[index].want.item.clone();
+                        app.model.shelf.selection.select(&item);
+                        close(app, true);
+                    }
+                });
+                LRESULT(0)
+            }
+            WM_RBUTTONUP => {
+                with_app(|app| {
+                    let Some(grid) = app.grid.as_ref() else { return };
+                    let Some(index) = cell_at(grid, point(hwnd, lparam)) else { return };
+                    let item = grid.cells[index].want.item.clone();
+                    let mut p = POINT { x: (lparam.0 & 0xffff) as i16 as i32, y: ((lparam.0 >> 16) & 0xffff) as i16 as i32 };
+                    let _ = ClientToScreen(hwnd, &mut p);
+                    strip::context_menu(app, hwnd, &item, p);
+                });
+                LRESULT(0)
+            }
+            WM_MOUSEWHEEL => {
+                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as f64;
+                with_app(|app| {
+                    if GetKeyState(VK_CONTROL.0 as i32) < 0 {
+                        set_size(app, app.model.prefs.grid_size + rules::GRID_SIZE_STEP * delta / 120.0);
+                    } else {
+                        scroll_by(app, -delta * 100.0 / 120.0);
+                    }
+                });
+                LRESULT(0)
+            }
+            WM_GETDLGCODE => LRESULT(DLGC_WANTARROWS as isize),
+            WM_DESTROY => {
+                with_app(|app| {
+                    if let Some(g) = app.grid.as_mut() {
+                        g.surface.release();
+                    }
+                });
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+}
