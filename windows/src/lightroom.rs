@@ -238,6 +238,22 @@ pub fn libraries(pictures: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Each catalog's `originals` folder of Lightroom on Windows, where its
+/// local storage is unless moved: `%LOCALAPPDATA%\Adobe\Lightroom CC\Data\
+/// <catalog id>\originals` (seen 2026-11-19, the same date folders as the
+/// Mac's library). Internal and undocumented, so only a hint for cleanup.
+pub fn local_libraries(local_app_data: &Path) -> Vec<PathBuf> {
+    let data = local_app_data.join("Adobe").join("Lightroom CC").join("Data");
+    let Ok(catalogs) = std::fs::read_dir(data) else { return vec![] };
+    catalogs.flatten().map(|e| e.path().join("originals")).filter(|o| o.is_dir()).collect()
+}
+
+/// Every library cleanup looks in: local storage, then `*.lrlibrary` in Pictures.
+pub fn all_libraries() -> Vec<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    local.map(|l| local_libraries(&l)).unwrap_or_default().into_iter().chain(libraries(&pictures())).collect()
+}
+
 /// A capture date: year, month, day.
 pub type Day = (i32, u32, u32);
 
@@ -383,7 +399,7 @@ pub fn clean_up(folder: &Path, libraries: Option<&[PathBuf]>, now: SystemTime) -
     let libraries = match libraries {
         Some(l) => l,
         None => {
-            found = self::libraries(&pictures());
+            found = all_libraries();
             &found
         }
     };
@@ -549,6 +565,10 @@ mod tests {
         // Same name, another size: not this file's copy.
         std::fs::write(library.join("0000/0000-00-00/b-Negs.tif"), b"bb").unwrap();
         assert_eq!(libraries(&dir), [library.clone()]);
+        let local = dir.join("Local");
+        std::fs::create_dir_all(local.join("Adobe/Lightroom CC/Data/e429/originals/2026/2026-11-19")).unwrap();
+        std::fs::create_dir_all(local.join("Adobe/Lightroom CC/Data/Import")).unwrap();
+        assert_eq!(local_libraries(&local), [local.join("Adobe/Lightroom CC/Data/e429/originals")]);
         let renamed = unique_in_library(&folder.join("b-Negs.tif"), std::slice::from_ref(&library));
         assert_eq!(renamed.file_name().unwrap(), "b-Negs 2.tif");
         let later = SystemTime::now() + Duration::from_secs(3600);

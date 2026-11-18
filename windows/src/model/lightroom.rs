@@ -118,7 +118,7 @@ impl Model {
             // Named so Lightroom's library can't already have them, which
             // is what tells cleanup that Lightroom took its copy.
             let files: Vec<PathBuf> = if kind == Kind::Cloud {
-                let libraries = lightroom::libraries(&lightroom::pictures());
+                let libraries = lightroom::all_libraries();
                 written.iter().map(|f| lightroom::unique_in_library(f, &libraries)).collect()
             } else {
                 written
