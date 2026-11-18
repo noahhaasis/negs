@@ -45,14 +45,20 @@ pub struct Span {
     pub text: String,
     pub tone: Tone,
     pub strong: bool,
+    /// A hint: shown whole or not at all, where the room runs out.
+    pub optional: bool,
 }
 
 impl Span {
     pub fn new(text: impl Into<String>, tone: Tone) -> Self {
-        Self { text: text.into(), tone, strong: false }
+        Self { text: text.into(), tone, strong: false, optional: false }
     }
     pub fn strong(text: impl Into<String>, tone: Tone) -> Self {
-        Self { text: text.into(), tone, strong: true }
+        Self { text: text.into(), tone, strong: true, optional: false }
+    }
+    /// A hint, left out whole when it doesn't fit.
+    pub fn hint(text: impl Into<String>, tone: Tone) -> Self {
+        Self { text: text.into(), tone, strong: false, optional: true }
     }
 }
 
@@ -299,6 +305,9 @@ fn paint(hwnd: HWND, dc: HDC) {
             for span in &line.left {
                 let style = if span.strong { &STRONG } else { &WORDS };
                 let m = p.measure(&span.text, style, 0.0);
+                if span.optional && x + m.width > room {
+                    continue;
+                }
                 p.text(&span.text, style, x, baseline - m.baseline, Ink::hex(ink(&t, span.tone)));
                 x += m.width + 5.0;
             }

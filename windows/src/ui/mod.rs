@@ -185,10 +185,10 @@ static TIMED: Mutex<Vec<(Instant, usize)>> = Mutex::new(Vec::new());
 static MAIN: AtomicIsize = AtomicIsize::new(0);
 
 /// The narrowest canvas column and adjustments column, in DIPs (the Mac's
-/// split-view minimums). The window keeps room for both, or for the canvas
-/// alone while the adjustments are hidden.
-const CANVAS_MINIMUM: f64 = 680.0;
-const INSPECTOR_MINIMUM: f64 = 300.0;
+/// split-view minimums, `EditorWindowController`). The window keeps room
+/// for both, or for the canvas alone while the adjustments are hidden.
+const CANVAS_MINIMUM: f64 = 640.0;
+const INSPECTOR_MINIMUM: f64 = 340.0;
 const INSPECTOR_MAXIMUM: f64 = 440.0;
 const SPLITTER: f64 = 5.0;
 const MINIMUM_HEIGHT: f64 = 520.0;
@@ -759,7 +759,7 @@ impl App {
             left.push(Span::new(if differences.is_empty() { summary } else { format!("{summary} · differ in {differences}") }, Tone::Label));
             if !c.against_original() && model.shown_items().len() > 2 {
                 let place = if compare::stacked(self) { "bottom" } else { "right" };
-                left.push(Span::new(format!("    ← → steps the {place} one"), Tone::Dim));
+                left.push(Span::hint(format!("    ← → steps the {place} one"), Tone::Dim));
             }
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
@@ -2143,7 +2143,7 @@ mod tests {
     #[test]
     fn minimum_width_follows_the_adjustments() {
         assert_eq!(minimum_width(true), 985.0);
-        assert_eq!(minimum_width(false), 680.0);
+        assert_eq!(minimum_width(false), 640.0);
     }
 
     /// A narrow window narrows the adjustments before the canvas, down to
@@ -2151,8 +2151,10 @@ mod tests {
     #[test]
     fn adjustments_give_way_to_the_canvas() {
         assert_eq!(inspector_width(340.0, 1400.0), 340.0);
-        assert_eq!(inspector_width(440.0, 1000.0), 315.0);
-        assert_eq!(inspector_width(440.0, 900.0), 300.0);
+        assert_eq!(inspector_width(440.0, 1000.0), 355.0);
+        assert_eq!(inspector_width(440.0, 900.0), 340.0);
         assert_eq!(inspector_width(500.0, 2000.0), 440.0);
+        // A width saved under the old 300 minimum shows at the new one.
+        assert_eq!(inspector_width(300.0, 1400.0), 340.0);
     }
 }
