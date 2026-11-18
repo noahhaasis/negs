@@ -121,3 +121,26 @@
   the camera's preview, while it develops again, even after an update.
 - While cropping, the status line says the aspect and the size of the
   crop.
+- **Photographs open faster.** A RAW is read once and its brightness
+  match solved before anything develops, so the first develop you see is
+  the right one, with no darker or lighter frame first. A photograph you
+  come back to reuses its solved match instead of solving it again. As a
+  photograph opens, its thumbnail stands in on the canvas at once.
+- **Export the grid's selection.** With several photographs selected in
+  the grid, File › Export ("Export 12 Photographs…") asks for a folder
+  and exports each with its own edits and rating: the format, size and
+  colour as for one, how files are named (Name_Film, Name, or your own
+  pattern with {name} and {film}) and what to do when a file is there
+  already (add a number, replace or skip). The status line and the
+  grid's foot show how far it has come, with Cancel; Show lists what
+  failed and why, with Retry Failed and Show in Explorer. An export cut
+  short by quitting is offered again at the next launch.
+- **Open in Lightroom.** With Lightroom or Lightroom Classic installed,
+  File, the Output tab under Export and the right-click menu of the strip
+  and the grid offer "Open in Lightroom": the photographs are developed
+  to full-size 16-bit TIFFs and handed to Lightroom together, so it asks
+  once. Copies for Lightroom are deleted once it has its own; Lightroom
+  Classic's stay in Pictures › Negs for Lightroom. The right-click menu
+  also gains Export.
+- Negs frees the film's memory when you go to the grid, and when Windows
+  runs low on memory.
