@@ -98,9 +98,6 @@ impl Picture {
         Scopes::shown(rgba, *w as usize, *h as usize, crop, orientation, 1 << 20)
     }
 
-    pub fn same(&self, other: &Picture) -> bool {
-        Arc::ptr_eq(&self.inner, &other.inner)
-    }
 }
 
 /// The helper's name for the Rec. 2020 proxy space.

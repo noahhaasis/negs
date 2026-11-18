@@ -391,7 +391,10 @@ pub struct GpuImage {
 }
 
 pub struct Gpu {
+    // Held for as long as the device, never read.
+    #[allow(dead_code)]
     pub instance: wgpu::Instance,
+    #[allow(dead_code)]
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,

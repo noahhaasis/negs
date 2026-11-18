@@ -17,7 +17,7 @@ decisions made with their reasons, and what was carried over. See
 | 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | done, merged `f9b8f47` |
 | 8 | Remaining features, Flip added (Open in Lightroom last) | done: 8c `1396397`, 8b `4a15d7f`, 8a `ee752ee`; follow-ups `563cfb5`, `68cfbee` |
-| 9 | Validation and release | running (branch `win-p9-validation`) |
+| 9 | Validation and release | done on branch `win-p9-validation` (see log) |
 
 ## 2026-11-19: phase 8a merged, the editor features (`ee752ee`, branch tip `5b369fb`)
 
@@ -89,6 +89,61 @@ decisions made with their reasons, and what was carried over. See
     the line doesn't fit. At 1800 × 1125 px (the Mac's 1440 × 900 at 125 %) it
     shows, as on the Mac.
   - Shots are in `phase8a/side/`. The two touched layout tests pass on the PC.
+
+## 2026-11-19: phase 9, validation and release (branch `win-p9-validation`, not merged)
+
+- **Landed on the branch:** `596ea25` dead code the build warned about (no
+  behaviour change), `db4eb62` one Windows section in the release notes, `ada8764`
+  main merged in, `f7bae39` `mac_shot.sh` can choose menu items, type and set
+  defaults, `66c8630` Compare's stacked names never cover the ring (and read
+  "Kodak Gold 200 on …" as on the Mac).
+- **Tests:** `test-parity.cmd` at `66c8630`: 277 of 277 (134.8 s). CI's way
+  (`cargo test --locked --manifest-path windows/Cargo.toml`, no `SPEKTRAFILM_ROOT`,
+  no `NEGS_REQUIRE_HELPER`, no helper built, profile override unset, scratch
+  `NEGS_PROFILE_DIR`): 277 of 277, the engine tests skip rather than fail. Mac
+  cross-check, plain and `--tests`: only `spektrafilm-io`'s `finish_rgb` warning
+  (a Mac-only caller, outside `windows/`).
+- **Sidecar round trip** on goat copies, both ways, with screenshots
+  (`~/.negs/windows-parity/phase9/roundtrip/`). Mac → Windows: rating, pick and
+  reject, square crop, Flip, matched EV, HP5 with the Yellow 2 filter, Your
+  negative (route, film base, convert EV, M/Y shifts, print exposure) all show as
+  on the Mac, and opening wrote nothing. Windows → Mac: 5 stars + pick, 4:3 crop +
+  Flip, HP5 + Red filter, Your negative, a re-rate and unflag all show as on
+  Windows, and the Mac left every sidecar byte-identical. No field is lost.
+  - Shifts move is an app setting on both (`filterShiftLink`), not in sidecars; the
+    shift values travel.
+  - Windows writes crop edges with float noise (`5.66e-17`, `0.9999999999999999`)
+    where the Mac writes `0` and `1`. Harmless; both read either.
+- **Startup ABBA**, phase 0's exe (`83e8c79`) against `66c8630`, both copied to
+  scratch, `_NHA9786.NEF` from a scratch roll, Defender 0 cpu-s before and after.
+  Medians in ms:
+
+  | Stamp | Base (8 / 10 runs) | Head (8 / 10 runs) |
+  |---|---|---|
+  | `first_window_composited` | 107.2 / 106.4 | 107.1 / 112.5 |
+  | `inspector_shown` | 220.0 / 215.3 | 261.9 / 261.1 |
+  | `gpu_ready` | 748.0 / 729.5 | 748.8 / 739.5 |
+  | `first_image_on_screen` | 8410.9 / 8447.8 | 2896.7 / 2786.4 |
+
+  `inspector_shown` is +42 to +46 ms against phase 0 (phase 3a's Direct2D workers
+  starved while the engine starts). **Noah accepted the +45 ms (2026-11-19).**
+- **Package:** `windows/package.ps1 -Iscc …` in the parity worktree with
+  the shipping profile (LTO on), output under its `target/` only: `Negs-Setup.exe`
+  139.7 MB and `Negs-portable.zip` 162.7 MB. `verify_package.py` (Python 3.11):
+  "Verified Windows 0.17.0 packages from 66c8630". `OFL-Newsreader.txt` and
+  `OFL-BarlowCondensed.txt` are in the portable zip (checked against the source)
+  and were compressed into the installer. The installer was never run.
+- **Side by side**, 14 views × Darkroom and Daylight, Mac and Windows on the same
+  seeded goat roll: `~/.negs/windows-parity/phase9/side-by-side/` with
+  `index.json` (one line per pair on what differs).
+- **Still differs from the Mac:**
+  - A filter in the grid keeps the open photograph shown on Windows (Showing 5 of 8);
+    the Mac drops it and moves current to the next shown one (`filterChanged`).
+  - Film base notes after reopening a Your negative photo: Windows "Reading the
+    negative as …", the Mac "Film base as picked or set in Lab." plus the
+    not-a-colour-negative hint.
+  - Windows' Color Filter row labels "Green" and "Yellow-green" overlap.
+  - With Add border off, the Mac greys the border tiles; Windows shows them in colour.
 
 ## 2026-11-19: phase 8b merged, faster open, batch export and Open in Lightroom (`4a15d7f`, branch tip `fbb7a11`)
 

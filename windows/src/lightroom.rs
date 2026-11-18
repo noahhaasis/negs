@@ -443,7 +443,7 @@ pub fn delete_sent(folder: &Path) {
 /// Lightroom that isn't running is started first and given its window and
 /// 3 s more, as the Mac does (a Lightroom starting up dropped files handed
 /// to it on the Mac); `starting` says so. Blocks: run it off the UI thread.
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 pub fn open(files: &[PathBuf], app: &Path, starting: impl FnOnce()) -> anyhow::Result<()> {
     use std::os::windows::process::CommandExt;
     if !has_main_window(app) {
@@ -466,7 +466,7 @@ pub fn arguments(files: &[PathBuf]) -> String {
 }
 
 /// A visible top-level window over 300 px tall of a process running `app`.
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 pub fn has_main_window(app: &Path) -> bool {
     use windows::Win32::Foundation::{BOOL, CloseHandle, HWND, LPARAM, RECT};
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};

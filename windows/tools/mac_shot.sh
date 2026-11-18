@@ -4,6 +4,8 @@
 # are never touched. Targets the process by PID.
 # Usage: windows/tools/mac_shot.sh <steps file> <out dir> [photo] [theme]
 #   theme: darkroom|contactSheet|lightTable|daylight|plain|plainDark (default darkroom)
+#   MAC_SHOT_DEFAULTS="key=value key=value" writes more string defaults first
+#   (e.g. newPhotoFilm=ilford_hp5_plus filterShiftLink=together).
 # Steps file, one per line:
 #   shot <name>            capture the window to <out>/<name>.png
 #   shotfront <name>       capture the app's frontmost window instead (Settings)
@@ -12,6 +14,9 @@
 #   click <x> <y> [n]      window-relative points, n clicks
 #   clickfront <x> <y> [n] the same in the frontmost window
 #   wait <seconds>
+#   menu <Menu> <Item…>    choose a menu item, e.g. "menu View Flip Horizontal"
+#   type <text…>           type text into the focused field
+#   ax <AppleScript…>      run it inside `tell` the app's process (System Events)
 # Needs: dist/negs-macos-dev/Negs.app (scripts/package_macos_app.sh --dev).
 set -euo pipefail
 steps="$1"; out="$2"; photo="${3:-}"; theme="${4:-darkroom}"
@@ -31,6 +36,7 @@ fi
 home="$base/home"; rm -rf "$home"; mkdir -p "$home"
 defaults delete "$id" >/dev/null 2>&1 || true
 defaults write "$id" appTheme "$theme"
+for kv in ${MAC_SHOT_DEFAULTS:-}; do defaults write "$id" "${kv%%=*}" "${kv#*=}"; done
 defaults write "$id" NSWindow\ Frame\ main "40 40 1440 900 0 0 3000 2000" >/dev/null 2>&1 || true
 HOME="$home" CFFIXED_USER_HOME="$home" "$app/Contents/MacOS/NegsApp" ${photo:+"$photo"} >"$base/app.log" 2>&1 &
 pid=$!
@@ -69,6 +75,11 @@ while read -r verb a b c; do
         osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to click at {$(( $2 + a )), $(( $3 + b ))}" >/dev/null
       done ;;
     wait) sleep "$a" ;;
+    menu) front
+      osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to click menu item \"$b${c:+ $c}\" of menu \"$a\" of menu bar 1" >/dev/null ;;
+    ax) front
+      osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to $a${b:+ $b}${c:+ $c}" ;;
+    type) front; osascript -e "tell application \"System Events\" to keystroke \"$a${b:+ $b}${c:+ $c}\"" ;;
   esac
   sleep 0.6
 done < "$steps"

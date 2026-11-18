@@ -1063,9 +1063,6 @@ impl Model {
     pub fn redo_title(&self) -> Option<&str> {
         self.undo.redo.last().map(|u| u.1.as_ref())
     }
-    pub fn render_backend_gpu(&self) -> bool {
-        self.render_on_gpu
-    }
 
     // MARK: Starting
 

@@ -79,6 +79,7 @@ impl Rect {
         let y1 = self.max_y().min(other.max_y());
         Rect::new(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
     }
+    #[cfg(test)]
     pub fn offset(&self, dx: f64, dy: f64) -> Rect {
         Rect::new(self.x + dx, self.y + dy, self.width, self.height)
     }
@@ -345,9 +346,6 @@ pub struct Handle {
 
 impl Handle {
     pub const MOVE: Handle = Handle { x: 0, y: 0 };
-    pub fn corner(&self) -> bool {
-        self.x != 0 && self.y != 0
-    }
 }
 
 fn clamp(value: f64, low: f64, high: f64) -> f64 {

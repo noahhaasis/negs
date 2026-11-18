@@ -333,12 +333,6 @@ pub fn brush(color: Color) -> HBRUSH {
     BRUSHES.with(|b| HBRUSH(*b.borrow_mut().entry(color).or_insert_with(|| unsafe { CreateSolidBrush(COLORREF(color)).0 as isize }) as *mut _))
 }
 
-/// The accent as the canvas wants it, `[r, g, b]`.
-pub fn accent_rgb() -> [u8; 3] {
-    let c = palette().accent;
-    [c as u8, (c >> 8) as u8, (c >> 16) as u8]
-}
-
 // MARK: The system's dark mode
 
 /// The Windows build number (10.0.x).

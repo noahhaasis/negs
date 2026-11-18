@@ -57,7 +57,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Ole::OleInitialize;
-use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -67,7 +67,7 @@ use windows::core::{PCWSTR, w};
 
 use crate::model::{Model, dirty};
 use crate::platform::{self, pcwstr, wide};
-use crate::session::{EditorSession, Preferences, SessionStore};
+use crate::session::{Preferences, SessionStore};
 
 /// Annotate icon buttons and numeric editors without changing their visual text.
 pub fn accessible_name(hwnd: HWND, name: &str) {
@@ -177,7 +177,6 @@ pub mod id {
 
 // Constants windows-rs 0.58 lacks.
 pub const TBM_GETPOS: u32 = WM_USER;
-pub const TBM_SETRANGE_MIN_MAX: u32 = WM_USER + 6;
 
 type Task = Box<dyn FnOnce(&mut App) + Send>;
 static QUEUE: Mutex<VecDeque<Task>> = Mutex::new(VecDeque::new());
@@ -395,8 +394,7 @@ pub mod testing {
                 original_key: None,
                 drop_target_active: false,
                 view: Default::default(),
-                started: Instant::now(),
-                quitting: false,
+                    quitting: false,
                 preview_monitor: 0,
             }
         }
@@ -560,7 +558,6 @@ pub struct App {
     pub drop_target_active: bool,
     /// Image Only and the photograph held upside down.
     pub view: view_modes::ViewModes,
-    started: Instant,
     quitting: bool,
     /// The monitor the thumbnails were last made for.
     preview_monitor: isize,
@@ -1610,7 +1607,6 @@ pub fn run() {
             original_key: None,
             drop_target_active: false,
             view: Default::default(),
-            started: Instant::now(),
             quitting: false,
             preview_monitor: 0,
         };
@@ -2114,9 +2110,6 @@ impl App {
         }
     }
 
-    pub fn elapsed_ms(&self) -> f64 {
-        self.started.elapsed().as_secs_f64() * 1000.0
-    }
 }
 
 pub fn dwm_flush() {
@@ -2124,16 +2117,6 @@ pub fn dwm_flush() {
         let _ = DwmFlush();
     }
 }
-
-pub fn current_process_id() -> u32 {
-    unsafe { GetCurrentProcessId() }
-}
-
-pub fn session_store() -> SessionStore {
-    SessionStore::default()
-}
-
-pub fn _unused(_: EditorSession) {}
 
 #[cfg(test)]
 mod tests {

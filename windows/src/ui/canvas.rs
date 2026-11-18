@@ -1642,11 +1642,6 @@ fn picture_texture<'a>(picture: &Picture) -> Option<&'a GpuImage> {
     picture.texture().map(|t| unsafe { &*(t as *const GpuImage) })
 }
 
-/// The Windows accent colour, for the drop outline and the dial's needle.
-pub fn accent_color() -> [u8; 3] {
-    super::theme::accent_rgb()
-}
-
 fn point(lparam: LPARAM) -> (i32, i32) {
     ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32)
 }
