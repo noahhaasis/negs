@@ -1435,6 +1435,25 @@ impl Model {
     }
 
     /// The state with the app's preferences that travel in it.
+    /// A restored edit's parameters under this engine's defaults, as a
+    /// photograph opens with them.
+    fn restored_session_params(&self, params: &Value) -> Value {
+        let mut restored = state::restored_params(&self.defaults, params, &self.nullable_paths);
+        // Sessions from before Image Size may carry the old working-resolution factor.
+        let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
+        if !factor.is_null() {
+            json::set(&mut restored, state::SIZE_FACTOR, factor);
+        }
+        // The inspector no longer edits Post tone or colour; an older
+        // session's Post edits would otherwise stay applied with no
+        // control to undo them.
+        let post = json::get(&self.defaults, "post").clone();
+        if !post.is_null() {
+            json::set(&mut restored, "post", post);
+        }
+        restored
+    }
+
     fn with_preferences(&self, mut state: EditState) -> EditState {
         state.limit_preview = self.prefs.limits_preview();
         state
@@ -2192,19 +2211,7 @@ impl Model {
         }
         if let Some(session) = session {
             let mut restored = session.state;
-            restored.params = state::restored_params(&self.defaults, &restored.params, &self.nullable_paths);
-            // Sessions from before Image Size may carry the old working-resolution factor.
-            let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
-            if !factor.is_null() {
-                json::set(&mut restored.params, state::SIZE_FACTOR, factor);
-            }
-            // The inspector no longer edits Post tone or colour; an older
-            // session's Post edits would otherwise stay applied with no
-            // control to undo them.
-            let post = json::get(&self.defaults, "post").clone();
-            if !post.is_null() {
-                json::set(&mut restored.params, "post", post);
-            }
+            restored.params = self.restored_session_params(&restored.params);
             // Sessions from before it was a preference carried it per photograph.
             if self.prefs.limit_preview.is_none() && restored.limit_preview {
                 self.prefs.limit_preview = Some(true);

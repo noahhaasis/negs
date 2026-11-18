@@ -296,24 +296,25 @@ impl Model {
 
     /// `item`'s edits as opening it would restore them, or a new
     /// photograph's (`comparedState`), and whether its match is to be
-    /// solved: wanted, possible, and not solved for these edits.
+    /// solved: wanted, possible, and not solved for these edits. The same
+    /// edits as opening it, so its solve is the one opening it looks up.
     fn compared_state(&self, item: &Item) -> Option<(EditState, bool)> {
         let library = self.shelf.library.as_ref()?;
         let limit = self.state.limit_preview;
         let raw = is_raw(&item.photo);
         let matchable = |s: &EditState| s.brightness_match.is_some() && (raw || json::string(s.value("io.input_interpretation.mode")) == "auto");
-        match library.export_edits(item) {
-            Some(stored) => {
-                let state = library_map::from_library(&stored.state, limit).ok()?;
-                let needs = !stored.match_solved && matchable(&state);
-                Some((state, needs))
-            }
+        let (stored, solved) = match library.export_edits(item) {
+            Some(stored) => (stored.state, stored.match_solved),
             None => {
-                let state = library_map::from_library(&library.defaults().plain_state(), limit).ok()?;
-                let needs = matchable(&state);
-                Some((state, needs))
+                let previous = library.state().cloned().unwrap_or_else(negs_library::EditState::empty);
+                (library.defaults().new_photo_state(&previous), false)
             }
-        }
+        };
+        let mut state = library_map::from_library(&stored, limit).ok()?;
+        state.params = self.restored_session_params(&state.params);
+        let state = self.with_preferences(state);
+        let needs = !solved && matchable(&state);
+        Some((state, needs))
     }
 
     /// The other photograph's stand-in at once, as opening it would show
