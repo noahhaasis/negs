@@ -28,6 +28,7 @@ mod settings;
 mod sheet;
 mod status;
 mod strip;
+mod surface;
 mod theme;
 mod titlebar;
 mod tone_graph;
