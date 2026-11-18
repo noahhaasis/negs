@@ -51,6 +51,113 @@ pub fn sheet_changed(hwnd: HWND) {
 pub fn drawing_ready(hwnd: HWND) {
     invalidate(hwnd);
 }
+
+/// The window is being sized by its edge, or that ended: the fitted view
+/// keeps to mipmaps while it moves, then makes its exact picture.
+pub fn set_live_resize(on: bool) {
+    with_view(|v| {
+        if v.live_resize != on {
+            v.live_resize = on;
+            invalidate(v.hwnd);
+        }
+    });
+}
+
+impl View {
+    /// The fitted photograph's exact-size picture over the photograph
+    /// (ticket 38), if it's made; asks for it if not. `corner` is the
+    /// crop's top left on screen, `clip` the crop in the turned frame of
+    /// the `shown` size, in layout pixels.
+    fn exact_draw(&mut self, picture: &Picture, scene: &Scene, corner: (f64, f64), clip: Rect, shown: Size) -> Option<Draw> {
+        let z = self.zoom;
+        let settled = scene.frame.is_none_or(|f| matches!(f.kind, crate::model::FrameKind::Settled | crate::model::FrameKind::Cached));
+        let (tw, th) = crate::exact_fit::target(scene.size.width, scene.size.height, z);
+        let eligible = self.fitting
+            && settled
+            && scene.crop.angle == 0.0
+            && !self.live_resize
+            && crate::exact_fit::worth_it(z, (picture.width, picture.height), (tw, th));
+        if !eligible {
+            self.exact_wanted = None;
+            return None;
+        }
+        let key = (picture.id, tw, th);
+        let made = match &self.gpu {
+            Some(_) => self.exact.iter().any(|(k, _)| *k == key),
+            None => self.software_cache.has_exact(key),
+        };
+        if !made {
+            if self.exact_wanted.as_ref().is_none_or(|(p, w, h)| (p.id, *w, *h) != key) {
+                self.exact_wanted = Some((picture.clone(), tw, th));
+                // The same size again (a new develop): at once. A new size
+                // (the inspector sliding, Image Only): once it holds still.
+                let wait = if self.exact_size == (tw, th) { 1 } else { 150 };
+                unsafe {
+                    SetTimer(self.hwnd, TIMER_EXACT, wait, None);
+                }
+            }
+            return None;
+        }
+        // In the exact picture's pixels: the crop on whole pixels, its
+        // corner on a whole screen pixel, drawn 1:1.
+        let turned = if scene.rotation.rem_euclid(2) == 1 { (th as f64, tw as f64) } else { (tw as f64, th as f64) };
+        let (fx, fy) = (turned.0 / shown.width, turned.1 / shown.height);
+        let c = Rect::new((clip.x * fx).round(), (clip.y * fy).round(), (clip.width * fx).round(), (clip.height * fy).round());
+        let (x0, y0) = (corner.0.round(), corner.1.round());
+        Some(Draw::Exact(
+            key,
+            PhotoUniform {
+                origin_scale: [(x0 - c.x) as f32, (y0 - c.y) as f32, 1.0, 0.0],
+                shown: [turned.0 as f32, turned.1 as f32, scene.rotation.rem_euclid(4) as f32, 0.0],
+                clip: [c.x as f32, c.y as f32, c.width as f32, c.height as f32],
+                quad: [x0 as f32, y0 as f32, c.width as f32, c.height as f32],
+                extra: [1.0, picture.wide as u8 as f32, 0.0, 0.0],
+            },
+        ))
+    }
+
+    /// Makes the wanted exact picture: on the GPU at once, on the software
+    /// canvas on a thread. Then the canvas draws it.
+    fn make_exact(&mut self) {
+        let Some((picture, tw, th)) = self.exact_wanted.take() else { return };
+        let key = (picture.id, tw, th);
+        self.exact_size = (tw, th);
+        match self.gpu.clone() {
+            Some(gpu) => {
+                let Some(source) = picture.texture() else { return };
+                let started = std::time::Instant::now();
+                let image = gpu.lanczos(source, picture.width, picture.height, tw, th);
+                crate::trace::event("exact_fit", || serde_json::json!({"from": [picture.width, picture.height], "to": [tw, th], "ms": started.elapsed().as_secs_f64() * 1000.0}));
+                if let Some(dump) = std::env::var_os("NEGS_EXACT_FIT_DUMP") {
+                    let dump = std::path::PathBuf::from(dump);
+                    let _ = std::fs::write(dump.join(format!("source-{}x{}.raw", picture.width, picture.height)), gpu.read_back(&source.texture));
+                    let _ = std::fs::write(dump.join(format!("exact-{tw}x{th}.raw", )), gpu.read_back(&image.texture));
+                }
+                // The last two: Original and the develop both stay sharp.
+                if self.exact.len() >= 2 {
+                    self.exact.remove(0);
+                }
+                self.exact.push((key, image));
+                invalidate(self.hwnd);
+            }
+            None => {
+                let hwnd = self.hwnd.0 as isize;
+                std::thread::Builder::new()
+                    .name("exact-fit".into())
+                    .spawn(move || {
+                        let Some(pixels) = picture.with_pixels(|rgba| crate::exact_fit::resample(rgba, picture.width, picture.height, tw, th)) else { return };
+                        post(move |_: &mut App| {
+                            with_view(|v| {
+                                v.software_cache.add_exact(key, pixels, picture.id);
+                                invalidate(HWND(hwnd as *mut _));
+                            });
+                        });
+                    })
+                    .ok();
+            }
+        }
+    }
+}
 /// 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
 /// photograph, but never enlarges a small one past 1:1 (the Mac's
 /// `ImageScrollView.magnification`).
@@ -177,7 +284,19 @@ struct View {
     /// Where the tag was last drawn, in pixels, and where its draws begin.
     tag_rect: Option<Rect>,
     tag_start: Option<usize>,
+    /// The fitted view's exact-size pictures (ticket 38), the last two
+    /// made, by picture and size; the one wanted next; the size last made.
+    exact: Vec<(ExactKey, GpuImage)>,
+    exact_wanted: Option<(Picture, u32, u32)>,
+    exact_size: (u32, u32),
+    /// The window is being sized by its edge: the fit changes every frame.
+    live_resize: bool,
 }
+
+/// An exact picture's picture id and size.
+type ExactKey = (u64, u32, u32);
+/// Makes a wanted exact picture once the canvas holds still.
+const TIMER_EXACT: usize = 8;
 
 #[derive(Clone, Copy)]
 enum CropDrag {
@@ -261,6 +380,10 @@ pub fn init(hwnd: HWND, dpi: u32) {
             software_base: None,
             tag_rect: None,
             tag_start: None,
+            exact: Vec::new(),
+            exact_wanted: None,
+            exact_size: (0, 0),
+            live_resize: false,
         })
     });
 }
@@ -822,6 +945,8 @@ enum Draw {
     /// A mark drawn with Direct2D (the caret, the lock, the turn arrows,
     /// a strike), its colour, its top left in pixels.
     Glyph(Glyph, [f32; 4], (f64, f64)),
+    /// The fitted photograph's exact-size picture, drawn 1:1.
+    Exact(ExactKey, PhotoUniform),
     /// What follows draws only inside this rectangle (pixels); None: anywhere.
     Clip(Option<Rect>),
 }
@@ -888,7 +1013,7 @@ fn turn_half(draws: &mut [Draw], c: (f64, f64)) {
     let turn_rect = |r: [f32; 4]| [(2.0 * c.0) as f32 - r[0] - r[2], (2.0 * c.1) as f32 - r[1] - r[3], r[2], r[3]];
     for draw in draws {
         match draw {
-            Draw::Photo(_, u) => {
+            Draw::Photo(_, u) | Draw::Exact(_, u) => {
                 let (shown_w, shown_h, z) = (u.shown[0], u.shown[1], u.origin_scale[2]);
                 u.origin_scale[0] = (2.0 * c.0) as f32 - u.origin_scale[0] - shown_w * z;
                 u.origin_scale[1] = (2.0 * c.1) as f32 - u.origin_scale[1] - shown_h * z;
@@ -1203,7 +1328,10 @@ impl View {
             quad: screen(px, py, pw, ph),
             extra: [1.0, picture.wide as u8 as f32, 0.0, 0.0],
         };
+        let exact = self.exact_draw(&picture, scene, (ox + px * z, oy + py * z), clip, shown);
         items.push(Draw::Photo(picture, uniform));
+        // Over it, so a sliver its rounding leaves shows the photograph, not the sheet.
+        items.extend(exact);
         // Film frame and 35mm strip over the photograph's edge.
         let Some(border) = scene.border else { return };
         let (w, h) = (pw as u32, ph as u32);
@@ -1353,6 +1481,11 @@ impl View {
                     if let Some(image) = words.get(&words_key(&text, &style, width, self.dpi)) {
                         let size = image.texture.size();
                         items.push(Item::Quad(Some(image), QuadInstance::text(rect(x.round(), y.round(), size.width as f64, size.height as f64), color)));
+                    }
+                }
+                Draw::Exact(key, uniform) => {
+                    if let Some((_, image)) = self.exact.iter().find(|(k, _)| *k == key) {
+                        items.push(Item::Photo(image, uniform));
                     }
                 }
                 Draw::Glyph(glyph, color, (x, y)) => {
@@ -1519,6 +1652,11 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             WM_ERASEBKGND => LRESULT(1),
             WM_SIZE => {
                 resized(hwnd);
+                LRESULT(0)
+            }
+            WM_TIMER if wparam.0 == TIMER_EXACT => {
+                let _ = KillTimer(hwnd, TIMER_EXACT);
+                with_view(|v| v.make_exact());
                 LRESULT(0)
             }
             WM_TIMER if wparam.0 == TIMER_RUNNING => {

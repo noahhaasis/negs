@@ -8,6 +8,7 @@ mod brightness;
 mod crop;
 mod edits;
 mod engine;
+mod exact_fit;
 mod gpu;
 mod help;
 mod histogram;

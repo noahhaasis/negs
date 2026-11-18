@@ -1673,6 +1673,11 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| app.layout());
                 LRESULT(0)
             }
+            // The fitted view's exact picture waits until sizing ends.
+            WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
+                canvas::set_live_resize(msg == WM_ENTERSIZEMOVE);
+                LRESULT(0)
+            }
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             WM_SETTINGCHANGE | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
                 // The app theme ("ImmersiveColorSet"), high contrast or the accent.

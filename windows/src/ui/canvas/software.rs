@@ -7,8 +7,19 @@ type Mip = (Arc<Vec<u8>>, u32, u32);
 #[derive(Default)]
 pub(super) struct Cache {
     mips: HashMap<(u64, u32), Mip>,
+    /// The fitted view's exact-size pictures (ticket 38), the last two.
+    exact: Vec<((u64, u32, u32), Arc<Vec<u8>>)>,
 }
 impl Cache {
+    pub(super) fn has_exact(&self, key: (u64, u32, u32)) -> bool {
+        self.exact.iter().any(|(k, _)| *k == key)
+    }
+    pub(super) fn add_exact(&mut self, key: (u64, u32, u32), pixels: Vec<u8>, _picture: u64) {
+        if self.exact.len() >= 2 {
+            self.exact.remove(0);
+        }
+        self.exact.push((key, Arc::new(pixels)));
+    }
     // Cache only reduced levels, never a second copy of the full image.
     // Like the Vulkan mip chain, each level averages in linear light.
     fn mip(&mut self, picture: &crate::picture::Picture, footprint: f32) -> Option<Mip> {
@@ -322,6 +333,12 @@ pub(super) fn render_onto(
                     out.photo(&bytes, w, h, p);
                 } else {
                     picture.with_pixels(|bytes| out.photo(bytes, picture.width, picture.height, p));
+                }
+            }
+            Draw::Exact(key, p) => {
+                if let Some((_, bytes)) = cache.exact.iter().find(|(k, _)| k == key) {
+                    let bytes = bytes.clone();
+                    out.photo(&bytes, key.1, key.2, p);
                 }
             }
             Draw::Fill(q) => out.quad(q, None),
