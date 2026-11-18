@@ -70,4 +70,17 @@
   print formats, Landscape and Portrait, the angle and the size, with a
   yellow Done; Return applies and Esc cancels. Straighten with the dial
   under the photograph; its arrows turn it a quarter.
+- **The film and paper tray.** Clicking the film or the paper under the
+  photograph (or Film and Paper in the adjustments) opens a tray along
+  the bottom of the window, in place of the film strip: every stock as
+  your photograph developed with it, in groups, your favourites first.
+  Click a tile to try it, as often as you like; ← → step through them.
+  Return or Done keeps it, as one step to undo, and Esc goes back to the
+  stock you started from. Clicking elsewhere, or any other edit or
+  command, keeps it too. The film tray has Search; the paper tray has the
+  paper lock's switch. While a stock develops its tile stands in, turned
+  like the photograph. This replaces the tiles that folded out in the
+  adjustments.
+- The paper lock on "printed on" explains itself when you rest the
+  pointer on it.
 - The window reopens at the size it was left at.
