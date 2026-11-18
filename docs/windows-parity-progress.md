@@ -77,10 +77,18 @@ decisions made with their reasons, and what was carried over. See
   - The inspector isn't dimmed while the original is active.
   - A flip re-develops the tiles.
   - Not tried: a RAW+JPEG pair in Original ⌄ (the test roll has none).
-- **Follow-up (running):**
-  - Compare's captions leave out the camera ("Nikon D750").
-  - The edited side's film and paper lack their ⌄ menus and lock.
-  - The status line's "← → steps the right one" is cut off at 1440 px.
+- **Follow-up, merged `563cfb5`** (branch tip `65ca87f`):
+  - The edited photograph keeps its film and paper ⌄ menus and the paper lock, which
+    open its tray. The other photograph's label stays plain words.
+  - The status line's "← → steps the right one" shows whole or not at all.
+  - **The inspector matches the Mac's width.** The default goes from 404 to 340
+    (phase 3a had taken 404 from the Mac's unused `Theme.Size.inspector`), the
+    limits from 300–440 to 340–440, and the canvas minimum from 680 to 640. Saved
+    widths are kept.
+  - The camera in Compare's captions follows the Mac's rule: it drops first when
+    the line doesn't fit. At 1800 × 1125 px (the Mac's 1440 × 900 at 125 %) it
+    shows, as on the Mac.
+  - Shots are in `phase8a/side/`. The two touched layout tests pass on the PC.
 
 ## 2026-11-19: phase 8b merged, faster open, batch export and Open in Lightroom (`4a15d7f`, branch tip `fbb7a11`)
 
