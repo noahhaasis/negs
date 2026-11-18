@@ -68,7 +68,7 @@ pub struct TileLook {
 
 /// What a click in the foot reaches.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Part {
+pub(super) enum Part {
     Index(usize),
     Keep,
     Done,
@@ -223,12 +223,15 @@ pub fn sync(app: &mut App) {
             GLIDE.set(None);
         }
         let changed = !same(&shown, &next);
+        let listed = shown.sections != next.sections || shown.favourites != next.favourites;
+        let tried = shown.current != next.current || shown.in_favourites != next.in_favourites;
         *shown = next;
-        changed
+        (changed, listed, tried)
     });
+    let (changed, listed, tried) = changed;
     sync_search(app, tray, paper, opened);
     if changed || opened {
-        super::accessible_name(tray, if paper { "Papers" } else { "Films" });
+        super::tray_access::changed(listed || opened, tried || opened);
         unsafe {
             let _ = InvalidateRect(tray, None, false);
         }
@@ -789,32 +792,42 @@ fn set_hot(hwnd: HWND, part: Option<Part>, tile: Option<Hit>) {
 
 fn click(x: f32, y: f32) {
     if let Some(part) = part_at(x, y) {
-        let (starts, content) = SHOWN.with(|v| {
-            let v = v.borrow();
-            (rules::starts(&v.sections), rules::content_width(&v.sections))
-        });
-        match part {
-            Part::Done => {
-                with_app(|app| app.model.end_tray(true));
-            }
-            Part::Keep => {
-                with_app(|app| {
-                    let keep = !app.model.prefs.keep_paper;
-                    app.model.set_keep_paper(keep);
-                    app.model.dirty |= crate::model::dirty::CANVAS | crate::model::dirty::TRAY;
-                });
-            }
-            Part::Index(i) => {
-                // Glides to the group, 30 in from the left.
-                let visible = visible_width();
-                if let Some(start) = starts.get(i) {
-                    glide_to(rules::jump(*start, visible, content));
-                }
+        return press_part(part);
+    }
+    if let Some(hit) = tile_at(x, y) {
+        press_tile(hit);
+    }
+}
+
+/// Done keeps, the switch locks or frees the paper, a group's name glides
+/// the row to it: clicked, or a screen reader's default action.
+fn press_part(part: Part) {
+    match part {
+        Part::Done => {
+            with_app(|app| app.model.end_tray(true));
+        }
+        Part::Keep => {
+            with_app(|app| {
+                let keep = !app.model.prefs.keep_paper;
+                app.model.set_keep_paper(keep);
+                app.model.dirty |= crate::model::dirty::CANVAS | crate::model::dirty::TRAY;
+            });
+        }
+        Part::Index(i) => {
+            // Glides to the group, 30 in from the left.
+            let (starts, content) = SHOWN.with(|v| {
+                let v = v.borrow();
+                (rules::starts(&v.sections), rules::content_width(&v.sections))
+            });
+            if let Some(start) = starts.get(i) {
+                glide_to(rules::jump(*start, visible_width(), content));
             }
         }
-        return;
     }
-    let Some(hit) = tile_at(x, y) else { return };
+}
+
+/// A tile tries its stock; its star stars or unstars it.
+fn press_tile(hit: Hit) {
     let (Hit::Tile(si, i) | Hit::Star(si, i)) = hit;
     let Some((id, favourites, paper)) = SHOWN.with(|v| {
         let v = v.borrow();
@@ -834,6 +847,149 @@ fn click(x: f32, y: f32) {
             with_app(|app| app.model.choose_tile(&id, favourites));
         }
     }
+}
+
+// MARK: Screen readers
+
+/// What a screen reader can press (`tray_access.rs`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Press {
+    Part(Part),
+    Tile(Hit),
+    /// Search: its own window.
+    Search,
+    Nothing,
+}
+
+/// One thing in the tray as a screen reader sees it: in the Mac's words
+/// (`TrayTile`, `IndexButton`, `KeepPaperSwitch`), its place in DIPs in
+/// the tray, and what pressing it does.
+#[derive(Clone, Debug)]
+pub(super) struct Spoken {
+    pub name: String,
+    pub value: String,
+    pub help: String,
+    pub role: u32,
+    pub state: u32,
+    pub place: RectF,
+    pub press: Press,
+}
+
+const ROLE_STATICTEXT: u32 = 0x29;
+const ROLE_PUSHBUTTON: u32 = 0x2b;
+const ROLE_CHECKBUTTON: u32 = 0x2c;
+const ROLE_TEXT: u32 = 0x2a;
+pub(super) const STATE_SELECTED: u32 = 0x2;
+const STATE_CHECKED: u32 = 0x10;
+const STATE_INVISIBLE: u32 = 0x8000;
+const STATE_OFFSCREEN: u32 = 0x10000;
+const STATE_SELECTABLE: u32 = 0x200000;
+
+/// The tray's name for screen readers, and what's in it, in reading order:
+/// each group's name, its tiles each with its star, then the foot (the
+/// index or the count, Search or the switch, Done). None while it's busy
+/// or closed.
+pub(super) fn spoken() -> Option<(String, Vec<Spoken>)> {
+    OPEN.get()?;
+    let parts = PARTS.with(|p| p.try_borrow().ok().map(|p| p.clone()))?;
+    let search = search_field();
+    SHOWN.with(|v| {
+        let v = v.try_borrow().ok()?;
+        let visible = visible_width() as f32;
+        let offset = v.offset as f32;
+        let starts = rules::starts(&v.sections);
+        let visit = rules::Visit::new(v.paper, (), v.before_id.clone());
+        let shown = |r: RectF| if r.x + r.w <= 0.0 || r.x >= visible { STATE_OFFSCREEN } else { 0 };
+        let mut all = vec![];
+        for (si, (section, start)) in v.sections.iter().zip(&starts).enumerate() {
+            let x = *start as f32 - offset;
+            let title = RectF::new(x, rules::TOP as f32, rules::TITLE as f32, rules::PICTURE as f32);
+            all.push(Spoken { name: section.title.clone(), value: String::new(), help: String::new(), role: ROLE_STATICTEXT, state: shown(title), place: title, press: Press::Nothing });
+            for (i, entry) in section.stocks.iter().enumerate() {
+                let left = rules::tile_left(*start, i) - v.offset;
+                let tile = RectF::new(left as f32, rules::TOP as f32, rules::TILE as f32, (rules::PICTURE + rules::NAME_GAP + rules::NAME_LINE) as f32);
+                let selected = entry.id == v.current;
+                let before = visit.shows_before(&entry.id, &v.current);
+                let state = shown(tile) | STATE_SELECTABLE | if selected { STATE_SELECTED } else { 0 };
+                all.push(Spoken {
+                    name: entry.name.clone(),
+                    value: rules::tile_value(selected, before).into(),
+                    help: String::new(),
+                    role: ROLE_PUSHBUTTON,
+                    state,
+                    place: tile,
+                    press: Press::Tile(Hit::Tile(si, i)),
+                });
+                let favourite = v.favourites.contains(&entry.id);
+                let (sx, sy, sw, sh) = rules::star_rect(left);
+                let star = RectF::new(sx as f32, sy as f32, sw as f32, sh as f32);
+                all.push(Spoken {
+                    name: rules::star_label(&entry.name, favourite),
+                    value: String::new(),
+                    help: rules::star_help(favourite).into(),
+                    role: ROLE_PUSHBUTTON,
+                    state: shown(star),
+                    place: star,
+                    press: Press::Tile(Hit::Star(si, i)),
+                });
+            }
+        }
+        let painted = |part: Part| parts.iter().find(|(p, _)| *p == part).map(|(_, r)| *r);
+        let foot = RectF::new(0.0, rules::ROW as f32, visible, rules::FOOT as f32);
+        if rules::searching(&v.query) {
+            let count = v.sections.iter().map(|s| s.stocks.len()).sum();
+            all.push(Spoken { name: rules::matches(count), value: String::new(), help: String::new(), role: ROLE_STATICTEXT, state: 0, place: foot, press: Press::Nothing });
+        } else {
+            let group = rules::current(v.offset, &starts);
+            for (i, section) in v.sections.iter().enumerate() {
+                let place = painted(Part::Index(i));
+                let state = if place.is_some() { 0 } else { STATE_INVISIBLE } | if i == group { STATE_SELECTED } else { 0 };
+                all.push(Spoken {
+                    name: rules::index_label(&section.title),
+                    value: String::new(),
+                    help: String::new(),
+                    role: ROLE_PUSHBUTTON,
+                    state,
+                    place: place.unwrap_or(foot),
+                    press: Press::Part(Part::Index(i)),
+                });
+            }
+        }
+        if v.paper {
+            let place = painted(Part::Keep).unwrap_or(foot);
+            let help = if v.keep_paper { crate::help::PAPER_KEPT } else { crate::help::PAPER_LOCK };
+            let state = if v.keep_paper { STATE_CHECKED } else { 0 };
+            let value = if v.keep_paper { "On" } else { "Off" };
+            all.push(Spoken { name: rules::KEEP_PAPER_LABEL.into(), value: value.into(), help: help.into(), role: ROLE_CHECKBUTTON, state, place, press: Press::Part(Part::Keep) });
+        } else if !search.is_invalid() {
+            all.push(Spoken { name: "Search films".into(), value: v.query.clone(), help: String::new(), role: ROLE_TEXT, state: 0, place: foot, press: Press::Search });
+        }
+        let place = painted(Part::Done).unwrap_or(foot);
+        all.push(Spoken { name: "Done".into(), value: String::new(), help: rules::done_help(v.paper), role: ROLE_PUSHBUTTON, state: 0, place, press: Press::Part(Part::Done) });
+        Some((if v.paper { "Papers" } else { "Films" }.to_string(), all))
+    })
+}
+
+/// A screen reader's press, run from the tray's own message loop.
+pub(super) fn press(press: Press) {
+    match press {
+        Press::Part(part) => press_part(part),
+        Press::Tile(hit) => press_tile(hit),
+        Press::Search => {
+            let field = search_field();
+            if !field.is_invalid() {
+                unsafe {
+                    let _ = SetFocus(field);
+                }
+            }
+        }
+        Press::Nothing => {}
+    }
+}
+
+/// The tray's window and Search's, for `tray_access.rs`.
+pub(super) fn windows() -> (HWND, HWND) {
+    (hwnd(), search_field())
 }
 
 fn visible_width() -> f64 {
@@ -947,6 +1103,11 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
+            WM_GETOBJECT if lparam.0 as i32 == OBJID_CLIENT.0 => super::tray_access::object(hwnd, wparam),
+            super::tray_access::WM_APP_PRESS => {
+                super::tray_access::press(wparam.0);
+                LRESULT(0)
+            }
             WM_TIMER if wparam.0 == TIMER_GLIDE => {
                 glide_step(hwnd);
                 LRESULT(0)

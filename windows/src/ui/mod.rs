@@ -36,6 +36,7 @@ mod thumbs;
 mod titlebar;
 mod tone_graph;
 mod tray;
+mod tray_access;
 mod view_modes;
 
 use std::cell::{Cell, RefCell};
