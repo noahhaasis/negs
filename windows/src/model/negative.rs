@@ -40,6 +40,9 @@ pub struct Memory {
     crop_pending: Option<u64>,
     /// The next `replace_state` is Undo or Redo putting an edit back.
     pub(super) undoing: bool,
+    /// Prep's "Backlight…" was clicked: the Backlight row shows, until
+    /// another photograph opens.
+    pub backlight_shown: bool,
 }
 
 /// What `negative_base` read along the film's edge for one reading.
@@ -680,6 +683,7 @@ impl Model {
         self.negative.request.fetch_add(1, Ordering::Relaxed);
         self.negative.working = None;
         self.negative.detecting = false;
+        self.negative.backlight_shown = false;
     }
 }
 

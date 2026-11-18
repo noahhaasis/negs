@@ -107,6 +107,8 @@ enum When {
     ColorFilter,
     /// The photograph is read as a negative (Prep's Film base and Balance).
     Negative,
+    /// Prep › Backlight, once its "Backlight…" line was clicked.
+    Backlight,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -188,6 +190,8 @@ enum More {
     Module(usize),
     Section(Section),
     All,
+    /// Prep › Film base on a negative: "Backlight…" (`NegativePrep`'s `MoreLine`).
+    Backlight,
 }
 
 /// A "N more" line's words and what a click does; None hides it.
@@ -197,6 +201,7 @@ fn more_line(model: &Model, more: More) -> Option<(String, crate::edits::MoreAct
         More::Module(index) => edits::module_more(model, index),
         More::Section(section) => edits::section_more(model, section),
         More::All => model.prefs.lab_all_controls.then(|| ("Showing all controls. Show fewer".into(), MoreAction::ShowFewer)),
+        More::Backlight => (model.is_negative() && !model.negative.backlight_shown).then(|| ("Backlight…".into(), MoreAction::ShowFewer)),
     }
 }
 
@@ -490,7 +495,9 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::Note(Note::NegativeGuess), prep, None, When::Note);
     add(&mut rows, Kind::Actions(FIND_BUTTONS), prep, None, When::Negative);
     add(&mut rows, Kind::Actions(CROP_BUTTONS), prep, None, When::Negative);
-    add(&mut rows, Kind::Choice("Backlight", crate::negative::SCAN_ILLUMINANT, &["D55", "D50", "D65"]), prep, None, When::Negative);
+    // Behind "Backlight…", as on the Mac: Daylight suits most light pads and scanners.
+    add(&mut rows, Kind::Choice("Backlight", crate::negative::SCAN_ILLUMINANT, &["D55", "D50", "D65"]), prep, None, When::Backlight);
+    add(&mut rows, Kind::More(More::Backlight), prep, None, When::More(More::Backlight));
     add(&mut rows, Kind::Section("Balance"), prep, None, When::Negative);
     add(&mut rows, Kind::Footer("Balance Print ran when the base was found, and the print exposure was metered. Auto prints this frame as a minilab would, and runs again on each new paper; the picker balances on something grey. Both set Lab › Enlarger."), prep, None, When::Negative);
     add(&mut rows, Kind::Actions(BALANCE_BUTTONS), prep, None, When::Negative);
@@ -747,6 +754,7 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
         When::ColorFilm => !model.film_is_bw(),
         When::ColorFilter => model.shows_color_filter(),
         When::Negative => model.is_negative(),
+        When::Backlight => model.is_negative() && model.negative.backlight_shown,
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
         When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
         When::Note => matches!(row.kind, Kind::Note(note) if !note_text(model, note).is_empty()),
@@ -1433,7 +1441,7 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
                 // A section's line sits 6 DIPs lower, the Lab's top one 10.
                 let top = ins.px(match more {
                     More::Module(_) => 2.0,
-                    More::Section(_) => 8.0,
+                    More::Section(_) | More::Backlight => 8.0,
                     More::All => 10.0,
                 });
                 positions.push((c[0], gutter - margin, y + top - ins.px(4.0), right - gutter + 2 * margin, ins.px(25.0)));
@@ -2245,6 +2253,11 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::MatchBrightness, CHECK) if code == BN_CLICKED => app.model.set_matches_brightness(checked()),
+        (Kind::More(More::Backlight), ACTION) if code == BN_CLICKED => {
+            app.model.negative.backlight_shown = true;
+            app.inspector.slide = true;
+            app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
+        }
         (Kind::More(more), ACTION) if code == BN_CLICKED => {
             let Some((_, action)) = more_line(&app.model, more) else { return };
             let prefs = &mut app.model.prefs;
