@@ -3721,6 +3721,7 @@ impl Model {
             engine.stop();
         }
         self.preview_cache.flush();
+        crate::match_cache::shared().flush();
     }
 
     /// Try Again on the canvas: develops the current edit once more.
