@@ -1,10 +1,20 @@
+pub mod delete;
 pub mod edits;
+pub mod filter;
 pub mod folder;
+pub mod item;
 pub mod json;
+pub mod selection;
 pub mod sha256;
 pub mod sidecar;
+pub mod thumbnail;
+pub mod xmp;
 
+pub use delete::{Bin, DeletePlan, FolderBin, Question};
 pub use edits::{BrightnessMatch, EditDefaults, EditGroup, EditState, Roll, SavedEdits};
+pub use filter::{EditsFilter, Filter, FlagFilter, RatingFilter};
 pub use folder::{Listing, PhotoFile};
+pub use item::{Item, Summary};
 pub use json::Json;
+pub use selection::Selection;
 pub use sidecar::{DefaultsTable, Flag, Patch, Problem, Sidecar, Tables};

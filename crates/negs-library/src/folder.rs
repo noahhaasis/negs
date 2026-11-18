@@ -295,4 +295,57 @@ mod tests {
         names.sort_by(|a, b| standard_compare(a, b));
         assert_eq!(names, expected);
     }
+
+    fn folder(tag: &str, names: &[&str]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("negs-library-folder-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in names {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn the_listing_finds_sidecars_but_not_their_temporary_files() {
+        let dir = folder("sidecars", &["b.jpg", "a10.png", "a2.png", "notes.txt", "a2.png.negs", "B.JPG.NEGS", ".a10.png.negs.tmp", "orphan.cr3.negs"]);
+        let found = listing(&dir, true).unwrap();
+        assert_eq!(found.photos.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["a2.png", "a10.png", "b.jpg"]);
+        let mut sidecars: Vec<&str> = found.sidecars.keys().map(String::as_str).collect();
+        sidecars.sort();
+        assert_eq!(sidecars, ["B.JPG", "a2.png", "orphan.cr3"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A RAW's camera JPEG (or HEIF) of the same name goes with it, unless
+    /// it has a sidecar of its own; pairing off lists both.
+    #[test]
+    fn camera_jpegs_go_with_their_raws() {
+        let names = [
+            "DSCF1.RAF", "DSCF1.JPG", "dscf2.raf", "DSCF2.jpeg", "DSCF3.JPG", "DSCF4.CR3", "DSCF4.HIF", "DSCF5.NEF", "DSCF5.JPG", "DSCF5.JPG.negs", "DSCF6.png",
+            "DSCF6.dng", "DSCF7.heic",
+        ];
+        let dir = folder("pairs", &names);
+        let paired = listing(&dir, true).unwrap();
+        assert_eq!(
+            paired.photos.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["DSCF1.RAF", "dscf2.raf", "DSCF3.JPG", "DSCF4.CR3", "DSCF5.JPG", "DSCF5.NEF", "DSCF6.dng", "DSCF6.png"],
+            "a JPEG without a RAW, a rated one and a PNG stay; HEIF is never a photograph"
+        );
+        let companions: HashMap<String, String> = paired
+            .companions
+            .iter()
+            .map(|(raw, picture)| (raw.file_name().unwrap().to_string_lossy().into(), picture.file_name().unwrap().to_string_lossy().into()))
+            .collect();
+        assert_eq!(
+            companions,
+            HashMap::from([("DSCF1.RAF".into(), "DSCF1.JPG".into()), ("dscf2.raf".into(), "DSCF2.jpeg".into()), ("DSCF4.CR3".into(), "DSCF4.HIF".into())])
+        );
+        let separate = listing(&dir, false).unwrap();
+        assert_eq!(separate.photos.len(), 10, "HEIF is not listed when not paired");
+        assert!(separate.companions.is_empty());
+        assert_eq!(paired_raw(&dir.join("DSCF1.JPG")), Some(dir.join("DSCF1.RAF")));
+        assert_eq!(paired_raw(&dir.join("DSCF3.JPG")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
