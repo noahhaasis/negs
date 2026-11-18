@@ -694,7 +694,7 @@ impl Painter<'_> {
         let Some(Shape::One(g)) = self.shape(id, |f| geometry(f, &negs_marks::star_path(name, index).0, true).ok().map(Shape::One)) else { return };
         let g = g.clone();
         let at = moved(cx as f64, cy as f64);
-        if halo && !self.plain {
+        if halo {
             self.halo(&g, at);
         }
         self.draw(&g, at, None, None, ink);
@@ -705,7 +705,6 @@ impl Painter<'_> {
         let (w, h) = (r.w as f64, r.h as f64);
         let id = key(("cross", name, q(w), q(h)));
         let round = self.round();
-        let halo = halo && !self.plain;
         let Painter { shared, rt, brush, caches, .. } = self;
         let made = shape_in(caches, &shared.d2d, id, |f| {
             let strokes = negs_marks::cross_strokes(w, h, name);

@@ -501,10 +501,11 @@ impl ThemeName {
         }
     }
 
-    /// Plain follows Windows' app mode: Plain dark when apps are dark.
+    /// Plain follows Windows' app mode (or `NEGS_THEME`), as the window
+    /// does: Plain dark when apps are dark.
     pub fn resolved(self) -> Self {
         match self {
-            Self::Plain | Self::PlainDark if apps_use_dark() => Self::PlainDark,
+            Self::Plain | Self::PlainDark if dark() => Self::PlainDark,
             Self::Plain | Self::PlainDark => Self::Plain,
             other => other,
         }
