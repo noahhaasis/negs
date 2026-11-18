@@ -1969,3 +1969,56 @@ lifecycle_test! {
         assert!(h.renders().is_empty() && h.errors.is_empty(), "{:?}", h.errors);
     }
 }
+
+// MARK: The tray and the sidecar
+
+lifecycle_test! {
+    /// Stocks tried in the tray reach the photograph's sidecar only when one
+    /// is kept, in one write a second later; Esc leaves an unedited
+    /// photograph without a sidecar. The visit is one undo step.
+    fn a_tray_visit_reaches_the_sidecar_once_when_kept() {
+        use std::time::Duration;
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let folder = std::env::temp_dir().join(format!("negs-harness-tray-sidecar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let photo = folder.join("tray.png");
+        std::fs::copy(&h.photo, &photo).unwrap();
+        let sidecar = negs_library::sidecar::sidecar_path(&photo);
+        h.model().shelf.enabled = true;
+        h.open(&photo);
+        assert!(h.model().shelf.library.is_some(), "the photograph's folder is the library");
+        h.edit(|m| m.set_previews(true));
+        let before = h.model().state.film.clone();
+        let films: Vec<String> = h.model().films().iter().map(|s| s.id.clone()).filter(|id| *id != before).take(3).collect();
+        assert_eq!(films.len(), 3);
+        h.edit(|m| m.open_tray(false));
+        for film in &films {
+            h.edit(|m| m.try_stock(film));
+            h.fire_timers(Duration::from_secs(2));
+        }
+        assert!(!sidecar.exists(), "tried stocks aren't saved");
+        h.edit(|m| m.end_tray(false));
+        h.fire_timers(Duration::from_secs(2));
+        assert_eq!(h.model().state.film, before);
+        assert!(!sidecar.exists(), "Esc leaves no sidecar");
+        assert!(h.model().undo.undo.is_empty(), "nor an undo step");
+        h.edit(|m| m.open_tray(false));
+        h.edit(|m| m.try_stock(&films[0]));
+        h.edit(|m| m.try_stock(&films[1]));
+        h.fire_timers(Duration::from_secs(2));
+        assert!(!sidecar.exists(), "still trying");
+        h.edit(|m| m.end_tray(true));
+        h.fire_timers(Duration::from_secs(2));
+        let text = std::fs::read_to_string(&sidecar).expect("kept: the sidecar is written");
+        assert!(text.contains(&films[1]) && !text.contains(&films[0]), "{text}");
+        let written = std::fs::metadata(&sidecar).unwrap().modified().unwrap();
+        h.fire_timers(Duration::from_secs(3));
+        assert_eq!(std::fs::metadata(&sidecar).unwrap().modified().unwrap(), written, "written once");
+        assert_eq!(h.model().undo.undo.len(), 1, "one undo step for the visit");
+        h.edit(|m| m.perform_undo());
+        assert_eq!(h.model().state.film, before);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}

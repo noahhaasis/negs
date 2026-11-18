@@ -1065,7 +1065,9 @@ impl App {
         }
         self.save_window();
         // The open photograph's edits go to its sidecar first; Negs stays open
-        // if they can't, as it does for the session.
+        // if they can't, as it does for the session. Quitting keeps the
+        // stock the tray is trying, as any other command does.
+        self.model.end_tray(true);
         if let Err(error) = self.model.library_save_now() {
             if !ending_session {
                 self.model.error = Some(error);

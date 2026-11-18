@@ -127,7 +127,11 @@ impl Model {
         let before = self.with_preferences(tray.before.clone());
         match rules::ending(keep, before, &self.state, tray.action()) {
             Ending::Nothing => {}
-            Ending::Step(before, action) => self.register_undo(before, action),
+            Ending::Step(before, action) => {
+                self.register_undo(before, action);
+                // The kept stock reaches the sidecar now, once.
+                self.library_edited();
+            }
             Ending::Restore(before) => self.replace_state(before),
         }
         self.mark(dirty::TRAY | dirty::LAYOUT | dirty::PREVIEWS | dirty::CANVAS | dirty::INSPECTOR | dirty::CHROME);
