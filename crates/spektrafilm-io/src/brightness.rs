@@ -102,50 +102,82 @@ pub fn write_reference(rgb: &image::RgbImage, path: &Path) -> Result<()> {
 /// Lightroom make sRGB previews unless set otherwise); one in another declared
 /// colour space (a DNG's ProPhoto or gray gamma 2.2) is refused.
 pub fn camera_preview(file: &[u8], expected: (u32, u32)) -> Result<image::RgbImage> {
-    let source = rawler::rawsource::RawSource::new_from_slice(file);
-    let Ok(decoder) = rawler::get_decoder(&source) else {
-        return unusable("This RAW has no camera preview to match.");
-    };
-    let params = rawler::decoders::RawDecodeParams::default();
-    let preview = decoder.preview_image(&source, &params).ok().flatten();
-    let from_thumbnail = preview.is_none();
-    let Some(image) = preview.or_else(|| decoder.thumbnail_image(&source, &params).ok().flatten()) else {
-        return unusable("This RAW has no camera preview to match.");
-    };
-    let metadata = decoder.raw_metadata(&source, &params).ok();
-    let orientation = metadata.as_ref().and_then(|m| m.exif.orientation).unwrap_or(1);
-    let image = match orientation {
-        2 => image.fliph(),
-        3 => image.rotate180(),
-        4 => image.flipv(),
-        5 => image.rotate90().fliph(),
-        6 => image.rotate90(),
-        7 => image.rotate270().fliph(),
-        8 => image.rotate270(),
-        _ => image,
-    };
-    let (width, height) = (image.width(), image.height());
-    if width < 64 || height < 64 || expected.0 == 0 || expected.1 == 0 {
-        return unusable("The camera preview is too small to match.");
-    }
-    let declared = declared_for(file, from_thumbnail, metadata.as_ref().and_then(|m| m.exif.color_space));
-    let mut rgba = image.to_rgba8();
-    drop(image);
-    match declared {
-        Some(Declared::Srgb) | None => {}
-        Some(Declared::AdobeRgb) => adobe_to_srgb(&mut rgba),
-        Some(Declared::Other) => return unusable("The camera preview’s colour space isn’t supported."),
-    }
-    let wanted = expected.0 as f64 / expected.1 as f64;
-    if !same_shape(width as f64 / height as f64, wanted) {
-        // Only previews of another shape pay for the bar search.
-        let gray: Vec<u8> = rgba.pixels().map(|p| luma(p.0)).collect();
-        let Some((x, y, w, h)) = trimming_bars(&gray, width as usize, height as usize, wanted) else {
-            return unusable("The camera preview is framed differently from the photo.");
+    CameraPreview::read(file)?.reference(expected)
+}
+
+/// A RAW's embedded preview, read, oriented and in sRGB, before the
+/// photograph's size is known (its decode runs meanwhile): [`camera_preview`]
+/// in two steps, with the same checks in the same order.
+pub struct CameraPreview {
+    /// None when it is too small to match.
+    rgba: Option<image::RgbaImage>,
+    /// Its declared colour space can be read as sRGB.
+    supported: bool,
+}
+
+impl CameraPreview {
+    /// Most of [`camera_preview`]'s cost: the preview's decode and colour.
+    pub fn read(file: &[u8]) -> Result<CameraPreview> {
+        let source = rawler::rawsource::RawSource::new_from_slice(file);
+        let Ok(decoder) = rawler::get_decoder(&source) else {
+            return unusable("This RAW has no camera preview to match.");
         };
-        rgba = image::imageops::crop_imm(&rgba, x as u32, y as u32, w as u32, h as u32).to_image();
+        let params = rawler::decoders::RawDecodeParams::default();
+        let preview = decoder.preview_image(&source, &params).ok().flatten();
+        let from_thumbnail = preview.is_none();
+        let Some(image) = preview.or_else(|| decoder.thumbnail_image(&source, &params).ok().flatten()) else {
+            return unusable("This RAW has no camera preview to match.");
+        };
+        let metadata = decoder.raw_metadata(&source, &params).ok();
+        let orientation = metadata.as_ref().and_then(|m| m.exif.orientation).unwrap_or(1);
+        let image = match orientation {
+            2 => image.fliph(),
+            3 => image.rotate180(),
+            4 => image.flipv(),
+            5 => image.rotate90().fliph(),
+            6 => image.rotate90(),
+            7 => image.rotate270().fliph(),
+            8 => image.rotate270(),
+            _ => image,
+        };
+        if image.width() < 64 || image.height() < 64 {
+            return Ok(CameraPreview { rgba: None, supported: true });
+        }
+        let declared = declared_for(file, from_thumbnail, metadata.as_ref().and_then(|m| m.exif.color_space));
+        let mut rgba = image.to_rgba8();
+        drop(image);
+        let supported = match declared {
+            Some(Declared::Srgb) | None => true,
+            Some(Declared::AdobeRgb) => {
+                adobe_to_srgb(&mut rgba);
+                true
+            }
+            Some(Declared::Other) => false,
+        };
+        Ok(CameraPreview { rgba: Some(rgba), supported })
     }
-    Ok(reduced(rgba))
+
+    /// The reference for a photograph of `expected` size (its decoded
+    /// source): what [`camera_preview`] gives.
+    pub fn reference(&self, expected: (u32, u32)) -> Result<image::RgbImage> {
+        let Some(rgba) = self.rgba.as_ref().filter(|_| expected.0 > 0 && expected.1 > 0) else {
+            return unusable("The camera preview is too small to match.");
+        };
+        if !self.supported {
+            return unusable("The camera preview’s colour space isn’t supported.");
+        }
+        let (width, height) = rgba.dimensions();
+        let wanted = expected.0 as f64 / expected.1 as f64;
+        if !same_shape(width as f64 / height as f64, wanted) {
+            // Only previews of another shape pay for the bar search.
+            let gray: Vec<u8> = rgba.pixels().map(|p| luma(p.0)).collect();
+            let Some((x, y, w, h)) = trimming_bars(&gray, width as usize, height as usize, wanted) else {
+                return unusable("The camera preview is framed differently from the photo.");
+            };
+            return Ok(reduced(image::imageops::crop_imm(rgba, x as u32, y as u32, w as u32, h as u32).to_image()));
+        }
+        Ok(reduced(rgba.clone()))
+    }
 }
 
 /// At most [`LONG_SIDE`], opaque 8-bit sRGB, as the helper's reference PNG
