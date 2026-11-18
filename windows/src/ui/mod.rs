@@ -12,6 +12,8 @@
 mod alert;
 pub mod batch;
 pub mod canvas;
+mod color_filter;
+pub mod compare;
 mod d2d;
 mod dialogs;
 mod draw;
@@ -39,6 +41,7 @@ mod tone_graph;
 mod tray;
 mod tray_access;
 mod view_modes;
+mod view_switch;
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -153,6 +156,15 @@ pub mod id {
     pub const CROP: u16 = 401;
     pub const CROP_DONE: u16 = 402;
     pub const CROP_CANCEL: u16 = 403;
+    /// View › Flip Horizontal: mirrors as shown, while cropping (`io.flip`).
+    pub const FLIP: u16 = 404;
+    pub const COMPARE: u16 = 405;
+    pub const GRID: u16 = 406;
+    pub const COMPARE_OFFER: u16 = 407;
+    /// The title bar's Grid · Photo · Compare (`view_switch`).
+    pub const VIEW_GRID: u16 = 408;
+    pub const VIEW_PHOTO: u16 = 409;
+    pub const VIEW_COMPARE: u16 = 410;
     pub const UPDATES: u16 = 500;
     pub const ABOUT: u16 = 501;
     pub const CANCEL_EXPORT: u16 = 600;
@@ -637,6 +649,9 @@ impl App {
             strip::sync(self);
             grid::sync(self);
         }
+        if flags & (dirty::COMPARE | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME) != 0 {
+            compare::sync(self);
+        }
         if flags & (dirty::TRAY | dirty::PREVIEWS | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME | dirty::STRUCTURE) != 0 {
             tray::sync(self);
         }
@@ -682,10 +697,11 @@ impl App {
             }
         }
         // The band says the file's name alone (`TitleBar.swift`).
-        let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_else(|| "Negs".into());
+        let name = model.compare_title().or_else(|| model.source.as_deref().map(crate::model::file_name)).unwrap_or_else(|| "Negs".into());
         titlebar::set_title(self.main, &name);
         panes::sync(self.panes, model.pane() == crate::model::Pane::Presets);
         self.update_taskbar();
+        view_switch::sync(self);
     }
 
     /// The status line (§4.7): what's happening on the left, the canvas's
@@ -736,6 +752,14 @@ impl App {
                 format!("Cropping · {} · {} × {} px", session.aspect.title(), size.0.round() as i64, size.1.round() as i64),
                 Tone::Dim,
             ));
+        } else if let Some(c) = model.comparison() {
+            let differences = compare::differences(self);
+            let summary = model.compare_summary();
+            left.push(Span::new(if differences.is_empty() { summary } else { format!("{summary} · differ in {differences}") }, Tone::Label));
+            if !c.against_original() && model.shown_items().len() > 2 {
+                let place = if compare::stacked(self) { "bottom" } else { "right" };
+                left.push(Span::new(format!("    ← → steps the {place} one"), Tone::Dim));
+            }
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
         }
@@ -744,6 +768,7 @@ impl App {
             holding: model.holding_original,
             cropping: model.cropping(),
             failed: model.render_failed && model.develop_error.is_some(),
+            compare: model.comparison().map(|c| c.layout == crate::compare::Layout::Slider),
         });
         status::set(status::Line { left, cancel: model.exporting || batch_running, tools, progress, show });
         unsafe {
@@ -813,19 +838,23 @@ impl App {
             // step aside in Image Only and while a file is dragged in.
             let chrome = photo && !image_only && !self.drop_target_active && !shows_tray;
             let status_height = if chrome { self.px(status::HEIGHT) } else { 0 };
-            let show_strip = self.model.prefs.filmstrip_visible && chrome;
+            // Compare has no strip: its height goes to the photographs.
+            let comparing = photo && self.model.comparison().is_some();
+            let show_strip = self.model.prefs.filmstrip_visible && chrome && !comparing;
             // 158 + 28: the tray's 186, so the canvas keeps its size when it opens.
             let strip_height = if show_strip { self.px(crate::sheet_rules::BAND) - status_height } else { 0 };
             let canvas_bottom = (bottom - status_height - strip_height - tray_height).max(top);
             tray::layout(self, RECT { left: 0, top: bottom - tray_height, right: column, bottom }, shows_tray);
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
             let _ = MoveWindow(self.empty, 0, top, column, bottom - top, true);
-            let _ = ShowWindow(self.canvas, if photo { SW_SHOWNA } else { SW_HIDE });
+            // Compare takes the canvas's place.
+            compare::layout(self, RECT { left: 0, top, right: column, bottom: canvas_bottom }, comparing);
+            let _ = ShowWindow(self.canvas, if photo && !comparing { SW_SHOWNA } else { SW_HIDE });
             let _ = ShowWindow(self.empty, if photo { SW_HIDE } else { SW_SHOWNA });
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
             // The leader stands on the strip's top edge, or the status line's.
-            strip::layout_leader(self, column, canvas_bottom, chrome && !self.model.cropping());
+            strip::layout_leader(self, column, canvas_bottom, chrome && !self.model.cropping() && !comparing);
             grid::layout(self, RECT { left: 0, top, right: client.right, bottom });
             let _ = MoveWindow(self.status, 0, bottom - status_height, column, status_height, true);
             let _ = ShowWindow(self.status, if chrome { SW_SHOWNA } else { SW_HIDE });
@@ -836,7 +865,11 @@ impl App {
             let panes_height = if shows_panes { self.px(panes::HEIGHT) } else { 0 };
             let _ = MoveWindow(self.panes, column + splitter, top, inspector_width, panes_height, true);
             let _ = ShowWindow(self.panes, if shows_panes { SW_SHOWNA } else { SW_HIDE });
-            let panel_top = top + panes_height;
+            // Which photograph the panel edits, while comparing.
+            let note_height = if shows_panes && comparing { self.px(compare::NOTE_HEIGHT) } else { 0 };
+            let note = RECT { left: column + splitter, top: top + panes_height, right: column + splitter + inspector_width, bottom: top + panes_height + note_height };
+            compare::layout_note(self, note, note_height > 0);
+            let panel_top = top + panes_height + note_height;
             self.inspector.layout(column + splitter, panel_top, inspector_width, bottom - panel_top, shows_inspector && !shows_presets);
             let rect = RECT { left: column + splitter, top: panel_top, right: column + splitter + inspector_width, bottom };
             presets::layout(self, rect, shows_presets && !image_only);
@@ -960,6 +993,12 @@ impl App {
                 model.begin_crop();
                 model.rotate()
             }
+            // Like a turn, a flip starts cropping, where Cancel undoes it.
+            id::FLIP if model.source.is_some() => model.flip(),
+            id::COMPARE => compare::toggle(self),
+            id::COMPARE_OFFER => compare::take_offer(self),
+            id::GRID => grid::toggle(self),
+            id::VIEW_GRID | id::VIEW_PHOTO | id::VIEW_COMPARE => view_switch::act(self, command),
             id::IMAGE_ONLY => view_modes::toggle_image_only(self),
             id::CROP => {
                 if model.cropping() {
@@ -1056,6 +1095,10 @@ impl App {
             enable(c, photo && !model.cropping());
         }
         enable(id::ROTATE, photo);
+        enable(id::FLIP, photo);
+        enable(id::COMPARE, model.can_toggle_compare());
+        retitle(id::COMPARE, crate::compare::menu_title(model.comparison().is_some()));
+        enable(id::GRID, model.shelf.library.is_some() && !model.cropping());
         retitle(id::CROP, if model.cropping() { "Done &Cropping\tCtrl+K" } else { "&Crop\tCtrl+K" });
         enable(id::CROP, model.cropping() || model.image.is_some());
         // View › Theme: the one chosen ticked, as a radio choice (an
@@ -1326,6 +1369,9 @@ fn build_menu() -> (HMENU, HMENU) {
         add(view, id::PRESETS, "&Presets\tF8");
         add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
         add(view, id::IMAGE_ONLY, "&Image Only\tF");
+        // Grid · Photo · Compare, as the Mac's title bar switch (ticket 46).
+        add(view, id::GRID, "&Grid\tG");
+        add(view, id::COMPARE, crate::compare::menu_title(false));
         // Every control in every module, as the Lab's Advanced controls switch did.
         add(view, id::ALL_CONTROLS, "Show A&ll Controls");
         separator(view);
@@ -1335,6 +1381,7 @@ fn build_menu() -> (HMENU, HMENU) {
         add(view, id::ZOOM_OUT, "Zoom &Out\tCtrl+-");
         separator(view);
         add(view, id::ROTATE, "&Rotate Clockwise\tCtrl+R");
+        add(view, id::FLIP, "Flip &Horizontal");
         add(view, id::CROP, "&Crop\tCtrl+K");
         separator(view);
         let themes = CreatePopupMenu().unwrap();
@@ -1379,7 +1426,8 @@ fn accelerators() -> HACCEL {
         (ctrl, VK_SUBTRACT.0, id::ZOOM_OUT),
         (ctrl, 'R' as u16, id::ROTATE),
         (ctrl, 'K' as u16, id::CROP),
-        (FVIRTKEY, 'C' as u16, id::CROP),
+        // C compares, as on the Mac; Ctrl+K crops.
+        (FVIRTKEY, 'C' as u16, id::COMPARE),
         (FVIRTKEY, 'F' as u16, id::IMAGE_ONLY),
         (ctrl, VK_OEM_COMMA.0, id::SETTINGS),
     ];
@@ -1490,6 +1538,7 @@ pub fn run() {
         strip::register();
         inspector::register();
         tone_graph::register();
+        color_filter::register();
         presets::register();
         status::register();
 
@@ -1684,6 +1733,14 @@ fn pre_translate(msg: &MSG) -> bool {
                 return true;
             }
         }
+        // Compare's keys: S, the arrows, Esc.
+        if !text_focus() && compare::key(app, msg) {
+            return true;
+        }
+        // A picker waiting for a click on the negative.
+        if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && app.model.cancel_negative_pick() {
+            return true;
+        }
         // Escape's next use (§5.2): leaving Image Only.
         if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && view_modes::escape(app) {
             return true;
@@ -1842,6 +1899,9 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             WM_NOTIFY => {
                 if let Some(result) = titlebar::dropdown(hwnd, lparam) {
+                    return result;
+                }
+                if let Some(result) = view_switch::notify(lparam) {
                     return result;
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)

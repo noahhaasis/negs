@@ -114,7 +114,7 @@ impl View {
                 shown: [turned.0 as f32, turned.1 as f32, scene.rotation.rem_euclid(4) as f32, 0.0],
                 clip: [c.x as f32, c.y as f32, c.width as f32, c.height as f32],
                 quad: [x0 as f32, y0 as f32, c.width as f32, c.height as f32],
-                extra: [1.0, picture.wide as u8 as f32, 0.0, 0.0],
+                extra: [1.0, picture.wide as u8 as f32, scene.flip as u8 as f32, 0.0],
             },
         ))
     }
@@ -186,6 +186,9 @@ pub enum Grid {
 pub struct CropScene {
     pub photo: Size,
     pub rotation: i32,
+    /// Mirrored left to right before the quarter turns (`io.flip`).
+    pub flip: bool,
+    /// Degrees clockwise as shown.
     pub angle: f64,
     pub shown: Rect,
     pub grid: Option<Grid>,
@@ -200,6 +203,8 @@ pub struct Scene {
     /// The photograph's layout size in pixels, before cropping and rotation.
     pub size: Size,
     pub rotation: i32,
+    /// Mirrored left to right after the crop, before the turns (`io.flip`).
+    pub flip: bool,
     pub crop: CropSettings,
     pub border: Option<BorderSettings>,
     pub film: String,
@@ -576,20 +581,23 @@ pub fn update_scene(app: &mut App) {
         (_, None, Some(placeholder)) => (Some(placeholder.clone()), model.placeholder_size, false),
         _ => (None, Size::ZERO, false),
     };
-    let cropped = model.state.crop.size_of(size);
+    // Picking the base shows the whole frame, without its border.
+    let whole = model.negative_pick() == Some(crate::negative::Pick::Base);
+    let shown_crop = model.shown_crop();
+    let cropped = shown_crop.size_of(size);
     // A stock just tried in the tray: its tile until its develop is in
     // (`EditorModel.trialImage`). The tile is cropped already, so it's shown
     // uncropped at the cropped photograph's size, turned as the photograph is;
     // while zoomed into a cropped photograph that would move the view, so not then.
     let fitting = with_view(|v| v.fitting).unwrap_or(true);
-    let trial = model.shown_trial().filter(|_| fitting || !model.state.crop.cropped()).map(|trial| {
+    let trial = model.shown_trial().filter(|_| fitting || !shown_crop.cropped()).map(|trial| {
         let tile = (trial.picture.width, trial.picture.height);
         let (w, h) = crate::tray_rules::stand_in_size(tile, (cropped.width, cropped.height));
         (trial.picture.clone(), Size::new(w, h))
     });
     let (picture, size, developed, crop) = match trial {
         Some((picture, size)) => (Some(picture), size, false, CropSettings::default()),
-        None => (picture, size, developed, model.state.crop),
+        None => (picture, size, developed, shown_crop),
     };
     // As a photograph opens, its developed thumbnail until anything else
     // (`standIn`): cropped, turned and bordered already, so shown as it is,
@@ -602,10 +610,11 @@ pub fn update_scene(app: &mut App) {
         }
         None => (picture, size, crop),
     };
-    let border = if stand_in.is_some() { None } else { model.state.border.shown(cropped.width as u32, cropped.height as u32) };
+    let border = if whole || stand_in.is_some() { None } else { model.state.border.shown(cropped.width as u32, cropped.height as u32) };
     let cropping = model.crop_session.as_ref().map(|s| CropScene {
         photo: s.photo,
         rotation: s.rotation,
+        flip: s.flip,
         angle: s.angle,
         shown: s.shown(),
         grid: if s.straightening { Some(Grid::Fine) } else if s.adjusting { Some(Grid::Thirds) } else { None },
@@ -615,6 +624,7 @@ pub fn update_scene(app: &mut App) {
         developed,
         size,
         rotation: if stand_in.is_some() { 0 } else { model.rotation() },
+        flip: stand_in.is_none() && model.state.flip(),
         crop,
         border,
         film: model.state.film.clone(),
@@ -695,7 +705,10 @@ fn print_words(app: &App) -> PrintWords {
         scanning: crate::json::boolean(model.value("io.scan_film")),
         original: model.holding_original && model.original.is_some(),
         keep_paper: model.prefs.keep_paper,
-        tray: model.tray_shown(),
+        tray: model.tray_shown().filter(|_| !model.tray().is_some_and(|t| t.read_as)),
+        negative: model.is_negative(),
+        read_as_open: model.tray_shown() == Some(false) && model.tray().is_some_and(|t| t.read_as),
+        prompt: model.negative_pick().map(|p| p.prompt()),
     }
 }
 
@@ -1040,9 +1053,13 @@ fn rect(x: f64, y: f64, w: f64, h: f64) -> [f32; 4] {
 }
 
 /// The crop rectangle in the turned frame of the photograph as shown, from
-/// the exporter's pixel rectangle in the unrotated photograph.
-fn shown_pixels(crop: &CropSettings, size: Size, rotation: i32) -> (Rect, Size) {
+/// the exporter's pixel rectangle in the unrotated photograph: mirrored if
+/// `flip`, then turned.
+fn shown_pixels(crop: &CropSettings, size: Size, rotation: i32, flip: bool) -> (Rect, Size) {
     let mut r = crop.pixels(size);
+    if flip {
+        r = Rect::new(size.width - r.x - r.width, r.y, r.width, r.height);
+    }
     let mut s = size;
     for _ in 0..rotation.rem_euclid(4) {
         r = Rect::new(s.height - r.y - r.height, r.x, r.height, r.width);
@@ -1093,6 +1110,19 @@ fn turn_half(draws: &mut [Draw], c: (f64, f64)) {
 impl View {
     /// The print (the photograph with its border) on screen, cut to its
     /// band, on whole pixels; None before there's a document.
+    /// Where (x, y) falls on the photograph as shown, as fractions of it
+    /// from its top left (outside it, beyond 0…1).
+    fn shown_fraction(&self, x: f64, y: f64) -> Option<[f64; 2]> {
+        let (dw, dh) = self.document;
+        let (pw, ph) = self.photo_display;
+        if pw <= 0.0 || ph <= 0.0 {
+            return None;
+        }
+        let (ox, oy) = self.document_origin();
+        let (left, top) = (ox + (dw - pw) / 2.0 * self.zoom, oy + (dh - ph) / 2.0 * self.zoom);
+        Some([(x - left) / (pw * self.zoom), (y - top) / (ph * self.zoom)])
+    }
+
     fn print_rect(&self) -> Option<Rect> {
         let (dw, dh) = self.document;
         if dw <= 0.0 || self.width == 0 {
@@ -1410,14 +1440,16 @@ impl View {
             }
         }
         // The photograph through its crop.
-        let (clip, shown) = shown_pixels(&scene.crop, scene.size, scene.rotation);
+        let (clip, shown) = shown_pixels(&scene.crop, scene.size, scene.rotation, scene.flip);
         let origin = (ox + px * z - clip.x * z, oy + py * z - clip.y * z);
+        // Straightened in the unflipped photograph: the other way round as shown.
+        let angle = if scene.flip { -scene.crop.angle } else { scene.crop.angle };
         let uniform = PhotoUniform {
-            origin_scale: [origin.0 as f32, origin.1 as f32, z as f32, scene.crop.angle.to_radians() as f32],
+            origin_scale: [origin.0 as f32, origin.1 as f32, z as f32, angle.to_radians() as f32],
             shown: [shown.width as f32, shown.height as f32, scene.rotation.rem_euclid(4) as f32, 0.0],
             clip: [clip.x as f32, clip.y as f32, clip.width as f32, clip.height as f32],
             quad: screen(px, py, pw, ph),
-            extra: [1.0, picture.wide as u8 as f32, 0.0, 0.0],
+            extra: [1.0, picture.wide as u8 as f32, scene.flip as u8 as f32, 0.0],
         };
         let exact = self.exact_draw(&picture, scene, (ox + px * z, oy + py * z), clip, shown);
         items.push(Draw::Photo(picture, uniform));
@@ -1482,7 +1514,7 @@ impl View {
             shown: [cropping.photo.width as f32, cropping.photo.height as f32, cropping.rotation.rem_euclid(4) as f32, 1.0],
             clip: [shown.x as f32, shown.y as f32, shown.width as f32, shown.height as f32],
             quad: rect(frame.x + bounds.x * scale - 1.0, frame.y + bounds.y * scale - 1.0, bounds.width * scale + 2.0, bounds.height * scale + 2.0),
-            extra: [super::theme::CROP_SHADE_OPACITY, picture.wide as u8 as f32, 0.0, 0.0],
+            extra: [super::theme::CROP_SHADE_OPACITY, picture.wide as u8 as f32, cropping.flip as u8 as f32, 0.0],
         };
         items.push(Draw::Photo(picture, uniform));
         let c = crop_rect;
@@ -1772,6 +1804,17 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                     SetCapture(hwnd);
                     return LRESULT(0);
                 }
+                // Prep's pickers: the click reads the negative there.
+                if with_app(|app| app.model.negative_pick().is_some()).unwrap_or(false) {
+                    let shown = with_view(|v| v.shown_fraction(x as f64, y as f64)).flatten();
+                    post(move |app: &mut App| match shown {
+                        Some(shown) => app.model.picked_shown_point(shown),
+                        None => {
+                            app.model.cancel_negative_pick();
+                        }
+                    });
+                    return LRESULT(0);
+                }
                 // The label's names, the lock, a trim mark or a turn arrow:
                 // they act when the button comes up over them.
                 if let Some(target) = with_view(|v| v.print_hit(x as f64, y as f64).0).flatten() {
@@ -1959,11 +2002,11 @@ mod tests {
     fn shown_crop_turns_the_exporters_pixels() {
         let crop = CropSettings { rect: Rect::new(0.1, 0.2, 0.5, 0.25), ..Default::default() };
         let size = Size::new(1000.0, 800.0);
-        let (r, s) = shown_pixels(&crop, size, 0);
+        let (r, s) = shown_pixels(&crop, size, 0, false);
         assert_eq!((r, s), (Rect::new(100.0, 160.0, 500.0, 200.0), size));
-        let (r, s) = shown_pixels(&crop, size, 1);
+        let (r, s) = shown_pixels(&crop, size, 1, false);
         assert_eq!((r, s), (Rect::new(440.0, 100.0, 200.0, 500.0), Size::new(800.0, 1000.0)));
-        let (r, _) = shown_pixels(&crop, size, 4);
+        let (r, _) = shown_pixels(&crop, size, 4, false);
         assert_eq!(r, Rect::new(100.0, 160.0, 500.0, 200.0));
     }
 

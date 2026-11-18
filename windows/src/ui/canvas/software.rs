@@ -164,6 +164,9 @@ impl Raster {
             for _ in 0..p.shown[2] as u32 {
                 uv = [uv[1], 1.0 - uv[0]];
             }
+            if p.extra[2] > 0.5 {
+                uv[0] = 1.0 - uv[0];
+            }
             let mut color = sample(rgba, w, h, uv, &out.decode);
             if p.extra[1] > 0.5 {
                 let m = crate::gpu::REC2020_TO_SRGB;

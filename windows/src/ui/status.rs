@@ -29,6 +29,7 @@ pub const HEIGHT: f64 = 28.0;
 const PADDING: f32 = 18.0;
 pub const WORDS: TextStyle = TextStyle::ui(11.0, 400);
 const STRONG: TextStyle = TextStyle::ui(11.0, 600);
+const CAP: TextStyle = TextStyle::ui(9.5, 400);
 
 /// A word's ink.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -66,6 +67,8 @@ pub struct Tools {
     pub cropping: bool,
     /// Couldn't develop: nothing to compare or zoom.
     pub failed: bool,
+    /// Comparing, and whether as a slider: Compare's tools instead.
+    pub compare: Option<bool>,
 }
 
 /// What the line shows.
@@ -89,19 +92,45 @@ enum Word {
     Fit,
     Actual,
     Cancel,
+    SideBySide,
+    Slider,
+    Swap,
+    Done,
+    /// Fit and 100% while comparing: both photographs.
+    FitBoth,
+    ActualBoth,
     Show,
 }
 
 impl Word {
-    const ALL: [Word; 6] = [Word::Original, Word::OriginalMenu, Word::Fit, Word::Actual, Word::Cancel, Word::Show];
+    const ALL: [Word; 12] = [
+        Word::Original,
+        Word::OriginalMenu,
+        Word::Fit,
+        Word::Actual,
+        Word::Cancel,
+        Word::SideBySide,
+        Word::Slider,
+        Word::Swap,
+        Word::Done,
+        Word::FitBoth,
+        Word::ActualBoth,
+        Word::Show,
+    ];
 
     fn tip(self) -> &'static str {
         match self {
             Word::Original => "Hold to show the original (\\ or O)",
-            Word::OriginalMenu => "Choose Original or Edited",
+            Word::OriginalMenu => "Choose what Original does",
             Word::Fit => "Fit photograph (Ctrl+0)",
             Word::Actual => "Actual size (Ctrl+1)",
             Word::Cancel => "Stop exporting",
+            Word::SideBySide => "Show the two side by side (S)",
+            Word::Slider => "Show the two in one frame with a line between them (S)",
+            Word::Swap => "Swap the two photographs' places",
+            Word::Done => "Stop comparing (Esc)",
+            Word::FitBoth => "Fit both photographs (Ctrl+0)",
+            Word::ActualBoth => "Both at actual size (Ctrl+1)",
             Word::Show => "Show what was exported",
         }
     }
@@ -221,7 +250,32 @@ fn paint(hwnd: HWND, dc: HDC) {
             *right = x - gap;
             r
         };
-        if let Some(tools) = line.tools {
+        // A key in a box after a word, as the Mac's `KeyCap`.
+        let cap = |p: &mut Painter, key: &str, right: &mut f32| {
+            let m = p.measure(key, &CAP, 0.0);
+            let r = RectF::new(*right - m.width - 8.0, (h / 2.0 - 8.0).round(), m.width + 8.0, 16.0);
+            p.stroke_round_rect(RectF::new(r.x + 0.5, r.y + 0.5, r.w - 1.0, r.h - 1.0), 3.0, 1.0, Ink::hex(t.hex.track));
+            p.text(key, &CAP, r.x + 4.0, baseline - m.baseline, Ink::hex(t.hex.dim));
+            *right = r.x - 6.0;
+        };
+        let rule = |p: &mut Painter, right: &mut f32| {
+            p.fill_rect(RectF::new(*right, (h / 2.0 - 5.0).round(), 1.0, 10.0), Ink::hex(t.hex.track));
+            *right -= 14.0;
+        };
+        if let Some(slider) = line.tools.and_then(|t| t.compare) {
+            // Side by side  Slider [S] | Swap | Fit  100% | Done [Esc] (`CompareTools`).
+            cap(p, "Esc", &mut right);
+            word(p, "Done", Some(Word::Done), Tone::Dim, true, &mut right, 14.0);
+            rule(p, &mut right);
+            word(p, "100%", Some(Word::ActualBoth), if fitting { Tone::Dim } else { Tone::Paper }, true, &mut right, 14.0);
+            word(p, "Fit", Some(Word::FitBoth), if fitting { Tone::Paper } else { Tone::Dim }, true, &mut right, 14.0);
+            rule(p, &mut right);
+            word(p, "Swap", Some(Word::Swap), Tone::Dim, true, &mut right, 14.0);
+            rule(p, &mut right);
+            cap(p, "S", &mut right);
+            word(p, "Slider", Some(Word::Slider), if slider { Tone::Paper } else { Tone::Dim }, true, &mut right, 12.0);
+            word(p, "Side by side", Some(Word::SideBySide), if slider { Tone::Dim } else { Tone::Paper }, true, &mut right, 16.0);
+        } else if let Some(tools) = line.tools {
             let zoom = !tools.cropping && !tools.failed;
             word(p, "100%", Some(Word::Actual), if fitting { Tone::Dim } else { Tone::Paper }, zoom, &mut right, 14.0);
             word(p, "Fit", Some(Word::Fit), if fitting { Tone::Paper } else { Tone::Dim }, zoom, &mut right, 14.0);
@@ -328,17 +382,25 @@ fn word_at(hwnd: HWND, x: i32, y: i32) -> Option<Word> {
     PLACES.with(|p| p.borrow().iter().find(|(_, r, on)| *on && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h).map(|(w, _, _)| *w))
 }
 
-/// Original ⌄: Original or Edited, the one showing ticked, above the word.
+/// Original ⌄: what pressing Original does, ticked (`OriginalMenu`);
+/// for a RAW shot as RAW+JPEG, which of the two it shows.
 fn original_menu(hwnd: HWND) {
-    const ORIGINAL: usize = 1;
-    const EDITED: usize = 2;
-    let holding = LINE.with(|l| l.borrow().tools.is_some_and(|t| t.holding));
+    use crate::compare::{OriginalMode, OriginalReference};
+    const REFERENCE: usize = 10;
+    let Some((mode, reference, jpeg)) = with_app(|app| (app.model.original_mode(), app.model.original_reference(), app.model.camera_jpeg().is_some())) else { return };
     let place = PLACES.with(|p| p.borrow().iter().find(|(w, _, _)| *w == Word::Original).map(|(_, r, _)| *r));
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
-        for (command, title, on) in [(ORIGINAL, "&Original", holding), (EDITED, "&Edited", !holding)] {
-            let text = wide(title);
-            let _ = AppendMenuW(menu, MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED }, command, pcwstr(&text));
+        for (i, m) in OriginalMode::ALL.into_iter().enumerate() {
+            let text = wide(m.title());
+            let _ = AppendMenuW(menu, MF_STRING | if m == mode { MF_CHECKED } else { MF_UNCHECKED }, 1 + i, pcwstr(&text));
+        }
+        if jpeg {
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+            for (i, r) in OriginalReference::ALL.into_iter().enumerate() {
+                let text = wide(r.title());
+                let _ = AppendMenuW(menu, MF_STRING | if r == reference { MF_CHECKED } else { MF_UNCHECKED }, REFERENCE + i, pcwstr(&text));
+            }
         }
         let s = draw::dpi_of(hwnd);
         let mut at = POINT { x: place.map_or(0, |r| (r.x * s) as i32), y: 0 };
@@ -346,22 +408,30 @@ fn original_menu(hwnd: HWND) {
         let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_LEFTALIGN | TPM_NONOTIFY, at.x, at.y, 0, hwnd, None);
         let _ = DestroyMenu(menu);
         match chosen.0 as usize {
-            ORIGINAL => {
-                with_app(|app| app.model.hold_original(true));
+            0 => {}
+            i if i >= REFERENCE => {
+                if let Some(r) = OriginalReference::ALL.get(i - REFERENCE) {
+                    with_app(|app| app.model.set_original_reference(*r));
+                }
             }
-            EDITED => {
-                with_app(|app| app.model.hold_original(false));
+            i => {
+                if let Some(m) = OriginalMode::ALL.get(i - 1) {
+                    with_app(|app| app.model.set_original_mode(*m));
+                }
             }
-            _ => {}
         }
     }
 }
 
 fn act(word: Word) {
     let command = match word {
-        Word::Fit => id::FIT,
-        Word::Actual => id::ACTUAL,
+        Word::Fit | Word::FitBoth => id::FIT,
+        Word::Actual | Word::ActualBoth => id::ACTUAL,
         Word::Cancel => id::CANCEL_EXPORT,
+        Word::SideBySide => return compare_tool(super::compare::Tool::SideBySide),
+        Word::Slider => return compare_tool(super::compare::Tool::Slider),
+        Word::Swap => return compare_tool(super::compare::Tool::Swap),
+        Word::Done => return compare_tool(super::compare::Tool::Done),
         Word::Show => {
             // The batch's popover, over the word.
             let place = PLACES.with(|p| p.borrow().iter().find(|(w, ..)| *w == Word::Show).map(|(_, r, _)| *r));
@@ -379,6 +449,10 @@ fn act(word: Word) {
         Word::Original | Word::OriginalMenu => return,
     };
     with_app(|app| app.command(command));
+}
+
+fn compare_tool(tool: super::compare::Tool) {
+    with_app(|app| super::compare::act(app, tool));
 }
 
 fn set_hot(hwnd: HWND, hot: Option<Word>) {
@@ -423,6 +497,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
                 let (x, y) = point();
                 match word_at(hwnd, x, y) {
+                    // Split line and Side by side: a click compares with the original.
+                    Some(Word::Original) if with_app(|app| app.model.original_mode() != crate::compare::OriginalMode::Hold).unwrap_or(false) => {
+                        with_app(|app| app.model.toggle_original_compare());
+                    }
                     Some(Word::Original) => {
                         HOLDING.with(|h| h.set(true));
                         SetCapture(hwnd);

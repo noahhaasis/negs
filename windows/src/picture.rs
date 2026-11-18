@@ -92,10 +92,10 @@ impl Picture {
     }
 
     /// The histogram and waveform of the crop, the waveform across the
-    /// photograph as shown after `rotation` quarter turns.
-    pub fn scopes(&self, crop: &CropSettings, rotation: i32) -> Scopes {
+    /// photograph as shown, mirrored and turned.
+    pub fn scopes(&self, crop: &CropSettings, orientation: crate::crop::Orientation) -> Scopes {
         let (rgba, w, h) = &self.inner.small;
-        Scopes::of(rgba, *w as usize, *h as usize, crop, rotation, 1 << 20)
+        Scopes::shown(rgba, *w as usize, *h as usize, crop, orientation, 1 << 20)
     }
 
     pub fn same(&self, other: &Picture) -> bool {

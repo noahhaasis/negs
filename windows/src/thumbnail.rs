@@ -164,9 +164,15 @@ pub fn raw_preview(path: &Path, max_pixels: u32) -> Result<Decoded> {
 /// The photograph at once, laid out at its full size so the canvas doesn't
 /// jump when the developed render arrives. RAW: the embedded preview.
 pub fn placeholder(path: &Path) -> Option<(Picture, Size)> {
+    let (rgba, width, height, full) = placeholder_pixels(path)?;
+    Some((Picture::new(rgba, width, height), full))
+}
+
+/// `placeholder`'s RGBA pixels, kept on the CPU (Compare's stand-in).
+pub fn placeholder_pixels(path: &Path) -> Option<(Vec<u8>, u32, u32, Size)> {
     com_thread();
     let decoded = if is_raw(path) { raw_preview(path, 2048).ok()? } else { wic(path, 2048, false).ok()? };
-    Some((Picture::new(decoded.rgba, decoded.width, decoded.height), decoded.full))
+    Some((decoded.rgba, decoded.width, decoded.height, decoded.full))
 }
 
 /// Show Original for JPEG, PNG and TIFF: the file itself with its colour

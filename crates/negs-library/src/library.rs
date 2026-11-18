@@ -1110,19 +1110,50 @@ impl Library {
     pub fn paste_edits(&mut self, items: &[Item]) -> Outcome {
         let Some(copied) = self.copied.clone() else { return Outcome::default() };
         let from_unedited = (!copied.edited).then(|| copied.groups.clone());
-        self.change_edits(items, "Paste Edits", "Edits Pasted", false, from_unedited, |target| EditGroup::merge(&copied.groups, &copied.state, target))
+        self.change_edits(items, "Paste Edits", "Edits Pasted", false, from_unedited, |_, target| EditGroup::merge(&copied.groups, &copied.state, target))
     }
 
     /// Applies the last photograph left with edits, no copy step.
     pub fn paste_from_previous(&mut self, items: &[Item]) -> Outcome {
         let Some(previous) = self.previous.clone() else { return Outcome::default() };
-        self.change_edits(items, "Paste from Previous", "Edits Pasted", false, None, |target| EditGroup::merge(&EditGroup::standard(), &previous, target))
+        self.change_edits(items, "Paste from Previous", "Edits Pasted", false, None, |_, target| EditGroup::merge(&EditGroup::standard(), &previous, target))
     }
 
     /// Removes the edits of `items`, crop and rotation included: they are
     /// as if never edited. Ratings and flags stay.
     pub fn reset_edits(&mut self, items: &[Item]) -> Outcome {
-        self.change_edits(items, "Reset Edits", "Edits Reset", true, None, EditState::clone)
+        self.change_edits(items, "Reset Edits", "Edits Reset", true, None, |_, target| target.clone())
+    }
+
+    /// Changes each of `items`' edits by `transform` as one undo step
+    /// (`changeEdits`): the open one in place, the others in their
+    /// sidecars. Use for whole roll prints them all as frames of one roll.
+    pub fn change_each_edit(&mut self, items: &[Item], action: &str, note: &str, transform: impl Fn(&Item, &EditState) -> EditState) -> Outcome {
+        self.change_edits(items, action, note, false, None, transform)
+    }
+
+    /// `item`'s edits as it opens with them (`openingState`); None if its
+    /// sidecar can't be read.
+    pub fn opening_state(&mut self, item: &Item) -> Option<EditState> {
+        if let Some(open) = self.open.as_ref().filter(|o| o.item == *item) {
+            return Some(open.state.clone());
+        }
+        if !self.sidecars {
+            return Some(self.defaults.plain_state());
+        }
+        let restore = self.restore(&item.photo, item.variant.as_deref());
+        if restore.problem.is_some() {
+            return None;
+        }
+        Some(match restore.edits {
+            None => self.defaults.plain_state(),
+            Some(saved) => self.defaults.restored(&saved.state),
+        })
+    }
+
+    /// A new id for a variant or a roll, as the library makes them.
+    pub fn new_id(&mut self) -> String {
+        self.ids.next()
     }
 
     /// Changes the edits of `items` as one undo step: the open one in
@@ -1137,7 +1168,7 @@ impl Library {
         note: &str,
         reset: bool,
         from_unedited: Option<BTreeSet<EditGroup>>,
-        transform: impl Fn(&EditState) -> EditState,
+        transform: impl Fn(&Item, &EditState) -> EditState,
     ) -> Outcome {
         let mut outcome = Outcome::default();
         if items.is_empty() {
@@ -1147,7 +1178,8 @@ impl Library {
         if !self.sidecars {
             // Nothing is saved per photograph: only the open one changes.
             if let Some(open) = self.open.as_mut().filter(|o| items.contains(&o.item)) {
-                open.state = if reset { self.defaults.new_photo_state(&open.state) } else { transform(&open.state) };
+                let next = if reset { self.defaults.new_photo_state(&open.state) } else { transform(&open.item, &open.state) };
+                open.state = next;
                 outcome.open_changed = true;
             }
             let unsaved = items.iter().any(|i| Some(i) != open_item.as_ref()).then(|| "Not saved: Settings › Save ratings and edits is off".to_string());
@@ -1182,7 +1214,7 @@ impl Library {
                 if from_unedited.is_some() && !self.open_edited() {
                     continue;
                 }
-                let pasted = transform(&open.state);
+                let pasted = transform(item, &open.state);
                 let cleared = from_unedited.as_ref().is_some_and(|g| self.defaults.holds_no_edits(&pasted, g));
                 recorder.touch(&photo);
                 outcome.open_changed = true;
@@ -1244,7 +1276,7 @@ impl Library {
                     Some(saved) => self.defaults.restored(&saved.state),
                     None => self.defaults.plain_state(),
                 };
-                let pasted = transform(&base);
+                let pasted = transform(item, &base);
                 // Its match, if on, is solved again when it opens.
                 if !from_unedited.as_ref().is_some_and(|g| self.defaults.holds_no_edits(&pasted, g)) {
                     edits = Some(encode_edits(&pasted, false, &table));

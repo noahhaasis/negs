@@ -4,7 +4,14 @@
 
 /// A control's tooltip. A grain lane (`film_render.grain.rms_granularity.1`)
 /// shares its array's.
+/// Prep › Backlight, on a negative (`NegativeScanRows`; not in the Mac's
+/// `ControlHelp` table).
+pub const SCAN_ILLUMINANT: &str = "The light behind the negative while it was photographed or scanned. Daylight suits most light pads and scanners.";
+
 pub fn text(path: &str) -> Option<&'static str> {
+    if path == crate::negative::SCAN_ILLUMINANT {
+        return Some(SCAN_ILLUMINANT);
+    }
     let lookup = |p: &str| PATHS.iter().find(|(key, _)| *key == p).map(|(_, text)| *text);
     lookup(path).or_else(|| crate::state::grain_lane(path).and_then(|(field, _)| lookup(&format!("film_render.grain.{field}"))))
 }
@@ -186,7 +193,7 @@ mod tests {
         let mut missing: Vec<&str> = vec![];
         for control in controls {
             match control {
-                Adjustment::BalancePrint { help, .. } => assert!(!help.is_empty()),
+                Adjustment::BalancePrint { help, .. } | Adjustment::FilterLink { help } => assert!(!help.is_empty()),
                 other if text(other.path()).is_none() => missing.push(other.path()),
                 _ => {}
             }

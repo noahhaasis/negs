@@ -103,6 +103,14 @@ enum When {
     FilmStyle,
     /// Hidden for B&W films (one emulsion): per-channel grain lanes.
     ColorFilm,
+    /// Lab › Camera › Color Filter: B&W films, or while a filter is set.
+    ColorFilter,
+    /// The photograph is read as a negative (Prep's Film base and Balance).
+    Negative,
+    /// Prep › Backlight, once its "Backlight…" line was clicked.
+    Backlight,
+    /// A frame of a roll with a filtration of its own.
+    OwnFiltration,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -138,8 +146,16 @@ enum Kind {
     Color(bool),
     /// The Balance Print button: title, tooltip.
     BalancePrint(&'static str, &'static str),
+    /// Enlarger › Shifts move (a preference): its tooltip.
+    FilterLink(&'static str),
     /// The tone graph atop Print Curves, with its label and channel buttons.
     ToneGraph,
+    /// Color Filter's glass discs, the hint and the colour film warning.
+    ColorFilter,
+    /// Prep's buttons on a negative, at the row's end: title, tooltip.
+    Actions(&'static [(&'static str, &'static str)]),
+    /// Prep › Flat field: the light frame's name, Choose… and Off (`FlatFieldRow`).
+    FlatField,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -148,7 +164,39 @@ enum Note {
     Size,
     /// What the brightness match did, or why it can't.
     Brightness,
+    /// Where the negative's film base came from, or what's being read.
+    NegativeBase,
+    /// The scan doesn't look like a colour negative.
+    NegativeWarning,
+    /// The base is a guess: pick it from the rebate.
+    NegativeGuess,
+    /// A RAW negative not on Daylight white balance.
+    NegativeDaylight,
+    /// The light frame isn't used on this frame, and why.
+    FlatField,
+    /// A frame of a roll: what's the roll's and what's its own.
+    Roll,
+    /// A frame of a roll with its own filtration: why.
+    OwnFiltration,
 }
+
+/// Prep's buttons on a negative (`NegativePrep`).
+const FIND_BUTTONS: &[(&str, &str)] = &[
+    ("Find again", "Looks for the clear film again, forgetting a picked point."),
+    ("Pick from rebate", "Click the clear film between frames or along the edge. Esc cancels."),
+];
+const CROP_BUTTONS: &[(&str, &str)] = &[("Crop to picture", "Crops to the picture inside the clear film, levelled by the rebate.")];
+const ROLL_BUTTONS: &[(&str, &str)] = &[(
+    "Use for whole roll",
+    "Prints every photograph in view as a frame of this roll: this film, backlight, base and filtration, each frame with its own exposure. Frames that set their own filtration keep it.",
+)];
+const ROLL_FILTRATION_BUTTONS: &[(&str, &str)] = &[("Roll\u{2019}s filtration", "Prints this frame with the roll\u{2019}s magenta and yellow again, and meters its exposure.")];
+const BALANCE_BUTTONS: &[(&str, &str)] = &[
+    ("Auto", "Sets the enlarger's magenta, yellow and print exposure so this frame prints as a minilab's auto printer would."),
+    ("Pick neutral", "Click something that should be grey. Esc cancels."),
+];
+/// The Film module's words for what a negative skips.
+const NEGATIVE_SKIPS: [&str; 3] = ["Grain", "Halation", "DIR Couplers"];
 
 /// What a "N more" line folds: a module's controls, a section's modules
 /// and rows, or (at the Lab's top) View › Show All Controls.
@@ -157,6 +205,8 @@ enum More {
     Module(usize),
     Section(Section),
     All,
+    /// Prep › Film base on a negative: "Backlight…" (`NegativePrep`'s `MoreLine`).
+    Backlight,
 }
 
 /// A "N more" line's words and what a click does; None hides it.
@@ -166,6 +216,7 @@ fn more_line(model: &Model, more: More) -> Option<(String, crate::edits::MoreAct
         More::Module(index) => edits::module_more(model, index),
         More::Section(section) => edits::section_more(model, section),
         More::All => model.prefs.lab_all_controls.then(|| ("Showing all controls. Show fewer".into(), MoreAction::ShowFewer)),
+        More::Backlight => (model.is_negative() && !model.negative.backlight_shown).then(|| ("Backlight…".into(), MoreAction::ShowFewer)),
     }
 }
 
@@ -179,6 +230,9 @@ struct Row {
     print: bool,
     /// Border controls, disabled while the border is off.
     border: bool,
+    /// Prep's tone, colour and detail: on a scene, before the film; a
+    /// negative is film already (the convert-film route).
+    scene: bool,
     /// An adjustment group's control: the group and its place, for the
     /// Lab's basics.
     basic: Option<(usize, usize)>,
@@ -278,7 +332,7 @@ pub fn register() {
     }
 }
 
-pub(super) fn decimal_separator() -> char {
+pub(crate) fn decimal_separator() -> char {
     use windows::Win32::Globalization::{GetLocaleInfoEx, LOCALE_SDECIMAL};
     let mut buffer = [0u16; 8];
     let n = unsafe { GetLocaleInfoEx(PCWSTR::null(), LOCALE_SDECIMAL, Some(&mut buffer)) };
@@ -461,7 +515,7 @@ impl Inspector {
 fn rows() -> Vec<Row> {
     let mut rows = vec![];
     let add = |rows: &mut Vec<Row>, kind: Kind, tab: Tab, group: Option<usize>, when: When| {
-        rows.push(Row { kind, tab, group, when, print: false, border: false, basic: None, controls: vec![], shown: false });
+        rows.push(Row { kind, tab, group, when, print: false, border: false, scene: false, basic: None, controls: vec![], shown: false });
         rows.len() - 1
     };
     let prep = Tab::Prep;
@@ -470,6 +524,27 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::Choice("White balance", "io.raw_white_balance.mode", state::WHITE_BALANCE), prep, None, When::Raw);
     add(&mut rows, Kind::Slider(state::WB_TEMPERATURE), prep, None, When::CustomWhiteBalance);
     add(&mut rows, Kind::Slider(state::WB_TINT), prep, None, When::CustomWhiteBalance);
+    // Your negative: the film base, the scan light and the balance.
+    add(&mut rows, Kind::Section("Film base"), prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::NegativeBase), prep, None, When::Note);
+    add(&mut rows, Kind::Note(Note::NegativeWarning), prep, None, When::Note);
+    add(&mut rows, Kind::Note(Note::NegativeGuess), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(FIND_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::FlatField, prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::FlatField), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(CROP_BUTTONS), prep, None, When::Negative);
+    // Behind "Backlight…", as on the Mac: Daylight suits most light pads and scanners.
+    add(&mut rows, Kind::Choice("Backlight", crate::negative::SCAN_ILLUMINANT, &["D55", "D50", "D65"]), prep, None, When::Backlight);
+    add(&mut rows, Kind::More(More::Backlight), prep, None, When::More(More::Backlight));
+    add(&mut rows, Kind::Note(Note::Roll), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(ROLL_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::Section("Balance"), prep, None, When::Negative);
+    add(&mut rows, Kind::Footer("Balance Print ran when the base was found, and the print exposure was metered. Auto prints this frame as a minilab would, and runs again on each new paper; the picker balances on something grey. Both set Lab › Enlarger."), prep, None, When::Negative);
+    add(&mut rows, Kind::Actions(BALANCE_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::OwnFiltration), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(ROLL_FILTRATION_BUTTONS), prep, None, When::OwnFiltration);
+    add(&mut rows, Kind::Note(Note::NegativeDaylight), prep, None, When::Note);
+    let scene = rows.len();
     add(&mut rows, Kind::Section("Brightness"), prep, None, When::Always);
     add(&mut rows, Kind::MatchBrightness, prep, None, When::Always);
     add(&mut rows, Kind::ExposureOffset, prep, None, When::Always);
@@ -481,6 +556,9 @@ fn rows() -> Vec<Row> {
         for slider in sliders {
             add(&mut rows, Kind::Slider(*slider), prep, None, When::Always);
         }
+    }
+    for row in &mut rows[scene..] {
+        row.scene = true;
     }
     // How the file is read; set once per photograph.
     add(&mut rows, Kind::Section("Lens"), prep, None, When::LensCorrection);
@@ -507,6 +585,7 @@ fn rows() -> Vec<Row> {
                     Adjustment::Toggle { title, path } => Kind::Toggle(title, path),
                     Adjustment::Choice { title, path, options } => Kind::Choice(title, path, options),
                     Adjustment::BalancePrint { title, help } => Kind::BalancePrint(title, help),
+                    Adjustment::FilterLink { help } => Kind::FilterLink(help),
                     slider => Kind::Slider(slider),
                 };
                 let when = if state::color_only(control.path()) { When::ColorFilm } else { When::Always };
@@ -526,13 +605,18 @@ fn rows() -> Vec<Row> {
     // View › Show All Controls says so where it shows, with the way back.
     add(&mut rows, Kind::More(More::All), lab, None, When::More(More::All));
     add(&mut rows, Kind::Section("Camera"), lab, None, When::Always);
+    add(&mut rows, Kind::Footer("The camera is skipped: your negative was exposed already."), lab, None, When::Negative);
     add(&mut rows, Kind::Slider(state::NEGATIVE_EXPOSURE), lab, None, When::Always);
     add(&mut rows, Kind::FilmFormat, lab, None, When::Always);
     add(&mut rows, Kind::Slider(state::FILM_FORMAT), lab, None, When::CustomFormat);
     add(&mut rows, Kind::Slider(state::LENS_BLUR), lab, None, When::Shows(Section::Camera, state::LENS_BLUR.path()));
+    // Its switch takes the glass off and puts the last one back.
+    let filter = add(&mut rows, Kind::Group { title: "Color Filter", enable: Some(state::ColorFilter::PATH) }, lab, None, When::ColorFilter);
+    add(&mut rows, Kind::ColorFilter, lab, Some(filter), When::ColorFilter);
     groups(&mut rows, Section::Camera);
     section_more(&mut rows, Section::Camera);
     add(&mut rows, Kind::Section("Film"), lab, None, When::Always);
+    add(&mut rows, Kind::Footer("Your negative is read through the film's curves and base. Its grain, halation and couplers are skipped: the negative has them already."), lab, None, When::Negative);
     // The stock's development time, from the times it was measured at.
     add(&mut rows, Kind::DevTime(false), lab, None, When::FilmTimes);
     groups(&mut rows, Section::Film);
@@ -703,6 +787,9 @@ fn stock_times(model: &Model, paper: bool) -> Vec<f64> {
 fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> bool {
     let scanning = json::boolean(model.value("io.scan_film"));
     let border = model.state.border;
+    if row.scene && model.is_negative() {
+        return false;
+    }
     let shown = match row.when {
         When::Always => true,
         When::FilmTimes => stock_times(model, false).len() > 1,
@@ -715,6 +802,10 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
         When::CustomWhiteBalance => model.is_raw && json::string(model.value("io.raw_white_balance.mode")) == "custom",
         When::Scanning => scanning,
         When::ColorFilm => !model.film_is_bw(),
+        When::ColorFilter => model.shows_color_filter(),
+        When::Negative => model.is_negative(),
+        When::Backlight => model.is_negative() && model.negative.backlight_shown,
+        When::OwnFiltration => model.is_negative() && model.state.roll.as_ref().is_some_and(|r| !r.filtered(&model.state)),
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
         When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
         When::Note => matches!(row.kind, Kind::Note(note) if !note_text(model, note).is_empty()),
@@ -734,6 +825,34 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
     // changed from its default.
     let basic = row.basic.is_none_or(|(index, place)| crate::edits::control_shows(model, index, place));
     shown && basic && row.group.is_none_or(|g| group_shown(g))
+}
+
+/// A Film module a negative skips: it has its grain, halation and couplers already.
+fn negative_skips(model: &Model, title: &str) -> bool {
+    NEGATIVE_SKIPS.contains(&title) && model.is_negative()
+}
+
+/// A module's switch: on for a bool path, and for Color Filter while a
+/// glass is in front of the lens.
+fn switch_on(model: &Model, path: &str) -> bool {
+    if path == state::ColorFilter::PATH { model.color_filter() != state::ColorFilter::NONE } else { json::boolean(model.value(path)) }
+}
+
+/// Under Color Filter's discs: what the glass does and costs this film, and
+/// on colour film the warning (`ColorFilterPicker`).
+fn color_filter_hints(model: &Model, decimal: char) -> (String, String) {
+    let chosen = model.chosen_color_filter();
+    let film = model.stocks.iter().find(|s| !s.paper && s.id == model.state.film).map_or("this film", |s| s.name.as_str());
+    // Auto exposure meters through the glass, and so does matching the camera's brightness.
+    let metered = json::boolean(model.value("camera.auto_exposure")) || model.matches_brightness();
+    let stops = chosen.and_then(|f| model.color_filter_stops(&f.key));
+    let hint = state::ColorFilter::hint(chosen, stops, film, metered, decimal);
+    let warning = if chosen.is_some() && !model.film_is_bw() {
+        "Taking filters are made for black-and-white film. On colour film this one tints the whole photograph.".to_string()
+    } else {
+        String::new()
+    };
+    (hint, warning)
 }
 
 /// What an export makes, over the Export button: "6048 × 4024 · PNG 16-bit
@@ -759,6 +878,30 @@ fn note_text(model: &Model, note: Note) -> String {
     match note {
         Note::Size => size_note(model),
         Note::Brightness => model.brightness_match_note().unwrap_or_default(),
+        _ if !model.is_negative() => String::new(),
+        Note::NegativeBase => model.negative_sentence(),
+        Note::NegativeWarning => model.negative_warning().unwrap_or_default().into(),
+        Note::NegativeGuess => match model.negative_base() {
+            Some(base) if base.guessed() && model.state.roll.is_some() => "Pick from the rebate if the scan shows clear film; otherwise Use for whole roll on a frame that has it.".into(),
+            Some(base) if base.guessed() => "Pick from the rebate if the scan shows clear film; otherwise this guess can tint the print.".into(),
+            _ => String::new(),
+        },
+        Note::FlatField => model.flat_field().hint().unwrap_or_default(),
+        Note::Roll if model.is_negative() && model.state.roll.is_some() => {
+            "A frame of a roll: the film, backlight, base and filtration are the roll\u{2019}s; the print exposure is this frame\u{2019}s own.".into()
+        }
+        Note::OwnFiltration if model.is_negative() => match &model.state.roll {
+            Some(roll) if !roll.filtered(&model.state) => roll.own_filtration(&model.state).into(),
+            _ => String::new(),
+        },
+        Note::Roll | Note::OwnFiltration => String::new(),
+        Note::NegativeDaylight => {
+            if model.is_raw && json::string(model.value("io.raw_white_balance.mode")) != "daylight" {
+                "Set White balance to Daylight for a negative on a daylight backlight; As shot can tint it.".into()
+            } else {
+                String::new()
+            }
+        }
     }
 }
 
@@ -963,10 +1106,17 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
     // A note's height follows its text, so set it before laying out.
     let mut note_changed = false;
     for row in ins.rows.iter().filter(|r| r.shown) {
-        if let Kind::Note(note) = row.kind {
-            let text = note_text(model, note);
-            if window_text(row.controls[0]) != text {
-                set_text(row.controls[0], &text);
+        let texts = match row.kind {
+            Kind::Note(note) => vec![(row.controls[0], note_text(model, note))],
+            Kind::ColorFilter => {
+                let (hint, warning) = color_filter_hints(model, ins.decimal);
+                vec![(row.controls[1], hint), (row.controls[2], warning)]
+            }
+            _ => continue,
+        };
+        for (control, text) in texts {
+            if window_text(control) != text {
+                set_text(control, &text);
                 note_changed = true;
             }
         }
@@ -1140,6 +1290,11 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             super::dialogs::tooltip(c, crate::help::text(state::FILM_FORMAT.path()).unwrap_or_default());
             controls.push(c);
         }
+        Kind::ColorFilter => {
+            controls.push(super::color_filter::create(parent, id(ACTION)));
+            controls.push(ink_static("", Role::Hint, LABEL, false));
+            controls.push(ink_static("", Role::Hint, EDIT, false));
+        }
         Kind::ToneGraph => {
             let text = create(w!("STATIC"), "Tone graph", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.small);
             controls.push(text);
@@ -1155,6 +1310,31 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 }
                 super::dialogs::tooltip(b, &format!("Show {}", names[i]));
                 controls.push(b);
+            }
+        }
+        Kind::Actions(buttons) => {
+            for (i, (title, help)) in buttons.iter().enumerate() {
+                let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(i as u16), fonts.ui);
+                draw::set_role(c, Role::Outlined);
+                draw::track_hover(c);
+                super::dialogs::tooltip(c, help);
+                controls.push(c);
+            }
+        }
+        Kind::FlatField => {
+            let help = crate::negative::FlatField::HELP;
+            let text = label("Flat field", fonts.ui);
+            super::dialogs::tooltip(text, help);
+            controls.push(text);
+            let value = ink_static("Off", Role::Readout, EDIT, true);
+            super::dialogs::tooltip(value, help);
+            controls.push(value);
+            for (part, title) in [(ACTION, "Choose…"), (RESET, "Off")] {
+                let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(part), fonts.ui);
+                draw::set_role(c, Role::Outlined);
+                draw::track_hover(c);
+                super::dialogs::tooltip(c, if part == ACTION { "Choose the light frame: a frame of the bare light, shot with this roll's camera, lens and aperture." } else { "Stop dividing the scan by the light frame." });
+                controls.push(c);
             }
         }
         Kind::BalancePrint(title, help) => {
@@ -1208,6 +1388,18 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             controls.push(value);
         }
         Kind::Note(_) => controls.push(ink_static("", Role::Hint, LABEL, false)),
+        Kind::FilterLink(help) => {
+            controls.push(label("Shifts move", fonts.ui));
+            let c = combo(false);
+            for link in state::FilterLink::ALL {
+                let text = wide(link.title());
+                unsafe {
+                    SendMessageW(c, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+                }
+            }
+            super::dialogs::tooltip(c, help);
+            controls.push(c);
+        }
         Kind::Choice(title, path, options) => {
             controls.push(label(title, fonts.ui));
             let c = combo(false);
@@ -1337,7 +1529,7 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
                 // A section's line sits 6 DIPs lower, the Lab's top one 10.
                 let top = ins.px(match more {
                     More::Module(_) => 2.0,
-                    More::Section(_) => 8.0,
+                    More::Section(_) | More::Backlight => 8.0,
                     More::All => 10.0,
                 });
                 positions.push((c[0], gutter - margin, y + top - ins.px(4.0), right - gutter + 2 * margin, ins.px(25.0)));
@@ -1399,12 +1591,56 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
                 positions.push((c[1], gutter, y + ins.px(36.0), right - gutter, ins.px(168.0)));
                 ins.px(36.0 + 168.0 + 6.0)
             }
+            Kind::ColorFilter => {
+                let picker = ins.px(super::color_filter::HEIGHT);
+                positions.push((c[0], 0, y, width, picker));
+                let mut height = picker;
+                for &hint in &c[1..] {
+                    let text_height = if window_text(hint).is_empty() { 0 } else { footer_height(ins, hint, right - gutter) };
+                    positions.push((hint, gutter, y + height, right - gutter, text_height));
+                    if text_height > 0 {
+                        height += text_height + ins.px(6.0);
+                    }
+                }
+                height + ins.px(4.0)
+            }
             Kind::BalancePrint(title, _) => {
                 let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
                 positions.push((c[0], right - button + margin, y, button, ins.px(35.0)));
                 ins.px(35.0)
             }
-            Kind::Choice(..) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
+            Kind::FlatField => {
+                // The label, the light frame's name, then Choose… and (when on) Off at the row's end.
+                let on = window_text(c[1]) != "Off";
+                let mut x = right + margin;
+                for (i, title) in [(3, "Off"), (2, "Choose…")] {
+                    let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                    if i == 3 && !on {
+                        positions.push((c[3], x, y, 0, 0));
+                        continue;
+                    }
+                    x -= button;
+                    positions.push((c[i], x, y + (row_h - ins.px(35.0)) / 2, button, ins.px(35.0)));
+                    x -= ins.px(8.0) - 2 * margin;
+                }
+                let label = (column - gutter).min(ins.px(ink::width("Flat field", &ink::LABEL) as f64 + 12.0));
+                positions.push((c[0], gutter, y, label, row_h));
+                // Clear of the buttons' windows, which paint their margins.
+                positions.push((c[1], gutter + label, y, (x - margin - gutter - label).max(0), row_h));
+                row_h.max(ins.px(39.0))
+            }
+            Kind::Actions(buttons) => {
+                // At the row's end, 8 apart, as `NegativePrep.buttons`.
+                let mut x = right + margin;
+                for (i, (title, _)) in buttons.iter().enumerate().rev() {
+                    let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                    x -= button;
+                    positions.push((c[i], x, y, button, ins.px(35.0)));
+                    x -= ins.px(8.0) - 2 * margin;
+                }
+                ins.px(39.0)
+            }
+            Kind::Choice(..) | Kind::FilterLink(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
                 // The label, and the value at the row's end; the box takes
                 // the rest of the line, so a click anywhere after the label opens it.
                 let label = (column - gutter).min(ins.px(ink::width(&window_text(c[0]), &ink::LABEL) as f64 + 12.0)).max(ins.px(60.0));
@@ -1468,7 +1704,13 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
     let mut placed = std::collections::HashMap::new();
     unsafe {
         let mut defer = BeginDeferWindowPos(positions.len() as i32).ok();
+        // Wrapped hints repaint whole when they move: a static resized
+        // repaints only what it gained, leaving two wrappings side by side.
+        let mut hints = vec![];
         for (hwnd, x, y, w, h) in positions {
+            if draw::role_of(hwnd) == Some(Role::Hint) {
+                hints.push(hwnd);
+            }
             let top = y - ins.scroll;
             placed.insert(hwnd.0 as isize, top);
             let mut at = top;
@@ -1495,6 +1737,9 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
         }
         if let Some(d) = defer {
             let _ = EndDeferWindowPos(d);
+        }
+        for hwnd in hints {
+            let _ = InvalidateRect(hwnd, None, false);
         }
         if !moves.is_empty() {
             // Revealed rows wait until the rows below have made room.
@@ -1722,7 +1967,11 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
     let mut group_off = vec![false; ins.rows.len()];
     for (i, row) in ins.rows.iter().enumerate() {
         if let Kind::Group { enable: Some(path), .. } = row.kind {
-            group_off[i] = !json::boolean(model.value(path));
+            // The glass can be changed with the filter off (`disablesContent: false`).
+            group_off[i] = path != state::ColorFilter::PATH && !switch_on(model, path);
+        }
+        if let Kind::Group { title, .. } = row.kind {
+            group_off[i] |= negative_skips(model, title);
         }
     }
     let decimal = ins.decimal;
@@ -1741,7 +1990,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 let section = [Section::Camera, Section::Film, Section::Print, Section::Scan].into_iter().find(|&s| crate::edits::section_title(s) == title);
                 let look = section.map_or_else(ink::Look::default, |s| ink::Look {
                     edited: crate::edits::section_count(s, model) > 0,
-                    skipped: s == Section::Print && scanning,
+                    skipped: (s == Section::Print && scanning) || (s == Section::Camera && model.is_negative()),
                     ..Default::default()
                 });
                 ink::set_look(c[0], look);
@@ -1769,24 +2018,36 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     (Some(index), _) => crate::edits::group_count(index, model) > 0,
                     (None, "Output") => output_changed(model),
                     (None, "Input Colour") => crate::edits::INPUT_PATHS.iter().any(|p| model.is_modified(p)),
+                    (None, "Color Filter") => model.is_modified(state::ColorFilter::PATH),
                     _ => false,
                 };
-                let off = switch.is_some_and(|path| !json::boolean(model.value(path)));
-                let skipped = row.print && scanning;
-                let summary = index.and_then(|index| group_summary(model, index, decimal)).unwrap_or_default();
+                let off = switch.is_some_and(|path| !switch_on(model, path));
+                let skipped = (row.print && scanning) || negative_skips(model, title);
+                let summary = match title {
+                    "Color Filter" => model.chosen_color_filter().map_or_else(|| "Off".into(), |f| f.name.clone()),
+                    _ => index.and_then(|index| group_summary(model, index, decimal)).unwrap_or_default(),
+                };
                 unsafe {
                     // Read out with its state, as the foldouts are.
                     let open = expanded[i] as isize + 2 * skipped as isize + 4;
                     if GetWindowLongPtrW(c[0], GWLP_USERDATA) != open {
                         SetWindowLongPtrW(c[0], GWLP_USERDATA, open);
-                        let state = if skipped { "skipped while scanning film" } else if expanded[i] { "expanded" } else { "collapsed" };
+                        let state = if skipped && model.is_negative() {
+                            "skipped on a negative"
+                        } else if skipped {
+                            "skipped while scanning film"
+                        } else if expanded[i] {
+                            "expanded"
+                        } else {
+                            "collapsed"
+                        };
                         super::accessible_name(c[0], &format!("{title}, {state}"));
                     }
                 }
                 ink::set_look(c[0], ink::Look { open: expanded[i], off, edited, skipped, summary, ..Default::default() });
                 enable(c[0], catalog);
                 if let Some(path) = switch {
-                    set_check(c[1], json::boolean(model.value(path)));
+                    set_check(c[1], switch_on(model, path));
                     enable(c[1], catalog && !skipped);
                     ink::set_look(c[1], ink::Look { skipped, ..Default::default() });
                 }
@@ -1855,6 +2116,10 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 }
                 enable_all(c, on);
             }
+            Kind::ColorFilter => {
+                super::color_filter::update(c[0], model, on);
+                ink::set_look(c[2], ink::Look { warn: true, ..Default::default() });
+            }
             Kind::ToneGraph => {
                 // Not off with the print curves: a contrast drag turns them on.
                 let on = catalog && !scanning;
@@ -1864,6 +2129,16 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 }
                 enable_all(c, on);
                 super::tone_graph::update(c[1], model, on, ins.dpi, decimal);
+            }
+            Kind::Actions(_) => enable_all(c, catalog && !model.negative_busy()),
+            Kind::FlatField => {
+                let flat = model.flat_field();
+                set_text(c[1], &flat.value());
+                ink::set_changed(c[0], flat.is_on());
+                enable_all(c, catalog && !model.negative_busy());
+                if !flat.is_on() {
+                    enable(c[3], false);
+                }
             }
             Kind::BalancePrint(title, _) => {
                 set_text(c[0], if model.balancing_print { "Balancing…" } else { title });
@@ -1911,6 +2186,15 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 let b = model.state.border;
                 set_check(c[0], [b.enabled, b.instagram, b.export][which as usize]);
                 enable(c[0], catalog && (which == 0 || b.enabled));
+            }
+            Kind::FilterLink(_) => {
+                let index = state::FilterLink::ALL.iter().position(|&l| l == model.filter_link()).unwrap_or(0) as isize;
+                unsafe {
+                    if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
+                        SendMessageW(c[1], CB_SETCURSEL, WPARAM(index as usize), LPARAM(0));
+                    }
+                }
+                enable_all(c, on);
             }
             Kind::Choice(_, path, options) => {
                 ink::set_changed(c[1], model.is_modified(path));
@@ -2007,6 +2291,9 @@ pub fn parse_number(text: &str) -> Option<f64> {
 fn set_slider(app: &mut App, index: usize, value: f64) {
     let kind = app.inspector.rows[index].kind;
     match kind {
+        Kind::Slider(Adjustment::Slider { path, low, high, step, .. }) if state::FilterLink::links(path) => {
+            app.model.set_filter_shift(path, state::snap(value, low, high, step));
+        }
         Kind::Slider(Adjustment::Slider { path, low, high, step, .. }) => {
             app.model.set(path, json::num(state::snap(value, low, high, step)));
         }
@@ -2018,6 +2305,10 @@ fn set_slider(app: &mut App, index: usize, value: f64) {
 
 fn reset_row(app: &mut App, index: usize) {
     match app.inspector.rows[index].kind {
+        Kind::Slider(adjustment) if state::FilterLink::links(adjustment.path()) && DOUBLE_CLICK_RESET.get() => {
+            app.model.reset_filter_shift_after_click(adjustment.path())
+        }
+        Kind::Slider(adjustment) if state::FilterLink::links(adjustment.path()) => app.model.reset_filter_shift(adjustment.path()),
         Kind::Slider(adjustment) => app.model.reset_value(adjustment.path()),
         Kind::Toggle(_, path) | Kind::Choice(_, path, _) => app.model.reset_value(path),
         Kind::BorderSlider(_, field) => {
@@ -2075,9 +2366,15 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.prefs.save();
             app.model.dirty |= dirty::STRUCTURE;
         }
+        (Kind::Group { enable: Some(state::ColorFilter::PATH), .. }, CHECK) if code == BN_CLICKED => app.model.switch_color_filter(checked()),
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::MatchBrightness, CHECK) if code == BN_CLICKED => app.model.set_matches_brightness(checked()),
+        (Kind::More(More::Backlight), ACTION) if code == BN_CLICKED => {
+            app.model.negative.backlight_shown = true;
+            app.inspector.slide = true;
+            app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
+        }
         (Kind::More(more), ACTION) if code == BN_CLICKED => {
             let Some((_, action)) = more_line(&app.model, more) else { return };
             let prefs = &mut app.model.prefs;
@@ -2095,6 +2392,26 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.choose_film_format(usize::try_from(index).ok().filter(|&i| i < state::FILM_FORMATS.len()));
         }
         (Kind::BalancePrint(..), ACTION) if code == BN_CLICKED => app.model.balance_print(),
+        (Kind::FlatField, ACTION) if code == BN_CLICKED => {
+            let main = app.main;
+            if let Some(light) = super::dialogs::choose_light_frame(main, app.model.source.as_deref()) {
+                app.model.choose_flat_field(&light);
+            }
+        }
+        (Kind::FlatField, RESET) if code == BN_CLICKED => app.model.clear_flat_field(),
+        (Kind::Actions(buttons), p) if code == BN_CLICKED => {
+            use crate::negative::Pick;
+            match buttons.get(p as usize).map(|b| b.0) {
+                Some("Find again") => app.model.redetect_negative_base(),
+                Some("Pick from rebate") => app.model.begin_negative_pick(Pick::Base),
+                Some("Crop to picture") => app.model.crop_to_picture(),
+                Some("Auto") => app.model.auto_print_negative(),
+                Some("Pick neutral") => app.model.begin_negative_pick(Pick::Neutral),
+                Some("Use for whole roll") => app.model.use_negative_for_roll(),
+                Some("Roll\u{2019}s filtration") => app.model.use_roll_filtration(),
+                _ => {}
+            }
+        }
         (Kind::ToneGraph, p) if code == BN_CLICKED && (p as usize) < super::tone_graph::CHANNELS.len() => {
             app.model.prefs.tone_graph_channel = super::tone_graph::CHANNELS[p as usize].into();
             app.model.prefs.save();
@@ -2123,6 +2440,11 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         }
         (Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset, RESET) if code == BN_CLICKED => reset_row(app, index),
         (_, LABEL) if code == STN_DBLCLK && !draw::is_dimmed(hwnd) => reset_row(app, index),
+        (Kind::FilterLink(_), COMBO) if code == CBN_SELCHANGE => {
+            if let Some(&link) = state::FilterLink::ALL.get(selection() as usize) {
+                app.model.set_filter_link(link);
+            }
+        }
         (Kind::Choice(_, path, options), COMBO) if code == CBN_SELCHANGE => {
             if let Some(option) = options.get(selection() as usize) {
                 app.model.set(path, Value::String(option.to_string()));
@@ -2561,6 +2883,9 @@ thread_local! {
     static LAST_TRACKBAR_CLICK: Cell<Option<(usize, u32, i32, i32)>> = const { Cell::new(None) };
     /// A trackbar whose reset click's button-up it must not see.
     static RESET_TRACKBAR: Cell<usize> = const { Cell::new(0) };
+    /// The reset under way is a double-click's on the track, whose first
+    /// click moved the thumb.
+    static DOUBLE_CLICK_RESET: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Whether this click on a trackbar completes a double-click. Trackbars
@@ -2617,7 +2942,9 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 RESET_TRACKBAR.set(hwnd.0 as usize);
                 let parent = GetParent(hwnd).unwrap_or_default();
                 let button = GetDlgItem(parent, reset as i32).unwrap_or_default();
+                DOUBLE_CLICK_RESET.set(double && !alt);
                 SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | reset), LPARAM(button.0 as isize));
+                DOUBLE_CLICK_RESET.set(false);
                 return LRESULT(0);
             }
         }
@@ -3083,6 +3410,8 @@ const C_RESET: u16 = CROP_FIRST + 18;
 const C_DONE: u16 = CROP_FIRST + 19;
 const C_CANCEL: u16 = CROP_FIRST + 20;
 const C_SIZE_NOTE: u16 = CROP_FIRST + 21;
+/// Flip left to right (`io.flip`), a tick box.
+const C_FLIP: u16 = CROP_FIRST + 22;
 const C_LABELS: u16 = CROP_FIRST + 30;
 /// The labels: Ratio, ×, Orientation, Angle, Size, the size's hint, the
 /// instructions, and the two sections' heads.
@@ -3094,6 +3423,7 @@ const L_ANGLE: u16 = C_LABELS + 5;
 const L_SIZE: u16 = C_LABELS + 6;
 const L_HINT: u16 = C_LABELS + 7;
 const L_SIZE_HINT: u16 = C_LABELS + 8;
+const L_FLIP: u16 = C_LABELS + 9;
 
 /// The foot's words, the aspect formats and the orientation words (`Crop.swift`).
 const CROP_FOOT: TextStyle = TextStyle::serif(14.0, 400).italic();
@@ -3143,6 +3473,7 @@ fn build_crop(app: &mut App) {
     ink_static(L_STRAIGHTEN, "STRAIGHTEN", Role::Section);
     ink_static(L_ANGLE, "Angle", Role::Label);
     ink_static(C_ANGLE_VALUE, "0°", Role::Readout);
+    ink_static(L_FLIP, "FLIP", Role::Section);
     ink_static(L_SIZE, "Size", Role::Label);
     let size = ink_static(C_SIZE, "", Role::Readout);
     super::dialogs::tooltip(size, "The exported photograph’s size, before the border.");
@@ -3195,6 +3526,10 @@ fn build_crop(app: &mut App) {
     draw::track_hover(angle);
     draw::set_default_pos(angle, 0);
     super::dialogs::tooltip(angle, "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.");
+    let flip = add(C_FLIP, w!("BUTTON"), "Flip left to right", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_CHECKBOX as u32), fonts.ui);
+    draw::set_role(flip, Role::Tick);
+    draw::track_hover(flip);
+    super::dialogs::tooltip(flip, "Mirrors the photograph, as a negative photographed from its base side needs. With a half turn it mirrors top to bottom.");
     let reset_crop = add(C_RESET, w!("BUTTON"), "Reset Crop", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_PUSHBUTTON as u32), fonts.ui);
     draw::set_role(reset_crop, Role::WordButton);
     draw::track_hover(reset_crop);
@@ -3326,6 +3661,11 @@ fn crop_rows(ins: &Inspector, width: i32) -> (Vec<(HWND, i32, i32, i32, i32)>, i
     place(C_ANGLE, gutter + label, y, (right - gutter - label - value - reset).max(0), row);
     place(C_ANGLE_VALUE, right - reset - value, y, value, row);
     place(C_ANGLE_RESET, right - reset, y, reset, row);
+    y += row + ins.px(10.0);
+    place(L_FLIP, gutter, y, right - gutter, ins.px(ink::SECTION_HEAD));
+    y += ins.px(ink::SECTION_HEAD);
+    let margin = ins.px(ink::MARGIN);
+    place(C_FLIP, gutter - margin, y, right - gutter + 2 * margin, row);
     y += row + ins.px(14.0);
     place(L_SIZE, gutter, y, label, row);
     place(C_SIZE, gutter + label, y, right - gutter - label, row);
@@ -3387,6 +3727,12 @@ fn sync_crop(app: &mut App) {
         let _ = ShowWindow(crop.get(C_ANGLE_RESET), if session.angle != 0.0 { SW_SHOWNA } else { SW_HIDE });
     }
     ink::set_changed(crop.get(L_ANGLE), session.angle != 0.0);
+    let flip = crop.get(C_FLIP);
+    ink::set_changed(flip, session.flip);
+    unsafe {
+        SendMessageW(flip, BM_SETCHECK, WPARAM(if session.flip { 1 } else { 0 }), LPARAM(0));
+        let _ = InvalidateRect(flip, None, false);
+    }
     set_text(crop.get(C_ANGLE_VALUE), &format!("{}°", format(session.angle, 0.1, decimal)));
     // The draft's pixels in the frame an export develops; with a target, a
     // smaller crop needs a larger frame, up to the working limit.
@@ -3567,6 +3913,8 @@ fn crop_command(app: &mut App, id: u16, code: u32) {
             session.end_straightening();
         }
         C_RESET if code == BN_CLICKED => session.reset(),
+        // The edit, not the session: Done keeps it with the crop, Cancel takes it back.
+        C_FLIP if code == BN_CLICKED => return app.model.flip(),
         C_DONE if code == BN_CLICKED => return app.model.end_crop(true),
         C_CANCEL if code == BN_CLICKED => return app.model.end_crop(false),
         C_WIDTH | C_HEIGHT if code == EN_SETFOCUS => session.typing = true,
@@ -3751,10 +4099,10 @@ mod tests {
         model.previews.tray = Some(crate::previews::TrayVisit::new(false, model.state.clone(), String::new()));
         let shown = |model: &Model| -> Vec<(bool, Vec<String>)> { model.tray_sections().into_iter().map(|s| (s.favourites, s.stocks.into_iter().map(|e| e.id).collect())).collect() };
         let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        // Not searching: the favourites first, then every group.
+        // Not searching: Scan's Your negative, the favourites, then every group.
         for query in ["", "   "] {
             model.previews.tray.as_mut().unwrap().query = query.into();
-            assert_eq!(shown(&model), [(true, ids(&["gold"])), (false, ids(&["gold", "portra"])), (false, ids(&["trix"]))]);
+            assert_eq!(shown(&model), [(false, ids(&[crate::negative::STOCK_ID])), (true, ids(&["gold"])), (false, ids(&["gold", "portra"])), (false, ids(&["trix"]))]);
         }
         let search = |model: &mut Model, query: &str| {
             model.previews.tray.as_mut().unwrap().query = query.into();
@@ -3781,6 +4129,10 @@ mod tests {
             for control in group.controls {
                 if let Adjustment::BalancePrint { title, .. } = control {
                     assert!(rows.iter().any(|r| matches!(r.kind, Kind::BalancePrint(t, _) if t == *title)));
+                    continue;
+                }
+                if let Adjustment::FilterLink { .. } = control {
+                    assert!(rows.iter().any(|r| matches!(r.kind, Kind::FilterLink(_))));
                     continue;
                 }
                 assert!(paths.contains(&control.path()), "{}", control.path());
@@ -3824,7 +4176,8 @@ mod tests {
         let title = |name: &'static str| move |k: &Kind| matches!(k, Kind::Group { title, .. } if *title == name);
         let rows = shown(&model);
         assert!(rows.iter().any(slider("enlarger.print_exposure")));
-        assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fourth basic");
+        assert!(rows.iter().any(|k| matches!(k, Kind::FilterLink(..))), "Shifts move is the Enlarger's fourth basic");
+        assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fifth basic");
         assert!(!rows.iter().any(slider("enlarger.preflash_exposure")));
         assert!(!rows.iter().any(slider("camera.lens_blur_um")));
         // Scan & Color always heads its "N more" line, as on the Mac.

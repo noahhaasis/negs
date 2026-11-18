@@ -34,6 +34,9 @@ pub const STAR_INSET: f64 = 5.0;
 pub const WHEEL_NOTCH: f64 = 80.0;
 
 pub const FAVOURITES: &str = "Favourites";
+/// Your negative's group (ticket 33), and its tile's id: never a stock.
+pub const SCAN: &str = "Scan";
+pub const YOUR_NEGATIVE: &str = "negs.your-negative";
 
 /// A stock as the tray lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,6 +79,16 @@ pub fn sections(matched: Vec<Section>, favourites: Vec<Entry>, query: &str) -> V
         return matched;
     }
     std::iter::once(Section { title: FAVOURITES.into(), stocks: favourites, favourites: true }).chain(matched).collect()
+}
+
+/// The film tray's row: Your negative first, in its own Scan group, so the
+/// order never changes from one photograph to the next; not while
+/// searching, nor for papers or the films a negative is read as.
+pub fn with_scan(sections: Vec<Section>, paper: bool, read_as: bool, query: &str, name: &str) -> Vec<Section> {
+    if paper || read_as || searching(query) {
+        return sections;
+    }
+    std::iter::once(Section::group(SCAN, vec![Entry::new(YOUR_NEGATIVE, name)])).chain(sections).collect()
 }
 
 /// A tile in the row: its stock, and whether it's the favourites' copy.
@@ -326,16 +339,28 @@ pub struct Visit<S> {
     /// tray opens on a favourite, or the copy last clicked or stepped to),
     /// so ← → go on from there rather than from its group.
     pub in_favourites: bool,
+    /// The film a negative is read as (its "read as" name): the colour
+    /// negatives only, the paper and the negative kept.
+    pub read_as: bool,
+    /// The film tray of a negative, or of a photograph the helper found
+    /// looks like one: it opens on Scan, at the row's start.
+    pub opens_on_scan: bool,
 }
 
 impl<S> Visit<S> {
     pub fn new(paper: bool, before: S, before_id: impl Into<String>) -> Self {
-        Self { paper, before, before_id: before_id.into(), query: String::new(), in_favourites: true }
+        Self { paper, before, before_id: before_id.into(), query: String::new(), in_favourites: true, read_as: false, opens_on_scan: false }
     }
 
     /// The undo name for keeping a stock.
     pub fn action(&self) -> &'static str {
-        if self.paper { "Change Paper" } else { "Change Film" }
+        if self.paper {
+            "Change Paper"
+        } else if self.read_as {
+            "Change Negative Film"
+        } else {
+            "Change Film"
+        }
     }
 
     /// Something else than the stock it opened on is being tried.
@@ -498,6 +523,33 @@ pub fn stand_in_size(image: (u32, u32), photo: (f64, f64)) -> (f64, f64) {
     let long = if long > 0.0 { long } else { 2048.0 };
     let scale = long / image.0.max(image.1).max(1) as f64;
     (image.0 as f64 * scale, image.1 as f64 * scale)
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+
+    #[test]
+    fn your_negative_leads_the_film_row_but_not_a_search() {
+        let groups = vec![Section::group("Color Negative", vec![Entry::new("portra", "Portra")])];
+        let row = with_scan(groups.clone(), false, false, "", "Your negative");
+        assert_eq!(row[0], Section::group(SCAN, vec![Entry::new(YOUR_NEGATIVE, "Your negative")]));
+        assert_eq!(row[1..], groups[..]);
+        assert_eq!(with_scan(groups.clone(), false, false, "port", "Your negative"), groups);
+        assert_eq!(with_scan(groups.clone(), false, false, "  ", "Your negative").len(), 2, "spaces aren't a search");
+        assert_eq!(with_scan(groups.clone(), true, false, "", "Your negative"), groups, "papers");
+        assert_eq!(with_scan(groups.clone(), false, true, "", "Your negative"), groups, "read as");
+        // ← → go through it like any tile.
+        assert_eq!(places(&row)[0], Place { stock: YOUR_NEGATIVE.into(), favourite: false });
+    }
+
+    #[test]
+    fn keeping_a_read_as_film_is_its_own_undo_name() {
+        let mut visit = Visit::new(false, (), "portra");
+        assert_eq!(visit.action(), "Change Film");
+        visit.read_as = true;
+        assert_eq!(visit.action(), "Change Negative Film");
+    }
 }
 
 #[cfg(test)]

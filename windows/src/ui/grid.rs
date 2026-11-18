@@ -300,6 +300,16 @@ pub fn toggle(app: &mut App) {
     if shown(app) { close(app, true) } else { open(app) }
 }
 
+/// Closes the grid for Compare, which has no strip to fold the sheet into:
+/// at once, without the flight.
+pub fn close_for_compare(app: &mut App) {
+    if !shown(app) {
+        return;
+    }
+    app.model.shelf.in_grid = false;
+    finish_flight(app, false);
+}
+
 fn start_flight(app: &mut App, opening: bool) {
     let reduce = !unsafe {
         let mut on = BOOL(1);

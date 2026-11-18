@@ -43,10 +43,9 @@ pub fn to_value(json: &Json) -> Value {
     }
 }
 
-/// The editor's state as the library keeps it. `roll` is carried from what
-/// the library had: Windows can't print a negative as a roll's frame yet,
-/// and must not lose a Mac's.
-pub fn to_library(win: &EditState, roll: Option<negs_library::Roll>) -> negs_library::EditState {
+/// The editor's state as the library keeps it.
+pub fn to_library(win: &EditState) -> negs_library::EditState {
+    let roll = win.roll.as_ref().map(|r| negs_library::Roll { id: r.id.clone(), magenta: r.magenta, yellow: r.yellow, paper: r.paper.clone() });
     let brightness_match = win.brightness_match.as_ref().map(|m| negs_library::BrightnessMatch {
         ev: m.ev,
         highlight_limited: m.highlight_limited,
@@ -77,6 +76,7 @@ pub fn from_library(edits: &negs_library::EditState, limit_preview: bool) -> Res
         border,
         crop,
         brightness_match: None,
+        roll: edits.roll.as_ref().map(|r| state::Roll { id: r.id.clone(), magenta: r.magenta, yellow: r.yellow, paper: r.paper.clone() }),
     };
     if let Some(found) = &edits.brightness_match {
         let inputs = (found.solved && found.ev.is_some()).then(|| state::match_inputs(&win));

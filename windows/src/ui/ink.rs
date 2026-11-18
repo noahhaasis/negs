@@ -378,7 +378,8 @@ pub fn paint_button(draw: &NMCUSTOMDRAW, role: Role) {
     let s = draw::dpi_of(hwnd);
     let t = theme::tokens();
     let mut c = Canvas::new(draw.hdc, draw.rc);
-    c.clear(theme::gdi(t.hex.panel));
+    // The view switch stands on the title bar.
+    c.clear(theme::gdi(if role == Role::ViewWord { t.hex.bg } else { t.hex.panel }));
     let (w, h) = ((draw.rc.right - draw.rc.left) as f32 / s, (draw.rc.bottom - draw.rc.top) as f32 / s);
     let m = MARGIN as f32;
     let skipped = with_look(hwnd, |l| l.skipped);
@@ -389,6 +390,20 @@ pub fn paint_button(draw: &NMCUSTOMDRAW, role: Role) {
                 let ink = if checked { t.hex.paper } else if hot { t.hex.label } else { t.hex.dim };
                 let metrics = p.measure(text, &style, 0.0);
                 p.text(text, &style, m, centred(h, &metrics, style.size), hex(ink, disabled, pressed));
+                if focused {
+                    focus_box(p, RectF::new(0.0, 0.0, w, h), &t);
+                }
+            }
+            Role::ViewWord => {
+                let style = super::view_switch::WORD;
+                let ink = if checked { t.hex.paper } else if hot { t.hex.label } else { t.hex.dim };
+                let metrics = p.measure(text, &style, 0.0);
+                // Lifted 1.5 for the pencil's room under it (`.padding(.bottom, 3)`).
+                let y = centred(h, &metrics, style.size) - 1.5;
+                if checked {
+                    p.underline(RectF::new(m, y + metrics.baseline + 2.5, metrics.width, 5.0), &t, false);
+                }
+                p.text(text, &style, m, y, hex(ink, disabled, pressed));
                 if focused {
                     focus_box(p, RectF::new(0.0, 0.0, w, h), &t);
                 }
