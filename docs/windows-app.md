@@ -815,6 +815,44 @@ Notes on the table:
   camera preview's colour space isn't supported." wasn't seen end to end. The note shows other
   refusals, such as the M11's, the same way.
 
+## Window shell (parity phase 2, 2026-11-18)
+
+The window paints from the theme's tokens (`ui/theme.rs`): View › Theme
+chooses among the six themes, stored as `appTheme` in the Windows settings
+(Darkroom when missing); only Plain follows Windows' light or dark.
+`NEGS_THEME` still forces one (a theme's name, or `light`/`dark` for Plain).
+The old GDI palette is derived from the tokens, so the inspector's controls
+take `panel` and `bg` until phase 3 repaints them.
+
+- **Title bar** (`ui/titlebar.rs`): 38 DIP of `bg` drawn with Direct2D, the
+  menu row (a toolbar control, its popups from the HMENU), the file name in
+  Newsreader 15/600, middle-truncated, and the caption buttons as lines in
+  the theme (`HTMAXBUTTON` keeps snap layouts). A `line` rule runs along the
+  band's foot over the inspector column only.
+- **No toolbar.** Shortcuts are in `docs/windows-ui-features.md` §2.
+- **Status line** (`ui/status.rs`): 28 DIP under the strip in the canvas
+  column, Segoe UI 11 `dim`; the size and develop time, the export with
+  Cancel, "Couldn’t develop"; Original ⌄, Fit and 100% on the right.
+  Right-click copies the words. The film → paper part waits for phase 4's
+  label.
+- **Alert card** (`ui/alert.rs`): a layered popup over the client area below
+  the band, dimmed, with the card 12 DIP under the band. It is modal (a
+  message loop of its own, the window disabled) and replaces the task dialogs
+  for errors, notices and the two confirmations. Windows' open, save and
+  colour dialogs and About stay native.
+- **Small states:** the empty window (`ui/empty.rs`, one painted window: trim
+  marks, Open a photograph, Recent), "drop to open it", the Developing /
+  Updating / Loading Original tag and "couldn't be developed" with Try Again
+  on the canvas, set with DirectWrite into masks the GPU colours. A failed
+  develop goes to `Model::develop_error`, not to an alert.
+- **Startup:** `d2d::prepare` runs at the top of `run()`, and its thread sets
+  the first frame's type once (`d2d::warm`), so the title bar never waits for
+  it. ABBA, 6 runs, against the presets build: first window 81.9 ms vs 86.4,
+  inspector shown 176.4 vs 181.1 (medians).
+
+Validation: 182 Windows tests pass on the PC with the release helper
+(`NEGS_REQUIRE_HELPER=1`). Screenshots in `~/.negs/windows-parity/phase2/`.
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,
