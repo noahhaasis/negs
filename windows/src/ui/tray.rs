@@ -528,7 +528,7 @@ fn tile_marks(p: &mut Painter, t: &Tokens, looks: &[TileLook]) {
         }
         if let Some(words) = look.words {
             // `NegativeTile`: serif 15 italic, centred, 18 in from the sides.
-            let style = TextStyle::serif(15.0, 400).italic();
+            let style = TextStyle::serif(15.0, 400).italic().line_height(1.25);
             let width = r.w - 36.0;
             let m = p.measure_in(words, &style, width, super::d2d::Align::Center);
             p.text_in(words, &style, RectF::new(r.x + 18.0, r.y + (r.h - m.height) / 2.0, width, m.height + 4.0), super::d2d::Align::Center, Ink::hex(t.film.label));
