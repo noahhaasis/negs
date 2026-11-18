@@ -62,6 +62,11 @@ pub struct EditorSession {
     pub inspector_visible: bool,
     #[serde(default = "yes")]
     pub fit_image: bool,
+    /// The photograph's sidecar keeps its edits, and `state` is only what
+    /// was on screen. Sessions from before the library lack it: their state
+    /// is the photograph's edits, which go to a sidecar without any.
+    #[serde(default)]
+    pub library: bool,
 }
 
 fn yes() -> bool {
@@ -184,9 +189,10 @@ pub struct Preferences {
     pub keep_paper: bool,
     /// The tone graph's channel: "rgb", "r", "g" or "b".
     pub tone_graph_channel: String,
-    /// Settings › New photographs: Start fresh (true, the default) or keep
-    /// the previous photograph's edits (false, as earlier versions did). A
-    /// restored session keeps its own edits either way.
+    /// Start fresh (true, the default) or keep the previous photograph's
+    /// edits (false, as earlier versions did), for a photograph opened
+    /// without a library. No longer in Settings: in a library the Mac's New
+    /// photographs film and paper decide. Kept so old settings files parse.
     #[serde(rename = "freshEditsForNewPhotos")]
     pub fresh_edits: bool,
     /// Settings › Match new photographs to camera brightness: whether a new
@@ -228,6 +234,10 @@ pub struct Preferences {
     /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
     /// Old settings files lack it: Darkroom.
     pub app_theme: String,
+    /// The library's: its filter, Copy Edits…'s groups, Advance After
+    /// Rating, New photographs' film and paper, under the Mac's keys.
+    #[serde(flatten)]
+    pub library: crate::model::LibraryPreferences,
     /// Settings › Fotufilm films, as the Mac stores it: "all",
     /// "datasheets" or "off".
     pub fotufilm_films: String,
@@ -283,6 +293,7 @@ impl Default for Preferences {
             viewer_background: "#242424".into(),
             viewer_sheet: String::new(),
             app_theme: "darkroom".into(),
+            library: Default::default(),
             fotufilm_films: "all".into(),
             settings_tab: "Photographs".into(),
         }
@@ -436,6 +447,7 @@ mod tests {
             state: EditState { params: json!({"io": {"rotate_cw": 1}}), ..Default::default() },
             inspector_visible: true,
             fit_image: true,
+            library: false,
         }
     }
 

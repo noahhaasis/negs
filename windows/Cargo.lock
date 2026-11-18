@@ -1117,6 +1117,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "negs-library"
+version = "0.17.0"
+
+[[package]]
 name = "negs-marks"
 version = "0.17.0"
 
@@ -1127,6 +1131,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "image",
+ "negs-library",
  "negs-marks",
  "pollster",
  "raw-window-handle",
