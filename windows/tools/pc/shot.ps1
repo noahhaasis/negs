@@ -2,7 +2,7 @@
 # Usage: shot.ps1 -JobFile <job.json>
 # job.json: { "exe": "...\\Negs.exe", "photo": "...", "out": "C:\\...\\shots\\name",
 #   "theme": "light|dark|", "width": 1440, "height": 900, "settle_ms": 4000,
-#   "env": {"NAME": "value"}, "keep_profile": "dir (optional)",
+#   "env": {"NAME": "value"}, "keep_profile": "dir (optional)", "keep_size": true,
 #   "steps": [ {"shot": "start"}, {"keys": "{F8}", "wait": 800, "shot": "presets"},
 #              {"click": [x, y], "wait": 500}, {"key": "VK name", ...} ] }
 # "drag": [x0, y0, x1, y1, steps, ms] presses at the first point, moves to the
@@ -70,7 +70,8 @@ $h = $proc.MainWindowHandle
 $w = if ($job.width) { [int]$job.width } else { 1440 }
 $hh = if ($job.height) { [int]$job.height } else { 900 }
 [NegsWin]::ShowWindow($h, 9) | Out-Null   # SW_RESTORE
-[NegsWin]::SetWindowPos($h, [IntPtr]::Zero, 40, 40, $w, $hh, 0x0040) | Out-Null
+# keep_size: leave the size the app restored (checks that it reopens at it).
+if (-not $job.keep_size) { [NegsWin]::SetWindowPos($h, [IntPtr]::Zero, 40, 40, $w, $hh, 0x0040) | Out-Null }
 # Foreground from a background task: a synthetic Alt tap lets SetForegroundWindow succeed.
 [NegsWin]::keybd_event(0x12, 0, 0, [IntPtr]::Zero); [NegsWin]::keybd_event(0x12, 0, 2, [IntPtr]::Zero)
 [NegsWin]::SetForegroundWindow($h) | Out-Null

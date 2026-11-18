@@ -1068,7 +1068,7 @@ impl App {
             let show = if placement.showCmd == SW_SHOWMAXIMIZED.0 as u32 { 3 } else { 1 };
             let s = self.scale();
             // Saved in DIPs, so a monitor with another scale restores the same size.
-            self.model.prefs.window = Some([show, r.left, r.top, ((r.right - r.left) as f64 / s) as i32, ((r.bottom - r.top) as f64 / s) as i32]);
+            self.model.prefs.window = Some([show, r.left, r.top, ((r.right - r.left) as f64 / s).round() as i32, ((r.bottom - r.top) as f64 / s).round() as i32]);
             self.model.prefs.save();
         }
     }
@@ -1500,7 +1500,7 @@ pub fn run() {
 fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
     let Some([_, x, y, w, h]) = prefs.window else { return default_height(main, dpi) };
     let s = dpi as f64 / 96.0;
-    let rect = RECT { left: x, top: y, right: x + (w as f64 * s) as i32, bottom: y + (h as f64 * s) as i32 };
+    let rect = RECT { left: x, top: y, right: x + (w as f64 * s).round() as i32, bottom: y + (h as f64 * s).round() as i32 };
     unsafe {
         // A monitor that is gone leaves the default placement.
         if MonitorFromRect(&rect, MONITOR_DEFAULTTONULL).is_invalid() {
