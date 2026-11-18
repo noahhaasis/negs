@@ -178,7 +178,7 @@ pub struct Preferences {
     /// Settings › Film, paper and preset previews (the Mac's `previews`).
     /// Old settings files lack it: on.
     pub previews: bool,
-    /// Settings › Keep paper when changing film (the Mac's `keep_paper`).
+    /// The paper lock on "printed on", once Settings › Keep paper when changing film (the Mac's `keep_paper`).
     /// Old settings files lack it: off, the paper follows the film.
     #[serde(rename = "keep_paper")]
     pub keep_paper: bool,

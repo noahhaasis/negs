@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(slide.paper, "crystal");
     }
 
-    /// Settings › Keep paper when changing film (Linux `keep_paper_leaves_the_paper_alone`).
+    /// The paper lock (Linux `keep_paper_leaves_the_paper_alone`).
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
         for keep in [false, true] {

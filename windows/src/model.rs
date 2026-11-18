@@ -2086,7 +2086,7 @@ impl Model {
         self.mark(dirty::STRUCTURE | dirty::PRESETS | dirty::PREVIEWS);
     }
 
-    /// Settings › Keep paper when changing film. The film tiles show what a
+    /// The paper lock on "printed on". The film tiles show what a
     /// click would develop, so they follow it: their keys include the paper.
     pub fn set_keep_paper(&mut self, on: bool) {
         if self.prefs.keep_paper != on {
@@ -3558,7 +3558,7 @@ mod tests {
         assert!(!old.fotufilm && old.manufacturer_data);
     }
 
-    /// Settings › Keep paper when changing film, through the film menu.
+    /// The paper lock, through the film menu.
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
         let stock = |id: &str, paper: bool, target: &str| Stock {
