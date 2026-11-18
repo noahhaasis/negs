@@ -325,9 +325,10 @@ impl Model {
         let (crop, orientation, photo, item) = (state.crop, state.orientation(), item.photo.clone(), item.clone());
         // A develop to an Image Size is cropped by the helper already.
         let cropped_render = state::size_mode(&state.params) == state::SizeMode::LongestSide && crop.cropped();
-        let as_shown = move |picture: &Picture, crop_it: bool| {
-            let pixels = (crop_it && crop.cropped()).then(|| (crop.pixels(Size::new(picture.width as f64, picture.height as f64)), crop.angle));
-            picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, pixels, orientation, picture.wide)).flatten()
+        // Pictures leave the CPU once on the GPU: these are read as pixels.
+        let as_shown = move |(rgba, width, height): (Vec<u8>, u32, u32), wide: bool, crop_it: bool| {
+            let pixels = (crop_it && crop.cropped()).then(|| (crop.pixels(Size::new(width as f64, height as f64)), crop.angle));
+            Shown::of(&rgba, width, height, pixels, orientation, wide)
         };
         #[cfg(test)]
         let background = ui::testing::background();
@@ -335,16 +336,18 @@ impl Model {
             #[cfg(test)]
             let _background = background;
             let shown = kept
-                .and_then(|(key, loose)| KeptDevelop::load(&key, loose.as_deref()))
-                .and_then(|(picture, _)| as_shown(&picture, !cropped_render))
+                .and_then(|(key, loose)| KeptDevelop::pixels(&key, loose.as_deref()))
+                .and_then(|(rgba, w, h, space, _)| as_shown((rgba, w, h), crate::picture::is_wide(&space), !cropped_render))
                 .map(|shown| (shown, "kept"))
                 .or_else(|| {
                     // Finished: cropped, turned and bordered.
-                    let picture = thumbnail.and_then(|(key, loose)| stand_in(&key, loose.as_deref()))?;
-                    let shown = picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, None, Default::default(), picture.wide)).flatten()?;
-                    Some((shown, "thumbnail"))
+                    let (rgba, w, h) = thumbnail.and_then(|(key, loose)| stand_in_pixels(&key, loose.as_deref()))?;
+                    Some((Shown::of(&rgba, w, h, None, Default::default(), false)?, "thumbnail"))
                 })
-                .or_else(|| crate::thumbnail::placeholder(&photo).and_then(|(picture, _)| as_shown(&picture, true)).map(|shown| (shown, "embedded")));
+                .or_else(|| {
+                    let (rgba, w, h, _) = crate::thumbnail::placeholder_pixels(&photo)?;
+                    Some((as_shown((rgba, w, h), false, true)?, "embedded"))
+                });
             crate::trace::event("compare_stand_in", || json!({"request": request, "shown": shown.as_ref().map(|(_, kind)| *kind)}));
             let Some((shown, _)) = shown else { return };
             ui::post(move |app: &mut App| {

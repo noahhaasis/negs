@@ -483,6 +483,13 @@ impl KeptDevelop {
     /// The kept develop filed as `key`, else the last one kept for the same
     /// edits under an older engine (`previousKey`), as the canvas's stand-in.
     fn load(key: &str, loose: Option<&str>) -> Option<(Picture, Size)> {
+        let (rgba, pw, ph, space, size) = Self::pixels(key, loose)?;
+        Some((Picture::new(rgba, pw, ph).in_display_space(&space), size))
+    }
+
+    /// `load`'s RGBA pixels, kept on the CPU, with their display space and
+    /// the photograph's size (Compare's stand-in).
+    fn pixels(key: &str, loose: Option<&str>) -> Option<(Vec<u8>, u32, u32, String, Size)> {
         let store = crate::edited_store::renders();
         let key = if store.contains(key) { key.to_string() } else { store.previous(loose?)? };
         let key = key.as_str();
@@ -493,13 +500,19 @@ impl KeptDevelop {
             p.swap(0, 2);
         }
         store.touch(key);
-        Some((Picture::new(rgba, pw, ph).in_display_space(&space), Size::new(w, h)))
+        Some((rgba, pw, ph, space, Size::new(w, h)))
     }
 }
 
 /// The developed thumbnail filed as `key`, else the last one filed for the
 /// same edits under an older engine, as the canvas's stand-in.
 fn stand_in(key: &str, loose: Option<&str>) -> Option<Picture> {
+    let (rgba, w, h) = stand_in_pixels(key, loose)?;
+    Some(Picture::new(rgba, w, h))
+}
+
+/// `stand_in`'s RGBA pixels, kept on the CPU (Compare's stand-in).
+fn stand_in_pixels(key: &str, loose: Option<&str>) -> Option<(Vec<u8>, u32, u32)> {
     let store = crate::edited_store::thumbnails();
     let key = if store.contains(key) { key.to_string() } else { store.previous(loose?)? };
     let file = std::fs::read(store.path(&key)).ok()?;
@@ -507,7 +520,7 @@ fn stand_in(key: &str, loose: Option<&str>) -> Option<Picture> {
     for p in rgba.chunks_exact_mut(4) {
         p.swap(0, 2);
     }
-    Some(Picture::new(rgba, w, h))
+    Some((rgba, w, h))
 }
 
 pub struct Model {
