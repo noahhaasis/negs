@@ -12,6 +12,11 @@ use std::path::{Path, PathBuf};
 /// Where deleted files go. The platform's own bin (the Recycle Bin, the
 /// Trash, the freedesktop trash); `FolderBin` for tests.
 pub trait Bin {
+    /// What the platform calls it, for the alert and the Undo menu
+    /// ("Trash", "Recycle Bin").
+    fn name(&self) -> &str {
+        "Trash"
+    }
     /// Whether `folder`'s volume has a bin. Without one, a delete is permanent.
     fn available(&self, folder: &Path) -> bool;
     /// Moves `file` to the bin and returns where it went, for Undo.

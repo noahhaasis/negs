@@ -244,7 +244,7 @@ fn duplicates_are_named_and_removed_as_on_the_mac() {
     assert_eq!(library.summary(&raw).rating, 2, "a duplicate's own");
 
     let plan = library.delete_plan(&[made[0].clone()]);
-    let question = plan.question(|i| library.name(i), library.delete_is_permanent(&plan), "Trash");
+    let question = library.delete_question(&plan);
     assert_eq!(question.message, "Remove the duplicate “IMG_1.CR3 (2)”?");
     let before = folder.sidecar("IMG_1.CR3");
     library.delete(&plan);

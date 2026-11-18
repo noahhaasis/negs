@@ -1245,6 +1245,11 @@ impl Library {
         DeletePlan::new(items, |p| self.duplicates(p).to_vec(), |p| self.companion(p).map(Path::to_path_buf))
     }
 
+    /// The alert before deleting `plan` (always ask when it is permanent).
+    pub fn delete_question(&self, plan: &DeletePlan) -> crate::delete::Question {
+        plan.question(|i| self.name(i), self.delete_is_permanent(plan), self.bin.name())
+    }
+
     /// Whether a delete of `plan` would be for good: its folder's volume
     /// has no bin. Then always ask first.
     pub fn delete_is_permanent(&self, plan: &DeletePlan) -> bool {
@@ -1327,7 +1332,7 @@ impl Library {
         self.refresh(false);
         let kept = if permanent { plan.without_files() } else { plan.clone() };
         let step = (!permanent || !files.is_empty()).then(|| Step {
-            action: plan.action_name("Trash"),
+            action: plan.action_name(self.bin.name()),
             kind: StepKind::Delete { plan: kept, moves, reopen },
             files,
         });
