@@ -640,6 +640,7 @@ impl App {
                 self.report.stamp("first_image_scene");
                 // The strip's thumbnails waited for it.
                 self.model.dirty |= dirty::STRIP;
+                crate::film_cache_release::watch_memory_pressure();
             }
         }
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {

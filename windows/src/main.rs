@@ -9,6 +9,7 @@ mod crop;
 mod edited_store;
 mod edits;
 mod engine;
+mod film_cache_release;
 mod exact_fit;
 mod gpu;
 mod help;

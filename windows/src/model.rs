@@ -3724,6 +3724,16 @@ impl Model {
         crate::match_cache::shared().flush();
     }
 
+    /// Lets the helper free the film side it keeps between renders
+    /// (ticket 41): the grid opened over the photograph, or memory is low.
+    pub fn release_film_cache(&mut self, reason: crate::film_cache_release::Reason) {
+        if let Some(engine) = &self.engine
+            && !self.closing
+        {
+            crate::film_cache_release::release(engine, reason);
+        }
+    }
+
     /// Try Again on the canvas: develops the current edit once more.
     pub fn retry_develop(&mut self) {
         if !self.render_failed || self.source.is_none() || self.closing {

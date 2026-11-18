@@ -2043,3 +2043,49 @@ lifecycle_test! {
         let _ = std::fs::remove_dir_all(&folder);
     }
 }
+
+// MARK: The film side's release (ticket 41)
+
+lifecycle_test! {
+    /// The Mac's `FilmCacheReleaseTests`: edits and a photo switch send no
+    /// `release_film_cache` (a new decode frees it in the helper); the grid
+    /// opening and a memory warning send one each, which the helper answers;
+    /// with no helper running nothing is sent, so none is started.
+    fn the_grid_and_low_memory_release_the_film_side_but_editing_does_not() {
+        use crate::film_cache_release::Reason;
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let photo = h.photo.clone();
+        h.open(&photo);
+        h.clear_logs();
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        h.idle();
+        let other_photo = second_photo(&h, "film-cache");
+        h.open(&other_photo);
+        let _ = std::fs::remove_file(&other_photo);
+        assert!(!h.command_names().iter().any(|c| c == "release_film_cache"), "{:?}", h.command_names());
+
+        h.clear_logs();
+        h.edit(|m| m.release_film_cache(Reason::EditorClosed));
+        h.edit(|m| m.release_film_cache(Reason::MemoryPressure));
+        h.idle();
+        assert_eq!(h.command_names(), ["release_film_cache", "release_film_cache"]);
+        let answer = ask(&h, serde_json::json!({"command": "release_film_cache"}));
+        assert!(answer["released_bytes"].as_f64().is_some(), "{answer}");
+
+        let engine = h.model().engine.clone().unwrap();
+        let epoch = engine.helper_epoch();
+        engine.kill_helper();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while engine.helper_running() {
+            assert!(std::time::Instant::now() < deadline, "the helper didn't exit");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.clear_logs();
+        h.edit(|m| m.release_film_cache(Reason::MemoryPressure));
+        h.idle();
+        assert!(h.command_names().is_empty() && !engine.helper_running(), "no helper started for a release");
+        assert_eq!(engine.helper_epoch(), epoch + 1);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}

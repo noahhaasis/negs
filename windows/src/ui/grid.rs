@@ -236,6 +236,8 @@ pub fn open(app: &mut App) {
     }
     app.model.shelf.in_grid = true;
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
+    // The editor closed: its film side won't be used soon (ticket 41).
+    app.model.release_film_cache(crate::film_cache_release::Reason::EditorClosed);
     let grid = app.grid.as_mut().unwrap();
     grid.shown = true;
     grid.cells.clear();
