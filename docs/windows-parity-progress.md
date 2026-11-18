@@ -19,6 +19,78 @@ decisions made with their reasons, and what was carried over. See
 | 8 | Remaining features, Flip added (Open in Lightroom last) | in progress |
 | 9 | Validation and release | not started |
 
+## 2026-11-19: phase 8c, polish on the strip, grid and tray (branch `win-p8c-polish`)
+
+- **What users see:**
+  - **The tray** paints on the GPU, through the strip's Direct2D swap chain (WARP
+    too). A group's name in its foot glides the row there in 0.25 s.
+  - **Screen readers** read the tray: each group's name, every tile with its state
+    ("current", "before") and its star, the group index ("Show Kodak"), Search, the
+    paper lock's switch and Done, in the Mac's words. A default action presses each.
+  - **The grid** glides with the wheel (a notch at a time; touchpads and animations
+    off scroll at once). The Mac's overlay scroll bar shows at the right edge while
+    it scrolls and fades a second later. It widens under the pointer; drag the knob,
+    or click above or below it to page. Only the rows on screen are painted.
+  - **Thumbnails** are cropped, turned and inside their borders: solid, keyline,
+    film and 35mm, through `spektrafilm-io`'s own crop and border.
+  - **The open photograph's thumbnail** is filed from its settled preview when it
+    is left or the grid opens, under the Mac's conditions, so it shows at once and
+    costs no develop.
+  - **Kept develops** (`Cache\Renders`) point a loose key at themselves, so a
+    photograph still opens on its last develop after an engine update.
+  - **The leader's slanted edge** is smooth. The canvas draws the tongue under the
+    leader's window, and the window's aliased shape sits 2 px inside it.
+  - **Settings › Photographs** has "RAW + JPEG" › "Show camera JPEGs separately"
+    and "Edits" › "Save ratings and edits next to photos", in the Mac's words and
+    places. Both default to today's behaviour.
+  - The window reopens at exactly its last size at 125 % and 150 %.
+  - The dead `fonts.glyph` is gone.
+- **Gates:**
+  - The PC build (`662fe87`).
+  - The full Windows suite (`test-parity.cmd`, scratch profile), run because the
+    open path files the thumbnail: 243 of 244 passed. The failure was the Settings
+    test still expecting the old Photographs sections. It is updated, and its 11
+    tests pass.
+  - `windows/tray-rules` 17 and `windows/sheet-rules` 19 pass on the Mac. The Mac
+    cross-check is at its baseline warnings, with and without `--tests`.
+  - `NEGS_GRID_BENCH`, 2 rounds, 1582×953 px at 125 %, GTX 1660 SUPER:
+
+    | Path | Median frame | p95 frame | Frames over 20 ms |
+    |---|---|---|---|
+    | Direct2D, hardware | 16.67 ms | 16.78–16.86 ms | 1 of 335 |
+    | Direct2D on WARP | 33.35 ms | 33.4–50 ms | nearly all (30 fps, as phase 7) |
+
+  - Screenshots in `~/.negs/windows-parity/phase8c/{darkroom,daylight}/`:
+    - `strip`, `strip-after`: the leader's smooth edge; the open photograph's
+      keyline thumbnail after the grid.
+    - `grid`, `grid-developed`: white, 35mm (Kodak Gold 200), keyline and film
+      borders, from seeded Mac-format sidecars.
+    - `grid-scrolled`: a page down with the widened bar.
+    - `tray`: GPU-painted, with the Search field showing over the swap chain.
+    - They match the Mac's `04-film-tray` and `09-grid`. The tray's Scan group is
+      8a's.
+    - Pixel rows across the leader's slant show 3–4 intermediate shades per step.
+- **Decisions:**
+  - The Mac uses the kept develop only on the canvas (and in Compare), never for
+    strip thumbnails. So item 4 became the Mac's actual use: the kept develop stands
+    in after an engine update too (`previousKey`). The strip's stand-ins stay the
+    developed thumbnail, then an older engine's, then the embedded preview.
+  - Thumbnails filed from the preview are reduced to about twice what the crop
+    needs, then cropped, turned and bordered. A wide-gamut preview is brought to
+    sRGB with the canvas's `REC2020_TO_SRGB`.
+  - A thumbnail is filed only when the preview settled for the edits shown and
+    they are saved. With no stored edits, it is filed only when the photograph
+    shows none (`!open_edited`).
+  - The tray's accessibility is MSAA `IAccessible`, which UIA reads through its
+    bridge, as the rest of the app does. Search is its own window's object.
+  - The leader stays a window. The canvas draws its smooth edge, rather than the
+    window becoming layered or composited.
+- **Different from the Mac or left:**
+  - The developed thumbnail does not yet stand in on the canvas while a photograph
+    opens (the Mac's `standIn`). That belongs to the open path (8b's faster open).
+  - Entering the grid files the thumbnail but not the kept develop. The Mac saves
+    both.
+
 ## 2026-11-19: phase 7 merged, the strip and grid (`f9b8f47`, branch tip `774d5ef`)
 
 - **What users see:**
