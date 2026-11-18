@@ -1,7 +1,7 @@
 //! The export dialogs' own controls.
 //!
-//! The file dialogs come up dark in a dark theme and light in a light one
-//! (`theme::init`, `theme::dialogs_dark`). The controls `IFileDialogCustomize` adds don't
+//! The file dialogs follow Windows' own light or dark app mode, whatever
+//! the theme (`theme::dialogs_dark`). The controls `IFileDialogCustomize` adds don't
 //! follow. On Windows 10 their texts paint on the light system face and
 //! their edit boxes white (Export 8 Photographs, 2026-11-19). Visual
 //! groups' labels are drawn by the dialog itself in a grey that reads as
