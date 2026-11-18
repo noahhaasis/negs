@@ -591,6 +591,9 @@ pub struct Model {
     pending_render: bool,
     activity_timer: bool,
     interaction_start: Option<EditState>,
+    /// What the last drag or click that changed the edit left, so a
+    /// double-click's reset can undo its first click exactly.
+    last_interaction: Option<EditState>,
     closing: bool,
     explicit_open_requested: bool,
     /// The catalog arrived; the session restoration is still loading.
@@ -761,6 +764,7 @@ impl Model {
             pending_render: false,
             activity_timer: false,
             interaction_start: None,
+            last_interaction: None,
             closing: false,
             explicit_open_requested: false,
             awaiting_restoration: false,
@@ -899,7 +903,23 @@ impl Model {
         let mut next = self.state.clone();
         json::set(&mut next.params, state::FilterLink::MAGENTA, json::num(m));
         json::set(&mut next.params, state::FilterLink::YELLOW, json::num(y));
+        let before = self.state.clone();
         self.apply(next, "Change Adjustment");
+        // A click on the track: its own step, which a double-click's reset undoes.
+        if !self.interacting() && self.state != before {
+            self.last_interaction = Some(self.state.clone());
+        }
+    }
+    /// A double-click on a shift's track. Its first click moved the shift to
+    /// the pointer, and a linked one with it: that click is undone first,
+    /// exactly, so the reset is one step from before it
+    /// (`resetFilterShiftAfterClick`).
+    pub fn reset_filter_shift_after_click(&mut self, path: &str) {
+        let last = self.last_interaction.take();
+        if last.as_ref() == Some(&self.state) && matches!(self.undo.undo.last(), Some((Step::Edit(_), _))) {
+            self.perform_undo();
+        }
+        self.reset_filter_shift(path);
     }
     /// Resets a shift; linked (Together, Opposite ways), both reset, as
     /// they move, in one step.
@@ -1254,6 +1274,7 @@ impl Model {
 
     pub fn end_interaction(&mut self, action: &'static str) {
         let Some(start) = self.interaction_start.take() else { return };
+        self.last_interaction = (start != self.state).then(|| self.state.clone());
         if start != self.state {
             self.register_undo(start, action);
         }
@@ -3973,6 +3994,26 @@ mod tests {
         model.set_tray_query("crystal");
         assert_eq!(wanted(&model, true), ["endura", "crystal"]);
         assert_eq!((model.state.clone(), model.undo_title().map(str::to_owned)), (edit, undo));
+    }
+
+    /// Linked shifts: a double-click on the track is one step, its first
+    /// click undone before the reset (`resetFilterShiftAfterClick`).
+    #[test]
+    fn a_double_click_on_a_linked_shift_is_one_undo_step() {
+        let mut model = catalog_model(Preferences { previews: true, ..Preferences::default() });
+        model.source = Some(PathBuf::from("photo.png"));
+        model.prefs.filter_shift_link = "together".into();
+        model.set_filter_shift(state::FilterLink::MAGENTA, 10.0);
+        let (steps, before) = (model.undo.undo.len(), model.state.clone());
+        // The first click moves both; the second resets both.
+        model.set_filter_shift(state::FilterLink::MAGENTA, 30.0);
+        assert_eq!(json::number(model.value(state::FilterLink::YELLOW)), json::number(before.value(state::FilterLink::YELLOW)) + 20.0, "linked");
+        model.reset_filter_shift_after_click(state::FilterLink::MAGENTA);
+        assert_eq!(json::number(model.value(state::FilterLink::MAGENTA)), json::number(model.default_value(state::FilterLink::MAGENTA)));
+        assert_eq!(json::number(model.value(state::FilterLink::YELLOW)), json::number(model.default_value(state::FilterLink::YELLOW)));
+        assert_eq!(model.undo.undo.len(), steps + 1, "the click and the reset are one step");
+        model.perform_undo();
+        assert_eq!(model.state, before, "undo goes back to before the double-click");
     }
 
     /// A visit to the tray is one undo step however many stocks were tried;

@@ -2180,6 +2180,9 @@ fn set_slider(app: &mut App, index: usize, value: f64) {
 
 fn reset_row(app: &mut App, index: usize) {
     match app.inspector.rows[index].kind {
+        Kind::Slider(adjustment) if state::FilterLink::links(adjustment.path()) && DOUBLE_CLICK_RESET.get() => {
+            app.model.reset_filter_shift_after_click(adjustment.path())
+        }
         Kind::Slider(adjustment) if state::FilterLink::links(adjustment.path()) => app.model.reset_filter_shift(adjustment.path()),
         Kind::Slider(adjustment) => app.model.reset_value(adjustment.path()),
         Kind::Toggle(_, path) | Kind::Choice(_, path, _) => app.model.reset_value(path),
@@ -2741,6 +2744,9 @@ thread_local! {
     static LAST_TRACKBAR_CLICK: Cell<Option<(usize, u32, i32, i32)>> = const { Cell::new(None) };
     /// A trackbar whose reset click's button-up it must not see.
     static RESET_TRACKBAR: Cell<usize> = const { Cell::new(0) };
+    /// The reset under way is a double-click's on the track, whose first
+    /// click moved the thumb.
+    static DOUBLE_CLICK_RESET: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Whether this click on a trackbar completes a double-click. Trackbars
@@ -2797,7 +2803,9 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 RESET_TRACKBAR.set(hwnd.0 as usize);
                 let parent = GetParent(hwnd).unwrap_or_default();
                 let button = GetDlgItem(parent, reset as i32).unwrap_or_default();
+                DOUBLE_CLICK_RESET.set(double && !alt);
                 SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | reset), LPARAM(button.0 as isize));
+                DOUBLE_CLICK_RESET.set(false);
                 return LRESULT(0);
             }
         }
