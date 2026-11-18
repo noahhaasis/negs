@@ -1,14 +1,18 @@
 //! The export dialogs' own controls.
 //!
-//! The app asks for dark common controls (`theme::set_app_mode`), so in a
-//! dark theme the file dialogs come up dark. The controls
-//! `IFileDialogCustomize` adds to them don't follow, though. On Windows 10 its
-//! text paints on the light system face, its edit boxes are white, and the
-//! group labels are a dim grey that reads as disabled (Export 8 Photographs,
-//! 2026-11-19). Once a dialog is up, `dress` finds those windows. In a dark
-//! theme it answers their `WM_CTLCOLOR*` in the dialog's own dark colours, and
-//! gives the edit boxes the dark dialog theme the dialog's own fields use. It
-//! also finds the batch dialog's example, so the example can wrap to fit.
+//! The file dialogs come up dark in a dark theme (`theme::set_app_mode`),
+//! and in a light one at launch when Windows' apps are dark
+//! (`theme::dialogs_dark`). The controls `IFileDialogCustomize` adds don't
+//! follow. On Windows 10 their texts paint on the light system face and
+//! their edit boxes white (Export 8 Photographs, 2026-11-19). Visual
+//! groups' labels are drawn by the dialog itself in a grey that reads as
+//! disabled, so the export dialogs give each control a text of its own as
+//! its label instead (`dialogs.rs`).
+//!
+//! Once a dialog is up, `dress` finds those windows. When the dialog is
+//! dark, their parents answer `WM_CTLCOLOR*` in its dark colours, and the
+//! edit boxes take the dark theme of the dialog's own fields. `dress` also
+//! finds the batch dialog's example, so the example can wrap to fit.
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
@@ -78,19 +82,19 @@ pub fn children(top: HWND) -> Vec<Child> {
     found
 }
 
-/// Whether `child` is one of the controls added through
-/// `IFileDialogCustomize`: a static or an edit box with one of `ids`, or
-/// with one of the `texts` set before the dialog showed.
-fn is_custom(child: &Child, ids: &[u32], texts: &[String]) -> bool {
+/// Whether `child` is one of the texts or edit boxes added through
+/// `IFileDialogCustomize`. On Windows 10 each such control sits alone in a
+/// `FloatNotifySink` window under the dialog's view, with id 0 (traced
+/// 2026-11-19); the dialog's own Folder field and label don't.
+fn is_custom(child: &Child, all: &[Child]) -> bool {
     let class = child.class.to_ascii_lowercase();
-    (class == "static" || class == "edit")
-        && (ids.contains(&(child.id as u32)) || (!child.text.is_empty() && texts.iter().any(|t| *t == child.text)))
+    (class == "static" || class == "edit") && all.iter().any(|p| p.hwnd == child.parent && p.class.eq_ignore_ascii_case("FloatNotifySink"))
 }
 
-/// Once the dialog is up: traces its windows (`NEGS_RENDER_TRACE`), and in
-/// a dark theme recolours the custom controls' parents' answers and
-/// darkens their edit boxes.
-pub fn dress(dialog: &IFileDialog, ids: &[u32], texts: &[String], example_id: u32) -> Dressed {
+/// Once the dialog is up: traces its windows (`NEGS_RENDER_TRACE`), and
+/// when the dialog is dark recolours the custom controls' parents' answers
+/// and darkens their edit boxes.
+pub fn dress(dialog: &IFileDialog) -> Dressed {
     let Some(top) = window_of(dialog) else { return Dressed::default() };
     let all = children(top);
     if crate::trace::enabled() {
@@ -105,18 +109,14 @@ pub fn dress(dialog: &IFileDialog, ids: &[u32], texts: &[String], example_id: u3
                     "hwnd": c.hwnd.0 as usize, "parent": c.parent.0 as usize, "class": c.class, "text": c.text, "id": c.id,
                     "style": format!("{style:08x}"), "enabled": enabled, "visible": visible,
                     "rect": [rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top],
-                    "custom": is_custom(c, ids, texts),
+                    "custom": is_custom(c, &all),
                 })
             });
         }
     }
-    let custom: Vec<&Child> = all.iter().filter(|c| is_custom(c, ids, texts)).collect();
-    let example = custom
-        .iter()
-        .find(|c| c.class.eq_ignore_ascii_case("static") && (c.id as u32 == example_id || c.text.starts_with("For example")))
-        .map(|c| c.hwnd);
-    let current = theme::current();
-    if current.dark && !current.high_contrast {
+    let custom: Vec<&Child> = all.iter().filter(|c| is_custom(c, &all)).collect();
+    let example = custom.iter().find(|c| c.class.eq_ignore_ascii_case("static") && c.text.starts_with("For example")).map(|c| c.hwnd);
+    if theme::dialogs_dark() {
         let mut hosts: Vec<HWND> = custom.iter().map(|c| c.parent).filter(|p| !p.is_invalid()).collect();
         hosts.sort_by_key(|h| h.0 as usize);
         hosts.dedup();

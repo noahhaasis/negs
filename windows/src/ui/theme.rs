@@ -404,12 +404,32 @@ fn uxtheme() -> Option<&'static UxTheme> {
     UX.with(Cell::get)
 }
 
+thread_local! {
+    /// The app mode last asked for (`set_app_mode`), or None before any.
+    static APP_MODE: Cell<Option<i32>> = const { Cell::new(None) };
+}
+
 fn set_app_mode(theme: Theme) {
     if let Some(ux) = uxtheme() {
         // Default, AllowDark, ForceDark, ForceLight.
         let mode = if theme.high_contrast { 0 } else if theme.dark { 2 } else { 3 };
         (ux.set_preferred_app_mode)(mode);
         (ux.flush_menu_themes)();
+        APP_MODE.with(|m| m.set(Some(mode)));
+    }
+}
+
+/// Whether the file dialogs come up dark: a dark theme forces them dark
+/// and a light one, once switched to, light; a light theme at launch asks
+/// nothing (`init`), so they follow Windows' own app mode.
+pub fn dialogs_dark() -> bool {
+    if current().high_contrast {
+        return false;
+    }
+    match APP_MODE.with(Cell::get) {
+        Some(2) => true,
+        Some(3) => false,
+        _ => apps_use_dark(),
     }
 }
 
