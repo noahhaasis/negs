@@ -102,7 +102,9 @@ impl Glyph {
             Glyph::Turn(_) => (24.0, 24.0),
             Glyph::Strike(w) => (w as f64 / 10.0, 6.0),
             Glyph::Highlight(w) => (w as f64 / 10.0, 6.0 + negs_marks::HIGHLIGHTER_WIDTH),
-            Glyph::Tongue(_) => (crate::sheet_rules::LEADER_WIDTH, crate::sheet_rules::LEADER_RAISED),
+            // A DIP more to the right and below: the canvas's edges cut it
+            // there, wherever the scale rounds its place.
+            Glyph::Tongue(_) => (crate::sheet_rules::LEADER_WIDTH + 1.0, crate::sheet_rules::LEADER_RAISED + 1.0),
         }
     }
 
@@ -162,7 +164,7 @@ impl Glyph {
                 let shape = move || {
                     let (w, h) = (LEADER_WIDTH, LEADER_RAISED);
                     let top = h - if raised { LEADER_RAISED } else { LEADER_HEIGHT };
-                    Path::polygon(&[Pt { x: 0.0, y: h }, Pt { x: LEADER_SLANT, y: top }, Pt { x: w, y: top }, Pt { x: w, y: h }])
+                    Path::polygon(&[Pt { x: 0.0, y: h + 1.0 }, Pt { x: 0.0, y: h }, Pt { x: LEADER_SLANT, y: top }, Pt { x: w + 1.0, y: top }, Pt { x: w + 1.0, y: h + 1.0 }])
                 };
                 p.path(0x7a60 + raised as u64, shape, 0.0, 0.0, None, white);
             }

@@ -1201,7 +1201,7 @@ impl View {
         if let Some(raised) = self.leader {
             // Its right and bottom edges on the canvas's, under the leader's window.
             let t = super::theme::tokens();
-            let (w, h) = Glyph::Tongue(raised).size();
+            let (w, h) = (crate::sheet_rules::LEADER_WIDTH, crate::sheet_rules::LEADER_RAISED);
             let at = (self.width as f64 - (w * s).round(), self.height as f64 - (h * s).round());
             items.push(Draw::Glyph(Glyph::Tongue(raised), hex(t.film.film, 1.0), at));
         }
