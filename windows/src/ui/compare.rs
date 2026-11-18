@@ -641,11 +641,14 @@ fn paint(hwnd: HWND, dc: HDC) {
                     let f = frames[i];
                     let middle = f.y - rules::STACKED_CAPTION as f32 / 2.0;
                     let film = match &words[i].paper {
-                        Some(paper) => format!("{} printed on {}", words[i].film, paper),
+                        Some(paper) => format!("{} on {}", words[i].film, paper),
                         None => words[i].film.clone(),
                     };
                     let m = p.measure(&film, &FACT, 0.0);
-                    p.text(&film, &FACT, f.x + f.w - m.width, middle - m.height / 2.0, Ink::hex(ink.paper));
+                    // Never over the ring, even when the names fill the frame's width.
+                    let ring = if words[i].number.is_empty() { 0.0 } else { RING + 12.0 };
+                    let x = (f.x + f.w - m.width).max(f.x + ring);
+                    p.text(&film, &FACT, x, middle - m.height / 2.0, Ink::hex(ink.paper));
                     caption(p, &t, &ink, &words[i], &words[1 - i], f.x, middle, false, edited(i), true, f.w - m.width - 24.0);
                 }
             } else {
