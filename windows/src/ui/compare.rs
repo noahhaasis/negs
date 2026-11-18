@@ -342,6 +342,7 @@ fn paint(hwnd: HWND, dc: HDC) {
             }
         });
     });
+    c.present(dc);
 }
 
 fn at(lparam: LPARAM, hwnd: HWND) -> (f32, f32) {
