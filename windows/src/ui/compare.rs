@@ -194,16 +194,30 @@ fn items(words: &Words, camera: bool) -> Vec<String> {
 /// Over a photograph: its number in a ring, then its facts, those the
 /// other's differ in underlined. `right` lays it out leftwards from `edge`.
 #[allow(clippy::too_many_arguments)]
-fn caption(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, other: &Words, edge: f32, middle: f32, right: bool, edited: bool, camera: bool) {
-    let facts = items(words, camera);
-    let others = items(other, camera);
+fn caption(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, other: &Words, edge: f32, middle: f32, right: bool, edited: bool, camera: bool, room: f32) {
+    const DOT_GAP: f32 = 9.0;
     let dot = "·";
     let dot_width = p.measure(dot, &FACT, 0.0).width;
-    let widths: Vec<f32> = facts.iter().map(|f| p.measure(f, &FACT, 0.0).width).collect();
-    const DOT_GAP: f32 = 9.0;
-    let facts_width: f32 = widths.iter().sum::<f32>() + (facts.len().saturating_sub(1)) as f32 * (dot_width + 2.0 * DOT_GAP);
     let has_number = !words.number.is_empty();
     let number_width = if has_number { RING + 12.0 } else { 0.0 };
+    // What fits: without the camera first, then the last facts dropped.
+    let mut camera = camera;
+    let (mut facts, mut others) = (items(words, camera), items(other, camera));
+    let mut widths: Vec<f32>;
+    let mut facts_width;
+    loop {
+        widths = facts.iter().map(|f| p.measure(f, &FACT, 0.0).width).collect();
+        facts_width = widths.iter().sum::<f32>() + (facts.len().saturating_sub(1)) as f32 * (dot_width + 2.0 * DOT_GAP);
+        if number_width + facts_width <= room || facts.is_empty() {
+            break;
+        }
+        if camera && words.facts.as_ref().is_some_and(|f| f.camera.is_some()) {
+            camera = false;
+            (facts, others) = (items(words, false), items(other, false));
+        } else {
+            facts.pop();
+        }
+    }
     let total = number_width + facts_width;
     let x0 = if right { edge - total } else { edge };
     // The ring, first on the left or last on the right.
@@ -240,15 +254,18 @@ fn caption(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, ot
     }
 }
 
-/// Under a photograph: its film, and on the next line (or after it, `inline`)
-/// "printed on" its paper.
-fn label(p: &mut Painter, ink: &SheetInk, words: &Words, edge: f32, top: f32, right: bool, inline: bool, with_paper: bool) {
+/// Under a photograph: its film, and on the next line (or after it, `inline`,
+/// when it ends before `limit`) "printed on" its paper.
+fn label(p: &mut Painter, ink: &SheetInk, words: &Words, edge: f32, top: f32, right: bool, inline: bool, limit: f32) {
     let fm = p.measure(&words.film, &FILM, 0.0);
     let fx = if right { edge - fm.width } else { edge };
     p.text(&words.film, &FILM, fx, top, Ink::hex(ink.paper));
-    let Some(paper) = words.paper.as_ref().filter(|_| with_paper) else { return };
+    let Some(paper) = words.paper.as_ref() else { return };
     let km = p.measure("printed on", &KIND, 0.0);
     let pm = p.measure(paper, &PAPER, 0.0);
+    if inline && fx + fm.width + 14.0 + km.width + 8.0 + pm.width > limit {
+        return;
+    }
     let (x, baseline) = if inline { (fx + fm.width + 14.0, top + fm.baseline) } else { (edge, top + fm.height + 4.0 + pm.baseline) };
     let x = if right && !inline { edge - km.width - 8.0 - pm.width } else { x };
     p.text("printed on", &KIND, x, baseline - km.baseline, Ink::hex(ink.dim));
@@ -305,10 +322,12 @@ fn paint(hwnd: HWND, dc: HDC) {
             if slider {
                 let f = frames[0];
                 let middle = f.y - 20.0;
-                caption(p, &t, &ink, &words[0], &words[1], f.x, middle, false, edited(0), false);
-                caption(p, &t, &ink, &words[1], &words[0], f.x + f.w, middle, true, edited(1), false);
-                label(p, &ink, &words[0], f.x, f.y + f.h + 8.0, false, true, true);
-                label(p, &ink, &words[1], f.x + f.w, f.y + f.h + 8.0, true, true, false);
+                caption(p, &t, &ink, &words[0], &words[1], f.x, middle, false, edited(0), false, f.w / 2.0 - 12.0);
+                caption(p, &t, &ink, &words[1], &words[0], f.x + f.w, middle, true, edited(1), false, f.w / 2.0 - 12.0);
+                // The first's paper only when it clears the second's film.
+                let second = p.measure(&words[1].film, &FILM, 0.0).width;
+                label(p, &ink, &words[0], f.x, f.y + f.h + 8.0, false, true, f.x + f.w - second - 24.0);
+                label(p, &ink, &words[1], f.x + f.w, f.y + f.h + 8.0, true, true, f32::NEG_INFINITY);
                 // The line, with a grip in its middle.
                 let x = f.x + f.w * comparison.split as f32;
                 let cy = f.y + f.h / 2.0;
@@ -325,19 +344,21 @@ fn paint(hwnd: HWND, dc: HDC) {
                 for i in 0..2 {
                     let f = frames[i];
                     let middle = f.y - rules::STACKED_CAPTION as f32 / 2.0;
-                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, middle, false, edited(i), true);
                     let film = match &words[i].paper {
                         Some(paper) => format!("{} printed on {}", words[i].film, paper),
                         None => words[i].film.clone(),
                     };
                     let m = p.measure(&film, &FACT, 0.0);
                     p.text(&film, &FACT, f.x + f.w - m.width, middle - m.height / 2.0, Ink::hex(ink.paper));
+                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, middle, false, edited(i), true, f.w - m.width - 24.0);
                 }
             } else {
                 for i in 0..2 {
                     let f = frames[i];
-                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, f.y - 20.0, false, edited(i), true);
-                    label(p, &ink, &words[i], f.x, f.y + f.h + 8.0, false, false, true);
+                    // As wide as its frame, or the room up to the other's.
+                    let room = if i == 0 { (frames[1].x - f.x - 24.0).max(f.w) } else { w as f32 - f.x - 16.0 };
+                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, f.y - 20.0, false, edited(i), true, room);
+                    label(p, &ink, &words[i], f.x, f.y + f.h + 8.0, false, false, f32::INFINITY);
                 }
             }
         });

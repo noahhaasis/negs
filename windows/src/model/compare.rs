@@ -259,6 +259,7 @@ impl Model {
     }
 
     fn develop_compared(&mut self, item: Item) {
+        crate::trace::event("compare_develop", || json!({"item": item.photo, "engine": self.engine.is_some()}));
         let (Some(engine), Some(library)) = (self.engine.clone(), self.shelf.library.as_ref()) else { return };
         let (stored, _) = library.thumbnail_state(&item).unwrap_or_else(|| (library.unedited_state(), false));
         let Ok(mut state) = library_map::from_library(&stored, false) else { return };
@@ -268,7 +269,7 @@ impl Model {
         let buffer = engine.directory().join(format!("compare-{request}.rgba"));
         let mut command = json!({
             "command": "thumbnail", "input": item.photo, "film": state.film, "paper": state.paper, "params": state.params,
-            "long_side": OTHER_LONG_SIDE, "source_generation": 1_000_000 + request, "preview_path": buffer,
+            "long_side": OTHER_LONG_SIDE, "source_generation": 2_000_000_000 + request, "preview_path": buffer,
         });
         if state.crop.cropped() {
             let r = state.crop.rect;
@@ -280,6 +281,10 @@ impl Model {
         engine.request(command, engine::timeout_for("thumbnail"), move |result| {
             #[cfg(test)]
             let _background = background;
+            crate::trace::event("compare_developed", || match &result {
+                Ok((_, r)) => json!({"request": request, "width": r["width"], "height": r["height"], "bytes": std::fs::metadata(&buffer).map(|m| m.len()).ok()}),
+                Err(error) => json!({"request": request, "error": format!("{error:#}")}),
+            });
             let shown = result.ok().and_then(|(_, r)| {
                 let rgba = std::fs::read(&buffer).ok()?;
                 Shown::of(&rgba, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32, None, orientation, false)
@@ -302,18 +307,19 @@ impl Model {
         }
     }
 
-    /// The open photograph as shown: its preview cropped, mirrored and turned.
+    /// The open photograph as shown: its settled develop (the preview's
+    /// pixels leave memory once on the GPU), cropped, mirrored and turned.
     pub fn compared_open(&mut self) -> Option<Shown> {
-        let image = self.image.clone()?;
         let orientation = self.state.orientation();
         let crop = self.state.crop;
         let cropped_render = self.size_mode() == state::SizeMode::LongestSide && crop.cropped();
-        let key = (image.id, self.revision, format!("{crop:?}{orientation:?}"));
+        let Some(kept) = self.kept.as_ref().filter(|k| k.generation == self.source_generation) else { return self.compare.shown.clone() };
+        let key = (kept.generation, kept.revision, format!("{crop:?}{orientation:?}"));
         if self.compare.shown_key.as_ref() == Some(&key) {
             return self.compare.shown.clone();
         }
-        let pixels = (!cropped_render && crop.cropped()).then(|| crop.pixels(Size::new(image.width as f64, image.height as f64)));
-        let shown = image.with_pixels(|rgba| Shown::of(rgba, image.width, image.height, pixels, orientation, image.wide)).flatten();
+        let pixels = (!cropped_render && crop.cropped()).then(|| crop.pixels(Size::new(kept.width as f64, kept.height as f64)));
+        let shown = Shown::of(&kept.pixels, kept.width, kept.height, pixels, orientation, crate::picture::is_wide(&kept.space));
         if shown.is_some() {
             self.compare.shown_key = Some(key);
             self.compare.shown = shown;
