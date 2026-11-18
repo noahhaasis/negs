@@ -129,6 +129,8 @@ struct State {
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
     static REGISTERED: Cell<bool> = const { Cell::new(false) };
+    /// The card's window while it shows.
+    static POPUP: Cell<isize> = const { Cell::new(0) };
 }
 
 const TIMER: usize = 1;
@@ -218,6 +220,7 @@ pub fn ask(owner: HWND, alert: Alert) -> usize {
             STATE.with(|s| s.borrow_mut().take());
             return fallback;
         };
+        POPUP.with(|p| p.set(popup.0 as isize));
         render(popup);
         let _ = EnableWindow(owner, false);
         let _ = ShowWindow(popup, SW_SHOW);
@@ -241,11 +244,25 @@ pub fn ask(owner: HWND, alert: Alert) -> usize {
         }
         // The owner first, so it keeps the activation.
         let _ = EnableWindow(owner, true);
+        POPUP.with(|p| p.set(0));
         let _ = DestroyWindow(popup);
         let _ = SetForegroundWindow(owner);
     }
     STATE.with(|s| s.borrow_mut().take()).and_then(|s| s.answer).unwrap_or(fallback)
 }
+
+/// The window was activated (Alt+Tab, the taskbar, another app) while the
+/// card shows: the card takes the keyboard back, as a dialog would.
+pub fn reclaim_focus() {
+    let popup = HWND(POPUP.with(Cell::get) as *mut _);
+    if !popup.is_invalid() {
+        unsafe {
+            let _ = PostMessageW(popup, WM_APP_FOCUS, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+const WM_APP_FOCUS: u32 = WM_APP + 40;
 
 /// Windows' "Show animations in Windows" setting.
 fn client_animations() -> bool {
@@ -506,6 +523,11 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_MOUSEACTIVATE => LRESULT(MA_ACTIVATE as isize),
+            WM_APP_FOCUS => {
+                let _ = SetForegroundWindow(hwnd);
+                let _ = SetFocus(hwnd);
+                LRESULT(0)
+            }
             WM_SETCURSOR => {
                 let _ = SetCursor(LoadCursorW(None, IDC_ARROW).unwrap_or_default());
                 LRESULT(1)

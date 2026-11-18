@@ -1668,6 +1668,8 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 if wparam.0 & 0xffff == WA_INACTIVE as usize {
                     with_app(|app| app.release_original());
                     titlebar::deactivated(hwnd);
+                } else {
+                    alert::reclaim_focus();
                 }
                 titlebar::invalidate(hwnd);
                 DefWindowProcW(hwnd, msg, wparam, lparam)
