@@ -394,6 +394,26 @@ fn fitted(p: &mut Painter, text: &str, style: &TextStyle, width: f32) -> String 
     if low == 0 { String::new() } else { chars[..low].iter().collect::<String>().trim_end().to_string() + "…" }
 }
 
+/// `text` cut in the middle to fit `width` (`.truncationMode(.middle)`):
+/// the most characters that fit, as evenly from both ends as they come.
+fn fitted_middle(p: &mut Painter, text: &str, style: &TextStyle, width: f32) -> String {
+    if p.measure(text, style, 0.0).width <= width {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |kept: usize| {
+        let head: String = chars[..kept.div_ceil(2)].iter().collect();
+        let tail: String = chars[chars.len() - kept / 2..].iter().collect();
+        format!("{}…{}", head.trim_end(), tail.trim_start())
+    };
+    let (mut low, mut high) = (0usize, chars.len());
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        if p.measure(&cut(mid), style, 0.0).width <= width { low = mid } else { high = mid - 1 }
+    }
+    if low < 2 { String::new() } else { cut(low) }
+}
+
 /// The favourite's star (`StarShape`, the mockup's 20 × 20 path) drawn 15
 /// square in the 20 square box at (`x`, `y`): filled in the film's pencil on
 /// a favourite, else outlined for the photograph, over a dark shadow.
@@ -573,7 +593,7 @@ fn paint(hwnd: HWND, dc: HDC) {
             let room = right - (left + FOOT_SPACING);
             if room > 24.0 {
                 let hint = rules::hint(v.before_name.as_deref());
-                let shown = fitted(p, &hint, &FOOT_WORDS, room);
+                let shown = fitted_middle(p, &hint, &FOOT_WORDS, room);
                 let m = p.measure(&shown, &FOOT_WORDS, 0.0);
                 p.text(&shown, &FOOT_WORDS, right - m.width, baseline - line.baseline, Ink::hex(t.film.dim));
             }
