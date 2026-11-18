@@ -363,7 +363,7 @@ pub mod testing {
                 inspector: inspector::Inspector::headless(),
                 presets_view: None,
                 settings: None,
-                fonts: Fonts { ui: font, bold: font, section: font, small: font, glyph: font, glyph_small: font, line: 16 },
+                fonts: Fonts { ui: font, bold: font, small: font, line: 16 },
                 dpi: 96,
                 menu: HMENU::default(),
                 accelerators: HACCEL::default(),
@@ -430,11 +430,7 @@ pub struct Fonts {
     pub ui: HFONT,
     /// Group headers: the UI size, semibold.
     pub bold: HFONT,
-    /// Section titles: semibold and a little larger.
-    pub section: HFONT,
     pub small: HFONT,
-    pub glyph: HFONT,
-    pub glyph_small: HFONT,
     /// The UI font's line height in pixels.
     pub line: i32,
 }
@@ -453,23 +449,14 @@ impl Fonts {
             // The system's size (so text scaling applies) in Segoe UI
             // Variable where Windows 11 has it, unless the face was changed.
             let mut base = metrics.lfMessageFont;
-            let mut display = base;
             if platform::from_wide(&base.lfFaceName) == "Segoe UI" && font_exists("Segoe UI Variable Text") {
                 set_face(&mut base, "Segoe UI Variable Text");
-                set_face(&mut display, "Segoe UI Variable Display");
             }
             let ui = CreateFontIndirectW(&base);
             let bold = CreateFontIndirectW(&LOGFONTW { lfWeight: 600, ..base });
-            let section = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 115 / 100, lfWeight: 600, ..display });
             let small = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 85 / 100, ..base });
-            let glyph_face = icon_face();
-            let mut glyph = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
-            let face = wide(glyph_face);
-            glyph.lfFaceName[..face.len()].copy_from_slice(&face);
-            let glyph_font = CreateFontIndirectW(&glyph);
-            let glyph_small = CreateFontIndirectW(&LOGFONTW { lfHeight: -(11 * dpi as i32 / 96), ..glyph });
             let line = line_height(ui);
-            Fonts { ui, bold, section, small, glyph: glyph_font, glyph_small, line }
+            Fonts { ui, bold, small, line }
         }
     }
 }
@@ -490,11 +477,6 @@ fn set_face(font: &mut LOGFONTW, face: &str) {
     let w = wide(face);
     font.lfFaceName = [0; 32];
     font.lfFaceName[..w.len()].copy_from_slice(&w);
-}
-
-/// Segoe Fluent Icons on Windows 11, MDL2 Assets on Windows 10.
-pub fn icon_face() -> &'static str {
-    if font_exists("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" }
 }
 
 /// Whether a font family is installed (asked once per face).
