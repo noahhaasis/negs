@@ -322,6 +322,18 @@ pub(super) fn render(
                     );
                 }
             }
+            Draw::Words(text, style, width, color, (x, y)) => {
+                let plain = crate::ui::theme::tokens().plain;
+                if let Some(mask) = crate::ui::d2d::mask(text, style, *width, crate::ui::d2d::Align::Center, dpi as f32 / 96.0, plain) {
+                    let rgb = [decode(color[0]), decode(color[1]), decode(color[2])];
+                    let (x, y) = (x.round() as f32, y.round() as f32);
+                    out.area([x, y, mask.width as f32, mask.height as f32], |out, px, py, sx, sy| {
+                        let mx = (sx - x) as u32;
+                        let my = (sy - y) as u32;
+                        out.blend(px, py, rgb, color[3] * mask.coverage[(my * mask.width + mx) as usize] as f32 / 255.0);
+                    });
+                }
+            }
         }
     }
     cache.mips.retain(|(id, _), _| {

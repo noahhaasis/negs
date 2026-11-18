@@ -17,6 +17,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
+use super::d2d::TextStyle;
 use super::{App, post, with_app};
 use crate::border::{BorderSettings, BorderStyle, FilmFormat};
 use crate::crop::{self, CropSettings, Handle, Point, Rect, Size};
@@ -98,129 +99,13 @@ pub struct Scene {
     pub fit: bool,
     pub cropping: Option<CropScene>,
     pub drop_target: bool,
-    /// The tools under the photograph; None while cropping.
-    pub tools: Option<Tools>,
+    /// The photograph couldn't be developed: its name and the reason, said
+    /// where it would be, with Try Again (§4.14).
+    pub failed: Option<(String, String)>,
     /// The render the developed picture came from, for the timing trace.
     pub frame: Option<crate::model::FrameTag>,
 }
 
-/// The photograph's tools, in a pill floating under it: zoom, rotate and
-/// crop, before and after, the film strip. The title bar keeps the
-/// window's own actions; the Mac has all of them in its toolbar.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tool {
-    Fit,
-    Actual,
-    Rotate,
-    Crop,
-    Before,
-    After,
-    FilmStrip,
-}
-
-/// Which tools work, and which are on.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct Tools {
-    pub crop: bool,
-    pub original: bool,
-    pub before: bool,
-    pub filmstrip: bool,
-}
-
-impl Tool {
-    const ALL: [Tool; 7] = [Tool::Fit, Tool::Actual, Tool::Rotate, Tool::Crop, Tool::Before, Tool::After, Tool::FilmStrip];
-
-    /// A glyph of the icon font, or words.
-    fn face(self) -> &'static str {
-        match self {
-            Tool::Fit => "\u{E9A6}",
-            Tool::Actual => "1:1",
-            Tool::Rotate => "\u{E7AD}",
-            Tool::Crop => "\u{E7A8}",
-            Tool::Before => "Before",
-            Tool::After => "After",
-            Tool::FilmStrip => "\u{E8B9}",
-        }
-    }
-
-    fn tip(self) -> &'static str {
-        match self {
-            Tool::Fit => "Fit photograph (Ctrl+0)",
-            Tool::Actual => "Actual size (Ctrl+1)",
-            Tool::Rotate => "Rotate clockwise (Ctrl+R)",
-            Tool::Crop => "Crop the photograph (C)",
-            Tool::Before => "Show the photograph before developing (or hold O)",
-            Tool::After => "Show the developed photograph",
-            Tool::FilmStrip => "Show or hide film strip (F6)",
-        }
-    }
-
-    /// Width in DIPs; a gap of `TOOL_GAP` follows Actual, Crop and After.
-    fn width(self) -> f64 {
-        match self {
-            Tool::Actual => 40.0,
-            Tool::Before => 64.0,
-            Tool::After => 56.0,
-            _ => 36.0,
-        }
-    }
-
-    fn gap_after(self) -> bool {
-        matches!(self, Tool::Actual | Tool::Crop | Tool::After)
-    }
-
-    fn enabled(self, tools: &Tools) -> bool {
-        match self {
-            Tool::Crop => tools.crop,
-            Tool::Before => tools.original,
-            _ => true,
-        }
-    }
-
-    fn on(self, tools: &Tools) -> bool {
-        match self {
-            Tool::Before => tools.before,
-            Tool::After => !tools.before,
-            Tool::FilmStrip => tools.filmstrip,
-            _ => false,
-        }
-    }
-}
-
-const TOOL_HEIGHT: f64 = 32.0;
-const TOOL_GAP: f64 = 13.0;
-const PILL_PAD: f64 = 4.0;
-/// Under the pill, and between it and a fitted photograph.
-const PILL_MARGIN: f64 = 12.0;
-
-/// The room the tools keep under the photograph, in pixels.
-fn tools_reserve(scale: f64) -> f64 {
-    (TOOL_HEIGHT + 2.0 * PILL_PAD + 2.0 * PILL_MARGIN) * scale
-}
-
-/// The pill, its tools and the dividers between groups, centred at the
-/// bottom of a `width` × `height` canvas.
-fn tool_layout(width: f64, height: f64, scale: f64) -> (Rect, Vec<(Tool, Rect)>, Vec<f64>) {
-    let inner: f64 = Tool::ALL.iter().map(|t| t.width() + if t.gap_after() { TOOL_GAP } else { 0.0 }).sum();
-    let pill = Rect::new(
-        ((width - (inner + 2.0 * PILL_PAD) * scale) / 2.0).round(),
-        (height - (PILL_MARGIN + TOOL_HEIGHT + 2.0 * PILL_PAD) * scale).round(),
-        ((inner + 2.0 * PILL_PAD) * scale).round(),
-        ((TOOL_HEIGHT + 2.0 * PILL_PAD) * scale).round(),
-    );
-    let mut x = pill.x + PILL_PAD * scale;
-    let (mut tools, mut dividers) = (vec![], vec![]);
-    for tool in Tool::ALL {
-        let w = tool.width() * scale;
-        tools.push((tool, Rect::new(x.round(), pill.y + PILL_PAD * scale, w.round(), TOOL_HEIGHT * scale)));
-        x += w;
-        if tool.gap_after() {
-            dividers.push((x + TOOL_GAP * scale / 2.0).round());
-            x += TOOL_GAP * scale;
-        }
-    }
-    (pill, tools, dividers)
-}
 
 struct Surface {
     surface: wgpu::Surface<'static>,
@@ -258,13 +143,14 @@ struct View {
     crop_drag: Option<CropDrag>,
     texts: HashMap<(String, i32, i32), GpuImage>,
     first_image_presented: bool,
-    /// The room under the photograph the tools take (none while they're hidden).
-    reserve: f64,
-    hot: Option<Tool>,
-    pressed: Option<Tool>,
-    /// The tools' tooltips, and the size their rectangles were placed for.
-    tips: HWND,
-    tips_for: Option<(u32, u32, u32)>,
+    /// Newsreader set with DirectWrite for the canvas's words, by text and style.
+    words: HashMap<(String, String), GpuImage>,
+    /// Try Again, where it was last drawn, and the pointer over it or pressing it.
+    retry: Option<Rect>,
+    retry_hot: bool,
+    retry_pressed: bool,
+    /// When the running line under the Developing tag started.
+    running: Option<std::time::Instant>,
     /// The last developed frame drawn (`Scene::frame`).
     presented: Option<crate::model::FrameTag>,
 }
@@ -337,11 +223,11 @@ pub fn init(hwnd: HWND, dpi: u32) {
             crop_drag: None,
             texts: HashMap::new(),
             first_image_presented: false,
-            reserve: 0.0,
-            hot: None,
-            pressed: None,
-            tips: HWND::default(),
-            tips_for: None,
+            words: HashMap::new(),
+            retry: None,
+            retry_hot: false,
+            retry_pressed: false,
+            running: None,
             presented: None,
         })
     });
@@ -442,7 +328,11 @@ pub fn set_dpi(dpi: u32) {
     with_view(|view| {
         view.dpi = dpi;
         view.texts.clear();
-        view.set_reserve();
+        view.words.clear();
+        if view.fitting {
+            view.apply_zoom();
+        }
+        view.clamp_center();
         invalidate(view.hwnd);
     });
 }
@@ -519,11 +409,9 @@ pub fn update_scene(app: &mut App) {
         badge: model.badge(),
         zoom_command: model.zoom_command,
         fit: model.fit_image,
-        tools: model.crop_session.is_none().then(|| Tools {
-            crop: model.image.is_some(),
-            original: model.can_show_original(),
-            before: model.holding_original,
-            filmstrip: model.prefs.filmstrip_visible,
+        failed: model.develop_error.clone().filter(|_| model.render_failed).map(|reason| {
+            let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_else(|| "The photograph".into());
+            (name, reason)
         }),
         cropping,
         drop_target: app.drop_target_active,
@@ -549,21 +437,10 @@ impl View {
         self.dpi as f64 / 96.0
     }
 
-    /// The part of the canvas the photograph fits and centres in: above the tools.
+    /// The part of the canvas the photograph fits and centres in: all of it
+    /// (its tools are words in the status line).
     fn viewport(&self) -> (f64, f64) {
-        (self.width as f64, (self.height as f64 - self.reserve).max(1.0))
-    }
-
-    /// Follows the tools' showing (and the DPI); refits a fitted photograph.
-    fn set_reserve(&mut self) {
-        let reserve = if self.scene.tools.is_some() { tools_reserve(self.scale()) } else { 0.0 };
-        if reserve != self.reserve {
-            self.reserve = reserve;
-            if self.fitting {
-                self.apply_zoom();
-            }
-            self.clamp_center();
-        }
+        (self.width as f64, (self.height as f64).max(1.0))
     }
 
     fn display_size(scene: &Scene) -> (f64, f64) {
@@ -619,7 +496,6 @@ impl View {
             self.apply_zoom();
         }
         self.scene = scene;
-        self.set_reserve();
         self.clamp_center();
         invalidate(self.hwnd);
     }
@@ -834,6 +710,27 @@ enum Draw {
     Fill(QuadInstance),
     Texture(Picture, QuadInstance),
     Text(String, f64, i32, [f32; 4], (f64, f64), bool),
+    /// Words set with DirectWrite (Newsreader): the text, its style, the
+    /// width it wraps and centres in (DIPs; 0 for one line), colour, place.
+    Words(String, TextStyle, f32, [f32; 4], (f64, f64)),
+}
+
+/// The canvas's words in the design's type (§4.14).
+const TAG: TextStyle = TextStyle::serif(17.0, 400).italic();
+const FAILURE: TextStyle = TextStyle::serif(24.0, 600).line_height(1.3);
+const REASON: TextStyle = TextStyle::serif(16.0, 400).italic().line_height(1.45);
+const BUTTON_WORDS: TextStyle = TextStyle::serif(13.5, 500);
+const DROP: TextStyle = TextStyle::serif(22.0, 400).italic();
+/// Redraws the tag's running line.
+const TIMER_RUNNING: usize = 7;
+
+fn words_key(text: &str, style: &TextStyle, width: f32, dpi: u32) -> (String, String) {
+    (text.to_string(), format!("{style:?}|{width}|{dpi}|{}", super::theme::tokens().plain))
+}
+
+/// A theme colour (0xRRGGBB) for the GPU.
+fn hex(c: u32, alpha: f32) -> [f32; 4] {
+    rgba([(c >> 16) as u8, (c >> 8) as u8, c as u8], alpha)
 }
 
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
@@ -841,11 +738,6 @@ const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
 fn rgba(c: [u8; 3], alpha: f32) -> [f32; 4] {
     [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, alpha]
-}
-
-/// A palette colour (a `COLORREF`, 0x00BBGGRR).
-fn color(c: super::theme::Color, alpha: f32) -> [f32; 4] {
-    rgba([c as u8, (c >> 8) as u8, (c >> 16) as u8], alpha)
 }
 
 fn rect(x: f64, y: f64, w: f64, h: f64) -> [f32; 4] {
@@ -899,31 +791,188 @@ impl View {
                 self.build_photo(items, picture, &scene);
             }
         }
-        if let Some(badge) = scene.badge {
-            let font = 13.0;
-            let (tw, th) = self.text_size(badge, font, 600).unwrap_or((0.0, 0.0));
-            let (pw, ph) = (tw + 24.0 * s, th + 10.0 * s);
-            let x = (self.width as f64 - pw) / 2.0;
-            let y = 12.0 * s;
-            items.push(Draw::Fill(QuadInstance::rounded(rect(x, y, pw, ph), [0.97, 0.97, 0.97, 0.92], (ph / 2.0) as f32, 0.0)));
-            items.push(Draw::Fill(QuadInstance::rounded(rect(x, y, pw, ph), [0.0, 0.0, 0.0, 0.15], (ph / 2.0) as f32, 1.0)));
-            items.push(Draw::Text(badge.into(), font, 600, [0.12, 0.12, 0.12, 1.0], (x + 12.0 * s, y + 5.0 * s), false));
+        self.retry = None;
+        if scene.cropping.is_none() {
+            if let Some((name, reason)) = &scene.failed {
+                self.build_failure(items, name, reason);
+            } else if scene.drop_target && scene.picture.is_some() {
+                self.build_dropping(items);
+            }
         }
-        let tools = scene.tools.filter(|_| scene.picture.is_some());
-        if let Some(tools) = tools {
-            self.build_tools(items, tools);
+        match scene.badge.filter(|_| scene.failed.is_none() && !scene.drop_target) {
+            Some(badge) => self.build_tag(items, badge),
+            None => self.running = None,
         }
-        self.place_tips(tools.is_some());
-        if scene.drop_target {
-            let inset = 8.0 * s;
-            let accent = accent_color();
+        if scene.drop_target && scene.picture.is_none() {
+            // Nothing shown yet: a line round the canvas.
+            let inset = 12.0 * s;
+            let t = super::theme::tokens();
             items.push(Draw::Fill(QuadInstance::rounded(
                 rect(inset, inset, self.width as f64 - 2.0 * inset, self.height as f64 - 2.0 * inset),
-                rgba(accent, 1.0),
-                (12.0 * s) as f32,
-                (3.0 * s) as f32,
+                hex(t.hex.accent, 1.0),
+                (4.0 * s) as f32,
+                (1.5 * s) as f32,
             )));
         }
+        super::status::set_fitting(self.fitting);
+    }
+
+    /// The photograph's rectangle on screen, as drawn (its border included),
+    /// clipped to the canvas.
+    fn shown_rect(&self) -> Rect {
+        let (ox, oy) = self.document_origin();
+        let (dw, dh) = self.document;
+        let r = Rect::new(ox, oy, dw * self.zoom, dh * self.zoom);
+        let (x, y) = (r.x.max(0.0), r.y.max(0.0));
+        Rect::new(x, y, (r.max_x().min(self.width as f64) - x).max(0.0), (r.max_y().min(self.height as f64) - y).max(0.0))
+    }
+
+    /// Developing, Updating or Loading Original (`DevelopTag`): at the top
+    /// centre of the photograph, 16 DIP below its visible top edge, on the
+    /// theme's `bg` at 0.78 with a faint `paper` edge, the word in italic
+    /// `paper` over a short line where a yellow mark runs every 1.1 s.
+    fn build_tag(&mut self, items: &mut Vec<Draw>, title: &str) {
+        let s = self.scale();
+        let t = super::theme::tokens();
+        let Some((tw, th)) = self.words_size(title, &TAG) else { return };
+        let line = 64.0 * s;
+        let (pad_x, pad_top, pad_bottom, gap) = (16.0 * s, 7.0 * s, 9.0 * s, 5.0 * s);
+        let (w, h) = ((tw.max(line) + 2.0 * pad_x).round(), (pad_top + th + gap + s.max(1.0) + pad_bottom).round());
+        let photo = self.shown_rect();
+        let x = ((photo.mid_x() - w / 2.0).round()).max(0.0);
+        let y = (photo.y + 16.0 * s).round();
+        let strength = t.shadow_strength() as f32;
+        for i in 1..=4 {
+            let spread = i as f64 * 2.0 * s;
+            items.push(Draw::Fill(QuadInstance::rounded(rect(x - spread, y + 4.0 * s - spread, w + 2.0 * spread, h + 2.0 * spread), [0.0, 0.0, 0.0, 0.1 * strength / i as f32], (3.0 * s + spread) as f32, 0.0)));
+        }
+        items.push(Draw::Fill(QuadInstance::rounded(rect(x, y, w, h), hex(t.hex.bg, 0.78), (3.0 * s) as f32, 0.0)));
+        items.push(Draw::Fill(QuadInstance::rounded(rect(x, y, w, h), hex(t.hex.paper, 0.08), (3.0 * s) as f32, s.max(1.0) as f32)));
+        items.push(Draw::Words(title.into(), TAG, 0.0, hex(t.hex.paper, 1.0), ((x + (w - tw) / 2.0).round(), y + pad_top - s)));
+        let (lx, ly) = ((x + (w - line) / 2.0).round(), (y + pad_top + th + gap).round());
+        let thin = s.max(1.0).round();
+        items.push(Draw::Fill(QuadInstance::fill(rect(lx, ly, line, thin), hex(t.hex.track, 1.0))));
+        // The mark runs only where the canvas redraws by itself (the GPU);
+        // still, a third of the way along, as with Reduce Motion.
+        let animate = self.gpu.is_some() && super::motion::enabled();
+        let phase = if animate {
+            let started = *self.running.get_or_insert_with(std::time::Instant::now);
+            (started.elapsed().as_secs_f64() / 1.1).fract()
+        } else {
+            1.0 / 3.0 / 1.3 + 0.3 / 1.3
+        };
+        // From -0.3 to 1 of the line's width, clipped to it.
+        let start = lx + line * (phase * 1.3 - 0.3);
+        let (a, b) = (start.max(lx), (start + line * 0.3).min(lx + line));
+        if b > a {
+            items.push(Draw::Fill(QuadInstance::fill(rect(a, ly, b - a, thin), hex(t.hex.accent, 1.0))));
+        }
+        if animate {
+            unsafe {
+                SetTimer(self.hwnd, TIMER_RUNNING, 33, None);
+            }
+        }
+    }
+
+    /// A photograph that couldn't be developed (`DevelopFailure`): what's
+    /// shown fades to the canvas, and over it "NAME couldn’t be developed",
+    /// the reason, and Try Again.
+    fn build_failure(&mut self, items: &mut Vec<Draw>, name: &str, reason: &str) {
+        let s = self.scale();
+        let t = super::theme::tokens();
+        let photo = self.shown_rect();
+        if photo.width > 0.0 {
+            items.push(Draw::Fill(QuadInstance::fill(rect(photo.x, photo.y, photo.width, photo.height), hex(t.hex.bg, 0.88))));
+        }
+        let room = ((self.width as f64 - 120.0 * s) / s).max(120.0) as f32;
+        let heading = format!("{name} couldn’t be developed");
+        let (Some((hw, hh)), Some((rw, rh))) = (self.words_size_in(&heading, &FAILURE, room), self.words_size_in(reason, &REASON, room)) else { return };
+        let button = self.words_size("Try Again", &BUTTON_WORDS).unwrap_or((60.0 * s, 18.0 * s));
+        let (bw, bh) = ((button.0 + 24.0 * s).max(76.0 * s).round(), (23.0 * s).round());
+        let total = hh + 10.0 * s + rh + 22.0 * s + bh;
+        let mut y = ((self.height as f64 - total) / 2.0).round();
+        let mid = self.width as f64 / 2.0;
+        items.push(Draw::Words(heading, FAILURE, room, hex(t.hex.paper, 1.0), ((mid - hw / 2.0).round(), y)));
+        y += hh + 10.0 * s;
+        items.push(Draw::Words(reason.into(), REASON, room, hex(t.hex.label, 1.0), ((mid - rw / 2.0).round(), y)));
+        y += rh + 22.0 * s;
+        let r = Rect::new((mid - bw / 2.0).round(), y, bw, bh);
+        let (hot, pressed) = (self.retry_hot, self.retry_pressed && self.retry_hot);
+        if hot || pressed {
+            items.push(Draw::Fill(QuadInstance::rounded(rect(r.x, r.y, r.width, r.height), hex(t.hex.paper, if pressed { 0.09 } else { 0.04 }), (bh / 2.0) as f32, 0.0)));
+        }
+        let ring = if hot { t.hex.label } else { t.hex.dim };
+        items.push(Draw::Fill(QuadInstance::rounded(rect(r.x, r.y, r.width, r.height), hex(ring, 1.0), (bh / 2.0) as f32, s.max(1.0) as f32)));
+        items.push(Draw::Words("Try Again".into(), BUTTON_WORDS, 0.0, hex(t.hex.paper, 1.0), ((r.mid_x() - button.0 / 2.0).round(), (r.mid_y() - button.1 / 2.0).round())));
+        self.retry = Some(r);
+    }
+
+    /// A photograph dragged over the canvas: the photograph gives way to
+    /// "drop to open it" and a yellow line round its place (§4.14).
+    fn build_dropping(&mut self, items: &mut Vec<Draw>) {
+        let s = self.scale();
+        let t = super::theme::tokens();
+        let photo = self.shown_rect();
+        let o = 12.0 * s;
+        items.push(Draw::Fill(QuadInstance::rounded(rect(photo.x - o, photo.y - o, photo.width + 2.0 * o, photo.height + 2.0 * o), hex(t.hex.accent, 1.0), (4.0 * s) as f32, (1.5 * s) as f32)));
+        if let Some((w, h)) = self.words_size("drop to open it", &DROP) {
+            items.push(Draw::Words("drop to open it".into(), DROP, 0.0, hex(t.hex.paper, 1.0), ((self.width as f64 - w) / 2.0, (self.height as f64 - h) / 2.0)));
+        }
+    }
+
+    /// A press on Try Again: true if it took it (and wants the capture).
+    fn press_retry(&mut self, x: f64, y: f64) -> bool {
+        let on = self.retry.is_some_and(|r| r.contains(Point { x, y }));
+        if on {
+            self.retry_pressed = true;
+            self.retry_hot = true;
+            invalidate(self.hwnd);
+        }
+        on
+    }
+
+    /// Hot tracking over Try Again.
+    fn hover_retry(&mut self, x: f64, y: f64) {
+        let hot = self.retry.is_some_and(|r| r.contains(Point { x, y }));
+        if hot != self.retry_hot {
+            self.retry_hot = hot;
+            invalidate(self.hwnd);
+            if hot {
+                let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: self.hwnd, dwHoverTime: 0 };
+                unsafe {
+                    let _ = TrackMouseEvent(&mut track);
+                }
+            }
+        }
+    }
+
+    /// The size of `text` set in `style` on one line, in pixels.
+    fn words_size(&mut self, text: &str, style: &TextStyle) -> Option<(f64, f64)> {
+        self.words_size_in(text, style, 0.0)
+    }
+
+    /// The size of `text` set in `style`, wrapped and centred in `width`
+    /// DIPs (0: one line), in pixels.
+    fn words_size_in(&mut self, text: &str, style: &TextStyle, width: f32) -> Option<(f64, f64)> {
+        let mask = self.words_mask(text, style, width)?;
+        Some((mask.0 as f64, mask.1 as f64))
+    }
+
+    /// Sets words with DirectWrite, uploading them on the GPU; the software
+    /// canvas sets them again when drawing.
+    fn words_mask(&mut self, text: &str, style: &TextStyle, width: f32) -> Option<(u32, u32)> {
+        let key = words_key(text, style, width, self.dpi);
+        if let Some(image) = self.words.get(&key) {
+            let size = image.texture.size();
+            return Some((size.width, size.height));
+        }
+        let plain = super::theme::tokens().plain;
+        let mask = super::d2d::mask(text, style, width, super::d2d::Align::Center, self.scale() as f32, plain)?;
+        let size = (mask.width, mask.height);
+        if let Some(gpu) = self.gpu.clone() {
+            self.words.insert(key, gpu.upload_mask(&mask.coverage, mask.width, mask.height));
+        }
+        Some(size)
     }
 
     fn build_photo(&mut self, items: &mut Vec<Draw>, picture: Picture, scene: &Scene) {
@@ -1056,158 +1105,6 @@ impl View {
         self.build_dial(items, &layout, cropping.angle);
     }
 
-    /// The tools' pill, in the window's colours.
-    fn build_tools(&mut self, items: &mut Vec<Draw>, tools: Tools) {
-        let s = self.scale();
-        let p = super::theme::palette();
-        let (pill, slots, dividers) = tool_layout(self.width as f64, self.height as f64, s);
-        let radius = (pill.height / 2.0) as f32;
-        items.push(Draw::Fill(QuadInstance::rounded(rect(pill.x, pill.y, pill.width, pill.height), color(p.panel, 0.96), radius, 0.0)));
-        items.push(Draw::Fill(QuadInstance::rounded(rect(pill.x, pill.y, pill.width, pill.height), color(p.strong_border, 0.6), radius, s.max(1.0) as f32)));
-        for x in dividers {
-            items.push(Draw::Fill(QuadInstance::fill(rect(x, pill.y + pill.height * 0.3, s.max(1.0).floor(), pill.height * 0.4), color(p.border, 1.0))));
-        }
-        // Before | After share one track; the one showing is in the accent.
-        let segments: Vec<Rect> = slots.iter().filter(|(t, _)| matches!(t, Tool::Before | Tool::After)).map(|(_, r)| *r).collect();
-        if let [before, after] = segments[..] {
-            let track = Rect::new(before.x, before.y + 2.0 * s, after.max_x() - before.x, before.height - 4.0 * s);
-            items.push(Draw::Fill(QuadInstance::rounded(rect(track.x, track.y, track.width, track.height), color(p.subtle_hover, 1.0), (track.height / 2.0) as f32, 0.0)));
-        }
-        for (tool, r) in slots {
-            let enabled = tool.enabled(&tools);
-            let on = tool.on(&tools);
-            let hot = enabled && self.hot == Some(tool);
-            let pressed = hot && self.pressed == Some(tool);
-            let segment = matches!(tool, Tool::Before | Tool::After);
-            let face = if segment { Rect::new(r.x + 2.0 * s, r.y + 4.0 * s, r.width - 4.0 * s, r.height - 8.0 * s) } else { r.inset(2.0 * s, 2.0 * s) };
-            let round = if segment { (face.height / 2.0) as f32 } else { (6.0 * s) as f32 };
-            let fill = if segment && on {
-                Some(if pressed { p.accent_pressed } else if hot { p.accent_hover } else { p.accent })
-            } else if pressed {
-                Some(p.subtle_pressed)
-            } else if hot {
-                Some(if segment { p.subtle_pressed } else { p.subtle_hover })
-            } else if on {
-                Some(super::theme::mix(p.panel, p.accent, 0.16))
-            } else {
-                None
-            };
-            if let Some(fill) = fill {
-                items.push(Draw::Fill(QuadInstance::rounded(rect(face.x, face.y, face.width, face.height), color(fill, 1.0), round, 0.0)));
-            }
-            let ink = if !enabled {
-                p.disabled
-            } else if segment && on {
-                p.on_accent
-            } else if on {
-                super::theme::mix(p.text, p.accent, 0.6)
-            } else {
-                p.text
-            };
-            let glyph = tool.face().chars().all(|c| c >= '\u{E000}');
-            let (size, weight) = if glyph { (16.0, 400) } else { (12.0, if segment && on { 600 } else { 400 }) };
-            if let Some((tw, th)) = self.text_size(tool.face(), size, weight) {
-                let at = ((r.x + (r.width - tw) / 2.0).round(), (r.y + (r.height - th) / 2.0).round());
-                items.push(Draw::Text(tool.face().into(), size, weight, color(ink, 1.0), at, false));
-            }
-        }
-    }
-
-    /// A press on the pill: Some(true) if a tool took it (and wants the
-    /// capture), Some(false) between tools or on one that doesn't work now,
-    /// None off the pill.
-    fn press(&mut self, x: f64, y: f64) -> Option<bool> {
-        let tool = self.tool_at(x, y)?;
-        let tools = self.scene.tools?;
-        let tool = tool.filter(|t| t.enabled(&tools));
-        self.pressed = tool;
-        invalidate(self.hwnd);
-        Some(tool.is_some())
-    }
-
-    /// Hot tracking over the tools; true when the pointer just reached Before.
-    fn hover(&mut self, x: f64, y: f64) -> bool {
-        let hot = self.tool_at(x, y).flatten();
-        if hot == self.hot {
-            return false;
-        }
-        self.hot = hot;
-        invalidate(self.hwnd);
-        if hot.is_some() {
-            let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: self.hwnd, dwHoverTime: 0 };
-            unsafe {
-                let _ = TrackMouseEvent(&mut track);
-            }
-        }
-        hot == Some(Tool::Before)
-    }
-
-    /// The tool under a point: Some(None) on the pill between tools.
-    fn tool_at(&self, x: f64, y: f64) -> Option<Option<Tool>> {
-        self.scene.tools.filter(|_| self.scene.picture.is_some())?;
-        let (pill, slots, _) = tool_layout(self.width as f64, self.height as f64, self.scale());
-        let p = Point { x, y };
-        if !pill.contains(p) {
-            return None;
-        }
-        Some(slots.into_iter().find(|(_, r)| r.contains(p)).map(|(t, _)| t))
-    }
-
-    /// One tooltip per tool, over its place in the pill (none while hidden).
-    fn place_tips(&mut self, shown: bool) {
-        let key = shown.then_some((self.width, self.height, self.dpi));
-        if key == self.tips_for {
-            return;
-        }
-        self.tips_for = key;
-        unsafe {
-            if self.tips.is_invalid() {
-                let Ok(tips) = CreateWindowExW(
-                    WS_EX_TOPMOST,
-                    TOOLTIPS_CLASSW,
-                    None,
-                    WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX),
-                    CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    self.hwnd,
-                    None,
-                    super::instance(),
-                    None,
-                ) else {
-                    return;
-                };
-                super::theme::apply_control(tips, true);
-                self.tips = tips;
-                for (i, tool) in Tool::ALL.into_iter().enumerate() {
-                    // The tooltip keeps the pointer: the text lives as long as it.
-                    let text: &'static [u16] = Box::leak(crate::platform::wide(tool.tip()).into_boxed_slice());
-                    let info = TTTOOLINFOW {
-                        cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
-                        uFlags: TTF_SUBCLASS,
-                        hwnd: self.hwnd,
-                        uId: i + 1,
-                        lpszText: windows::core::PWSTR(text.as_ptr() as *mut _),
-                        ..Default::default()
-                    };
-                    SendMessageW(tips, TTM_ADDTOOLW, WPARAM(0), LPARAM(&info as *const _ as isize));
-                }
-            }
-            let slots = if shown { tool_layout(self.width as f64, self.height as f64, self.scale()).1 } else { vec![] };
-            for (i, tool) in Tool::ALL.into_iter().enumerate() {
-                let rect = slots.iter().find(|(t, _)| *t == tool).map_or(RECT::default(), |(_, r)| RECT {
-                    left: r.x as i32,
-                    top: r.y as i32,
-                    right: r.max_x() as i32,
-                    bottom: r.max_y() as i32,
-                });
-                let info = TTTOOLINFOW { cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32, hwnd: self.hwnd, uId: i + 1, rect, ..Default::default() };
-                SendMessageW(self.tips, TTM_NEWTOOLRECTW, WPARAM(0), LPARAM(&info as *const _ as isize));
-            }
-        }
-    }
-
     /// A ruler to turn the photograph by degrees, like the iPhone's.
     fn build_dial(&mut self, items: &mut Vec<Draw>, layout: &CropLayout, angle: f64) {
         let s = self.scale();
@@ -1240,8 +1137,14 @@ impl View {
     /// Rasterises the texts a frame needs before it borrows the cache.
     fn prepare_texts(&mut self, draws: &[Draw]) {
         for draw in draws {
-            if let Draw::Text(text, size, weight, ..) = draw {
-                let _ = self.text(text, *size, *weight);
+            match draw {
+                Draw::Text(text, size, weight, ..) => {
+                    let _ = self.text(text, *size, *weight);
+                }
+                Draw::Words(text, style, width, ..) => {
+                    let _ = self.words_mask(text, style, *width);
+                }
+                _ => {}
             }
         }
     }
@@ -1252,6 +1155,7 @@ impl View {
         let px = |size: f64, s: f64| (size * s).round() as i32;
         let s = self.scale();
         let texts = &self.texts;
+        let words = &self.words;
         let mut items = vec![];
         for draw in draws {
             match draw {
@@ -1268,6 +1172,12 @@ impl View {
                 }
                 Draw::Text(text, size, weight, color, (x, y), _) => {
                     if let Some(image) = texts.get(&(text, px(size, s), weight)) {
+                        let size = image.texture.size();
+                        items.push(Item::Quad(Some(image), QuadInstance::text(rect(x.round(), y.round(), size.width as f64, size.height as f64), color)));
+                    }
+                }
+                Draw::Words(text, style, width, color, (x, y)) => {
+                    if let Some(image) = words.get(&words_key(&text, &style, width, self.dpi)) {
                         let size = image.texture.size();
                         items.push(Item::Quad(Some(image), QuadInstance::text(rect(x.round(), y.round(), size.width as f64, size.height as f64), color)));
                     }
@@ -1401,18 +1311,6 @@ fn crop_mouse_move(app: &mut App, x: f64, y: f64) {
     app.model.crop_changed();
 }
 
-/// A click on a tool: the menu's command, or the original shown or not.
-fn use_tool(tool: Tool) {
-    with_app(|app| match tool {
-        Tool::Before => app.model.hold_original(true),
-        Tool::After => app.model.hold_original(false),
-        Tool::Fit => app.command(super::id::FIT),
-        Tool::Actual => app.command(super::id::ACTUAL),
-        Tool::Rotate => app.command(super::id::ROTATE),
-        Tool::Crop => app.command(super::id::CROP),
-        Tool::FilmStrip => app.command(super::id::FILMSTRIP),
-    });
-}
 
 fn crop_mouse_up(app: &mut App) {
     let Some(drag) = with_view(|v| v.crop_drag.take()).flatten() else { return };
@@ -1440,13 +1338,19 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 resized(hwnd);
                 LRESULT(0)
             }
+            WM_TIMER if wparam.0 == TIMER_RUNNING => {
+                let _ = KillTimer(hwnd, TIMER_RUNNING);
+                // The next frame sets it again while the tag shows.
+                if with_view(|v| v.running.is_some()).unwrap_or(false) {
+                    invalidate(hwnd);
+                }
+                LRESULT(0)
+            }
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
                 let _ = SetFocus(hwnd);
                 let (x, y) = point(lparam);
-                if let Some(pressed) = with_view(|v| v.press(x as f64, y as f64)).flatten() {
-                    if pressed {
-                        SetCapture(hwnd);
-                    }
+                if with_view(|v| v.press_retry(x as f64, y as f64)).unwrap_or(false) {
+                    SetCapture(hwnd);
                     return LRESULT(0);
                 }
                 let double = msg == WM_LBUTTONDBLCLK;
@@ -1479,10 +1383,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 })
                 .unwrap_or(false);
                 if !panned {
-                    if with_view(|v| v.hover(x as f64, y as f64)).unwrap_or(false) {
-                        // About to compare: decode the original ahead of the click.
-                        post(|app: &mut App| app.model.prepare_original());
-                    }
+                    with_view(|v| v.hover_retry(x as f64, y as f64));
                     with_app(|app| {
                         if app.model.cropping() {
                             crop_mouse_move(app, x as f64, y as f64);
@@ -1493,7 +1394,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_MOUSELEAVE => {
                 with_view(|v| {
-                    if v.hot.take().is_some() {
+                    if std::mem::take(&mut v.retry_hot) {
                         invalidate(hwnd);
                     }
                 });
@@ -1503,20 +1404,22 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 let (x, y) = point(lparam);
                 let clicked = with_view(|v| {
                     v.pan = None;
-                    let pressed = v.pressed.take();
-                    if pressed.is_some() {
+                    let pressed = std::mem::take(&mut v.retry_pressed);
+                    if pressed {
                         invalidate(hwnd);
                     }
-                    // A tool acts when the button comes up over it.
-                    pressed.filter(|&t| msg == WM_LBUTTONUP && v.tool_at(x as f64, y as f64) == Some(Some(t)))
+                    // Try Again acts when the button comes up over it.
+                    pressed && msg == WM_LBUTTONUP && v.retry.is_some_and(|r| r.contains(Point { x: x as f64, y: y as f64 }))
                 })
-                .flatten();
+                .unwrap_or(false);
                 with_app(crop_mouse_up);
                 if msg == WM_LBUTTONUP {
                     let _ = ReleaseCapture();
                 }
-                if let Some(tool) = clicked {
-                    use_tool(tool);
+                if clicked {
+                    if with_app(|app| app.model.retry_develop()).is_none() {
+                        post(|app: &mut App| app.model.retry_develop());
+                    }
                 }
                 LRESULT(0)
             }
@@ -1602,34 +1505,6 @@ mod tests {
         assert_eq!(r, Rect::new(100.0, 160.0, 500.0, 200.0));
     }
 
-    /// The tools sit in order inside the pill, centred above the bottom
-    /// edge, inside the room a fitted photograph leaves them.
-    #[test]
-    fn tools_fit_their_pill_under_the_photograph() {
-        for scale in [1.0, 1.5] {
-            let (pill, tools, dividers) = tool_layout(900.0, 700.0, scale);
-            assert!((pill.mid_x() - 450.0).abs() <= 1.0);
-            assert!(pill.max_y() <= 700.0 - PILL_MARGIN * scale + 1.0);
-            assert!(pill.y >= 700.0 - tools_reserve(scale));
-            assert_eq!(tools.iter().map(|(t, _)| *t).collect::<Vec<_>>(), Tool::ALL);
-            for pair in tools.windows(2) {
-                assert!(pair[0].1.max_x() <= pair[1].1.x + 0.5);
-            }
-            for (_, r) in &tools {
-                assert!(r.x >= pill.x && r.max_x() <= pill.max_x() + 1.0 && r.y >= pill.y && r.max_y() <= pill.max_y());
-            }
-            assert_eq!(dividers.len(), 3);
-        }
-    }
-
-    /// Fitting leaves the tools' room free, and gives it back while cropping.
-    #[test]
-    fn fitting_keeps_clear_of_the_tools() {
-        let reserve = tools_reserve(1.0);
-        let zoom = zoom_amount(true, (4000.0, 3000.0), (1000.0, 800.0 - reserve));
-        assert!(3000.0 * zoom <= 800.0 - reserve);
-        assert_eq!(zoom_amount(true, (4000.0, 3000.0), (1000.0, 800.0)), 0.25);
-    }
 
     #[test]
     fn crop_layout_fits_the_photograph_above_the_dial() {

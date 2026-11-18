@@ -1,7 +1,8 @@
 //! The colours every owner-draw and `WM_CTLCOLOR*` handler uses, one palette
-//! for the whole window: light or dark as the system's app theme says
-//! (switching live), the system colours in high contrast, and the accent
-//! colour from the system.
+//! for the whole window, made from the chosen theme's tokens (the macOS
+//! app's five themes, below). The theme doesn't follow the system's light or
+//! dark mode, except Plain, which on Windows does (switching live). High
+//! contrast keeps the system colours.
 //!
 //! Dark common controls use the `DarkMode_Explorer` and `DarkMode_CFD`
 //! themes; dark menus and scroll bars need three undocumented uxtheme
@@ -62,6 +63,8 @@ pub struct Palette {
     pub canvas: [u8; 3],
 }
 
+/// The light system palette, for tests of drawing in it.
+#[cfg(test)]
 pub const LIGHT: Palette = Palette {
     window: rgb(0xfb, 0xfb, 0xfb),
     panel: rgb(0xf3, 0xf3, 0xf3),
@@ -82,28 +85,6 @@ pub const LIGHT: Palette = Palette {
     well: rgb(0xe4, 0xe4, 0xe4),
     selection: rgb(0xe5, 0xe5, 0xe5),
     canvas: [0x9a, 0x9a, 0x9a],
-};
-
-pub const DARK: Palette = Palette {
-    window: rgb(0x1c, 0x1c, 0x1c),
-    panel: rgb(0x20, 0x20, 0x20),
-    control: rgb(0x2d, 0x2d, 0x2d),
-    control_hover: rgb(0x32, 0x32, 0x32),
-    control_pressed: rgb(0x27, 0x27, 0x27),
-    subtle_hover: rgb(0x2d, 0x2d, 0x2d),
-    subtle_pressed: rgb(0x29, 0x29, 0x29),
-    border: rgb(0x3a, 0x3a, 0x3a),
-    strong_border: rgb(0x9a, 0x9a, 0x9a),
-    text: rgb(0xf2, 0xf2, 0xf2),
-    secondary: rgb(0xa8, 0xa8, 0xa8),
-    disabled: rgb(0x6e, 0x6e, 0x6e),
-    accent: rgb(0x60, 0xcd, 0xff),
-    accent_hover: rgb(0x5a, 0xbc, 0xe8),
-    accent_pressed: rgb(0x52, 0xab, 0xd2),
-    on_accent: rgb(0x00, 0x00, 0x00),
-    well: rgb(0x2f, 0x2f, 0x2f),
-    selection: rgb(0x33, 0x33, 0x33),
-    canvas: [0x2b, 0x2b, 0x2b],
 };
 
 /// High contrast: the system's colours only.
@@ -143,6 +124,11 @@ pub struct Theme {
 
 thread_local! {
     static CURRENT: Cell<Option<Theme>> = const { Cell::new(None) };
+    /// The theme chosen (View › Theme, kept in the settings).
+    static CHOSEN: Cell<ThemeName> = const { Cell::new(ThemeName::Darkroom) };
+    /// The tokens the window is drawn with: the shown theme's, or the
+    /// system's colours in high contrast.
+    static TOKENS: Cell<Tokens> = const { Cell::new(DARKROOM) };
     static BRUSHES: RefCell<HashMap<Color, isize>> = RefCell::new(HashMap::new());
 }
 
@@ -178,27 +164,136 @@ pub fn refresh() -> bool {
 
 fn detect() -> Theme {
     if high_contrast() {
-        return Theme { palette: high_contrast_palette(), dark: false, high_contrast: true };
+        let palette = high_contrast_palette();
+        let tokens = high_contrast_tokens(&palette);
+        TOKENS.with(|t| t.set(tokens));
+        return Theme { palette, dark: tokens.dark, high_contrast: true };
     }
-    // NEGS_THEME=light|dark overrides the system for tests and screenshots.
-    let dark = match std::env::var("NEGS_THEME").as_deref() {
-        Ok("dark") => true,
-        Ok("light") => false,
+    let tokens = *shown().tokens();
+    TOKENS.with(|t| t.set(tokens));
+    Theme { palette: palette_of(&tokens), dark: tokens.dark, high_contrast: false }
+}
+
+/// `NEGS_THEME`, for tests and screenshots: a theme's name, or light and
+/// dark for Plain with Windows' light or dark forced.
+fn forced() -> Option<(ThemeName, Option<bool>)> {
+    let value = std::env::var("NEGS_THEME").ok()?;
+    match value.to_ascii_lowercase().as_str() {
+        "light" => Some((ThemeName::Plain, Some(false))),
+        "dark" => Some((ThemeName::Plain, Some(true))),
+        other => ThemeName::parse(other).map(|t| (t, None)),
+    }
+}
+
+/// Whether Windows' apps are dark (or `NEGS_THEME=light|dark` says so).
+/// Only Plain follows it.
+pub fn system_dark() -> bool {
+    match forced() {
+        Some((_, Some(dark))) => dark,
         _ => apps_use_dark(),
-    };
-    let mut palette = if dark { DARK } else { LIGHT };
-    if let Some([light, base, deep]) = accent_palette() {
-        if dark {
-            palette.accent = light;
-            palette.accent_hover = mix(light, base, 0.2);
-            palette.accent_pressed = mix(light, base, 0.35);
-        } else {
-            palette.accent = deep;
-            palette.accent_hover = mix(deep, base, 0.25);
-            palette.accent_pressed = mix(deep, base, 0.45);
-        }
     }
-    Theme { palette, dark, high_contrast: false }
+}
+
+/// The theme chosen, whatever `NEGS_THEME` forces.
+pub fn chosen() -> ThemeName {
+    CHOSEN.with(Cell::get)
+}
+
+/// Sets the theme chosen; `refresh` then repaints with it.
+pub fn set_chosen(theme: ThemeName) {
+    CHOSEN.with(|c| c.set(theme));
+}
+
+/// Whether `NEGS_THEME` decides the theme (View › Theme then only ticks).
+pub fn forced_by_environment() -> bool {
+    forced().is_some()
+}
+
+/// The theme the window shows: `NEGS_THEME`'s or the chosen one, Plain as
+/// Windows' light or dark.
+pub fn shown() -> ThemeName {
+    forced().map_or_else(chosen, |(theme, _)| theme).resolved()
+}
+
+/// The tokens the window is drawn with now.
+pub fn tokens() -> Tokens {
+    current();
+    TOKENS.with(Cell::get)
+}
+
+/// The palette's roles from a theme's tokens, for what still paints with
+/// it: the inspector's controls (until phase 3), Settings, the strip.
+fn palette_of(t: &Tokens) -> Palette {
+    let h = &t.hex;
+    let toward_paper = |amount: f64| mix(gdi(h.panel), gdi(h.paper), amount);
+    let control = if t.dark { toward_paper(0.07) } else { mix(gdi(h.panel), gdi(0xffffff), 0.6) };
+    // Words on a filled control: the theme's own on its fill, else
+    // whichever of near black and white reads better on the pencil.
+    let on_accent = if h.accent == h.fill {
+        h.on_fill
+    } else if contrast(h.accent, 0x14120c) >= contrast(h.accent, 0xffffff) {
+        0x14120c
+    } else {
+        0xffffff
+    };
+    Palette {
+        window: gdi(h.bg),
+        panel: gdi(h.panel),
+        control,
+        control_hover: mix(control, gdi(h.paper), 0.05),
+        control_pressed: mix(control, gdi(h.paper), 0.1),
+        subtle_hover: toward_paper(0.07),
+        subtle_pressed: toward_paper(0.12),
+        border: gdi(h.line),
+        strong_border: gdi(h.track),
+        text: gdi(h.paper),
+        secondary: gdi(h.dim),
+        disabled: mix(gdi(h.panel), gdi(h.dim), 0.55),
+        accent: gdi(h.accent),
+        accent_hover: mix(gdi(h.accent), gdi(h.paper), 0.15),
+        accent_pressed: mix(gdi(h.accent), gdi(h.paper), 0.3),
+        on_accent: gdi(on_accent),
+        well: gdi(h.blank),
+        selection: toward_paper(0.12),
+        canvas: [(h.bg >> 16) as u8, (h.bg >> 8) as u8, h.bg as u8],
+    }
+}
+
+/// High contrast: the system's colours as tokens, for what Direct2D draws,
+/// with Plain's straight marks and system font.
+fn high_contrast_tokens(p: &Palette) -> Tokens {
+    let hex = |c: Color| ((c & 0xff) << 16) | (c & 0xff00) | ((c >> 16) & 0xff);
+    let h = Hex {
+        bg: hex(p.window),
+        panel: hex(p.panel),
+        film: hex(p.window),
+        grid: hex(p.window),
+        line: hex(p.border),
+        track: hex(p.text),
+        dim: hex(p.text),
+        label: hex(p.text),
+        paper: hex(p.text),
+        accent: hex(p.accent),
+        fill: hex(p.accent),
+        on_fill: hex(p.on_accent),
+        warn: hex(p.text),
+        blank: hex(p.window),
+    };
+    Tokens { hex: h, dark: luminance(h.bg) < 0.5, highlighter: false, plain: true, film: h }
+}
+
+/// The relative luminance of 0xRRGGBB (WCAG).
+fn luminance(rgb: u32) -> f64 {
+    let channel = |shift: u32| {
+        let c = ((rgb >> shift) & 0xff) as f64 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+}
+
+fn contrast(a: u32, b: u32) -> f64 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
 fn high_contrast() -> bool {
@@ -222,29 +317,6 @@ fn apps_use_dark() -> bool {
         )
     };
     status == ERROR_SUCCESS && value == 0
-}
-
-/// The system's accent shades (AccentPalette: light 3, 2, 1, base, dark 1,
-/// 2, 3, …): light 2, the base and dark 1.
-fn accent_palette() -> Option<[Color; 3]> {
-    let mut bytes = [0u8; 32];
-    let mut size = bytes.len() as u32;
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent"),
-            w!("AccentPalette"),
-            RRF_RT_REG_BINARY,
-            None,
-            Some(bytes.as_mut_ptr() as *mut _),
-            Some(&mut size),
-        )
-    };
-    if status != ERROR_SUCCESS || size < 32 {
-        return None;
-    }
-    let at = |i: usize| rgb(bytes[i * 4], bytes[i * 4 + 1], bytes[i * 4 + 2]);
-    Some([at(1), at(3), at(4)])
 }
 
 /// `a` moved towards `b` by `t`.
@@ -440,13 +512,12 @@ pub fn apply_all() {
 
 // The macOS app's five themes (round 28), one token table each, exactly as
 // `AppTheme.swift` and `Theme.swift` have them (design/proposals/
-// IMPLEMENTATION-THEMES.md, IMPLEMENTATION.md §2.1). Not shown yet: the
-// window still paints with the system palette above until the window shell
-// and inspector move over (Windows parity phases 2 and 3).
+// IMPLEMENTATION-THEMES.md, IMPLEMENTATION.md §2.1). The title bar, the
+// status line, the empty window, the alert card and the canvas draw with
+// them directly; the rest reads the palette made from them (`palette_of`).
 
 /// A built-in theme. Darkroom is the default. On Windows, Plain follows
-/// Windows' light or dark setting (`resolved`): Plain dark is never chosen
-/// on its own.
+/// Windows' light or dark setting (`resolved`); Plain dark is dark always.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ThemeName {
     Darkroom,
@@ -501,12 +572,11 @@ impl ThemeName {
         }
     }
 
-    /// Plain follows Windows' app mode (or `NEGS_THEME`), as the window
-    /// does: Plain dark when apps are dark.
+    /// Plain follows Windows' app mode (or `NEGS_THEME=light|dark`): Plain
+    /// dark when apps are dark. Plain dark chosen is dark always.
     pub fn resolved(self) -> Self {
         match self {
-            Self::Plain | Self::PlainDark if dark() => Self::PlainDark,
-            Self::Plain | Self::PlainDark => Self::Plain,
+            Self::Plain if system_dark() => Self::PlainDark,
             other => other,
         }
     }

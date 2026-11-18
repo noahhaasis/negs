@@ -1,5 +1,6 @@
-//! The editing window: menu bar, toolbar, the canvas column (photograph or
-//! empty state, film strip), the adjustments column and the status bar.
+//! The editing window: the title bar with its menus, the canvas column
+//! (photograph or empty state, film strip, status line) and the adjustments
+//! column. No toolbar: its items are in the menus and the status line.
 //! Win32 with the common controls (docs/cross-platform-port.md, Windows UI).
 //!
 //! All state lives in one `App` on the UI thread. Window procedures reach it
@@ -8,8 +9,8 @@
 //! threads waits until the app is free. The canvas keeps its view state
 //! separately (`canvas::VIEW`) so it can paint at any time.
 
+mod alert;
 pub mod canvas;
-mod chrome;
 mod d2d;
 mod dialogs;
 mod draw;
@@ -21,6 +22,7 @@ mod motion;
 mod panes;
 mod presets;
 mod sampler;
+mod status;
 mod strip;
 mod theme;
 mod titlebar;
@@ -103,6 +105,8 @@ pub mod id {
     pub const FULL_SCREEN: u16 = 306;
     pub const PRESETS: u16 = 307;
     pub const PANEL: u16 = 308;
+    /// View › Theme, in `ThemeName::ALL`'s order.
+    pub const THEME: u16 = 320; // ..325
     pub const ROTATE: u16 = 400;
     pub const CROP: u16 = 401;
     pub const CROP_DONE: u16 = 402;
@@ -312,19 +316,15 @@ pub mod testing {
             App {
                 model,
                 main: none,
-                tools: none,
-                actions: none,
                 menubar: none,
                 status: none,
-                progress: none,
-                cancel: none,
                 canvas: none,
                 empty: none,
                 strip: none,
                 panes: none,
                 inspector: inspector::Inspector::headless(),
                 presets_view: None,
-                fonts: Fonts { ui: font, bold: font, section: font, small: font, title: font, glyph: font, glyph_small: font, line: 16 },
+                fonts: Fonts { ui: font, bold: font, section: font, small: font, glyph: font, glyph_small: font, line: 16 },
                 dpi: 96,
                 menu: HMENU::default(),
                 accelerators: HACCEL::default(),
@@ -391,7 +391,6 @@ pub struct Fonts {
     /// Section titles: semibold and a little larger.
     pub section: HFONT,
     pub small: HFONT,
-    pub title: HFONT,
     pub glyph: HFONT,
     pub glyph_small: HFONT,
     /// The UI font's line height in pixels.
@@ -421,7 +420,6 @@ impl Fonts {
             let bold = CreateFontIndirectW(&LOGFONTW { lfWeight: 600, ..base });
             let section = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 115 / 100, lfWeight: 600, ..display });
             let small = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 85 / 100, ..base });
-            let title = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 19 / 10, lfWeight: 600, ..display });
             let glyph_face = icon_face();
             let mut glyph = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
             let face = wide(glyph_face);
@@ -429,7 +427,7 @@ impl Fonts {
             let glyph_font = CreateFontIndirectW(&glyph);
             let glyph_small = CreateFontIndirectW(&LOGFONTW { lfHeight: -(11 * dpi as i32 / 96), ..glyph });
             let line = line_height(ui);
-            Fonts { ui, bold, section, small, title, glyph: glyph_font, glyph_small, line }
+            Fonts { ui, bold, section, small, glyph: glyph_font, glyph_small, line }
         }
     }
 }
@@ -490,15 +488,10 @@ fn enumerate_font(face: &str) -> bool {
 pub struct App {
     pub model: Model,
     pub main: HWND,
-    /// Open, after the menus; Export and the panel's button, before the
-    /// caption buttons.
-    tools: HWND,
-    actions: HWND,
-    /// The menu bar in the title bar.
+    /// The menu row in the title bar.
     menubar: HWND,
+    /// The status line under the canvas column.
     status: HWND,
-    progress: HWND,
-    cancel: HWND,
     pub canvas: HWND,
     empty: HWND,
     strip: HWND,
@@ -624,40 +617,37 @@ impl App {
                 let _ = SetWindowTextW(self.main, pcwstr(&title));
             }
         }
-        unsafe {
-            SendMessageW(self.actions, TB_ENABLEBUTTON, WPARAM(id::EXPORT as usize), LPARAM(model.can_export() as isize));
-            SendMessageW(self.actions, TB_CHECKBUTTON, WPARAM(id::PANEL as usize), LPARAM(model.inspector_visible as isize));
-        }
+        // The band says the file's name alone (`TitleBar.swift`).
+        let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_else(|| "Negs".into());
+        titlebar::set_title(self.main, &name);
         panes::sync(self.panes, model.pane() == crate::model::Pane::Presets);
-        let exporting = model.exporting;
-        unsafe {
-            let _ = ShowWindow(self.progress, if exporting { SW_SHOWNA } else { SW_HIDE });
-            let _ = ShowWindow(self.cancel, if exporting { SW_SHOWNA } else { SW_HIDE });
-        }
         self.update_taskbar();
     }
 
+    /// The status line (§4.7): what's happening on the left, the canvas's
+    /// tools on the right.
     fn update_status(&mut self) {
+        use status::{Span, Tone};
         let model = &self.model;
-        let mut text = model.status.clone();
-        if model.status == "Starting…" && model.source.is_none() {
-            text.clear();
+        let mut left = vec![];
+        if model.exporting {
+            let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_default();
+            left.push(Span::new(format!("Exporting {name}"), Tone::Label));
+            left.push(Span::new(format!("· {} s", model.export_started.elapsed().as_secs()), Tone::Dim));
+        } else if model.render_failed && model.develop_error.is_some() {
+            let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_default();
+            left.push(Span::strong("Couldn’t develop", Tone::Label));
+            left.push(Span::new(name, Tone::Dim));
+        } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
+            left.push(Span::new(model.status.clone(), Tone::Dim));
         }
-        let set = |part: usize, s: &str| unsafe {
-            let w = wide(s);
-            SendMessageW(self.status, SB_SETTEXTW, WPARAM(part), LPARAM(w.as_ptr() as isize));
-        };
-        set(0, &text);
-        let stocks = if model.source.is_none() || !model.ready {
-            String::new()
-        } else if crate::json::boolean(model.value("io.scan_film")) {
-            model.film_name()
-        } else {
-            format!("{} → {}", model.film_name(), model.paper_name())
-        };
-        set(1, &stocks);
-        let export = if model.exporting { format!("Exporting · {} s", model.export_started.elapsed().as_secs()) } else { String::new() };
-        set(2, &export);
+        let tools = (model.source.is_some()).then(|| status::Tools {
+            original: model.can_show_original() && !model.cropping(),
+            holding: model.holding_original,
+            cropping: model.cropping(),
+            failed: model.render_failed && model.develop_error.is_some(),
+        });
+        status::set(status::Line { left, cancel: model.exporting, tools });
         unsafe {
             if model.exporting {
                 SetTimer(self.main, TIMER_EXPORT, 1000, None);
@@ -704,15 +694,9 @@ impl App {
             self.fit_minimum();
             let mut client = RECT::default();
             let _ = GetClientRect(self.main, &mut client);
-            titlebar::layout(self.main, self.menubar, self.tools, self.actions);
-            SendMessageW(self.status, WM_SIZE, WPARAM(0), LPARAM(0));
-            let height = |hwnd: HWND| {
-                let mut r = RECT::default();
-                let _ = GetWindowRect(hwnd, &mut r);
-                if IsWindowVisible(hwnd).as_bool() { r.bottom - r.top } else { 0 }
-            };
+            titlebar::layout(self.main, self.menubar);
             let top = titlebar::height(self.main);
-            let bottom = client.bottom - height(self.status);
+            let bottom = client.bottom;
             let inspector_width = if self.model.inspector_visible {
                 self.px(inspector_width(self.model.prefs.inspector_width, client.right as f64 / self.scale()))
             } else {
@@ -720,16 +704,21 @@ impl App {
             };
             let splitter = if self.model.inspector_visible { self.px(SPLITTER) } else { 0 };
             let column = (client.right - inspector_width - splitter).max(0);
-            let show_strip = self.model.prefs.filmstrip_visible && self.model.source.is_some();
-            let strip_height = if show_strip { self.px(112.0) } else { 0 };
-            let canvas_bottom = (bottom - strip_height).max(top);
             let photo = self.model.source.is_some();
+            // The status line under the strip, with a photograph open.
+            let status_height = if photo { self.px(status::HEIGHT) } else { 0 };
+            let show_strip = self.model.prefs.filmstrip_visible && photo;
+            let strip_height = if show_strip { self.px(112.0) } else { 0 };
+            let canvas_bottom = (bottom - status_height - strip_height).max(top);
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
-            let _ = MoveWindow(self.empty, 0, top, column, canvas_bottom - top, true);
+            let _ = MoveWindow(self.empty, 0, top, column, bottom - top, true);
             let _ = ShowWindow(self.canvas, if photo { SW_SHOWNA } else { SW_HIDE });
             let _ = ShowWindow(self.empty, if photo { SW_HIDE } else { SW_SHOWNA });
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
+            let _ = MoveWindow(self.status, 0, bottom - status_height, column, status_height, true);
+            let _ = ShowWindow(self.status, if photo { SW_SHOWNA } else { SW_HIDE });
+            titlebar::set_inspector_edge(self.main, if self.model.inspector_visible { column + splitter } else { 0 });
             let shows_presets = presets::shown(&self.model);
             // The switch between the panels; cropping has the column to itself.
             let shows_panes = self.model.inspector_visible && !self.model.cropping();
@@ -744,7 +733,6 @@ impl App {
             // Their own WM_SIZE arrives while the app is busy here.
             empty::layout(self);
             strip::resized(self);
-            self.layout_status();
         }
     }
 
@@ -777,25 +765,6 @@ impl App {
             let x = frame.left.min(work.right - width).max(work.left);
             let y = frame.top.min(work.bottom - height).max(work.top);
             let _ = SetWindowPos(self.main, None, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-    }
-
-    fn layout_status(&mut self) {
-        unsafe {
-            let mut client = RECT::default();
-            let _ = GetClientRect(self.status, &mut client);
-            let export = if self.model.exporting { self.px(250.0) } else { 0 };
-            let stocks = self.px(280.0);
-            let right = client.right - self.px(18.0);
-            let parts = [(right - export - stocks).max(self.px(80.0)), right - export, -1];
-            SendMessageW(self.status, SB_SETPARTS, WPARAM(parts.len()), LPARAM(parts.as_ptr() as isize));
-            let mut part = RECT::default();
-            SendMessageW(self.status, SB_GETRECT, WPARAM(2), LPARAM(&mut part as *mut _ as isize));
-            let inset = self.px(2.0);
-            let bar = self.px(90.0);
-            let cancel = self.px(64.0);
-            let _ = MoveWindow(self.progress, part.right - cancel - bar - inset * 2, part.top + inset * 2, bar, part.bottom - part.top - inset * 4, true);
-            let _ = MoveWindow(self.cancel, part.right - cancel - inset, part.top + inset / 2, cancel, part.bottom - part.top - inset, true);
         }
     }
 
@@ -863,7 +832,10 @@ impl App {
             id::UPDATES => crate::updates::check(true),
             id::ABOUT => dialogs::about(self.main),
             id::CANCEL_EXPORT => model.cancel_export(),
-            id::COPY_STATUS => copy_text(self.main, &self.model.status),
+            id::COPY_STATUS => copy_text(self.main, &status::text()),
+            c if (id::THEME..id::THEME + theme::ThemeName::ALL.len() as u16).contains(&c) => {
+                self.choose_theme(theme::ThemeName::ALL[(c - id::THEME) as usize]);
+            }
             _ => {}
         }
     }
@@ -934,8 +906,17 @@ impl App {
             enable(c, photo && !model.cropping());
         }
         enable(id::ROTATE, photo);
-        retitle(id::CROP, if model.cropping() { "Done &Cropping\tC" } else { "&Crop\tC" });
+        retitle(id::CROP, if model.cropping() { "Done &Cropping\tCtrl+K" } else { "&Crop\tCtrl+K" });
         enable(id::CROP, model.cropping() || model.image.is_some());
+        // View › Theme: the one chosen ticked, as a radio choice (an
+        // environment override shows what it forces).
+        let shown = if theme::forced_by_environment() { theme::shown() } else { theme::chosen() };
+        let count = theme::ThemeName::ALL.len() as u32;
+        unsafe {
+            if let Some(i) = theme::ThemeName::ALL.iter().position(|&t| t == shown) {
+                let _ = CheckMenuRadioItem(menu, id::THEME as u32, id::THEME as u32 + count - 1, id::THEME as u32 + i as u32, MF_BYCOMMAND.0);
+            }
+        }
     }
 
     fn update_recent_menu(&self, menu: HMENU) {
@@ -1144,10 +1125,12 @@ fn build_menu() -> (HMENU, HMENU) {
             let _ = AppendMenuW(bar, MF_POPUP, menu.0 as usize, pcwstr(&w));
             menu
         };
+        // ⌘ is Ctrl and ⌥ is Alt; ⌥⌘ shortcuts (Ctrl+Alt is AltGr on many
+        // keyboards) keep Windows' own keys: F6, F7, F8.
         let file = popup("&File");
-        add(file, id::OPEN, "&Open Photograph…\tCtrl+O");
+        add(file, id::OPEN, "&Open…\tCtrl+O");
         let recent = CreatePopupMenu().unwrap();
-        let w = wide("Recent &Photographs");
+        let w = wide("Open &Recent");
         let _ = AppendMenuW(file, MF_POPUP, recent.0 as usize, pcwstr(&w));
         separator(file);
         add(file, id::SAVE_PREVIEW, "&Save Preview…\tCtrl+S");
@@ -1156,8 +1139,9 @@ fn build_menu() -> (HMENU, HMENU) {
         separator(file);
         add(file, id::NEW_PRESET, "&New Preset\tCtrl+Shift+S");
         add(file, id::IMPORT_PRESETS, "&Import Presets…\tCtrl+Shift+O");
+        add(file, id::PRESETS_FOLDER, "Show Presets &Folder");
         separator(file);
-        add(file, id::SETTINGS, "Se&ttings…");
+        add(file, id::SETTINGS, "Se&ttings…\tCtrl+,");
         separator(file);
         add(file, id::EXIT, "E&xit\tAlt+F4");
         let edit = popup("&Edit");
@@ -1169,24 +1153,32 @@ fn build_menu() -> (HMENU, HMENU) {
         add(edit, id::PASTE, "&Paste\tCtrl+V");
         add(edit, id::DELETE, "&Delete\tDel");
         add(edit, id::SELECT_ALL, "Select &All\tCtrl+A");
-        separator(edit);
-        add(edit, id::RESET_ALL, "Reset All A&djustments\tCtrl+Shift+R");
+        // Ratings, flags, copying edits and the rest come with the library
+        // (parity phase 6).
+        let photo = popup("&Photo");
+        add(photo, id::ORIGINAL, "Show &Original\tHold O");
+        separator(photo);
+        add(photo, id::RESET_ALL, "&Reset Edits\tCtrl+Shift+R");
         let view = popup("&View");
         add(view, id::FILMSTRIP, "&Film Strip\tF6");
         add(view, id::ADJUSTMENTS, "&Adjustments\tF7");
         add(view, id::PRESETS, "&Presets\tF8");
+        add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
         separator(view);
         add(view, id::FIT, "Fi&t Photograph\tCtrl+0");
         add(view, id::ACTUAL, "Actual &Size\tCtrl+1");
         add(view, id::ZOOM_IN, "Zoom &In\tCtrl+=");
         add(view, id::ZOOM_OUT, "Zoom &Out\tCtrl+-");
         separator(view);
-        add(view, id::ORIGINAL, "Show &Original\tHold O");
+        add(view, id::ROTATE, "&Rotate Clockwise\tCtrl+R");
+        add(view, id::CROP, "&Crop\tCtrl+K");
         separator(view);
-        add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
-        let image = popup("&Image");
-        add(image, id::ROTATE, "&Rotate Clockwise\tCtrl+R");
-        add(image, id::CROP, "&Crop\tC");
+        let themes = CreatePopupMenu().unwrap();
+        for (i, name) in theme::ThemeName::ALL.into_iter().enumerate() {
+            add(themes, id::THEME + i as u16, name.title());
+        }
+        let w = wide("T&heme");
+        let _ = AppendMenuW(view, MF_POPUP, themes.0 as usize, pcwstr(&w));
         let help = popup("&Help");
         add(help, id::UPDATES, "Check for &Updates…");
         separator(help);
@@ -1224,118 +1216,10 @@ fn accelerators() -> HACCEL {
         (ctrl, 'R' as u16, id::ROTATE),
         (ctrl, 'K' as u16, id::CROP),
         (FVIRTKEY, 'C' as u16, id::CROP),
+        (ctrl, VK_OEM_COMMA.0, id::SETTINGS),
     ];
     let accels: Vec<ACCEL> = table.iter().map(|&(f, key, cmd)| ACCEL { fVirt: f, key, cmd }).collect();
     unsafe { CreateAcceleratorTableW(&accels).unwrap_or_default() }
-}
-
-/// Segoe icon glyphs drawn at the window's DPI: they size the toolbar's
-/// buttons (`chrome` paints them from the palette).
-fn toolbar_images(dpi: u32) -> HIMAGELIST {
-    let glyphs = chrome::TOOL_GLYPHS;
-    let size = (20 * dpi / 96) as i32;
-    unsafe {
-        let list = ImageList_Create(size, size, ILC_COLOR32, glyphs.len() as i32, 0);
-        let screen = GetDC(None);
-        let dc = CreateCompatibleDC(screen);
-        ReleaseDC(None, screen);
-        let face = icon_face();
-        let mut lf = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: ANTIALIASED_QUALITY, ..Default::default() };
-        let w = wide(face);
-        lf.lfFaceName[..w.len()].copy_from_slice(&w);
-        let font = CreateFontIndirectW(&lf);
-        for glyph in glyphs {
-            let info = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: size,
-                    biHeight: -size,
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let mut bits = std::ptr::null_mut();
-            let Ok(bitmap) = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) else { continue };
-            let old = SelectObject(dc, bitmap);
-            let old_font = SelectObject(dc, font);
-            SetBkColor(dc, COLORREF(0));
-            SetTextColor(dc, COLORREF(0xffffff));
-            let mut r = RECT { left: 0, top: 0, right: size, bottom: size };
-            let mut text: Vec<u16> = glyph.to_string().encode_utf16().collect();
-            DrawTextW(dc, &mut text, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            let _ = GdiFlush();
-            // White on black → dark glyph with the coverage as alpha (premultiplied).
-            let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (size * size * 4) as usize);
-            for p in pixels.chunks_exact_mut(4) {
-                let a = p[1];
-                let ink = (0x20u16 * a as u16 / 255) as u8;
-                p[0] = ink;
-                p[1] = ink;
-                p[2] = ink;
-                p[3] = a;
-            }
-            SelectObject(dc, old_font);
-            SelectObject(dc, old);
-            ImageList_Add(list, bitmap, None);
-            let _ = DeleteObject(bitmap);
-        }
-        let _ = DeleteObject(font);
-        let _ = DeleteDC(dc);
-        list
-    }
-}
-
-/// The title bar's tooltips, by command.
-fn tool_tip(command: u16) -> &'static str {
-    match command {
-        id::OPEN => "Open photograph (Ctrl+O)",
-        id::EXPORT => "Export photograph (Ctrl+Shift+E)",
-        _ => "Show or hide the panel (F7 adjustments, F8 presets)",
-    }
-}
-
-/// A toolbar in the title bar, of (glyph, command, check button). Buttons
-/// with a label (`chrome::TOOL_LABELS`) show it; the tools for the
-/// photograph are on the canvas (`canvas::Tool`).
-fn build_toolbar(main: HWND, dpi: u32, font: HFONT, buttons: &[(i32, u16, bool)]) -> HWND {
-    unsafe {
-        let toolbar = create(
-            TOOLBARCLASSNAMEW,
-            "",
-            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | CCS_NODIVIDER as u32 | CCS_NOPARENTALIGN as u32 | CCS_NORESIZE as u32),
-            WINDOW_EX_STYLE(0),
-            main,
-            0,
-            font,
-        );
-        SendMessageW(toolbar, TB_BUTTONSTRUCTSIZE, WPARAM(std::mem::size_of::<TBBUTTON>()), LPARAM(0));
-        SendMessageW(toolbar, TB_SETEXTENDEDSTYLE, WPARAM(0), LPARAM(0x80 /* TBSTYLE_EX_DOUBLEBUFFER */));
-        SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
-        // A label shows and names the button (the toolbar keeps a pointer
-        // to it, so it lives as long as the toolbar).
-        let label = |image: i32| chrome::TOOL_LABELS.get(image as usize).copied().flatten();
-        let texts: &'static [Option<Vec<u16>>] =
-            Box::leak(buttons.iter().map(|&(image, _, _)| label(image).map(wide)).collect::<Vec<_>>().into_boxed_slice());
-        let buttons: Vec<TBBUTTON> = buttons
-            .iter()
-            .zip(texts)
-            .map(|(&(image, cmd, check), text)| TBBUTTON {
-                iBitmap: image,
-                idCommand: cmd as i32,
-                fsState: TBSTATE_ENABLED as u8,
-                fsStyle: ((if check { BTNS_CHECK } else { BTNS_BUTTON }) | if text.is_some() { BTNS_AUTOSIZE } else { 0 }) as u8,
-                iString: text.as_ref().map_or(-1, |t| t.as_ptr() as isize),
-                ..Default::default()
-            })
-            .collect();
-        SendMessageW(toolbar, TB_ADDBUTTONSW, WPARAM(buttons.len()), LPARAM(buttons.as_ptr() as isize));
-        titlebar::add_tips(toolbar, buttons.iter().map(|b| (b.idCommand as u16, tool_tip(b.idCommand as u16))).collect());
-        titlebar::tool_metrics(main, toolbar);
-        toolbar
-    }
 }
 
 /// Another Negs is running: hand it the photograph and bring it forward.
@@ -1369,6 +1253,18 @@ pub fn run() {
     if sampler::run_if_asked() {
         return;
     }
+    // Direct2D, DirectWrite and Newsreader, on their own thread from the
+    // start: the title bar's first paint sets the file name with them.
+    let drawing_started = platform::qpc();
+    d2d::prepare(move |shared| {
+        let cost = shared.cost;
+        let at = platform::qpc();
+        post(move |app: &mut App| {
+            app.report.line(&format!("drawing_started {drawing_started}"));
+            app.report.line(&format!("drawing_ready {at}"));
+            app.report.line(&format!("drawing_cost d2d_us {} dwrite_us {} fonts_us {}", cost.d2d.as_micros(), cost.dwrite.as_micros(), cost.fonts.as_micros()));
+        });
+    });
     let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| !p.to_string_lossy().starts_with('-') && p.is_file());
     let path = path.map(|p| std::path::absolute(&p).unwrap_or(p));
     if std::env::var_os("NEGS_ALLOW_MULTIPLE").is_none() && forward_to_running(path.as_deref()) {
@@ -1417,7 +1313,12 @@ pub fn run() {
         inspector::register();
         tone_graph::register();
         presets::register();
+        status::register();
 
+        // View › Theme, unless NEGS_THEME forces one.
+        if let Some(chosen) = theme::ThemeName::parse(&model.prefs.app_theme) {
+            theme::set_chosen(chosen);
+        }
         theme::init();
         let (menu, recent) = build_menu();
         let main = CreateWindowExW(
@@ -1444,19 +1345,9 @@ pub fn run() {
         let fonts = Fonts::new(dpi);
         report.stamp("fonts");
         let menubar = titlebar::create_menubar(main, menu, fonts.ui);
-        titlebar::set_fonts(fonts.ui, fonts.glyph_small);
-        let tools = build_toolbar(main, dpi, fonts.ui, &[(0, id::OPEN, false)]);
-        let actions = build_toolbar(main, dpi, fonts.ui, &[(1, id::EXPORT, false), (2, id::PANEL, true)]);
-        for toolbar in [tools, actions] {
-            chrome::subclass_toolbar(toolbar, fonts.glyph);
-        }
+        titlebar::set_fonts(fonts.ui);
         report.stamp("toolbar");
-        let status = create(STATUSCLASSNAMEW, "", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WINDOW_STYLE(SBARS_SIZEGRIP), WINDOW_EX_STYLE(0), main, 0, fonts.ui);
-        empty::subclass_status(status);
-        chrome::subclass_status(status);
-        let progress = create(PROGRESS_CLASSW, "", WS_CHILD | WINDOW_STYLE(PBS_MARQUEE), WINDOW_EX_STYLE(0), status, 0, HFONT::default());
-        SendMessageW(progress, PBM_SETMARQUEE, WPARAM(1), LPARAM(30));
-        let cancel = create(w!("BUTTON"), "Cancel", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), status, id::CANCEL_EXPORT, fonts.ui);
+        let status = status::create(main);
         let canvas = create(w!("NegsCanvas"), "Photograph preview", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
         let empty = create(w!("NegsEmpty"), "", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
         let strip = create(w!("NegsStrip"), "Film Strip", WS_CHILD | WS_TABSTOP | WS_HSCROLL, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
@@ -1467,12 +1358,8 @@ pub fn run() {
         let mut app = App {
             model,
             main,
-            tools,
-            actions,
             menubar,
             status,
-            progress,
-            cancel,
             canvas,
             empty,
             strip,
@@ -1699,15 +1586,6 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                     app.report.stamp("inspector_shown");
                     inspector::report_geometry(app);
                 });
-                // Direct2D, DirectWrite and Newsreader, on their own thread:
-                // nothing before this waits for them.
-                d2d::prepare(|shared| {
-                    let cost = shared.cost;
-                    post(move |app: &mut App| {
-                        app.report.stamp("drawing_ready");
-                        app.report.line(&format!("drawing_cost d2d_us {} dwrite_us {} fonts_us {}", cost.d2d.as_micros(), cost.dwrite.as_micros(), cost.fonts.as_micros()));
-                    });
-                });
                 LRESULT(0)
             }
             WM_SIZE => {
@@ -1756,21 +1634,6 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             WM_NOTIFY => {
                 if let Some(result) = titlebar::dropdown(hwnd, lparam) {
                     return result;
-                }
-                let header = &*(lparam.0 as *const NMHDR);
-                if header.code == NM_CLICK || header.code == NM_RETURN {
-                    if let Ok(id) = u16::try_from(header.idFrom) {
-                        if (id::EMPTY_RECENT..id::EMPTY_RECENT + 5).contains(&id) {
-                            with_app(|app| app.command(id));
-                        }
-                    }
-                }
-                if header.code == NM_RCLICK && header.hwndFrom != HWND::default() {
-                    with_app(|app| {
-                        if header.hwndFrom == app.status {
-                            app.status_menu();
-                        }
-                    });
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
@@ -1910,18 +1773,11 @@ impl App {
         self.dpi = dpi;
         self.fonts = Fonts::new(dpi);
         unsafe {
-            for toolbar in [self.tools, self.actions] {
-                SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
-                SendMessageW(toolbar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
-                chrome::subclass_toolbar(toolbar, self.fonts.glyph);
-                titlebar::tool_metrics(self.main, toolbar);
-            }
             panes::set_font(self.panes, self.fonts.ui);
             SendMessageW(self.menubar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             titlebar::set_metrics(self.main, self.menubar);
-            titlebar::set_fonts(self.fonts.ui, self.fonts.glyph_small);
-            SendMessageW(self.status, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
-            SendMessageW(self.cancel, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
+            titlebar::set_fonts(self.fonts.ui);
+            let _ = InvalidateRect(self.status, None, false);
         }
         canvas::set_dpi(dpi);
         inspector::dpi_changed(self);
@@ -1930,7 +1786,8 @@ impl App {
         self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::CANVAS | dirty::STRIP;
     }
 
-    /// Follows a change of the system's theme, contrast or accent.
+    /// Follows a change of the system's theme (Plain follows it), contrast
+    /// or accent, or of View › Theme.
     fn retheme(&mut self) {
         if !theme::refresh() {
             return;
@@ -1938,9 +1795,17 @@ impl App {
         theme::apply_all();
         presets::retheme(self);
         unsafe {
-            let _ = InvalidateRect(self.canvas, None, false);
+            let _ = RedrawWindow(self.main, None, None, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME);
         }
-        self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::STRIP | dirty::CANVAS;
+        self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::STRIP | dirty::CANVAS | dirty::CHROME;
+    }
+
+    /// View › Theme: shows `name` and remembers it in Settings.
+    fn choose_theme(&mut self, name: theme::ThemeName) {
+        theme::set_chosen(name);
+        self.model.prefs.app_theme = name.key().to_string();
+        self.model.prefs.save();
+        self.retheme();
     }
 
     fn status_menu(&mut self) {
