@@ -50,19 +50,12 @@ const TAB_PREP: u16 = 903;
 /// Histogram · Waveform.
 const SCOPE_HISTOGRAM: u16 = 904;
 const SCOPE_WAVEFORM: u16 = 906;
-/// The Film grid's search field, on the pinned panel.
-const FILM_SEARCH: u16 = 905;
 /// Each tab's dot and count, which opens its edits: 907–909.
 const TAB_COUNT: u16 = 907;
 /// What an export makes, over Export (`ExportFoot`).
 const FOOT_SUMMARY: u16 = 910;
 const TABS: [(u16, &str); 3] = [(TAB_PREP, "Prep"), (TAB_LAB, "Lab"), (TAB_OUTPUT, "Output")];
 const EDIT_TABS: [crate::edits::Tab; 3] = crate::edits::Tab::ALL;
-/// An open stock grid's height, in DIPs: it scrolls inside itself, keeping
-/// the tabs in reach.
-const GRID_HEIGHT: f64 = 290.0;
-/// The search field over the Film grid: 4 DIPs above a 24 DIP field, 4 below.
-const SEARCH_HEIGHT: f64 = 32.0;
 const CROP_FIRST: u16 = 950;
 
 /// Prepare the photograph, develop the film, then finish it; the pinned
@@ -144,7 +137,7 @@ enum Kind {
     BorderToggle(&'static str, u8),
     Choice(&'static str, &'static str, &'static [&'static str]),
     Stock(bool),
-    /// The film or paper as a foldout of preview tiles (Settings › previews).
+    /// The film or paper, a button that opens its tray (Settings › previews).
     Foldout(bool),
     DevTime(bool),
     BorderStyles,
@@ -231,12 +224,6 @@ pub struct Inspector {
     dpi: u32,
     /// The stock lists were filled from this catalog and these favourites.
     stocks_filled: String,
-    /// The film and paper tiles, built the first time each foldout opens.
-    grids: [Option<StockGrid>; 2],
-    /// The search field over the Film grid, made with its first grid. It
-    /// outlives the grids' rebuilds, which starring a film makes, so typing
-    /// in it goes on.
-    film_search: HWND,
     dev_times: [Vec<f64>; 2],
     decimal: char,
     /// The UI font's line height, for value boxes inside their fields.
@@ -264,15 +251,11 @@ thread_local! {
     static FOLDOUT_NAMES: RefCell<[String; 2]> = const { RefCell::new([String::new(), String::new()]) };
     /// The value each slider last gave UI Automation.
     static ACC_VALUES: RefCell<std::collections::HashMap<isize, String>> = RefCell::new(std::collections::HashMap::new());
-    /// The tiles as drawn, by grid (film, paper) and position.
-    static TILES: RefCell<[Vec<TileLook>; 2]> = const { RefCell::new([Vec::new(), Vec::new()]) };
     /// What the scope draws: the histogram, the waveform, and whether it shows the waveform.
     static SCOPE: RefCell<(Option<crate::histogram::Histogram>, Option<crate::histogram::Waveform>, bool)> = const { RefCell::new((None, None, false)) };
     /// The scope's height while its handle is dragged: where the drag
     /// started on screen, and the height then.
     static GRIP_DRAG: Cell<Option<(i32, f64)>> = const { Cell::new(None) };
-    /// The tile under the pointer, by grid and position, which shows its star.
-    static HOVER_TILE: Cell<Option<(bool, usize)>> = const { Cell::new(None) };
     static SWATCHES: Cell<(u32, u32, u32)> = const { Cell::new((0xffffff, 0, 0)) };
     static ITEM_HEIGHT: Cell<i32> = const { Cell::new(20) };
 }
@@ -280,7 +263,7 @@ thread_local! {
 pub fn register() {
     unsafe {
         // Their backgrounds are painted from the palette.
-        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 7] = [
+        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 6] = [
             (w!("NegsInspector"), Some(panel_proc), WNDCLASS_STYLES(0)),
             (w!("NegsRows"), Some(rows_proc), WNDCLASS_STYLES(0)),
             (w!("NegsScope"), Some(scope_proc), WNDCLASS_STYLES(0)),
@@ -288,7 +271,6 @@ pub fn register() {
             (w!("NegsCropPanel"), Some(crop_proc), WNDCLASS_STYLES(0)),
             // Its own class only so its scroll bar takes the dark theme.
             (w!("NegsCropRows"), Some(crop_proc), WNDCLASS_STYLES(0)),
-            (w!("NegsStockGrid"), Some(grid_proc), WNDCLASS_STYLES(0)),
         ];
         for (name, proc_, style) in classes {
             let class = WNDCLASSEXW {
@@ -350,8 +332,6 @@ impl Inspector {
             built: false,
             dpi,
             stocks_filled: String::new(),
-            grids: [None, None],
-            film_search: HWND::default(),
             dev_times: [vec![], vec![]],
             decimal: '.',
             line,
@@ -674,7 +654,7 @@ pub fn dpi_changed(app: &mut App) {
             }
         }
     }
-    for &c in ins.tabs.iter().chain([&ins.export]).chain([&ins.film_search].into_iter().filter(|s| !s.is_invalid())) {
+    for &c in ins.tabs.iter().chain([&ins.export]) {
         unsafe {
             SendMessageW(c, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
         }
@@ -690,12 +670,11 @@ pub fn dpi_changed(app: &mut App) {
             let _ = DestroyWindow(crop.panel);
         }
     }
-    // Built again at the new size when shown.
-    for grid in app.inspector.grids.iter_mut().filter_map(Option::take) {
-        unsafe {
-            let _ = DestroyWindow(grid.window);
-        }
-    }
+}
+
+/// Whether `hwnd` is the Film or Paper row, which opens and closes the tray.
+pub fn opens_tray(app: &App, hwnd: HWND) -> bool {
+    app.inspector.rows.iter().any(|r| matches!(r.kind, Kind::Foldout(_)) && r.controls.contains(&hwnd))
 }
 
 fn tab(model: &Model) -> Tab {
@@ -950,16 +929,12 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
         let shown = on_tab && visible(row, model, &|g| want[g] && expanded[g]);
         want[i] = shown;
     }
-    // Rows and grids appearing and going (a tab, a group, a foldout) change
-    // while the column doesn't draw, then it paints once: shown one by one,
-    // rows drew at their old places, over a part-cleared panel, before the
-    // layout moved them. The tabs used to fade the rows in instead, a
-    // layered window that blanked them first and flashed again when it ended.
-    let foldout_changed = |paper: bool| {
-        let open = model.previews.open(paper) && ins.rows.iter().zip(&want).any(|(r, w)| r.kind == Kind::Foldout(paper) && *w);
-        open != ins.grids[paper as usize].as_ref().is_some_and(|g| g.was_open)
-    };
-    let lock = !held && (want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown) || foldout_changed(false) || foldout_changed(true));
+    // Rows appearing and going (a tab, a group) change while the column
+    // doesn't draw, then it paints once: shown one by one, rows drew at
+    // their old places, over a part-cleared panel, before the layout moved
+    // them. The tabs used to fade the rows in instead, a layered window
+    // that blanked them first and flashed again when it ended.
+    let lock = !held && want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown);
     if lock {
         hold_redraw(ins.panel, true);
     }
@@ -985,41 +960,6 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
             }
         }
     }
-    // An open foldout's tiles, built the first time it opens, and again when
-    // the catalog or the favourites change.
-    for paper in [false, true] {
-        let key = grid_key(model, paper);
-        let open = model.previews.open(paper) && ins.rows.iter().any(|r| r.kind == Kind::Foldout(paper) && r.shown);
-        // A grid rebuilt while open keeps its scroll and the tile under the
-        // pointer, rather than jumping back to the current stock.
-        let mut kept = None;
-        if ins.grids[paper as usize].as_ref().is_some_and(|g| g.key != key) {
-            if let Some(grid) = ins.grids[paper as usize].take() {
-                kept = grid.was_open.then(|| (grid.scroll, pointed_tile(&grid)));
-                // The hovered tile's position now names another tile.
-                if HOVER_TILE.get().is_some_and(|(p, _)| p == paper) {
-                    HOVER_TILE.set(None);
-                }
-                unsafe {
-                    let _ = DestroyWindow(grid.window);
-                }
-            }
-        }
-        if open && ins.grids[paper as usize].is_none() && model.has_catalog() {
-            let mut grid = build_grid(ins.pinned, &app.fonts, model, paper, key);
-            if let Some((scroll, anchor)) = kept {
-                (grid.scroll, grid.was_open, grid.anchor) = (scroll, true, anchor);
-            }
-            ins.grids[paper as usize] = Some(grid);
-            if !paper && ins.film_search.is_invalid() {
-                ins.film_search = create_film_search(ins.pinned, &app.fonts, model);
-            }
-            created = true;
-            fix_z_order(ins);
-        }
-    }
-    // The search changed elsewhere: Settings turning previews off clears it.
-    let refiltered = sync_film_search(ins, model);
     // A note's height follows its text, so set it before laying out.
     let mut note_changed = false;
     for row in ins.rows.iter().filter(|r| r.shown) {
@@ -1032,7 +972,7 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
         }
     }
     let t1 = crate::platform::qpc();
-    if changed || created || structure || note_changed || refiltered {
+    if changed || created || structure || note_changed {
         layout_rows(ins, model);
     }
     let t2 = crate::platform::qpc();
@@ -1334,15 +1274,7 @@ fn fix_z_order(ins: &Inspector) {
     for pinned in [true, false] {
         let mut previous = HWND_TOP;
         for row in ins.rows.iter().filter(|r| (r.tab == Tab::Pinned) == pinned) {
-            // The Film grid's search field, then its tiles.
-            let grid: Vec<HWND> = match row.kind {
-                Kind::Foldout(paper) => {
-                    let search = (!paper && !ins.film_search.is_invalid()).then_some(ins.film_search);
-                    search.into_iter().chain(ins.grids[paper as usize].as_ref().map(|g| g.window)).collect()
-                }
-                _ => vec![],
-            };
-            for &c in row.controls.iter().chain(grid.iter()) {
+            for &c in &row.controls {
                 unsafe {
                     let _ = SetWindowPos(c, previous, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 }
@@ -1399,13 +1331,10 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, pinned: bool, fit: bool) ->
     let mut y = 0;
     let mut positions: Vec<(HWND, i32, i32, i32, i32)> = vec![];
     let mut rules = vec![];
-    let mut grids_shown = [false; 2];
     // Whether a section is open (its rule still to draw), and whether the
     // last row was a section's head (a module right under it has no rule).
     let mut in_section = false;
     let mut after_head = false;
-    let dpi = ins.dpi;
-    let grid_height = ins.px(GRID_HEIGHT);
     for i in 0..ins.rows.len() {
         let row = &ins.rows[i];
         if !row.shown || row.controls.is_empty() || (row.tab == Tab::Pinned) != pinned {
@@ -1508,29 +1437,9 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, pinned: bool, fit: bool) ->
                 positions.push((c[0], right - button + margin, y, button, ins.px(35.0)));
                 ins.px(35.0)
             }
-            Kind::Foldout(paper) => {
+            Kind::Foldout(_) => {
                 positions.push((c[0], gutter - margin, y, right - gutter + 2 * margin, row_h));
-                let header = row_h;
-                let open = model.previews.open(paper);
-                // The Film grid's search field sits over the grid, outside its
-                // scrolling, so it stays in reach.
-                let search = (!paper && !ins.film_search.is_invalid()).then(|| (ins.film_search, ins.field(gutter, y + header + ins.px(4.0), right - gutter), ins.px(SEARCH_HEIGHT)));
-                match &mut ins.grids[paper as usize] {
-                    Some(grid) if open => {
-                        grids_shown[paper as usize] = true;
-                        let below = match search {
-                            Some((field, r, height)) => {
-                                positions.push((field, r.left, r.top, r.right - r.left, r.bottom - r.top));
-                                height
-                            }
-                            None => 0,
-                        };
-                        let height = layout_grid(grid, right - gutter, grid_height, dpi);
-                        positions.push((grid.window, gutter, y + header + below, right - gutter, height));
-                        header + below + height + ins.px(8.0)
-                    }
-                    _ => header,
-                }
+                row_h
             }
             Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
                 // The label, and the value at the row's end; the box takes
@@ -1563,19 +1472,6 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, pinned: bool, fit: bool) ->
         y += rule;
     }
     if pinned {
-        for (grid, shown) in ins.grids.iter_mut().zip(grids_shown) {
-            if let Some(grid) = grid {
-                grid.was_open = shown;
-                unsafe {
-                    let _ = ShowWindow(grid.window, if shown { SW_SHOWNA } else { SW_HIDE });
-                }
-            }
-        }
-        if !ins.film_search.is_invalid() {
-            unsafe {
-                let _ = ShowWindow(ins.film_search, if grids_shown[0] { SW_SHOWNA } else { SW_HIDE });
-            }
-        }
         place(&positions, 0);
         ink::set_rules(ins.pinned, rules);
         unsafe {
@@ -2096,13 +1992,6 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     }
                 }
                 enable_all(c, catalog);
-                if let Some(grid) = &ins.grids[paper as usize] {
-                    select_tile(grid, if paper { &model.state.paper } else { &model.state.film });
-                    enable(grid.window, catalog);
-                }
-                if !paper && !ins.film_search.is_invalid() {
-                    enable(ins.film_search, catalog);
-                }
             }
             Kind::DevTime(paper) => {
                 let times = stock_times(model, paper);
@@ -2292,12 +2181,6 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         tab_edits(app, EDIT_TABS[(id - TAB_COUNT) as usize], hwnd);
         return;
     }
-    if id == FILM_SEARCH {
-        if code == EN_CHANGE {
-            film_search_changed(app, window_text(hwnd));
-        }
-        return;
-    }
     let Some((index, part)) = row_of(id) else { return };
     let Some(row) = app.inspector.rows.get(index) else { return };
     let kind = row.kind;
@@ -2374,8 +2257,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             }
         }
         (Kind::Foldout(paper), ACTION) if code == BN_CLICKED => {
-            app.inspector.slide = true;
-            app.model.toggle_foldout(paper);
+            app.model.toggle_tray(paper);
         }
         (Kind::DevTime(paper), COMBO) if code == CBN_SELCHANGE => {
             let times = stock_times(&app.model, paper);
@@ -2755,24 +2637,6 @@ fn draw_item(item: &DRAWITEMSTRUCT) {
     }
 }
 
-fn with_app_fonts_glyph() -> HGDIOBJ {
-    thread_local! {
-        static GLYPH: Cell<isize> = const { Cell::new(0) };
-    }
-    GLYPH.with(|g| {
-        if g.get() == 0 {
-            unsafe {
-                let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(super::main_hwnd()).max(96) as i32;
-                let mut lf = LOGFONTW { lfHeight: -(10 * dpi / 96), ..Default::default() };
-                let face = wide("Segoe MDL2 Assets");
-                lf.lfFaceName[..face.len()].copy_from_slice(&face);
-                g.set(CreateFontIndirectW(&lf).0 as isize);
-            }
-        }
-        HGDIOBJ(g.get() as *mut _)
-    })
-}
-
 /// The drawn samples of `BorderStylePicker`: a photograph (a sky-to-sand
 /// gradient) inside each style.
 fn draw_swatch(c: &mut Canvas, r: RECT, style: usize, mat: u32, line: u32, disabled: bool) {
@@ -3025,457 +2889,6 @@ fn commit_edit(hwnd: HWND) {
     });
 }
 
-// MARK: Film and paper previews
-
-/// An open foldout: the favourites, untitled, then headings and a
-/// two-column grid of tiles, one owner-drawn button per stock, under the
-/// menu's headings in catalog order. A favourite's tile is there twice. At
-/// most `GRID_HEIGHT` tall, it scrolls inside itself. While the Film grid
-/// searches, its matches show once each, under their groups, and the other
-/// tiles hide: they and their thumbnails stay for when the search clears.
-struct StockGrid {
-    window: HWND,
-    /// Each tile's stock id and button, in order.
-    tiles: Vec<(String, HWND)>,
-    /// Each heading (none above the favourites) and the index of the first
-    /// tile under it.
-    headings: Vec<(Option<HWND>, usize)>,
-    /// The catalog and favourites it was built from (`grid_key`).
-    key: String,
-    scroll: i32,
-    content: i32,
-    view: i32,
-    /// It was on screen at the last layout; opening it again scrolls to the
-    /// current stock.
-    was_open: bool,
-    /// The tile to keep in place at the next layout (`pointed_tile`).
-    anchor: Option<(String, bool, i32)>,
-    /// The search the tiles are filtered for, as typed, and which tiles
-    /// match it (never the favourites' copies); None while not searching.
-    query: String,
-    matches: Option<Vec<bool>>,
-    /// The Film grid's "No films match …" line.
-    no_matches: Option<HWND>,
-    /// The search was cleared: the next layout goes back to the current stock.
-    recenter: bool,
-}
-
-/// A tile as drawn.
-#[derive(Clone, Default)]
-struct TileLook {
-    image: Option<std::sync::Arc<crate::previews::Bitmap>>,
-    dimmed: bool,
-    selected: bool,
-    favorite: bool,
-}
-
-const TILE_FIRST: u16 = 100;
-/// The thumbnail's height, the caption and the gaps, in DIPs.
-const TILE_IMAGE: f64 = 92.0;
-const TILE_CAPTION: f64 = 18.0;
-const TILE_GAP: f64 = 8.0;
-const TILE_HEADING: f64 = 24.0;
-/// The star over a thumbnail's corner.
-const TILE_STAR: f64 = 24.0;
-
-fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, key: String) -> StockGrid {
-    let window = create(w!("NegsStockGrid"), if paper { "Papers" } else { "Films" }, WS_CHILD | WS_CLIPCHILDREN | WS_VSCROLL, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), parent, 0, HFONT::default());
-    unsafe {
-        SetWindowLongPtrW(window, GWLP_USERDATA, paper as isize);
-    }
-    let (films, papers) = (model.listed_films(), model.papers());
-    let favorites = model.favorite_stocks(paper);
-    let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
-    let sections = std::iter::once((None, favorites)).chain(groups.into_iter().map(|g| (Some(g.title), g.stocks)));
-    let (mut tiles, mut headings) = (vec![], vec![]);
-    for (title, stocks) in sections {
-        if stocks.is_empty() {
-            continue;
-        }
-        let heading = title.map(|title| create(w!("STATIC"), title, WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), window, 0, fonts.small));
-        headings.push((heading, tiles.len()));
-        for stock in stocks {
-            let id = TILE_FIRST + tiles.len() as u16;
-            let tile = create(w!("BUTTON"), &stock.name, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), window, id, fonts.small);
-            draw::track_hover(tile);
-            super::dialogs::tooltip(tile, &stock.name);
-            unsafe {
-                let _ = SetWindowSubclass(tile, Some(tile_subclass), 1, 0);
-            }
-            tiles.push((stock.id.clone(), tile));
-        }
-    }
-    // Thumbnails made before the grid was (re)built show at once.
-    let looks = tiles
-        .iter()
-        .map(|(id, _)| {
-            let thumb = model.previews.thumb(&crate::previews::Target::Stock { id: id.clone(), paper });
-            TileLook { image: thumb.and_then(|t| t.image.clone()), dimmed: thumb.is_some_and(|t| t.dimmed), selected: false, favorite: model.prefs.is_favorite(id, paper) }
-        })
-        .collect();
-    TILES.with(|t| t.borrow_mut()[paper as usize] = looks);
-    // A quiet line in the grid when nothing matches; hidden until then.
-    let no_matches = (!paper).then(|| create(w!("STATIC"), "", WS_CHILD | WINDOW_STYLE(SS_CENTER.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), window, 0, fonts.ui));
-    let mut grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false, anchor: None, query: String::new(), matches: None, no_matches, recenter: false };
-    if !paper {
-        filter_grid(&mut grid, model);
-    }
-    select_tile(&grid, if paper { &model.state.paper } else { &model.state.film });
-    grid
-}
-
-/// Which of the Film grid's tiles the search shows (`state::matching`):
-/// each match once, under its group, so never the favourites' copies.
-/// None while the search is empty or only spaces.
-fn search_matches(grid: &StockGrid, model: &Model, query: &str) -> Option<Vec<bool>> {
-    if query.trim().is_empty() {
-        return None;
-    }
-    let (films, papers) = (model.listed_films(), model.papers());
-    let matched: std::collections::HashSet<&str> =
-        state::matching(query, state::film_groups(&films, &papers)).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.as_str())).collect();
-    Some((0..grid.tiles.len()).map(|i| !among_favorites(grid, i) && matched.contains(grid.tiles[i].0.as_str())).collect())
-}
-
-/// Filters the Film grid for the model's search, hiding rather than
-/// rebuilding tiles; the next layout places what shows.
-fn filter_grid(grid: &mut StockGrid, model: &Model) {
-    let query = model.previews.film_query.clone();
-    grid.matches = search_matches(grid, model, &query);
-    if let Some(label) = grid.no_matches {
-        set_text(label, &format!("No films match \u{201c}{}\u{201d}", query.trim()));
-    }
-    // The tile under the pointer may hide.
-    if HOVER_TILE.get().is_some_and(|(paper, _)| !paper) {
-        HOVER_TILE.set(None);
-    }
-    grid.query = query;
-}
-
-/// The Film grid's search field: "Search films" until something is typed.
-fn create_film_search(parent: HWND, fonts: &super::Fonts, model: &Model) -> HWND {
-    let search = create(w!("EDIT"), &model.previews.film_query, WS_CHILD | WS_TABSTOP | WINDOW_STYLE(ES_AUTOHSCROLL as u32), WINDOW_EX_STYLE(0), parent, FILM_SEARCH, fonts.ui);
-    draw::set_role(search, Role::Field);
-    draw::track_hover(search);
-    super::accessible_name(search, "Search films");
-    let prompt = wide("Search films");
-    unsafe {
-        // Shown while focused too, as the Mac's placeholder is.
-        SendMessageW(search, EM_SETCUEBANNER, WPARAM(1), LPARAM(prompt.as_ptr() as isize));
-        let _ = SetWindowSubclass(search, Some(film_search_subclass), 1, 0);
-    }
-    search
-}
-
-/// The field and the Film grid follow the model's search when something
-/// other than typing changed it. True when the grid was filtered again.
-fn sync_film_search(ins: &mut Inspector, model: &Model) -> bool {
-    let query = &model.previews.film_query;
-    if !ins.film_search.is_invalid() && window_text(ins.film_search) != *query {
-        set_text(ins.film_search, query);
-    }
-    match ins.grids[0].as_mut() {
-        Some(grid) if grid.query != *query => {
-            filter_grid(grid, model);
-            true
-        }
-        _ => false,
-    }
-}
-
-/// Typing in the search field filters the Film grid at once, and never
-/// edits the photograph. Each search starts at the top of its matches;
-/// clearing it goes back to the current film.
-pub(crate) fn film_search_changed(app: &mut App, text: String) {
-    if app.model.previews.film_query == text {
-        return;
-    }
-    let cleared = text.is_empty();
-    app.model.previews.film_query = text;
-    // The thumbnails asked for follow the matches.
-    app.model.dirty |= dirty::PREVIEWS;
-    let ins = &mut app.inspector;
-    let (limit, dpi) = (ins.px(GRID_HEIGHT), ins.dpi);
-    let Some(grid) = ins.grids[0].as_mut() else { return };
-    filter_grid(grid, &app.model);
-    if cleared {
-        grid.recenter = true;
-    } else {
-        grid.scroll = 0;
-    }
-    grid.anchor = None;
-    // Only the grid moves: it keeps its height while searching, so the
-    // field and the rows below stay where they are, undrawn.
-    let mut r = RECT::default();
-    unsafe {
-        let _ = GetWindowRect(grid.window, &mut r);
-    }
-    if layout_grid(grid, r.right - r.left, limit, dpi) != r.bottom - r.top {
-        layout_rows(ins, &app.model);
-    }
-}
-
-/// Return in the search field chooses the first match, as listed: one
-/// undo step, as clicking its tile makes.
-pub(crate) fn choose_first_match(app: &mut App) {
-    let query = app.model.previews.film_query.clone();
-    if query.trim().is_empty() {
-        return;
-    }
-    let (films, papers) = (app.model.listed_films(), app.model.papers());
-    let first = state::matching(&query, state::film_groups(&films, &papers)).first().and_then(|g| g.stocks.first()).map(|s| s.id.clone());
-    if let Some(id) = first {
-        app.model.choose_film(&id);
-    }
-}
-
-/// The search field: Return chooses the first match, Escape clears it.
-extern "system" fn film_search_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
-    unsafe {
-        match msg {
-            WM_GETDLGCODE if matches!(VIRTUAL_KEY(wparam.0 as u16), VK_RETURN | VK_ESCAPE) => LRESULT(DLGC_WANTALLKEYS as isize),
-            WM_KEYDOWN if wparam.0 == VK_RETURN.0 as usize => {
-                post(choose_first_match);
-                LRESULT(0)
-            }
-            WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => {
-                // Sends EN_CHANGE, which clears the search.
-                if GetWindowTextLengthW(hwnd) > 0 {
-                    set_text(hwnd, "");
-                }
-                LRESULT(0)
-            }
-            WM_CHAR if wparam.0 == 13 || wparam.0 == 27 => LRESULT(0),
-            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
-        }
-    }
-}
-
-/// Where the headings and tiles go for `width`, and the content's height:
-/// those the search shows if `filtered`, else every one. A heading shows
-/// only over tiles; with none, the "No films match" line does.
-fn grid_positions(grid: &StockGrid, width: i32, dpi: u32, filtered: bool) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
-    let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
-    let gap = px(TILE_GAP);
-    let column = ((width - gap) / 2).max(1);
-    let tile = px(TILE_IMAGE + TILE_CAPTION);
-    let matches = grid.matches.as_ref().filter(|_| filtered);
-    let mut y = 0;
-    let mut positions = vec![];
-    for (g, &(heading, first)) in grid.headings.iter().enumerate() {
-        let end = grid.headings.get(g + 1).map_or(grid.tiles.len(), |h| h.1);
-        let shown: Vec<HWND> = (first..end).filter(|&i| matches.is_none_or(|m| m[i])).map(|i| grid.tiles[i].1).collect();
-        if shown.is_empty() {
-            continue;
-        }
-        match heading {
-            Some(heading) => {
-                positions.push((heading, 0, y + px(6.0), width, px(16.0)));
-                y += px(TILE_HEADING);
-            }
-            None => y += px(4.0),
-        }
-        for (i, button) in shown.iter().enumerate() {
-            let (col, row) = (i as i32 % 2, i as i32 / 2);
-            positions.push((*button, col * (column + gap), y + row * (tile + gap), column, tile));
-        }
-        let rows = shown.len().div_ceil(2) as i32;
-        y += rows * tile + (rows - 1).max(0) * gap + px(2.0);
-    }
-    if let (Some(_), Some(label), true) = (matches, grid.no_matches, positions.is_empty()) {
-        positions.push((label, 0, px(24.0), width, px(20.0)));
-        y = px(24.0 + 20.0);
-    }
-    (positions, y)
-}
-
-/// Places the headings and tiles for `width`, at most `limit` tall with a
-/// scroll bar beyond it; returns the grid's height. Opening it shows the
-/// current stock's tile in the middle.
-fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
-    // While searching the grid keeps its height, as the Mac's fixed frame
-    // does: the rows below stay put as the matches change.
-    let view = if grid.matches.is_some() { grid_positions(grid, width, dpi, false).1.min(limit) } else { limit };
-    let (mut positions, mut content) = grid_positions(grid, width, dpi, true);
-    if content > view {
-        let bar = unsafe { windows::Win32::UI::HiDpi::GetSystemMetricsForDpi(SM_CXVSCROLL, dpi) };
-        (positions, content) = grid_positions(grid, width - bar, dpi, true);
-    }
-    grid.content = content;
-    grid.view = if grid.matches.is_some() { view } else { content.min(limit) };
-    if let Some((id, favorite, top)) = grid.anchor.take() {
-        let index = (0..grid.tiles.len()).find(|&i| grid.tiles[i].0 == id && among_favorites(grid, i) == favorite);
-        if let Some(&(_, _, y, _, _)) = index.and_then(|i| positions.iter().find(|p| p.0 == grid.tiles[i].1)) {
-            grid.scroll = y - top;
-        }
-    } else if !grid.was_open || std::mem::take(&mut grid.recenter) {
-        // The current stock's first tile on show: the favourites' copy if
-        // it is starred, unless a search hides that.
-        let selected: Vec<usize> = TILES.with(|t| {
-            let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
-            t.borrow()[paper as usize].iter().enumerate().filter(|(_, look)| look.selected).map(|(i, _)| i).collect()
-        });
-        let tile = selected.iter().find_map(|&i| positions.iter().find(|p| p.0 == grid.tiles[i].1));
-        grid.scroll = tile.map_or(0, |&(_, _, y, _, h)| y + h / 2 - grid.view / 2);
-    }
-    grid.scroll = grid.scroll.clamp(0, (grid.content - grid.view).max(0));
-    // What the search hides goes first, then the rest move, then what it
-    // brings back shows in its place.
-    let wanted = |hwnd: HWND| positions.iter().any(|p| p.0 == hwnd);
-    let children: Vec<HWND> = grid.tiles.iter().map(|t| t.1).chain(grid.headings.iter().filter_map(|h| h.0)).chain(grid.no_matches).collect();
-    for &child in &children {
-        if !wanted(child) {
-            show_child(child, false);
-        }
-    }
-    place(&positions, grid.scroll);
-    for &child in &children {
-        if wanted(child) {
-            show_child(child, true);
-        }
-    }
-    unsafe {
-        let info = SCROLLINFO {
-            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
-            fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
-            nMin: 0,
-            nMax: grid.content,
-            nPage: grid.view.max(0) as u32,
-            nPos: grid.scroll,
-            ..Default::default()
-        };
-        SetScrollInfo(grid.window, SB_VERT, &info, true);
-        let _ = InvalidateRect(grid.window, None, true);
-    }
-    grid.view
-}
-
-/// Shows or hides a grid's tile, heading or line, if it isn't already.
-fn show_child(hwnd: HWND, show: bool) {
-    unsafe {
-        let visible = GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_VISIBLE.0 != 0;
-        if visible != show {
-            let _ = ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
-        }
-    }
-}
-
-/// Whether the tile at `index` is among the favourites, the untitled section.
-fn among_favorites(grid: &StockGrid, index: usize) -> bool {
-    match grid.headings.first() {
-        Some(&(None, _)) => index < grid.headings.get(1).map_or(grid.tiles.len(), |h| h.1),
-        _ => false,
-    }
-}
-
-/// The tile under the pointer: its stock, whether it is the copy among the
-/// favourites, and its top in the grid's view. Starring adds a tile above
-/// it; the rebuilt grid scrolls so this one stays under the pointer.
-fn pointed_tile(grid: &StockGrid) -> Option<(String, bool, i32)> {
-    unsafe {
-        let mut p = POINT::default();
-        GetCursorPos(&mut p).ok()?;
-        let _ = ScreenToClient(grid.window, &mut p);
-        grid.tiles.iter().enumerate().find_map(|(i, (id, tile))| {
-            // A tile the search hides keeps its old place.
-            if GetWindowLongW(*tile, GWL_STYLE) as u32 & WS_VISIBLE.0 == 0 {
-                return None;
-            }
-            let mut r = RECT::default();
-            let _ = GetWindowRect(*tile, &mut r);
-            let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
-            MapWindowPoints(None, grid.window, &mut corners);
-            let inside = p.x >= corners[0].x && p.x < corners[1].x && p.y >= corners[0].y && p.y < corners[1].y;
-            inside.then(|| (id.clone(), among_favorites(grid, i), corners[0].y))
-        })
-    }
-}
-
-/// Scrolls an open grid to `target`.
-fn scroll_grid(grid: &mut StockGrid, target: i32) {
-    let target = target.clamp(0, (grid.content - grid.view).max(0));
-    if target == grid.scroll {
-        return;
-    }
-    let delta = grid.scroll - target;
-    grid.scroll = target;
-    unsafe {
-        ScrollWindowEx(grid.window, 0, delta, None, None, None, None, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
-        let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
-        SetScrollInfo(grid.window, SB_VERT, &info, true);
-    }
-}
-
-/// Scrolls a grid so a focused tile is in view.
-fn reveal_tile(grid: &mut StockGrid, tile: HWND) {
-    unsafe {
-        let mut r = RECT::default();
-        let _ = GetWindowRect(tile, &mut r);
-        let mut top_left = POINT { x: r.left, y: r.top };
-        let _ = windows::Win32::Graphics::Gdi::ScreenToClient(grid.window, &mut top_left);
-        let (top, height) = (top_left.y + grid.scroll, r.bottom - r.top);
-        if top < grid.scroll {
-            scroll_grid(grid, top);
-        } else if top + height > grid.scroll + grid.view {
-            scroll_grid(grid, top + height - grid.view);
-        }
-    }
-}
-
-/// Outlines the current stock's tile, and names it for screen readers.
-fn select_tile(grid: &StockGrid, selected: &str) {
-    let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
-    TILES.with(|t| {
-        let mut t = t.borrow_mut();
-        let looks = &mut t[paper as usize];
-        for (i, (id, button)) in grid.tiles.iter().enumerate() {
-            let Some(look) = looks.get_mut(i) else { continue };
-            let now = id == selected;
-            if look.selected != now {
-                look.selected = now;
-                let name = window_text(*button);
-                let favorite = if look.favorite { ", favorite" } else { "" };
-                super::accessible_name(*button, &if now { format!("{name}, current{favorite}") } else { format!("{name}{favorite}") });
-                unsafe {
-                    let _ = InvalidateRect(*button, None, false);
-                }
-            }
-        }
-    });
-}
-
-/// Brings the open grids' tiles up to date with the model's thumbnails.
-pub fn redraw_previews(app: &mut App) {
-    let ins = &app.inspector;
-    for (paper, grid) in ins.grids.iter().enumerate() {
-        let Some(grid) = grid else { continue };
-        if !unsafe { IsWindowVisible(grid.window) }.as_bool() {
-            continue;
-        }
-        TILES.with(|t| {
-            let mut t = t.borrow_mut();
-            for (look, (id, button)) in t[paper].iter_mut().zip(&grid.tiles) {
-                let thumb = app.model.previews.thumb(&crate::previews::Target::Stock { id: id.clone(), paper: paper == 1 });
-                let image = thumb.and_then(|t| t.image.clone());
-                let dimmed = thumb.is_some_and(|t| t.dimmed);
-                let same = look.dimmed == dimmed
-                    && match (&look.image, &image) {
-                        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
-                        (None, None) => true,
-                        _ => false,
-                    };
-                if !same {
-                    look.image = image;
-                    look.dimmed = dimmed;
-                    unsafe {
-                        let _ = InvalidateRect(*button, None, false);
-                    }
-                }
-            }
-        });
-    }
-}
-
 /// A foldout's header: chevron and title, the current stock at the right.
 fn draw_foldout(c: &mut Canvas, item: &DRAWITEMSTRUCT, title: &str, color: u32) {
     unsafe {
@@ -3498,47 +2911,6 @@ fn draw_foldout(c: &mut Canvas, item: &DRAWITEMSTRUCT, title: &str, color: u32) 
         let nr = RECT { left: left + measure.right + (16.0 * s) as i32, top: 0, right: c.w - (8.0 * s) as i32, bottom: c.h };
         c.text(&name, nr, font, if disabled { p.disabled } else { p.secondary }, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
     }
-}
-
-/// A tile: the thumbnail cropped to fill a rounded frame (grey until it
-/// arrives, dimmed while out of date), the accent outline on the current
-/// stock, and the name below, cut with an ellipsis.
-fn draw_tile(item: &DRAWITEMSTRUCT, look: &TileLook, hovered: bool) {
-    let p = theme::palette();
-    let s = draw::dpi_of(item.hwndItem);
-    let px = |dip: f64| (dip * s as f64).round() as i32;
-    let mut c = Canvas::new(item.hDC, item.rcItem);
-    c.clear(p.panel);
-    let inset = px(2.0);
-    let frame = RECT { left: inset, top: inset, right: c.w - inset, bottom: px(TILE_IMAGE) - inset };
-    let radius = 6.0 * s;
-    let hot = hovered || draw::is_hot(item.hwndItem);
-    draw_thumbnail(&mut c, frame, radius, look.image.as_deref(), look.dimmed, p.well, p.panel);
-    if look.selected {
-        c.round_frame(RectF::of(frame).inset(-inset as f32, -inset as f32), radius + inset as f32, 2.0 * s, p.accent);
-    } else if hot {
-        c.round_frame(RectF::of(frame), radius, s, p.strong_border);
-    }
-    // The star sits over the thumbnail's corner, on the photograph, so its
-    // colours don't follow the theme: on a favourite, or under the pointer.
-    if look.favorite || hot {
-        let star = RECT { left: frame.right - px(TILE_STAR), top: frame.top, right: frame.right, bottom: frame.top + px(TILE_STAR) };
-        let shadow = RECT { left: star.left + 1, top: star.top + 1, right: star.right + 1, bottom: star.bottom + 1 };
-        let glyph = if look.favorite { "\u{E735}" } else { "\u{E734}" };
-        let font = HFONT(with_app_fonts_glyph().0);
-        let center = DT_SINGLELINE | DT_VCENTER | DT_CENTER;
-        c.text(glyph, shadow, font, theme::rgb(0x20, 0x20, 0x20), center);
-        c.text(glyph, star, font, if look.favorite { theme::rgb(0xff, 0xc8, 0x00) } else { theme::rgb(0xff, 0xff, 0xff) }, center);
-    }
-    let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
-    let ink = if disabled { p.disabled } else if look.selected || hot { p.text } else { p.secondary };
-    let tr = RECT { left: inset, top: frame.bottom + px(4.0), right: c.w - inset, bottom: c.h };
-    c.text(&draw::window_text(item.hwndItem), tr, draw::font_of(item.hwndItem), ink, DT_SINGLELINE | DT_TOP | DT_LEFT | DT_END_ELLIPSIS);
-    if item.itemState.0 & ODS_FOCUS.0 != 0 && item.itemState.0 & ODS_NOFOCUSRECT.0 == 0 {
-        let whole = RectF::of(c.rect());
-        draw::focus_ring(&mut c, whole, radius, s);
-    }
-    c.present(item.hDC);
 }
 
 /// A thumbnail cropped to fill `frame` with rounded corners, or the
@@ -3593,167 +2965,6 @@ pub fn draw_thumbnail(c: &mut Canvas, frame: RECT, radius: f32, image: Option<&c
             }
         }
         c.round_corners(f, radius, background);
-    }
-}
-
-/// The tile's grid (paper or not) and position.
-fn tile_of(hwnd: HWND) -> (bool, usize) {
-    unsafe {
-        let paper = GetWindowLongPtrW(GetParent(hwnd).unwrap_or_default(), GWLP_USERDATA) != 0;
-        (paper, (GetDlgCtrlID(hwnd) as u16).wrapping_sub(TILE_FIRST) as usize)
-    }
-}
-
-/// Whether a point in the tile's client area is on its star.
-fn on_star(hwnd: HWND, lparam: LPARAM) -> bool {
-    unsafe {
-        let mut r = RECT::default();
-        let _ = GetClientRect(hwnd, &mut r);
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as i32;
-        let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
-        let (x, y) = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
-        let right = r.right - px(2.0);
-        x >= right - px(TILE_STAR) && x < right && y >= px(2.0) && y < px(2.0) + px(TILE_STAR)
-    }
-}
-
-fn toggle_tile_favorite(hwnd: HWND) {
-    let (paper, index) = tile_of(hwnd);
-    post(move |app: &mut App| {
-        let id = app.inspector.grids[paper as usize].as_ref().and_then(|g| g.tiles.get(index)).map(|t| t.0.clone());
-        if let Some(id) = id {
-            app.model.toggle_favorite(&id, paper);
-        }
-    });
-}
-
-/// Enter chooses a focused tile, as Space does: owner-drawn buttons aren't
-/// push buttons to `IsDialogMessage`. A click on the star (or the context
-/// menu, for the keyboard) stars or unstars the stock instead; the pointer
-/// over a tile shows its star.
-extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
-    unsafe {
-        let enter = wparam.0 == VK_RETURN.0 as usize;
-        if msg == WM_GETDLGCODE && enter {
-            return LRESULT((DLGC_WANTMESSAGE | DLGC_BUTTON) as isize);
-        }
-        if msg == WM_KEYDOWN && enter {
-            let parent = GetParent(hwnd).unwrap_or_default();
-            SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | GetDlgCtrlID(hwnd) as usize), LPARAM(hwnd.0 as isize));
-            return LRESULT(0);
-        }
-        match msg {
-            // `draw_tile` covers the whole tile; erasing first blanked the
-            // thumbnails for a frame whenever the grid moved.
-            WM_ERASEBKGND => return LRESULT(1),
-            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if on_star(hwnd, lparam) => {
-                toggle_tile_favorite(hwnd);
-                return LRESULT(0);
-            }
-            WM_MOUSEMOVE => {
-                let tile = tile_of(hwnd);
-                if HOVER_TILE.get() != Some(tile) {
-                    HOVER_TILE.set(Some(tile));
-                    let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
-                    let _ = TrackMouseEvent(&mut track);
-                    let _ = InvalidateRect(hwnd, None, false);
-                }
-            }
-            WM_MOUSELEAVE => {
-                if HOVER_TILE.get() == Some(tile_of(hwnd)) {
-                    HOVER_TILE.set(None);
-                }
-                let _ = InvalidateRect(hwnd, None, false);
-            }
-            WM_CONTEXTMENU => {
-                let (paper, index) = tile_of(hwnd);
-                let favorite = TILES.with(|t| t.borrow()[paper as usize].get(index).is_some_and(|l| l.favorite));
-                let menu = CreatePopupMenu().unwrap();
-                let text = wide(if favorite { "Remove from &Favorites" } else { "Add to &Favorites" });
-                let _ = AppendMenuW(menu, MF_STRING, 1, pcwstr(&text));
-                let (mut x, mut y) = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
-                if x == -1 && y == -1 {
-                    let mut r = RECT::default();
-                    let _ = GetWindowRect(hwnd, &mut r);
-                    (x, y) = (r.left, r.bottom);
-                }
-                let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, hwnd, None);
-                let _ = DestroyMenu(menu);
-                if chosen.0 == 1 {
-                    toggle_tile_favorite(hwnd);
-                }
-                return LRESULT(0);
-            }
-            WM_SETFOCUS => {
-                let raw = hwnd.0 as isize;
-                post(move |app: &mut App| {
-                    let (paper, _) = tile_of(HWND(raw as *mut _));
-                    if let Some(grid) = app.inspector.grids[paper as usize].as_mut() {
-                        reveal_tile(grid, HWND(raw as *mut _));
-                    }
-                });
-            }
-            _ => {}
-        }
-        DefSubclassProc(hwnd, msg, wparam, lparam)
-    }
-}
-
-extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe {
-        let paper = GetWindowLongPtrW(hwnd, GWLP_USERDATA) != 0;
-        match msg {
-            WM_COMMAND if ((wparam.0 >> 16) & 0xffff) as u32 == BN_CLICKED => {
-                let index = (wparam.0 & 0xffff) as u16;
-                with_app(|app| {
-                    let Some(index) = index.checked_sub(TILE_FIRST) else { return };
-                    let Some(id) = app.inspector.grids[paper as usize].as_ref().and_then(|g| g.tiles.get(index as usize)).map(|t| t.0.clone()) else { return };
-                    if paper { app.model.choose_paper(&id) } else { app.model.choose_film(&id) }
-                });
-                LRESULT(0)
-            }
-            WM_DRAWITEM => {
-                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
-                let index = (item.CtlID as u16).wrapping_sub(TILE_FIRST) as usize;
-                let look = TILES.with(|t| t.borrow()[paper as usize].get(index).cloned()).unwrap_or_default();
-                draw_tile(item, &look, HOVER_TILE.get() == Some((paper, index)));
-                LRESULT(1)
-            }
-            WM_CTLCOLORSTATIC => {
-                let dc = HDC(wparam.0 as *mut _);
-                SetBkMode(dc, TRANSPARENT);
-                let p = theme::palette();
-                SetTextColor(dc, COLORREF(p.secondary));
-                LRESULT(theme::brush(p.panel).0 as isize)
-            }
-            WM_CTLCOLORBTN => draw::button_brush(),
-            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
-            WM_VSCROLL | WM_MOUSEWHEEL => {
-                with_app(|app| {
-                    let line = app.inspector.px(40.0);
-                    let Some(grid) = app.inspector.grids[paper as usize].as_mut() else { return };
-                    let target = if msg == WM_MOUSEWHEEL {
-                        grid.scroll - ((wparam.0 >> 16) & 0xffff) as i16 as i32 * line * 3 / 2 / 120
-                    } else {
-                        let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
-                        let _ = GetScrollInfo(hwnd, SB_VERT, &mut info);
-                        match SCROLLBAR_COMMAND((wparam.0 & 0xffff) as i32) {
-                            SB_LINEUP => info.nPos - line,
-                            SB_LINEDOWN => info.nPos + line,
-                            SB_PAGEUP => info.nPos - info.nPage as i32,
-                            SB_PAGEDOWN => info.nPos + info.nPage as i32,
-                            SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos,
-                            SB_TOP => 0,
-                            SB_BOTTOM => i32::MAX / 2,
-                            _ => info.nPos,
-                        }
-                    };
-                    scroll_grid(grid, target);
-                });
-                LRESULT(0)
-            }
-            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-        }
     }
 }
 
@@ -4683,58 +3894,35 @@ mod tests {
         assert_eq!(parse_number("inf"), None);
     }
 
-    /// A grid of a starred Gold (its copy among the favourites), Color
-    /// Negative's Gold and Portra, and Black & White's Tri-X. The windows are
-    /// stand-ins: laying out only reads them.
-    fn search_grid() -> StockGrid {
-        let h = |n: usize| HWND(n as *mut _);
-        StockGrid {
-            window: HWND::default(),
-            tiles: vec![("gold".into(), h(1)), ("gold".into(), h(2)), ("portra".into(), h(3)), ("trix".into(), h(4))],
-            headings: vec![(None, 0), (Some(h(10)), 1), (Some(h(11)), 3)],
-            key: String::new(),
-            scroll: 0,
-            content: 0,
-            view: 0,
-            was_open: true,
-            anchor: None,
-            query: String::new(),
-            matches: None,
-            no_matches: Some(h(20)),
-            recenter: false,
-        }
-    }
-
-    /// While searching, each match shows once under its group, without the
-    /// favourites or empty groups' headings; with none, the quiet line.
+    /// The tray's sections, as the Mac's `StockTray`: the favourites,
+    /// untitled, then each group; while searching each match once under
+    /// its group, without the favourites or empty groups.
     #[test]
     fn a_search_shows_each_match_once_under_its_group() {
         use crate::session::Preferences;
         let stock = |id: &str, name: &str, bw: bool| state::Stock {
             id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
         };
-        let mut model = Model::new(Preferences { favorite_films: vec!["gold".into()], ..Preferences::default() });
+        let mut model = Model::new(Preferences { previews: true, favorite_films: vec!["gold".into()], ..Preferences::default() });
         model.stocks = vec![stock("gold", "Gold 200", false), stock("portra", "Portra 400", false), stock("trix", "Tri-X 400", true)];
-        let mut grid = search_grid();
-        let shown = |grid: &StockGrid| grid_positions(grid, 200, 96, true).0.iter().map(|p| p.0.0 as usize).collect::<Vec<_>>();
+        model.source = Some(std::path::PathBuf::from("photo.png"));
+        model.previews.tray = Some(crate::previews::TrayVisit::new(false, model.state.clone(), String::new()));
+        let shown = |model: &Model| -> Vec<(bool, Vec<String>)> { model.tray_sections().into_iter().map(|s| (s.favourites, s.stocks.into_iter().map(|e| e.id).collect())).collect() };
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         // Not searching: the favourites first, then every group.
         for query in ["", "   "] {
-            assert_eq!(search_matches(&grid, &model, query), None);
+            model.previews.tray.as_mut().unwrap().query = query.into();
+            assert_eq!(shown(&model), [(true, ids(&["gold"])), (false, ids(&["gold", "portra"])), (false, ids(&["trix"]))]);
         }
-        assert_eq!(shown(&grid), [1, 10, 2, 3, 11, 4]);
+        let search = |model: &mut Model, query: &str| {
+            model.previews.tray.as_mut().unwrap().query = query.into();
+            shown(model)
+        };
         // A starred match shows once, under its group.
-        grid.matches = search_matches(&grid, &model, "GOLD");
-        assert_eq!(grid.matches, Some(vec![false, true, false, false]));
-        assert_eq!(shown(&grid), [10, 2]);
-        grid.matches = search_matches(&grid, &model, "black 400");
-        assert_eq!(shown(&grid), [11, 4]);
-        grid.matches = search_matches(&grid, &model, "400");
-        assert_eq!(shown(&grid), [10, 3, 11, 4]);
-        grid.matches = search_matches(&grid, &model, "gold 400");
-        assert_eq!(shown(&grid), [20]);
-        // The unfiltered layout, which keeps the grid's height while searching.
-        assert_eq!(grid_positions(&grid, 200, 96, false).0.len(), 6);
-        assert!(grid_positions(&grid, 200, 96, false).1 > grid_positions(&grid, 200, 96, true).1);
+        assert_eq!(search(&mut model, "GOLD"), [(false, ids(&["gold"]))]);
+        assert_eq!(search(&mut model, "black 400"), [(false, ids(&["trix"]))]);
+        assert_eq!(search(&mut model, "400"), [(false, ids(&["portra"])), (false, ids(&["trix"]))]);
+        assert!(search(&mut model, "gold 400").is_empty());
         // Searching never edits.
         assert!(model.undo_title().is_none());
     }
