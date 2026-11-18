@@ -17,8 +17,9 @@ mod draw;
 mod drop;
 mod empty;
 mod ink;
-mod folder_watch;
+pub mod folder_watch;
 pub mod inspector;
+mod library;
 mod motion;
 mod panes;
 mod presets;
@@ -674,7 +675,10 @@ impl App {
         use status::{Span, Tone};
         let model = &self.model;
         let mut left = vec![];
-        if model.exporting {
+        if let Some(words) = library::status_words(self) {
+            // "Edits pasted", "★★★": a library action's note, for a moment.
+            left = words;
+        } else if model.exporting {
             let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_default();
             left.push(Span::new(format!("Exporting {name}"), Tone::Label));
             left.push(Span::new(format!("· {} s", model.export_started.elapsed().as_secs()), Tone::Dim));
@@ -823,10 +827,14 @@ impl App {
 
     pub fn command(&mut self, command: u16) {
         // A command keeps the stock being tried and closes the tray, but
-        // editing the text being typed doesn't.
+        // editing the text being typed doesn't. The library's commands too
+        // (Undo with a library step on top undoes after the visit's step).
         let editing = matches!(command, id::CUT | id::COPY | id::PASTE | id::DELETE | id::SELECT_ALL) && text_focus();
         if !editing {
             self.model.end_tray(true);
+        }
+        if library::command(self, command) {
+            return;
         }
         let model = &mut self.model;
         match command {
@@ -989,6 +997,7 @@ impl App {
                 let _ = CheckMenuRadioItem(menu, id::THEME as u32, id::THEME as u32 + count - 1, id::THEME as u32 + i as u32, MF_BYCOMMAND.0);
             }
         }
+        library::update_menu(self, menu);
     }
 
     fn update_recent_menu(&self, menu: HMENU) {
@@ -1055,6 +1064,15 @@ impl App {
             }
         }
         self.save_window();
+        // The open photograph's edits go to its sidecar first; Negs stays open
+        // if they can't, as it does for the session.
+        if let Err(error) = self.model.library_save_now() {
+            if !ending_session {
+                self.model.error = Some(error);
+                self.model.dirty |= dirty::ERROR;
+                return false;
+            }
+        }
         if let Some(session) = self.model.session().filter(|_| std::env::var_os("SPEKTRAFILM_BENCHMARK_PHOTO").is_none()) {
             if let Err(error) = SessionStore::default().save(&session) {
                 if !ending_session {
@@ -1225,12 +1243,10 @@ fn build_menu() -> (HMENU, HMENU) {
         add(edit, id::PASTE, "&Paste\tCtrl+V");
         add(edit, id::DELETE, "&Delete\tDel");
         add(edit, id::SELECT_ALL, "Select &All\tCtrl+A");
-        // Ratings, flags, copying edits and the rest come with the library
-        // (parity phase 6).
         let photo = popup("&Photo");
         add(photo, id::ORIGINAL, "Show &Original\tHold O");
-        separator(photo);
-        add(photo, id::RESET_ALL, "&Reset Edits\tCtrl+Shift+R");
+        // Ratings, flags, copying edits, Reset Edits and the rest.
+        library::add_menu(photo);
         let view = popup("&View");
         add(view, id::FILMSTRIP, "&Film Strip\tF6");
         add(view, id::ADJUSTMENTS, "&Adjustments\tF7");
@@ -1294,7 +1310,8 @@ fn accelerators() -> HACCEL {
         (FVIRTKEY, 'F' as u16, id::IMAGE_ONLY),
         (ctrl, VK_OEM_COMMA.0, id::SETTINGS),
     ];
-    let accels: Vec<ACCEL> = table.iter().map(|&(f, key, cmd)| ACCEL { fVirt: f, key, cmd }).collect();
+    let mut accels: Vec<ACCEL> = table.iter().map(|&(f, key, cmd)| ACCEL { fVirt: f, key, cmd }).collect();
+    accels.extend(library::accelerators());
     unsafe { CreateAcceleratorTableW(&accels).unwrap_or_default() }
 }
 
@@ -1570,7 +1587,8 @@ fn pre_translate(msg: &MSG) -> bool {
         if matches!(msg.message, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) && app.model.tray().is_some() && !tray::keeps_open(app, msg) {
             app.model.end_tray(true);
         }
-        if app.original_key(msg) || view_modes::key(app, msg, text_focus()) {
+        // Rating keys never reach the library while typing (in the tray's Search too).
+        if app.original_key(msg) || view_modes::key(app, msg, text_focus()) || library::key(app, msg) {
             return true;
         }
         if msg.message == WM_KEYDOWN && app.model.cropping() && !text_focus() {
@@ -1790,6 +1808,11 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                     alert::reclaim_focus();
                 }
                 titlebar::invalidate(hwnd);
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_ACTIVATEAPP if wparam.0 != 0 => {
+                // Back from another app: the folder as it left it (`refresh`).
+                post(|app: &mut App| app.model.library_refresh());
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_MOVE | WM_DISPLAYCHANGE => {

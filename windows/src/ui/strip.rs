@@ -3,6 +3,9 @@
 //! thumbnails decoded lazily for the visible cells, one at a time, from a
 //! bounded cache. Click one to open it; Left and Right open the neighbours.
 //! OS folder notifications keep the list live; never a full development.
+//! With the folder's library it lists what the library shows (the filter's
+//! photographs, a RAW+JPEG pair as one, duplicates), with each one's rating
+//! and flag, and Ctrl and Shift select several for Paste Edits and the rest.
 
 use std::collections::{HashMap, VecDeque};
 use std::os::windows::fs::MetadataExt;
@@ -16,6 +19,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::StrCmpLogicalW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
+
+use negs_library::{Flag, Item, Summary};
 
 use super::{App, post, with_app};
 use crate::model::is_photo;
@@ -54,17 +59,30 @@ struct ThumbnailRequest {
     generation: u64,
 }
 
+/// One frame of the strip.
+#[derive(Clone, Debug, PartialEq)]
+struct Cell {
+    item: Item,
+    name: String,
+    summary: Summary,
+    /// The open photograph.
+    open: bool,
+    /// In the library's selection, for Paste Edits and the rest.
+    selected: bool,
+}
+
 #[derive(Default)]
 pub struct Strip {
     folder: Option<PathBuf>,
     files: Vec<PathBuf>,
+    cells: Vec<Cell>,
     versions: HashMap<PathBuf, PhotoFile>,
     watch: Option<super::folder_watch::FolderWatch>,
     status: Status,
     scroll: i32,
     thumbs: HashMap<PathBuf, Option<Thumb>>,
     order: VecDeque<PathBuf>,
-    selected: Option<PathBuf>,
+    selected: Option<Item>,
     requests: Option<Arc<(Mutex<Vec<ThumbnailRequest>>, Condvar)>>,
     generation: u64,
 }
@@ -121,7 +139,7 @@ impl Strip {
     }
 
     fn content_width(&self, dpi: u32) -> i32 {
-        let n = self.files.len() as f64;
+        let n = self.cells.len() as f64;
         self.px(dpi, PAD * 2.0 + n * CELL + (n - 1.0).max(0.0) * GAP)
     }
 
@@ -136,7 +154,7 @@ impl Strip {
         }
         let pitch = self.px(dpi, CELL + GAP);
         let index = (content / pitch) as usize;
-        (index < self.files.len() && content % pitch < self.px(dpi, CELL)).then_some(index)
+        (index < self.cells.len() && content % pitch < self.px(dpi, CELL)).then_some(index)
     }
 }
 
@@ -185,8 +203,10 @@ pub fn sync(app: &mut App) {
             if strip.watch.is_none() { strip.status = Status::Failed; }
         }
     }
-    if app.strip_view.selected != source {
-        app.strip_view.selected = source.clone();
+    relist(app);
+    let open = app.strip_view.cells.iter().find(|c| c.open).map(|c| c.item.clone());
+    if app.strip_view.selected != open {
+        app.strip_view.selected = open;
         center_selection(app);
     }
     request_visible(app);
@@ -215,6 +235,7 @@ fn apply_snapshot(app: &mut App, result: std::io::Result<Vec<PhotoFile>>) {
         }
         Err(_) => strip.status = Status::Failed,
     }
+    relist(app);
     if initial { center_selection(app); } else { clamp_scroll(app); }
     request_visible(app);
     unsafe { let _ = InvalidateRect(app.strip, None, false); }
@@ -227,7 +248,7 @@ fn center_selection(app: &mut App) {
         let _ = GetClientRect(app.strip, &mut r);
     }
     let strip = &mut app.strip_view;
-    if let Some(index) = strip.selected.as_ref().and_then(|s| strip.files.iter().position(|f| crate::session::same_path(f, s))) {
+    if let Some(index) = strip.cells.iter().position(|c| c.open) {
         let middle = strip.px(dpi, PAD + index as f64 * (CELL + GAP) + CELL / 2.0);
         strip.scroll = middle - r.right / 2;
     }
@@ -265,12 +286,17 @@ fn request_visible(app: &mut App) {
         let _ = GetClientRect(app.strip, &mut r);
     }
     let strip = &mut app.strip_view;
-    let wanted: Vec<ThumbnailRequest> = (0..strip.files.len())
+    let mut wanted_paths: Vec<PathBuf> = (0..strip.cells.len())
         .filter(|&i| {
             let x = strip.cell_x(dpi, i);
             x + strip.px(dpi, CELL) >= 0 && x <= r.right
         })
-        .map(|i| strip.files[i].clone())
+        .map(|i| strip.cells[i].item.photo.clone())
+        .collect();
+    // A photograph and its duplicates share one picture.
+    wanted_paths.dedup();
+    let wanted: Vec<ThumbnailRequest> = wanted_paths
+        .into_iter()
         .filter(|p| !strip.thumbs.contains_key(p))
         .filter_map(|p| strip.versions.get(&p).cloned())
         .map(|file| ThumbnailRequest { file, generation: strip.generation })
@@ -395,7 +421,8 @@ fn paint(app: &App, hwnd: HWND) {
         let message = match strip.status {
             Status::Loading => Some("Loading…"),
             Status::Failed => Some("This folder couldn’t be read."),
-            Status::Ready if strip.files.is_empty() => Some("No supported photographs in this folder."),
+            Status::Ready if strip.cells.is_empty() && !strip.files.is_empty() => Some("No photographs match the filter."),
+            Status::Ready if strip.cells.is_empty() => Some("No supported photographs in this folder."),
             Status::Ready => None,
         };
         if let Some(message) = message {
@@ -409,7 +436,8 @@ fn paint(app: &App, hwnd: HWND) {
         let accent = COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16);
         let mem = CreateCompatibleDC(dc);
         SetStretchBltMode(dc, HALFTONE);
-        for (i, path) in strip.files.iter().enumerate() {
+        for (i, shown) in strip.cells.iter().enumerate() {
+            let path = &shown.item.photo;
             let x = strip.cell_x(dpi, i);
             if x + px(CELL) < 0 || x > r.right {
                 continue;
@@ -436,9 +464,11 @@ fn paint(app: &App, hwnd: HWND) {
                     SelectObject(dc, old);
                 }
             }
-            let selected = strip.selected.as_ref().is_some_and(|s| crate::session::same_path(s, path));
-            if selected {
-                let pen = CreatePen(PS_SOLID, px(2.0), accent);
+            let selected = shown.open;
+            marks(dc, app, shown, cell, px);
+            if selected || shown.selected {
+                // The open one in the accent; others selected in a thin rule.
+                let pen = if selected { CreatePen(PS_SOLID, px(2.0), accent) } else { CreatePen(PS_SOLID, px(1.0), COLORREF(p.secondary)) };
                 let old = SelectObject(dc, pen);
                 let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
                 let _ = RoundRect(dc, cell.left, cell.top, cell.right, cell.bottom, px(8.0), px(8.0));
@@ -446,11 +476,11 @@ fn paint(app: &App, hwnd: HWND) {
                 SelectObject(dc, old);
                 let _ = DeleteObject(pen);
             }
-            let name = crate::model::file_name(path);
-            let shown = middle_truncated(dc, &name, px(CELL));
+            let rejected = shown.summary.flag == Some(Flag::Reject);
+            let shown = middle_truncated(dc, &shown.name, px(CELL));
             let mut text = wide(&shown);
             let len = text.len() - 1;
-            SetTextColor(dc, COLORREF(if !enabled { p.disabled } else if selected { p.text } else { p.secondary }));
+            SetTextColor(dc, COLORREF(if !enabled || (rejected && !selected) { p.disabled } else if selected { p.text } else { p.secondary }));
             let mut tr = RECT { left: x - px(4.0), top: cell.bottom + px(4.0), right: x + px(CELL + 4.0), bottom: cell.bottom + px(22.0) };
             DrawTextW(dc, &mut text[..len], &mut tr, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
@@ -485,13 +515,111 @@ fn open_neighbour(app: &mut App, step: isize) {
     if app.model.cropping() {
         return;
     }
+    if app.model.shelf.library.is_some() {
+        return app.model.step_photo(step);
+    }
     let strip = &app.strip_view;
-    let Some(index) = strip.selected.as_ref().and_then(|s| strip.files.iter().position(|f| crate::session::same_path(f, s))) else { return };
+    let Some(index) = strip.cells.iter().position(|c| c.open) else { return };
     let next = index as isize + step;
-    if next >= 0 && (next as usize) < strip.files.len() {
-        let path = strip.files[next as usize].clone();
+    if next >= 0 && (next as usize) < strip.cells.len() {
+        let path = strip.cells[next as usize].item.photo.clone();
         app.model.open(&path);
     }
+}
+
+/// What the strip lists: the library's photographs, else the folder's files.
+fn relist(app: &mut App) {
+    let model = &app.model;
+    let source = model.source.clone();
+    let cells: Vec<Cell> = match &model.shelf.library {
+        Some(library) => {
+            let open = library.open_item().cloned();
+            model
+                .shown_items()
+                .into_iter()
+                .map(|item| Cell {
+                    name: library.name(&item),
+                    summary: library.summary(&item),
+                    open: open.as_ref() == Some(&item),
+                    selected: model.shelf.selection.contains(&item),
+                    item,
+                })
+                .collect()
+        }
+        None => app
+            .strip_view
+            .files
+            .iter()
+            .map(|path| Cell {
+                item: Item::photo(path),
+                name: crate::model::file_name(path),
+                summary: Summary::default(),
+                open: source.as_ref().is_some_and(|s| crate::session::same_path(s, path)),
+                selected: false,
+            })
+            .collect(),
+    };
+    if app.strip_view.cells != cells {
+        app.strip_view.cells = cells;
+        clamp_scroll(app);
+        unsafe {
+            let _ = InvalidateRect(app.strip, None, false);
+        }
+    }
+}
+
+/// A frame's rating and flag, small, over its picture's foot: the stars at
+/// the left, a pick's flag or a reject's cross at the right.
+unsafe fn marks(dc: HDC, app: &App, cell: &Cell, frame: RECT, px: impl Fn(f64) -> i32) {
+    let p = super::theme::palette();
+    let summary = &cell.summary;
+    let flag = match summary.flag {
+        Some(Flag::Pick) => Some("\u{E7C1}"),
+        Some(Flag::Reject) => Some("\u{E711}"),
+        None => None,
+    };
+    if summary.rating == 0 && flag.is_none() {
+        return;
+    }
+    let band = RECT { left: frame.left, top: frame.bottom - px(15.0), right: frame.right, bottom: frame.bottom };
+    unsafe {
+        FillRect(dc, &band, super::theme::brush(p.window));
+        SetTextColor(dc, COLORREF(p.text));
+        if summary.rating > 0 {
+            let mut stars = wide("★".repeat(summary.rating as usize));
+            let len = stars.len() - 1;
+            let mut r = RECT { left: band.left + px(4.0), ..band };
+            DrawTextW(dc, &mut stars[..len], &mut r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
+        if let Some(glyph) = flag {
+            let old = SelectObject(dc, app.fonts.glyph);
+            let mut text = wide(glyph);
+            let len = text.len() - 1;
+            let mut r = RECT { right: band.right - px(4.0), ..band };
+            DrawTextW(dc, &mut text[..len], &mut r, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(dc, old);
+        }
+    }
+}
+
+/// A click (`EditorModel.click`): Ctrl adds or takes it from the selection,
+/// Shift selects up to it, and a plain click selects and opens it.
+fn click(app: &mut App, cell: Cell) {
+    let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) < 0 };
+    let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) < 0 };
+    let order = app.model.shown_items();
+    let selection = &mut app.model.shelf.selection;
+    if ctrl {
+        selection.toggle(&cell.item, Some(&order));
+    } else if shift {
+        selection.extend_to(&cell.item, &order);
+    } else {
+        selection.select(&cell.item);
+        if !cell.open {
+            app.model.open_item(cell.item);
+        }
+    }
+    app.model.dirty |= crate::model::dirty::STRIP | crate::model::dirty::CHROME;
 }
 
 extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -521,9 +649,12 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                         return;
                     }
                     if let Some(index) = app.strip_view.index_at(app.dpi, x) {
-                        let path = app.strip_view.files[index].clone();
-                        if !app.model.source.as_ref().is_some_and(|s| crate::session::same_path(s, &path)) {
-                            app.model.open(&path);
+                        let cell = app.strip_view.cells[index].clone();
+                        if app.model.shelf.library.is_some() {
+                            return click(app, cell);
+                        }
+                        if !cell.open {
+                            app.model.open(&cell.item.photo);
                         }
                     }
                 });

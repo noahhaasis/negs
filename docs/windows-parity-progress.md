@@ -13,11 +13,73 @@ decisions made with their reasons, and what was carried over. See
 | 2 | Window shell | done, merged `a9a0763` |
 | 3 | Inspector | done: 3a and 3b merged (see log) |
 | 4 | Canvas | done, merged `8f5bdde` |
-| 5 | Tray | not started |
-| 6 | Library | crate merged; glue built on the Mac (`win-p6b-library-glue`), now on the PC for its gates |
+| 5 | Tray | built on the Mac (`win-p5-tray`), PC gates next |
+| 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | not started |
-| 8 | Remaining features (Open in Lightroom last) | not started |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
+
+## 2026-11-19: phase 6b merged, the library glue (`c421063`, branch tip `51c9a91`)
+
+- **What users see:**
+  - Each folder is a library. Edits live in `.negs` sidecars next to the photographs and
+    are saved 1 s after the last change, on switching photographs, and at quit.
+  - The Photo menu has Rating, Flag, Copy Edits (and Copy Edits…), Paste Edits,
+    Paste from Previous, Duplicate, Reset Edits, Move to Recycle Bin (Del asks,
+    Shift+Del doesn't), Delete Rejected Photographs…, Advance After Rating, and Filter.
+  - Ratings and flags are keyed by the typed character, so AltGr layouts work.
+  - Ctrl/Shift-click selects in the strip. Notes show in the status line.
+  - Library undo shares the editor's stack. Undoing a step at once leaves the files
+    byte-identical.
+  - The Recycle Bin is used through `IFileOperation`, and undo puts the file back. A
+    volume without a bin asks first and says the delete is permanent.
+  - Other apps' writes show when the folder changes or the window is activated.
+  - Exports carry `xmp:Rating`.
+  - Settings › New photographs is now the Mac's Film and Paper pickers. The old "Keep
+    the previous edits / Start fresh" choice is gone from the UI; it still drives
+    photographs opened without a library.
+  - The strip marks (stars, flag, cross) are minimal stand-ins until phase 7.
+- **Gates:**
+  - Windows suite 204/204. Crate `NEGS_LIBRARY_SEEDS=25` passes on Windows. Mapping
+    tests pass 11/11.
+  - All checklist items passed on scratch copies: no writes on open, the save debounce,
+    undo byte-identical, the Recycle Bin and back (SHA-256 identical, `$I` records
+    cleaned), the network share asking, other apps' writes, quit inside the debounce,
+    New photographs.
+  - **Mac↔Windows round trip:** a Mac fixture (crop, border, match, stars, pick) opens
+    correctly on Windows. After an edit on Windows, the sidecar is byte-identical to the
+    Mac dev app's for the same keys. The Mac opens it and leaves it untouched.
+  - **Bug found and fixed on the PC:** serde_json without `float_roundtrip` read the
+    catalog defaults one ulp off, so every Windows-edited sidecar also stored three
+    defaults as changes. `float_roundtrip` is now on, and a mapping test covers it.
+  - **Full startup ABBA after phase 6** (10 each, Defender quiet, the library opening
+    on a scratch copy), medians in ms, main d056c64 → head:
+
+    | Stamp | Base | Head |
+    |---|---|---|
+    | `first_window_composited` | 82.2 | 88.5 |
+    | `inspector_shown` | 181.5 | 184.2 |
+    | `gpu_ready` | 430.5 | 428.3 |
+    | `first_image_on_screen` | 1175.3 | 1158.7 |
+
+    The +6 ms is all in the DwmFlush wait; every stamp up to `window_shown` is within
+    1 ms (vsync phase). Against main including phase 4, `first_image_on_screen` is not
+    slower, so phase 4's +33 ms was noise.
+- **Decided (coordinator):**
+  - Rating, flag and delete act on the open photograph. Paste, Reset and Duplicate act
+    on the strip's selection when it shows. No batch export until the phase 7 grid.
+  - The library's new-photo defaults override the old Windows choice, as on the Mac.
+  - Only fixed drives count as having a Recycle Bin.
+  - A file too big for the bin: Windows asks, and Yes reports an error. Fine for now.
+- **Found, not caused by 6b:**
+  - Every unedited RAW waits about 4 s for the camera-brightness reference before it
+    is placed, so a new RAW takes 7–8 s to appear on this PC. This is on main already.
+    Look at it with faster open (ticket 39) in phase 8.
+  - The strip's shell thumbnails make Windows write `Thumbs.db` into network folders.
+    Phase 7 replaces those thumbnails.
+- **Carried over:**
+  - Settings has no switches for sidecars or RAW+JPEG pairing yet (both are on).
+  - The strip watches its folder separately from the library's watcher (phase 7).
 
 ## 2026-11-19: phase 4 merged, the canvas (`8f5bdde`, branch tip `5726c97`)
 
@@ -63,7 +125,17 @@ decisions made with their reasons, and what was carried over. See
   - While cropping, the status line still shows the size and develop time; the Mac shows
     "Cropping · Original · 6016 × 4016 px" and dims Fit/100%. Carry to phase 7.
   - The window size can be 1 px off at fractional scales.
-- **For Noah:** a tooltip on the paper lock? An `io.flip` engine parameter for Flip?
+- **Decided by Noah:**
+  - The paper lock gets a tooltip if it's non-invasive. Phase 5 adds it with the Mac's
+    `ControlHelp.paperLock`/`paperKept` wording.
+  - Flip comes to Windows. The engine already takes it (`spektrafilm-native`'s
+    `IoParams::flip`, applied after the crop and before the turn), so the work is on the
+    Windows side:
+    - the `io.flip` edit state, mapped in the library glue;
+    - the crop panel's Flip tick box;
+    - a mirrored preview, and passing the flag to the engine.
+
+    Added to phase 8.
 
 ## 2026-11-19: speed-ups agreed with Noah
 
