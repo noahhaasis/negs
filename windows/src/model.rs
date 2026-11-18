@@ -1338,7 +1338,13 @@ impl Model {
     }
 
     pub fn rotate(&mut self) {
-        let turned = json::num(((self.rotation() + 1) % 4) as f64);
+        self.turn(true);
+    }
+
+    /// A quarter turn, as cropping's arrows and View › Rotate turn: while
+    /// cropping, with the crop.
+    pub fn turn(&mut self, clockwise: bool) {
+        let turned = json::num(((self.rotation() + if clockwise { 1 } else { 3 }) % 4) as f64);
         if self.cropping() {
             // Turns with the crop: one undo step on Done, undone by Cancel.
             let mut next = self.state.clone();

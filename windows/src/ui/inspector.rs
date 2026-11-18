@@ -242,7 +242,7 @@ pub struct Inspector {
     line: i32,
     /// Motion: the next layout slides rows to their places; the slide
     /// running.
-    slide: bool,
+    pub(super) slide: bool,
     sliding: Option<Slide>,
     /// Where the last layout put each control (its top), to slide from.
     placed: std::collections::HashMap<isize, i32>,
@@ -304,7 +304,7 @@ pub fn register() {
     }
 }
 
-fn decimal_separator() -> char {
+pub(super) fn decimal_separator() -> char {
     use windows::Win32::Globalization::{GetLocaleInfoEx, LOCALE_SDECIMAL};
     let mut buffer = [0u16; 8];
     let n = unsafe { GetLocaleInfoEx(PCWSTR::null(), LOCALE_SDECIMAL, Some(&mut buffer)) };
@@ -2179,7 +2179,7 @@ fn grid_key(model: &Model, paper: bool) -> String {
 /// The film or paper menu's entries: the favourites, starred, then each
 /// group's heading (None, can't be chosen) and stocks. A favourite stays in
 /// its group too; the closed menu shows that entry, with the plain name.
-fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
+pub(super) fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
     let (films, papers) = (model.listed_films(), model.papers());
     let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
     let mut entries: Vec<(String, Option<(String, bool)>)> =

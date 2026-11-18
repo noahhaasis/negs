@@ -87,7 +87,7 @@ struct Photo {
     clip: vec4f,
     // the quad drawn, on screen
     quad: vec4f,
-    // x: dimming outside the crop while cropping, y: 1 for a Rec. 2020 proxy
+    // x: the shade's opacity outside the crop while cropping, y: 1 for a Rec. 2020 proxy
     extra: vec4f,
 };
 @group(2) @binding(0) var<uniform> photo: Photo;
@@ -135,14 +135,16 @@ fn photo_fs(in: PhotoOut) -> @location(0) vec4f {
     if (photo.extra.y > 0.5) {
         rgb = REC2020_TO_SRGB * rgb;
     }
+    var shown = present(rgb);
     if (photo.shown.w > 0.5) {
         let clip = photo.clip;
         let outside = t.x < clip.x || t.y < clip.y || t.x > clip.x + clip.z || t.y > clip.y + clip.w;
         if (outside) {
-            rgb = rgb * photo.extra.x;
+            // rgba(8, 7, 6, .6) over it, as Core Animation blends: encoded.
+            shown = mix(shown, present(decode_srgb(vec3f(8.0, 7.0, 6.0) / 255.0)), photo.extra.x);
         }
     }
-    return vec4f(present(rgb), alpha);
+    return vec4f(shown, alpha);
 }
 
 // MARK: Quads
@@ -152,7 +154,8 @@ struct Quad {
     @location(1) uv: vec4f,
     // sRGB-encoded colour and alpha
     @location(2) color: vec4f,
-    // x: corner radius, y: stroke width (0 fills), z: flags (1 textured, 2 turned anticlockwise, 4 coverage mask)
+    // x: corner radius, y: stroke width (0 fills), z: flags (1 textured, 2 turned anticlockwise, 4 coverage mask),
+    // w: a Gaussian blur's deviation (the rectangle reaches 3 of them past the shape)
     @location(3) params: vec4f,
 };
 
@@ -188,6 +191,17 @@ fn rounded_box(p: vec2f, half: vec2f, radius: f32) -> f32 {
     return length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - radius;
 }
 
+// The error function, to within 3e-7 (Abramowitz and Stegun 7.1.26's
+// sharper cousin, 7.1.28).
+fn erf(x: f32) -> f32 {
+    let a = abs(x);
+    let t = 1.0 + a * (0.0705230784 + a * (0.0422820123 + a * (0.0092705272 + a * (0.0001520143 + a * (0.0002765672 + a * 0.0000430638)))));
+    let t2 = t * t;
+    let t4 = t2 * t2;
+    let t8 = t4 * t4;
+    return sign(x) * (1.0 - 1.0 / (t8 * t8));
+}
+
 @fragment
 fn quad_fs(in: QuadOut) -> @location(0) vec4f {
     let flags = u32(in.params.z + 0.5);
@@ -202,7 +216,12 @@ fn quad_fs(in: QuadOut) -> @location(0) vec4f {
     }
     let radius = in.params.x;
     let stroke = in.params.y;
-    if (radius > 0.0 || stroke > 0.0) {
+    let blur = in.params.w;
+    if (blur > 0.0) {
+        // A blurred rounded rectangle: its edge, a Gaussian across.
+        let d = rounded_box(in.local - in.size * 0.5, in.size * 0.5 - 3.0 * blur, radius);
+        color.a = color.a * 0.5 * (1.0 - erf(d / (blur * 1.41421356)));
+    } else if (radius > 0.0 || stroke > 0.0) {
         let d = rounded_box(in.local - in.size * 0.5, in.size * 0.5, radius);
         var coverage = clamp(0.5 - d, 0.0, 1.0);
         if (stroke > 0.0) {
@@ -278,6 +297,11 @@ impl QuadInstance {
     }
     pub fn text(rect: [f32; 4], color: [f32; 4]) -> Self {
         Self { rect, uv: [0.0, 0.0, 1.0, 1.0], color, params: [0.0, 0.0, TEXTURED + MASK, 0.0] }
+    }
+    /// A rounded rectangle blurred with a Gaussian of deviation `blur`:
+    /// `rect` reaches 3 deviations past the shape on every side.
+    pub fn blurred(rect: [f32; 4], color: [f32; 4], radius: f32, blur: f32) -> Self {
+        Self { rect, uv: [0.0, 0.0, 1.0, 1.0], color, params: [radius, 0.0, 0.0, blur] }
     }
 }
 
@@ -616,10 +640,12 @@ impl Gpu {
 pub enum Item<'a> {
     Photo(&'a GpuImage, PhotoUniform),
     Quad(Option<&'a GpuImage>, QuadInstance),
+    /// What follows draws only inside x, y, width, height (pixels); None: anywhere.
+    Clip(Option<[u32; 4]>),
 }
 
-/// Draws `items` over `clear` into the surface texture.
-pub fn draw(gpu: &Gpu, target: &wgpu::TextureView, globals: &wgpu::BindGroup, clear: [f32; 3], items: &[Item]) {
+/// Draws `items` over `clear` into the surface texture, `size` pixels.
+pub fn draw(gpu: &Gpu, target: &wgpu::TextureView, size: (u32, u32), globals: &wgpu::BindGroup, clear: [f32; 3], items: &[Item]) {
     let align = gpu.device.limits().min_uniform_buffer_offset_alignment.max(256) as usize;
     let photos: Vec<&PhotoUniform> = items.iter().filter_map(|i| if let Item::Photo(_, u) = i { Some(u) } else { None }).collect();
     let mut uniform_bytes = vec![0u8; photos.len().max(1) * align];
@@ -697,6 +723,12 @@ pub fn draw(gpu: &Gpu, target: &wgpu::TextureView, globals: &wgpu::BindGroup, cl
                     pass.set_bind_group(0, &image.unwrap_or(white).bind_group, &[]);
                     pass.set_vertex_buffer(0, instances.slice(..));
                     pass.draw(0..4, start..quad_index);
+                }
+                Item::Clip(clip) => {
+                    let [x, y, w, h] = clip.unwrap_or([0, 0, size.0, size.1]);
+                    let (x, y) = (x.min(size.0), y.min(size.1));
+                    pass.set_scissor_rect(x.min(size.0 - 1), y.min(size.1 - 1), w.min(size.0 - x).max(1), h.min(size.1 - y).max(1));
+                    i += 1;
                 }
             }
         }

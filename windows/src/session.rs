@@ -221,6 +221,10 @@ pub struct Preferences {
     /// The custom colour behind the photograph, "#rrggbb" in sRGB.
     #[serde(rename = "viewerBackgroundColor")]
     pub viewer_background: String,
+    /// Settings › Look › Viewer › Sheet, as the Mac stores it ("theme",
+    /// "grey22", …). Old settings files lack it: the sheet nearest the
+    /// custom background when that was on, else the theme's own.
+    pub viewer_sheet: String,
     /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
     /// Old settings files lack it: Darkroom.
     pub app_theme: String,
@@ -277,6 +281,7 @@ impl Default for Preferences {
             viewer_background_custom: false,
             // A neutral dark grey, near the dark theme's.
             viewer_background: "#242424".into(),
+            viewer_sheet: String::new(),
             app_theme: "darkroom".into(),
             fotufilm_films: "all".into(),
             settings_tab: "Photographs".into(),

@@ -56,7 +56,8 @@ fn highlight(on: bool) {
     with_app(|app: &mut App| {
         if app.drop_target_active != on {
             app.drop_target_active = on;
-            app.model.dirty |= dirty::CANVAS;
+            // The film strip and the status line step aside while dropping.
+            app.model.dirty |= dirty::CANVAS | dirty::LAYOUT;
             super::empty::highlight(app, on);
         }
     });

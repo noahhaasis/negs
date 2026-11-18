@@ -24,11 +24,13 @@ mod panes;
 mod presets;
 mod sampler;
 mod settings;
+mod sheet;
 mod status;
 mod strip;
 mod theme;
 mod titlebar;
 mod tone_graph;
+mod view_modes;
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -134,6 +136,7 @@ pub mod id {
     pub const PANEL: u16 = 308;
     /// Every control in every module of the Lab (`toggleAllControls`).
     pub const ALL_CONTROLS: u16 = 309;
+    pub const IMAGE_ONLY: u16 = 310;
     /// View › Theme, in `ThemeName::ALL`'s order.
     pub const THEME: u16 = 320; // ..325
     pub const ROTATE: u16 = 400;
@@ -366,6 +369,7 @@ pub mod testing {
                 taskbar: None,
                 original_key: None,
                 drop_target_active: false,
+                view: Default::default(),
                 started: Instant::now(),
                 quitting: false,
                 preview_monitor: 0,
@@ -544,6 +548,8 @@ pub struct App {
     taskbar: Option<ITaskbarList3>,
     original_key: Option<u32>,
     pub drop_target_active: bool,
+    /// Image Only and the photograph held upside down.
+    pub view: view_modes::ViewModes,
     started: Instant,
     quitting: bool,
     /// The monitor the thumbnails were last made for.
@@ -560,6 +566,7 @@ impl App {
 
     /// Updates every part the model marked as changed.
     pub fn refresh(&mut self) {
+        view_modes::sync(self);
         let flags = std::mem::take(&mut self.model.dirty);
         if flags == 0 {
             return;
@@ -721,7 +728,10 @@ impl App {
     /// Lays out the toolbar, the canvas column, the adjustments and the status bar.
     pub fn layout(&mut self) {
         unsafe {
-            INSPECTOR_SHOWN.with(|s| s.set(self.model.inspector_visible));
+            // Image Only leaves the photograph alone in the window.
+            let image_only = self.view.image_only;
+            let shows_inspector = self.model.inspector_visible && !image_only;
+            INSPECTOR_SHOWN.with(|s| s.set(shows_inspector));
             // Make room before the adjustments appear, so neither column is
             // squeezed below its minimum.
             self.fit_minimum();
@@ -730,17 +740,19 @@ impl App {
             titlebar::layout(self.main, self.menubar);
             let top = titlebar::height(self.main);
             let bottom = client.bottom;
-            let inspector_width = if self.model.inspector_visible {
+            let inspector_width = if shows_inspector {
                 self.px(inspector_width(self.model.prefs.inspector_width, client.right as f64 / self.scale()))
             } else {
                 0
             };
-            let splitter = if self.model.inspector_visible { self.px(SPLITTER) } else { 0 };
+            let splitter = if shows_inspector { self.px(SPLITTER) } else { 0 };
             let column = (client.right - inspector_width - splitter).max(0);
             let photo = self.model.source.is_some();
-            // The status line under the strip, with a photograph open.
-            let status_height = if photo { self.px(status::HEIGHT) } else { 0 };
-            let show_strip = self.model.prefs.filmstrip_visible && photo;
+            // The status line under the strip, with a photograph open; both
+            // step aside in Image Only and while a file is dragged in.
+            let chrome = photo && !image_only && !self.drop_target_active;
+            let status_height = if chrome { self.px(status::HEIGHT) } else { 0 };
+            let show_strip = self.model.prefs.filmstrip_visible && chrome;
             let strip_height = if show_strip { self.px(112.0) } else { 0 };
             let canvas_bottom = (bottom - status_height - strip_height).max(top);
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
@@ -750,18 +762,18 @@ impl App {
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
             let _ = MoveWindow(self.status, 0, bottom - status_height, column, status_height, true);
-            let _ = ShowWindow(self.status, if photo { SW_SHOWNA } else { SW_HIDE });
-            titlebar::set_inspector_edge(self.main, if self.model.inspector_visible { column + splitter } else { 0 });
+            let _ = ShowWindow(self.status, if chrome { SW_SHOWNA } else { SW_HIDE });
+            titlebar::set_inspector_edge(self.main, if shows_inspector { column + splitter } else { 0 });
             let shows_presets = presets::shown(&self.model);
             // The switch between the panels; cropping has the column to itself.
-            let shows_panes = self.model.inspector_visible && !self.model.cropping();
+            let shows_panes = shows_inspector && !self.model.cropping();
             let panes_height = if shows_panes { self.px(panes::HEIGHT) } else { 0 };
             let _ = MoveWindow(self.panes, column + splitter, top, inspector_width, panes_height, true);
             let _ = ShowWindow(self.panes, if shows_panes { SW_SHOWNA } else { SW_HIDE });
             let panel_top = top + panes_height;
-            self.inspector.layout(column + splitter, panel_top, inspector_width, bottom - panel_top, self.model.inspector_visible && !shows_presets);
+            self.inspector.layout(column + splitter, panel_top, inspector_width, bottom - panel_top, shows_inspector && !shows_presets);
             let rect = RECT { left: column + splitter, top: panel_top, right: column + splitter + inspector_width, bottom };
-            presets::layout(self, rect, shows_presets);
+            presets::layout(self, rect, shows_presets && !image_only);
             canvas::resized(self.canvas);
             // Their own WM_SIZE arrives while the app is busy here.
             empty::layout(self);
@@ -857,7 +869,12 @@ impl App {
             id::ZOOM_IN if model.source.is_some() && !model.cropping() => canvas::zoom_by(1.25),
             id::ZOOM_OUT if model.source.is_some() && !model.cropping() => canvas::zoom_by(0.8),
             id::FULL_SCREEN => self.toggle_full_screen(),
-            id::ROTATE if model.source.is_some() => model.rotate(),
+            id::ROTATE if model.source.is_some() => {
+                // As on the Mac, a turn starts cropping, where Cancel undoes it.
+                model.begin_crop();
+                model.rotate()
+            }
+            id::IMAGE_ONLY => view_modes::toggle_image_only(self),
             id::CROP => {
                 if model.cropping() {
                     model.end_crop(true)
@@ -939,6 +956,8 @@ impl App {
         enable(id::NEW_PRESET, model.can_change_presets());
         enable(id::IMPORT_PRESETS, model.can_change_presets());
         check(id::FULL_SCREEN, self.full_screen.is_some());
+        check(id::IMAGE_ONLY, self.view.image_only);
+        enable(id::IMAGE_ONLY, photo && !model.cropping());
         check(id::ORIGINAL, model.holding_original);
         enable(id::ORIGINAL, model.can_show_original() && !model.cropping());
         for c in [id::FIT, id::ACTUAL, id::ZOOM_IN, id::ZOOM_OUT] {
@@ -1203,6 +1222,7 @@ fn build_menu() -> (HMENU, HMENU) {
         add(view, id::ADJUSTMENTS, "&Adjustments\tF7");
         add(view, id::PRESETS, "&Presets\tF8");
         add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
+        add(view, id::IMAGE_ONLY, "&Image Only\tF");
         // Every control in every module, as the Lab's Advanced controls switch did.
         add(view, id::ALL_CONTROLS, "Show A&ll Controls");
         separator(view);
@@ -1257,6 +1277,7 @@ fn accelerators() -> HACCEL {
         (ctrl, 'R' as u16, id::ROTATE),
         (ctrl, 'K' as u16, id::CROP),
         (FVIRTKEY, 'C' as u16, id::CROP),
+        (FVIRTKEY, 'F' as u16, id::IMAGE_ONLY),
         (ctrl, VK_OEM_COMMA.0, id::SETTINGS),
     ];
     let accels: Vec<ACCEL> = table.iter().map(|&(f, key, cmd)| ACCEL { fVirt: f, key, cmd }).collect();
@@ -1311,6 +1332,8 @@ pub fn run() {
             app.report.line(&format!("drawing_started {drawing_started}"));
             app.report.line(&format!("drawing_ready {at}"));
             app.report.line(&format!("drawing_cost d2d_us {} dwrite_us {} fonts_us {}", cost.d2d.as_micros(), cost.dwrite.as_micros(), cost.fonts.as_micros()));
+            // A photograph shown before now has no caption or label yet.
+            canvas::drawing_ready(app.canvas);
         });
     });
     let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| !p.to_string_lossy().starts_with('-') && p.is_file());
@@ -1427,13 +1450,14 @@ pub fn run() {
             taskbar: None,
             original_key: None,
             drop_target_active: false,
+            view: Default::default(),
             started: Instant::now(),
             quitting: false,
             preview_monitor: 0,
         };
         let _ = recent;
         empty::build(&mut app);
-        canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
+        sheet::set_chosen(sheet::from_prefs(&app.model.prefs));
         app.layout();
         app.update_chrome();
         app.update_status();
@@ -1524,7 +1548,7 @@ fn pre_translate(msg: &MSG) -> bool {
         if matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MOUSEWHEEL) {
             app.report.stamp("first_input_received");
         }
-        if app.original_key(msg) {
+        if app.original_key(msg) || view_modes::key(app, msg, text_focus()) {
             return true;
         }
         if msg.message == WM_KEYDOWN && app.model.cropping() && !text_focus() {
@@ -1536,6 +1560,10 @@ fn pre_translate(msg: &MSG) -> bool {
                 app.model.end_crop(false);
                 return true;
             }
+        }
+        // Escape's next use (§5.2): leaving Image Only.
+        if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && view_modes::escape(app) {
+            return true;
         }
         if msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN {
             let focus = focused_class();
@@ -1719,7 +1747,10 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             WM_ACTIVATE => {
                 if wparam.0 & 0xffff == WA_INACTIVE as usize {
-                    with_app(|app| app.release_original());
+                    with_app(|app| {
+                        app.release_original();
+                        view_modes::release(app);
+                    });
                     titlebar::deactivated(hwnd);
                 } else {
                     alert::reclaim_focus();

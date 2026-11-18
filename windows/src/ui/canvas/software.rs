@@ -97,6 +97,8 @@ struct Raster {
     pixels: Vec<u8>,
     cm: Option<Transform>,
     decode: [f32; 256],
+    /// Draws reach only inside this (pixels), as the GPU's scissor.
+    clip: Option<[f32; 4]>,
 }
 impl Raster {
     fn blend(&mut self, x: u32, y: u32, linear: [f32; 3], alpha: f32) {
@@ -115,10 +117,11 @@ impl Raster {
         }
     }
     fn area(&mut self, r: [f32; 4], mut f: impl FnMut(&mut Self, u32, u32, f32, f32)) {
-        let x0 = r[0].floor().max(0.0) as u32;
-        let y0 = r[1].floor().max(0.0) as u32;
-        let x1 = (r[0] + r[2]).ceil().clamp(0.0, self.w as f32) as u32;
-        let y1 = (r[1] + r[3]).ceil().clamp(0.0, self.h as f32) as u32;
+        let c = self.clip.unwrap_or([0.0, 0.0, self.w as f32, self.h as f32]);
+        let x0 = r[0].max(c[0]).floor().max(0.0) as u32;
+        let y0 = r[1].max(c[1]).floor().max(0.0) as u32;
+        let x1 = (r[0] + r[2]).min(c[0] + c[2]).ceil().clamp(0.0, self.w as f32) as u32;
+        let y1 = (r[1] + r[3]).min(c[1] + c[3]).ceil().clamp(0.0, self.h as f32) as u32;
         for y in y0..y1 {
             for x in x0..x1 {
                 let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
@@ -158,17 +161,17 @@ impl Raster {
                     color[c] = row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2];
                 }
             }
-            if p.shown[3] > 0.5
+            let shaded = p.shown[3] > 0.5
                 && (t[0] < p.clip[0]
                     || t[1] < p.clip[1]
                     || t[0] > p.clip[0] + p.clip[2]
-                    || t[1] > p.clip[1] + p.clip[3])
-            {
-                for c in &mut color[..3] {
-                    *c *= p.extra[0];
-                }
-            }
+                    || t[1] > p.clip[1] + p.clip[3]);
             out.blend(x, y, [color[0], color[1], color[2]], alpha);
+            if shaded {
+                // rgba(8, 7, 6, .6) over it, as the shader does.
+                let shade = [8.0, 7.0, 6.0].map(|c: f32| decode(c / 255.0));
+                out.blend(x, y, shade, p.extra[0] * alpha);
+            }
         });
     }
     fn quad(&mut self, q: &QuadInstance, texture: Option<(&[u8], u32, u32)>) {
@@ -194,7 +197,13 @@ impl Raster {
             }
             let radius = q.params[0];
             let stroke = q.params[1];
-            if radius > 0.0 || stroke > 0.0 {
+            let blur = q.params[3];
+            if blur > 0.0 {
+                let a = (local[0] - q.rect[2] * 0.5).abs() - (q.rect[2] * 0.5 - 3.0 * blur) + radius;
+                let b = (local[1] - q.rect[3] * 0.5).abs() - (q.rect[3] * 0.5 - 3.0 * blur) + radius;
+                let d = a.max(0.0).hypot(b.max(0.0)) + a.max(b).min(0.0) - radius;
+                alpha *= 0.5 * (1.0 - erf(d / (blur * std::f32::consts::SQRT_2)));
+            } else if radius > 0.0 || stroke > 0.0 {
                 let a = (local[0] - q.rect[2] * 0.5).abs() - q.rect[2] * 0.5 + radius;
                 let b = (local[1] - q.rect[3] * 0.5).abs() - q.rect[3] * 0.5 + radius;
                 let d = a.max(0.0).hypot(b.max(0.0)) + a.max(b).min(0.0) - radius;
@@ -206,6 +215,13 @@ impl Raster {
             out.blend(x, y, color, alpha);
         });
     }
+}
+
+/// The error function, as the shader's (Abramowitz and Stegun 7.1.28).
+fn erf(x: f32) -> f32 {
+    let a = x.abs();
+    let t = 1.0 + a * (0.070_523_08 + a * (0.042_282_01 + a * (0.009_270_527 + a * (0.000_152_014_3 + a * (0.000_276_567_2 + a * 0.000_043_063_8)))));
+    x.signum() * (1.0 - 1.0 / t.powi(16))
 }
 
 /// Bilinear sampling in linear sRGB, including clamp-to-edge and straight alpha.
@@ -249,22 +265,51 @@ pub(super) fn render(
     cm: Option<&Transform>,
     cache: &mut Cache,
 ) -> Vec<u8> {
+    let pixels = background()
+        .iter()
+        .rev()
+        .copied()
+        .chain([255])
+        .cycle()
+        .take(w as usize * h as usize * 4)
+        .collect();
+    render_onto(pixels, w, h, dpi, draws, cm, cache)
+}
+
+/// Draws `draws` over `pixels` (BGRA, `w` × `h`).
+pub(super) fn render_onto(
+    pixels: Vec<u8>,
+    w: u32,
+    h: u32,
+    dpi: u32,
+    draws: &[Draw],
+    cm: Option<&Transform>,
+    cache: &mut Cache,
+) -> Vec<u8> {
     let mut out = Raster {
         w,
         h,
-        pixels: background()
-            .iter()
-            .rev()
-            .copied()
-            .chain([255])
-            .cycle()
-            .take(w as usize * h as usize * 4)
-            .collect(),
+        pixels,
         cm: cm.cloned(),
         decode: std::array::from_fn(|i| decode(i as f32 / 255.0)),
+        clip: None,
     };
     for draw in draws {
         match draw {
+            Draw::Clip(r) => out.clip = r.map(|r| [r.x as f32, r.y as f32, r.width as f32, r.height as f32]),
+            Draw::Glyph(glyph, color, (x, y)) => {
+                let plain = crate::ui::theme::tokens().plain;
+                let (gw, gh) = glyph.size();
+                if let Some(mask) = crate::ui::d2d::shape_mask(gw as f32, gh as f32, dpi as f32 / 96.0, plain, |p| glyph.draw(p)) {
+                    let rgb = [decode(color[0]), decode(color[1]), decode(color[2])];
+                    let (x, y) = (x.round() as f32, y.round() as f32);
+                    out.area([x, y, mask.width as f32, mask.height as f32], |out, px, py, sx, sy| {
+                        let mx = (sx - x) as u32;
+                        let my = (sy - y) as u32;
+                        out.blend(px, py, rgb, color[3] * mask.coverage[(my * mask.width + mx) as usize] as f32 / 255.0);
+                    });
+                }
+            }
             Draw::Photo(picture, p) => {
                 let (sw, sh) = if p.shown[2] as u32 % 2 == 0 {
                     (p.shown[0], p.shown[1])
@@ -296,32 +341,6 @@ pub(super) fn render(
                     });
                 }
             }
-            Draw::Text(text, size, weight, color, (x, y), _) => {
-                if let Some(mask) =
-                    crate::text::render(text, (*size * dpi as f64 / 96.0).round() as i32, *weight)
-                {
-                    let rgb = [decode(color[0]), decode(color[1]), decode(color[2])];
-                    out.area(
-                        [
-                            x.round() as f32,
-                            y.round() as f32,
-                            mask.width as f32,
-                            mask.height as f32,
-                        ],
-                        |out, px, py, sx, sy| {
-                            let mx = (sx - x.round() as f32) as u32;
-                            let my = (sy - y.round() as f32) as u32;
-                            out.blend(
-                                px,
-                                py,
-                                rgb,
-                                color[3] * mask.coverage[(my * mask.width + mx) as usize] as f32
-                                    / 255.0,
-                            );
-                        },
-                    );
-                }
-            }
             Draw::Words(text, style, width, color, (x, y)) => {
                 let plain = crate::ui::theme::tokens().plain;
                 if let Some(mask) = crate::ui::d2d::mask(text, style, *width, crate::ui::d2d::Align::Center, dpi as f32 / 96.0, plain) {
@@ -336,12 +355,14 @@ pub(super) fn render(
             }
         }
     }
-    cache.mips.retain(|(id, _), _| {
-        draws.iter().any(|d| match d {
-            Draw::Photo(p, _) | Draw::Texture(p, _) => p.id == *id,
-            _ => false,
-        })
-    });
+    if draws.iter().any(|d| matches!(d, Draw::Photo(..) | Draw::Texture(..))) {
+        cache.mips.retain(|(id, _), _| {
+            draws.iter().any(|d| match d {
+                Draw::Photo(p, _) | Draw::Texture(p, _) => p.id == *id,
+                _ => false,
+            })
+        });
+    }
     out.pixels
 }
 

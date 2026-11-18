@@ -6,7 +6,7 @@
 //! The view state lives here, apart from the app, so the canvas can paint
 //! while the app is busy (a modal dialog, a re-entrant call).
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,28 +25,31 @@ use crate::gpu::{self, Gpu, GpuImage, Item, PhotoUniform, QuadInstance};
 use crate::icc;
 use crate::picture::Picture;
 
+mod print;
 mod software;
 
-thread_local! {
-    /// Settings › Custom viewer background, when on.
-    static CUSTOM_BACKGROUND: Cell<Option<[u8; 3]>> = const { Cell::new(None) };
-}
+pub use print::PrintWords;
+use print::{Glyph, Target};
 
-/// The colour around the photograph: Settings' custom colour, or the
-/// theme's grey. High contrast keeps the system's colours.
+/// The sheet the photograph lies on (Settings › Look › Viewer). High
+/// contrast keeps the system's colours.
 fn background() -> [u8; 3] {
     let theme = super::theme::current();
-    match CUSTOM_BACKGROUND.with(Cell::get) {
-        Some(custom) if !theme.high_contrast => custom,
-        _ => theme.palette.canvas,
+    if theme.high_contrast {
+        return theme.palette.canvas;
     }
+    let sheet = super::sheet::ink().sheet;
+    [(sheet >> 16) as u8, (sheet >> 8) as u8, sheet as u8]
 }
 
-/// Sets the custom viewer background (None: the theme's) and repaints.
-pub fn set_custom_background(hwnd: HWND, color: Option<[u8; 3]>) {
-    if CUSTOM_BACKGROUND.with(|c| c.replace(color)) != color {
-        invalidate(hwnd);
-    }
+/// The viewer sheet changed: repaint in its colour and inks.
+pub fn sheet_changed(hwnd: HWND) {
+    invalidate(hwnd);
+}
+
+/// Direct2D is ready: the caption and label can be set now.
+pub fn drawing_ready(hwnd: HWND) {
+    invalidate(hwnd);
 }
 /// 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
 /// photograph, but never enlarges a small one past 1:1 (the Mac's
@@ -60,10 +63,6 @@ fn zoom_amount(fitting: bool, document: (f64, f64), viewport: (f64, f64)) -> f64
 
 const MIN_ZOOM: f64 = 0.005;
 const MAX_ZOOM: f64 = 16.0;
-const CROP_MARGIN: f64 = 36.0;
-const DIAL_SPACE: f64 = 76.0;
-/// DIPs per degree on the straighten dial.
-const DIAL_SPACING: f64 = 7.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Grid {
@@ -104,6 +103,14 @@ pub struct Scene {
     pub failed: Option<(String, String)>,
     /// The render the developed picture came from, for the timing trace.
     pub frame: Option<crate::model::FrameTag>,
+    /// The caption's and the label's words.
+    pub words: PrintWords,
+    /// A developed photograph is shown: the trim marks can crop it.
+    pub croppable: bool,
+    /// View › Image Only: no trim marks.
+    pub image_only: bool,
+    /// T held: the photograph turned upside down (display only).
+    pub upside_down: bool,
 }
 
 
@@ -141,7 +148,6 @@ struct View {
     crop: CropSettings,
     pan: Option<(i32, i32, (f64, f64))>,
     crop_drag: Option<CropDrag>,
-    texts: HashMap<(String, i32, i32), GpuImage>,
     first_image_presented: bool,
     /// Newsreader set with DirectWrite for the canvas's words, by text and style.
     words: HashMap<(String, String), GpuImage>,
@@ -153,6 +159,24 @@ struct View {
     running: Option<std::time::Instant>,
     /// The last developed frame drawn (`Scene::frame`).
     presented: Option<crate::model::FrameTag>,
+    /// What clicks can reach (names, lock, trim marks, the dial's arrows),
+    /// where they were last drawn, in pixels.
+    targets: Vec<(Target, Rect)>,
+    /// The target under the pointer, and the pointer is over the print.
+    hot: Option<Target>,
+    over_print: bool,
+    /// A press on a target: what, and where it began.
+    pressed: Option<(Target, (f64, f64))>,
+    /// The print's rectangle on screen as last laid out, cut to its band.
+    print: Option<Rect>,
+    /// The marks set as masks, by glyph, pixel scale and Plain.
+    glyphs: HashMap<(Glyph, u32, bool), GpuImage>,
+    /// The software canvas's last frame without the Developing tag, so the
+    /// tag's line can move without drawing the photograph again.
+    software_base: Option<(u32, u32, Vec<u8>)>,
+    /// Where the tag was last drawn, in pixels, and where its draws begin.
+    tag_rect: Option<Rect>,
+    tag_start: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -221,7 +245,6 @@ pub fn init(hwnd: HWND, dpi: u32) {
             crop: CropSettings::default(),
             pan: None,
             crop_drag: None,
-            texts: HashMap::new(),
             first_image_presented: false,
             words: HashMap::new(),
             retry: None,
@@ -229,6 +252,15 @@ pub fn init(hwnd: HWND, dpi: u32) {
             retry_pressed: false,
             running: None,
             presented: None,
+            targets: Vec::new(),
+            hot: None,
+            over_print: false,
+            pressed: None,
+            print: None,
+            glyphs: HashMap::new(),
+            software_base: None,
+            tag_rect: None,
+            tag_start: None,
         })
     });
 }
@@ -327,7 +359,6 @@ pub fn resized(hwnd: HWND) {
 pub fn set_dpi(dpi: u32) {
     with_view(|view| {
         view.dpi = dpi;
-        view.texts.clear();
         view.words.clear();
         if view.fitting {
             view.apply_zoom();
@@ -416,6 +447,10 @@ pub fn update_scene(app: &mut App) {
         cropping,
         drop_target: app.drop_target_active,
         frame: if developed { model.shown_frame } else { None },
+        words: print_words(app),
+        croppable: model.image.is_some() && !model.render_failed,
+        image_only: app.view.image_only,
+        upside_down: app.view.upside_down(),
     };
     let first = scene.developed;
     let hwnd = with_view(|view| {
@@ -432,15 +467,89 @@ pub fn update_scene(app: &mut App) {
     }
 }
 
+thread_local! {
+    /// The open photograph's camera facts, read off the UI thread: the
+    /// file, and its facts once read.
+    static FACTS: RefCell<Option<(std::path::PathBuf, Option<crate::photo_facts::PhotoFacts>)>> = const { RefCell::new(None) };
+}
+
+/// The caption's and the label's words for the open photograph. The
+/// camera's facts are read on a thread the first time.
+fn print_words(app: &App) -> PrintWords {
+    let model = &app.model;
+    let Some(source) = model.source.clone() else { return PrintWords::default() };
+    let facts = FACTS.with(|f| {
+        let mut f = f.borrow_mut();
+        match &*f {
+            Some((path, facts)) if *path == source => facts.clone(),
+            _ => {
+                *f = Some((source.clone(), None));
+                let path = source.clone();
+                std::thread::Builder::new()
+                    .name("photo-facts".into())
+                    .spawn(move || {
+                        let facts = crate::photo_facts::PhotoFacts::read(&path).unwrap_or_default();
+                        post(move |app: &mut App| {
+                            FACTS.with(|f| {
+                                if let Some((shown, slot)) = &mut *f.borrow_mut()
+                                    && *shown == path
+                                {
+                                    *slot = Some(facts);
+                                }
+                            });
+                            app.model.dirty |= crate::model::dirty::CANVAS;
+                        });
+                    })
+                    .ok();
+                None
+            }
+        }
+    });
+    let decimal = super::inspector::decimal_separator();
+    PrintWords {
+        facts: facts.map(|f| f.items(decimal)).unwrap_or_default(),
+        file: crate::model::file_name(&source),
+        film: model.film_name(),
+        paper: model.paper_name(),
+        scanning: crate::json::boolean(model.value("io.scan_film")),
+        original: model.holding_original && model.original.is_some(),
+        keep_paper: model.prefs.keep_paper,
+    }
+}
+
 impl View {
     fn scale(&self) -> f64 {
         self.dpi as f64 / 96.0
     }
 
-    /// The part of the canvas the photograph fits and centres in: all of it
-    /// (its tools are words in the status line).
+    /// The band the photograph lies in, between the caption's band above
+    /// and the label's below (§2.3); zoomed in, it scrolls under them.
+    fn band(&self) -> Rect {
+        let s = self.scale();
+        let top = (print::CAPTION_BAND * s).round();
+        let bottom = (print::LABEL_BAND * s).round();
+        Rect::new(0.0, top, self.width as f64, (self.height as f64 - top - bottom).max(1.0))
+    }
+
+    /// The band's size: what the photograph centres and scrolls in.
     fn viewport(&self) -> (f64, f64) {
-        (self.width as f64, (self.height as f64).max(1.0))
+        let band = self.band();
+        (band.width.max(1.0), band.height)
+    }
+
+    /// What a fitted photograph fills: the band less the side margins.
+    fn fit_viewport(&self) -> (f64, f64) {
+        let band = self.band();
+        ((band.width - 2.0 * (print::MARGIN * self.scale()).round()).max(1.0), band.height)
+    }
+
+    /// Zoomed in or out from fitting, not a zoom that happens to match the fit.
+    fn zoomed(&self) -> bool {
+        if self.fitting || self.document.0 <= 0.0 {
+            return false;
+        }
+        let fit = zoom_amount(true, self.document, self.fit_viewport()).clamp(MIN_ZOOM, MAX_ZOOM);
+        (self.zoom / fit - 1.0).abs() > 0.005
     }
 
     fn display_size(scene: &Scene) -> (f64, f64) {
@@ -505,7 +614,7 @@ impl View {
         if dw <= 0.0 || self.width == 0 {
             return;
         }
-        self.zoom = zoom_amount(self.fitting, (dw, dh), self.viewport()).clamp(MIN_ZOOM, MAX_ZOOM);
+        self.zoom = zoom_amount(self.fitting, (dw, dh), self.fit_viewport()).clamp(MIN_ZOOM, MAX_ZOOM);
         self.center = (dw / 2.0, dh / 2.0);
     }
 
@@ -521,7 +630,8 @@ impl View {
         if self.document.0 <= 0.0 {
             return;
         }
-        let (hx, hy) = (self.viewport().0 / 2.0, self.viewport().1 / 2.0);
+        let band = self.band();
+        let (hx, hy) = (band.mid_x(), band.mid_y());
         let doc = ((x - hx) / self.zoom + self.center.0, (y - hy) / self.zoom + self.center.1);
         self.fitting = false;
         self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -538,8 +648,8 @@ impl View {
 
     /// The document's top-left corner on screen.
     fn document_origin(&self) -> (f64, f64) {
-        let (w, h) = self.viewport();
-        (w / 2.0 - self.center.0 * self.zoom, h / 2.0 - self.center.1 * self.zoom)
+        let band = self.band();
+        (band.mid_x() - self.center.0 * self.zoom, band.mid_y() - self.center.1 * self.zoom)
     }
 
     fn update_color_management(&mut self) {
@@ -572,28 +682,6 @@ impl View {
         let bind_group = gpu.globals_bind_group(&buffer, &lut);
         self.globals = Some(Globals { buffer, bind_group, cm });
         invalidate(self.hwnd);
-    }
-
-    fn text_size(&mut self, text: &str, size: f64, weight: i32) -> Option<(f64, f64)> {
-        if self.gpu.is_some() {
-            return self.text(text, size, weight).map(|(_, w, h)| (w, h));
-        }
-        let mask = crate::text::render(text, (size * self.scale()).round() as i32, weight)?;
-        Some((mask.width as f64, mask.height as f64))
-    }
-
-    fn text(&mut self, text: &str, size_dip: f64, weight: i32) -> Option<(&GpuImage, f64, f64)> {
-        let gpu = self.gpu.clone()?;
-        let px = (size_dip * self.scale()).round() as i32;
-        let key = (text.to_string(), px, weight);
-        if !self.texts.contains_key(&key) {
-            let mask = crate::text::render(text, px, weight)?;
-            let image = gpu.upload_mask(&mask.coverage, mask.width, mask.height);
-            self.texts.insert(key.clone(), image);
-        }
-        let image = self.texts.get(&key)?;
-        let size = image.texture.size();
-        Some((image, size.width as f64, size.height as f64))
     }
 
     fn paint(&mut self) {
@@ -632,7 +720,7 @@ impl View {
         let photo_drawn = items.iter().any(|item| matches!(item, Item::Photo(..)));
         let globals = self.globals.as_ref().unwrap();
         let clear = background().map(|c| c as f32 / 255.0);
-        gpu::draw(&gpu, &target, &globals.bind_group, clear, &items);
+        gpu::draw(&gpu, &target, (self.width, self.height), &globals.bind_group, clear, &items);
         frame.present();
         if photo_drawn {
             self.note_presented("vulkan");
@@ -667,12 +755,31 @@ impl View {
     /// Software presentation while Vulkan is unavailable or still starting.
     fn paint_gdi(&mut self) {
         self.update_color_management();
+        let mut ps = PAINTSTRUCT::default();
+        let dc = unsafe { BeginPaint(self.hwnd, &mut ps) };
         let mut draws = Vec::new();
         self.build(&mut draws);
-        let pixels = software::render(self.width, self.height, self.dpi, &draws, self.software_cm.as_ref(), &mut self.software_cache);
+        let size = (self.width, self.height);
+        let r = ps.rcPaint;
+        // Only the tag's running line moved: draw it over the last frame
+        // without it, rather than the photograph again.
+        let only_tag = self.tag_rect.is_some_and(|t| {
+            r.left as f64 >= t.x.floor() && r.top as f64 >= t.y.floor() && r.right as f64 <= t.max_x().ceil() && r.bottom as f64 <= t.max_y().ceil()
+        });
+        let base = match (self.tag_start, self.software_base.take()) {
+            (Some(_), Some((w, h, base))) if only_tag && (w, h) == size => Some(base),
+            (Some(start), _) => Some(software::render(size.0, size.1, self.dpi, &draws[..start], self.software_cm.as_ref(), &mut self.software_cache)),
+            _ => None,
+        };
+        let pixels = match (base, self.tag_start) {
+            (Some(base), Some(start)) => {
+                let pixels = software::render_onto(base.clone(), size.0, size.1, self.dpi, &draws[start..], self.software_cm.as_ref(), &mut self.software_cache);
+                self.software_base = Some((size.0, size.1, base));
+                pixels
+            }
+            _ => software::render(size.0, size.1, self.dpi, &draws, self.software_cm.as_ref(), &mut self.software_cache),
+        };
         unsafe {
-            let mut ps = PAINTSTRUCT::default();
-            let dc = BeginPaint(self.hwnd, &mut ps);
             let info = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -709,10 +816,14 @@ enum Draw {
     Photo(Picture, PhotoUniform),
     Fill(QuadInstance),
     Texture(Picture, QuadInstance),
-    Text(String, f64, i32, [f32; 4], (f64, f64), bool),
     /// Words set with DirectWrite (Newsreader): the text, its style, the
     /// width it wraps and centres in (DIPs; 0 for one line), colour, place.
     Words(String, TextStyle, f32, [f32; 4], (f64, f64)),
+    /// A mark drawn with Direct2D (the caret, the lock, the turn arrows,
+    /// a strike), its colour, its top left in pixels.
+    Glyph(Glyph, [f32; 4], (f64, f64)),
+    /// What follows draws only inside this rectangle (pixels); None: anywhere.
+    Clip(Option<Rect>),
 }
 
 /// The canvas's words in the design's type (§4.14).
@@ -756,7 +867,8 @@ fn shown_pixels(crop: &CropSettings, size: Size, rotation: i32) -> (Rect, Size) 
     (r, s)
 }
 
-/// Crop mode's layout: the photograph's frame, its scale and the dial.
+/// Crop mode's layout: the photograph's frame, its scale and the dial's
+/// tick row.
 pub struct CropLayout {
     pub frame: Rect,
     pub scale: f64,
@@ -765,30 +877,104 @@ pub struct CropLayout {
 
 fn crop_layout(width: f64, height: f64, dpi: u32, photo: Size) -> CropLayout {
     let s = dpi as f64 / 96.0;
-    let (margin, dial_space) = (CROP_MARGIN * s, DIAL_SPACE * s);
-    let available = Size::new((width - 2.0 * margin).max(1.0), (height - 2.0 * margin - dial_space).max(1.0));
-    let scale = if photo.width > 0.0 && photo.height > 0.0 { (available.width / photo.width).min(available.height / photo.height) } else { 1.0 };
-    let frame = Rect::new(
-        (width - photo.width * scale) / 2.0,
-        margin + (available.height - photo.height * scale) / 2.0,
-        photo.width * scale,
-        photo.height * scale,
-    );
-    let dial_width = (380.0 * s).min((width - 2.0 * margin).max(120.0 * s));
-    let dial_height = 58.0 * s;
-    let dial = Rect::new((width - dial_width) / 2.0, height - 20.0 * s - dial_height, dial_width, dial_height);
-    CropLayout { frame, scale, dial }
+    let (frame, scale) = print::crop_place(width, height, s, photo);
+    CropLayout { frame, scale, dial: print::dial_rect(frame, s) }
+}
+
+/// Turns draws half a turn about `c` (pixels): the photograph upside down
+/// while T is held. Rectangles move to their mirror places, textures read
+/// backwards, and the photograph takes two more quarter turns.
+fn turn_half(draws: &mut [Draw], c: (f64, f64)) {
+    let turn_rect = |r: [f32; 4]| [(2.0 * c.0) as f32 - r[0] - r[2], (2.0 * c.1) as f32 - r[1] - r[3], r[2], r[3]];
+    for draw in draws {
+        match draw {
+            Draw::Photo(_, u) => {
+                let (shown_w, shown_h, z) = (u.shown[0], u.shown[1], u.origin_scale[2]);
+                u.origin_scale[0] = (2.0 * c.0) as f32 - u.origin_scale[0] - shown_w * z;
+                u.origin_scale[1] = (2.0 * c.1) as f32 - u.origin_scale[1] - shown_h * z;
+                u.shown[2] = ((u.shown[2] as i32 + 2) % 4) as f32;
+                u.clip = [shown_w - u.clip[0] - u.clip[2], shown_h - u.clip[1] - u.clip[3], u.clip[2], u.clip[3]];
+                u.quad = turn_rect(u.quad);
+            }
+            Draw::Fill(q) => q.rect = turn_rect(q.rect),
+            Draw::Texture(_, q) => {
+                q.rect = turn_rect(q.rect);
+                q.uv = [q.uv[2], q.uv[3], q.uv[0], q.uv[1]];
+            }
+            _ => {}
+        }
+    }
 }
 
 impl View {
+    /// The print (the photograph with its border) on screen, cut to its
+    /// band, on whole pixels; None before there's a document.
+    fn print_rect(&self) -> Option<Rect> {
+        let (dw, dh) = self.document;
+        if dw <= 0.0 || self.width == 0 {
+            return None;
+        }
+        let (ox, oy) = self.document_origin();
+        let shown = Rect::new(ox, oy, dw * self.zoom, dh * self.zoom).intersection(&self.band());
+        let (x, y) = (shown.x.floor(), shown.y.floor());
+        let r = Rect::new(x, y, shown.max_x().ceil() - x, shown.max_y().ceil() - y);
+        (r.width > 0.0 && r.height > 0.0).then_some(r)
+    }
+
     fn build(&mut self, items: &mut Vec<Draw>) {
         let scene = self.scene.clone();
         let s = self.scale();
+        let ink = super::sheet::ink();
+        self.targets.clear();
+        self.print = None;
+        self.tag_start = None;
+        self.tag_rect = None;
         if let Some(picture) = scene.picture.clone() {
             if let Some(cropping) = &scene.cropping {
-                self.build_crop(items, picture, cropping);
-            } else {
+                self.build_crop(items, picture, cropping, &ink);
+            } else if !scene.drop_target {
+                // While a file is dragged in, the photograph, caption and
+                // label step aside for a line round the print's place.
+                let print = self.print_rect();
+                self.print = print;
+                let zoomed = self.zoomed();
+                let failed = scene.failed.is_some();
+                // A light under the print when its edge sinks into the sheet;
+                // fitted only: zoomed in, the print has no edges on screen.
+                if let Some(print) = print.filter(|_| !zoomed && !failed && !super::theme::current().high_contrast) {
+                    let edge = super::sheet::light_table::edge(scene.border.as_ref());
+                    if let Some(light) = super::sheet::light_table::light(ink.sheet, edge) {
+                        use super::sheet::light_table::{BLUR, CORNER_RADIUS, SPREAD};
+                        let (spread, blur) = (SPREAD * s, BLUR * s);
+                        let reach = spread + 3.0 * blur;
+                        items.push(Draw::Fill(QuadInstance::blurred(
+                            rect(print.x - reach, print.y - reach, print.width + 2.0 * reach, print.height + 2.0 * reach),
+                            hex(light, 1.0),
+                            (CORNER_RADIUS * s) as f32,
+                            blur as f32,
+                        )));
+                    }
+                }
+                let start = items.len();
+                items.push(Draw::Clip(Some(self.band())));
                 self.build_photo(items, picture, &scene);
+                items.push(Draw::Clip(None));
+                if scene.upside_down {
+                    // About the middle of the part on screen, on a half pixel,
+                    // so the turn maps the pixel grid onto itself.
+                    if let Some(p) = print {
+                        let c = ((2.0 * p.mid_x()).round() / 2.0, (2.0 * p.mid_y()).round() / 2.0);
+                        turn_half(&mut items[start..], c);
+                    }
+                }
+                if let Some(print) = print {
+                    let portrait = !zoomed && print.height > print.width;
+                    self.build_caption(items, print, portrait, &ink);
+                    self.build_label(items, print, &ink);
+                    if !zoomed && !scene.image_only && scene.croppable && !failed {
+                        self.build_trim_marks(items, print, &ink);
+                    }
+                }
             }
         }
         self.retry = None;
@@ -838,9 +1024,12 @@ impl View {
         let line = 64.0 * s;
         let (pad_x, pad_top, pad_bottom, gap) = (16.0 * s, 7.0 * s, 9.0 * s, 5.0 * s);
         let (w, h) = ((tw.max(line) + 2.0 * pad_x).round(), (pad_top + th + gap + s.max(1.0) + pad_bottom).round());
-        let photo = self.shown_rect();
+        let photo = self.print_rect().unwrap_or_else(|| self.shown_rect());
         let x = ((photo.mid_x() - w / 2.0).round()).max(0.0);
         let y = (photo.y + 16.0 * s).round();
+        // With its shadow, for the software canvas's running line.
+        self.tag_rect = Some(Rect::new(x - 10.0 * s, y - 10.0 * s, w + 20.0 * s, h + 24.0 * s));
+        self.tag_start = Some(items.len());
         let strength = t.shadow_strength() as f32;
         for i in 1..=4 {
             let spread = i as f64 * 2.0 * s;
@@ -852,9 +1041,9 @@ impl View {
         let (lx, ly) = ((x + (w - line) / 2.0).round(), (y + pad_top + th + gap).round());
         let thin = s.max(1.0).round();
         items.push(Draw::Fill(QuadInstance::fill(rect(lx, ly, line, thin), hex(t.hex.track, 1.0))));
-        // The mark runs only where the canvas redraws by itself (the GPU);
-        // still, a third of the way along, as with Reduce Motion.
-        let animate = self.gpu.is_some() && super::motion::enabled();
+        // The mark runs unless motion is reduced: then it stays a third of
+        // the way along. The software canvas redraws only the tag for it.
+        let animate = super::motion::enabled();
         let phase = if animate {
             let started = *self.running.get_or_insert_with(std::time::Instant::now);
             (started.elapsed().as_secs_f64() / 1.1).fract()
@@ -911,12 +1100,12 @@ impl View {
     /// "drop to open it" and a yellow line round its place (§4.14).
     fn build_dropping(&mut self, items: &mut Vec<Draw>) {
         let s = self.scale();
-        let t = super::theme::tokens();
-        let photo = self.shown_rect();
+        let ink = super::sheet::ink();
+        let photo = self.print_rect().unwrap_or_else(|| self.shown_rect());
         let o = 12.0 * s;
-        items.push(Draw::Fill(QuadInstance::rounded(rect(photo.x - o, photo.y - o, photo.width + 2.0 * o, photo.height + 2.0 * o), hex(t.hex.accent, 1.0), (4.0 * s) as f32, (1.5 * s) as f32)));
+        items.push(Draw::Fill(QuadInstance::rounded(rect(photo.x - o, photo.y - o, photo.width + 2.0 * o, photo.height + 2.0 * o), hex(ink.accent, 1.0), (4.0 * s) as f32, (1.5 * s) as f32)));
         if let Some((w, h)) = self.words_size("drop to open it", &DROP) {
-            items.push(Draw::Words("drop to open it".into(), DROP, 0.0, hex(t.hex.paper, 1.0), ((self.width as f64 - w) / 2.0, (self.height as f64 - h) / 2.0)));
+            items.push(Draw::Words("drop to open it".into(), DROP, 0.0, hex(ink.paper, 1.0), ((self.width as f64 - w) / 2.0, (self.height as f64 - h) / 2.0)));
         }
     }
 
@@ -1056,8 +1245,14 @@ impl View {
         }
     }
 
-    fn build_crop(&mut self, items: &mut Vec<Draw>, picture: Picture, cropping: &CropScene) {
+    /// Cropping (§4.10): the photograph in the print's place, darkened
+    /// outside the crop with `rgba(8,7,6,.6)`; the crop a 1 DIP `paper` line
+    /// with the rule of thirds in faint `paper` (ninths while straightening)
+    /// and 3 DIP `paper` corners just outside it. The caption stays; the
+    /// straightening dial takes the label's place.
+    fn build_crop(&mut self, items: &mut Vec<Draw>, picture: Picture, cropping: &CropScene, ink: &super::sheet::SheetInk) {
         let s = self.scale();
+        let t = super::theme::tokens();
         let layout = crop_layout(self.width as f64, self.height as f64, self.dpi, cropping.photo);
         let (frame, scale) = (layout.frame, layout.scale);
         let shown = cropping.shown;
@@ -1068,93 +1263,77 @@ impl View {
             shown: [cropping.photo.width as f32, cropping.photo.height as f32, cropping.rotation.rem_euclid(4) as f32, 1.0],
             clip: [shown.x as f32, shown.y as f32, shown.width as f32, shown.height as f32],
             quad: rect(frame.x + bounds.x * scale - 1.0, frame.y + bounds.y * scale - 1.0, bounds.width * scale + 2.0, bounds.height * scale + 2.0),
-            extra: [0.45, picture.wide as u8 as f32, 0.0, 0.0],
+            extra: [super::theme::CROP_SHADE_OPACITY, picture.wide as u8 as f32, 0.0, 0.0],
         };
         items.push(Draw::Photo(picture, uniform));
         let c = crop_rect;
-        if let Some(grid) = cropping.grid {
-            let lines = if grid == Grid::Thirds { 3 } else { 9 };
-            let alpha = if grid == Grid::Thirds { 0.6 } else { 0.4 };
-            let thin = (0.5 * s).max(1.0);
-            for i in 1..lines {
-                let x = c.x + c.width * i as f64 / lines as f64;
-                let y = c.y + c.height * i as f64 / lines as f64;
-                items.push(Draw::Fill(QuadInstance::fill(rect(x - thin / 2.0, c.y, thin, c.height), [1.0, 1.0, 1.0, alpha])));
-                items.push(Draw::Fill(QuadInstance::fill(rect(c.x, y - thin / 2.0, c.width, thin), [1.0, 1.0, 1.0, alpha])));
-            }
+        let paper = t.hex.paper;
+        let lines = if cropping.grid == Some(Grid::Fine) { 9 } else { 3 };
+        let thin = s.max(1.0).round();
+        for i in 1..lines {
+            let x = (c.x + c.width * i as f64 / lines as f64).round();
+            let y = (c.y + c.height * i as f64 / lines as f64).round();
+            items.push(Draw::Fill(QuadInstance::fill(rect(x, c.y, thin, c.height), hex(paper, 0.3))));
+            items.push(Draw::Fill(QuadInstance::fill(rect(c.x, y, c.width, thin), hex(paper, 0.3))));
         }
-        // Outline, then corner brackets just outside the crop, with a soft shadow.
-        let line = (1.0 * s).max(1.0);
-        items.push(Draw::Fill(QuadInstance::rounded(rect(c.x - line, c.y - line, c.width + 2.0 * line, c.height + 2.0 * line), [1.0, 1.0, 1.0, 0.9], 0.0, line as f32)));
-        let length = (22.0 * s).min(c.width / 2.0).min(c.height / 2.0);
+        items.push(Draw::Fill(QuadInstance::rounded(rect(c.x - thin, c.y - thin, c.width + 2.0 * thin, c.height + 2.0 * thin), hex(paper, 0.9), 0.0, thin as f32)));
+        // The corners, 20 DIPs along each edge, just outside the line.
+        let length = (20.0 * s).min(c.width / 2.0).min(c.height / 2.0);
         let width = 3.0 * s;
         let outer = c.inset(-width / 2.0, -width / 2.0);
-        let mut brackets = vec![];
+        let mut corners = vec![];
         for (x, y, dx, dy) in [(outer.x, outer.y, 1.0, 1.0), (outer.max_x(), outer.y, -1.0, 1.0), (outer.x, outer.max_y(), 1.0, -1.0), (outer.max_x(), outer.max_y(), -1.0, -1.0)] {
-            let horizontal = Rect::new(if dx > 0.0 { x - width / 2.0 } else { x - length }, y - width / 2.0, length + width / 2.0, width);
-            let vertical = Rect::new(x - width / 2.0, if dy > 0.0 { y - width / 2.0 } else { y - length }, width, length + width / 2.0);
-            brackets.push(horizontal);
-            brackets.push(vertical);
+            corners.push(Rect::new(if dx > 0.0 { x - width / 2.0 } else { x - length }, y - width / 2.0, length + width / 2.0, width));
+            corners.push(Rect::new(x - width / 2.0, if dy > 0.0 { y - width / 2.0 } else { y - length }, width, length + width / 2.0));
         }
-        for b in &brackets {
-            items.push(Draw::Fill(QuadInstance::rounded(rect(b.x - s, b.y - s, b.width + 2.0 * s, b.height + 2.0 * s), [0.0, 0.0, 0.0, 0.25], (1.5 * s) as f32, 0.0)));
-        }
-        for b in &brackets {
-            items.push(Draw::Fill(QuadInstance::fill(rect(b.x, b.y, b.width, b.height), WHITE)));
-        }
-        self.build_dial(items, &layout, cropping.angle);
-    }
-
-    /// A ruler to turn the photograph by degrees, like the iPhone's.
-    fn build_dial(&mut self, items: &mut Vec<Draw>, layout: &CropLayout, angle: f64) {
-        let s = self.scale();
-        let d = layout.dial;
-        items.push(Draw::Fill(QuadInstance::rounded(rect(d.x, d.y, d.width, d.height), [0.97, 0.97, 0.97, 0.92], (12.0 * s) as f32, 0.0)));
-        items.push(Draw::Fill(QuadInstance::rounded(rect(d.x, d.y, d.width, d.height), [0.0, 0.0, 0.0, 0.15], (12.0 * s) as f32, 1.0)));
-        let label = if angle == 0.0 { "0°".to_string() } else { format!("{angle:.1}°") };
-        let color = if angle == 0.0 { [0.45, 0.45, 0.45, 1.0] } else { [0.1, 0.1, 0.1, 1.0] };
-        if let Some((tw, _)) = self.text_size(&label, 13.0, 600) {
-            items.push(Draw::Text(label, 13.0, 600, color, (d.x + (d.width - tw) / 2.0, d.y + 6.0 * s), false));
-        }
-        let ruler = Rect::new(d.x + 14.0 * s, d.y + 28.0 * s, d.width - 28.0 * s, 22.0 * s);
-        let mid = ruler.x + ruler.width / 2.0;
-        let half = ruler.width / 2.0;
-        for degree in -45..=45 {
-            let x = mid + (degree as f64 - angle) * DIAL_SPACING * s;
-            if x < ruler.x || x > ruler.max_x() {
-                continue;
+        // Uncropped, the corners lie on the sheet: on a light one, edged in its ink.
+        if !ink.light {
+            for b in &corners {
+                items.push(Draw::Fill(QuadInstance::fill(rect(b.x - s, b.y - s, b.width + 2.0 * s, b.height + 2.0 * s), hex(ink.paper, 1.0))));
             }
-            let major = degree % 5 == 0;
-            let height = if degree == 0 { ruler.height } else if major { ruler.height * 0.7 } else { ruler.height * 0.4 };
-            let fade = 1.0 - ((x - mid).abs() / half).powi(2);
-            let alpha = (if major { 0.75 } else { 0.4 }) * fade;
-            let width = if degree == 0 { 1.5 * s } else { 1.0 * s.max(1.0) };
-            items.push(Draw::Fill(QuadInstance::fill(rect(x - width / 2.0, ruler.y + (ruler.height - height) / 2.0, width, height), [0.0, 0.0, 0.0, alpha as f32])));
         }
-        items.push(Draw::Fill(QuadInstance::rounded(rect(mid - s, ruler.y, 2.0 * s, ruler.height), rgba(accent_color(), 1.0), s as f32, 0.0)));
+        for b in &corners {
+            items.push(Draw::Fill(QuadInstance::fill(rect(b.x, b.y, b.width, b.height), hex(paper, 1.0))));
+        }
+        let portrait = frame.height > frame.width;
+        self.build_caption(items, frame, portrait, ink);
+        self.build_straighten_dial(items, frame, cropping.angle, ink);
     }
 
     /// Rasterises the texts a frame needs before it borrows the cache.
     fn prepare_texts(&mut self, draws: &[Draw]) {
         for draw in draws {
             match draw {
-                Draw::Text(text, size, weight, ..) => {
-                    let _ = self.text(text, *size, *weight);
-                }
                 Draw::Words(text, style, width, ..) => {
                     let _ = self.words_mask(text, style, *width);
                 }
+                Draw::Glyph(glyph, ..) => self.glyph_mask(*glyph),
                 _ => {}
             }
+        }
+        // Words of photographs long gone.
+        if self.words.len() > 400 {
+            self.words.clear();
+        }
+    }
+
+    /// Sets a mark as a mask on the GPU, once per scale.
+    fn glyph_mask(&mut self, glyph: Glyph) {
+        let plain = super::theme::tokens().plain;
+        let key = (glyph, self.dpi, plain);
+        let Some(gpu) = self.gpu.clone() else { return };
+        if self.glyphs.contains_key(&key) {
+            return;
+        }
+        let (w, h) = glyph.size();
+        if let Some(mask) = super::d2d::shape_mask(w as f32, h as f32, self.scale() as f32, plain, |p| glyph.draw(p)) {
+            self.glyphs.insert(key, gpu.upload_mask(&mask.coverage, mask.width, mask.height));
         }
     }
 
     /// Turns pictures and text into GPU images; draws whose texture isn't
     /// ready yet are left out.
     fn resolve(&self, draws: Vec<Draw>) -> Vec<Item<'_>> {
-        let px = |size: f64, s: f64| (size * s).round() as i32;
-        let s = self.scale();
-        let texts = &self.texts;
         let words = &self.words;
         let mut items = vec![];
         for draw in draws {
@@ -1170,18 +1349,22 @@ impl View {
                         items.push(Item::Quad(Some(image), quad));
                     }
                 }
-                Draw::Text(text, size, weight, color, (x, y), _) => {
-                    if let Some(image) = texts.get(&(text, px(size, s), weight)) {
-                        let size = image.texture.size();
-                        items.push(Item::Quad(Some(image), QuadInstance::text(rect(x.round(), y.round(), size.width as f64, size.height as f64), color)));
-                    }
-                }
                 Draw::Words(text, style, width, color, (x, y)) => {
                     if let Some(image) = words.get(&words_key(&text, &style, width, self.dpi)) {
                         let size = image.texture.size();
                         items.push(Item::Quad(Some(image), QuadInstance::text(rect(x.round(), y.round(), size.width as f64, size.height as f64), color)));
                     }
                 }
+                Draw::Glyph(glyph, color, (x, y)) => {
+                    if let Some(image) = self.glyphs.get(&(glyph, self.dpi, super::theme::tokens().plain)) {
+                        let size = image.texture.size();
+                        items.push(Item::Quad(Some(image), QuadInstance::text(rect(x.round(), y.round(), size.width as f64, size.height as f64), color)));
+                    }
+                }
+                Draw::Clip(r) => items.push(Item::Clip(r.map(|r| {
+                    let (x, y) = (r.x.max(0.0).floor(), r.y.max(0.0).floor());
+                    [x as u32, y as u32, (r.max_x().ceil() - x).max(0.0) as u32, (r.max_y().ceil() - y).max(0.0) as u32]
+                }))),
             }
         }
         items
@@ -1216,18 +1399,18 @@ fn crop_target(app: &App, x: f64, y: f64) -> Option<CropTarget> {
     if layout.dial.contains(p) {
         return Some(CropTarget::Dial);
     }
-    crop::handle_at(p, frame, dpi as f64 / 96.0).map(|h| CropTarget::Handle(h, layout.scale, dpi))
+    crop::handle_at(p, frame, dpi as f64 / 96.0).map(CropTarget::Handle)
 }
 
 enum CropTarget {
-    Handle(Handle, f64, u32),
+    Handle(Handle),
     Dial,
 }
 
 fn cursor_for(target: Option<&CropTarget>) -> PCWSTRCursor {
     match target {
         Some(CropTarget::Dial) => IDC_SIZEWE,
-        Some(CropTarget::Handle(handle, ..)) => match (handle.x, handle.y) {
+        Some(CropTarget::Handle(handle)) => match (handle.x, handle.y) {
             (0, 0) => IDC_SIZEALL,
             (-1, -1) | (1, 1) => IDC_SIZENWSE,
             (1, -1) | (-1, 1) => IDC_SIZENESW,
@@ -1261,7 +1444,7 @@ fn crop_mouse_down(app: &mut App, x: f64, y: f64, double: bool) -> bool {
                 with_view(|v| v.crop_drag = Some(CropDrag::Dial(angle, x as i32)));
             }
         }
-        CropTarget::Handle(handle, _, _) => {
+        CropTarget::Handle(handle) => {
             let start = session.shown();
             session.adjusting = true;
             with_view(|v| v.crop_drag = Some(CropDrag::Handle(handle, start, Point { x, y })));
@@ -1282,7 +1465,7 @@ fn crop_mouse_move(app: &mut App, x: f64, y: f64) {
     let s = dpi as f64 / 96.0;
     match drag {
         CropDrag::Dial(start, x0) => {
-            let mut next = start - (x - x0 as f64) / (DIAL_SPACING * s);
+            let mut next = start - (x - x0 as f64) / print::dial_spacing(s);
             // Catch at zero.
             if next.abs() < 0.4 {
                 next = 0.0;
@@ -1305,7 +1488,7 @@ fn crop_mouse_move(app: &mut App, x: f64, y: f64) {
                 let resized = crop::resize(start, handle, Point { x: edge.x + offset.0, y: edge.y + offset.1 }, session.ratio(), bounds, 40.0 * s / layout.scale);
                 session.set_shown(crop::constrain(start, resized, angle, photo));
             }
-            set_cursor(cursor_for(Some(&CropTarget::Handle(handle, 0.0, dpi))));
+            set_cursor(cursor_for(Some(&CropTarget::Handle(handle))));
         }
     }
     app.model.crop_changed();
@@ -1340,9 +1523,16 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_TIMER if wparam.0 == TIMER_RUNNING => {
                 let _ = KillTimer(hwnd, TIMER_RUNNING);
-                // The next frame sets it again while the tag shows.
-                if with_view(|v| v.running.is_some()).unwrap_or(false) {
-                    invalidate(hwnd);
+                // The next frame sets it again while the tag shows. The
+                // software canvas redraws the tag alone.
+                let tag = with_view(|v| v.running.is_some().then(|| if v.gpu.is_some() { None } else { v.tag_rect })).flatten();
+                match tag {
+                    Some(Some(t)) => {
+                        let r = RECT { left: t.x.floor() as i32, top: t.y.floor() as i32, right: t.max_x().ceil() as i32, bottom: t.max_y().ceil() as i32 };
+                        let _ = InvalidateRect(hwnd, Some(&r), false);
+                    }
+                    Some(None) => invalidate(hwnd),
+                    None => {}
                 }
                 LRESULT(0)
             }
@@ -1350,6 +1540,13 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 let _ = SetFocus(hwnd);
                 let (x, y) = point(lparam);
                 if with_view(|v| v.press_retry(x as f64, y as f64)).unwrap_or(false) {
+                    SetCapture(hwnd);
+                    return LRESULT(0);
+                }
+                // The label's names, the lock, a trim mark or a turn arrow:
+                // they act when the button comes up over them.
+                if let Some(target) = with_view(|v| v.print_hit(x as f64, y as f64).0).flatten() {
+                    with_view(|v| v.pressed = Some((target, (x as f64, y as f64))));
                     SetCapture(hwnd);
                     return LRESULT(0);
                 }
@@ -1374,6 +1571,22 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_MOUSEMOVE => {
                 let (x, y) = point(lparam);
+                // A trim mark dragged inward crops.
+                let pressed = with_view(|v| v.pressed).flatten();
+                if let Some((Target::Mark(handle), start)) = pressed {
+                    let s = with_view(|v| v.scale()).unwrap_or(1.0);
+                    if print::inward(handle, start, x as f64, y as f64) > print::MARK_DRAG * s {
+                        with_view(|v| v.pressed = None);
+                        let _ = ReleaseCapture();
+                        if with_app(|app| app.model.begin_crop()).is_none() {
+                            post(|app: &mut App| app.model.begin_crop());
+                        }
+                    }
+                    return LRESULT(0);
+                }
+                if pressed.is_some() {
+                    return LRESULT(0);
+                }
                 let panned = with_view(|v| {
                     let Some((x0, y0, center)) = v.pan else { return false };
                     v.center = (center.0 - (x - x0) as f64 / v.zoom, center.1 - (y - y0) as f64 / v.zoom);
@@ -1383,7 +1596,12 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 })
                 .unwrap_or(false);
                 if !panned {
-                    with_view(|v| v.hover_retry(x as f64, y as f64));
+                    with_view(|v| {
+                        v.hover_retry(x as f64, y as f64);
+                        if v.crop_drag.is_none() {
+                            v.hover_print(Some((x as f64, y as f64)));
+                        }
+                    });
                     with_app(|app| {
                         if app.model.cropping() {
                             crop_mouse_move(app, x as f64, y as f64);
@@ -1397,11 +1615,23 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                     if std::mem::take(&mut v.retry_hot) {
                         invalidate(hwnd);
                     }
+                    v.hover_print(None);
                 });
                 LRESULT(0)
             }
             WM_LBUTTONUP | WM_CAPTURECHANGED => {
                 let (x, y) = point(lparam);
+                if let Some((target, _)) = with_view(|v| v.pressed.take()).flatten() {
+                    if msg == WM_LBUTTONUP {
+                        let _ = ReleaseCapture();
+                        let at = with_view(|v| (v.print_hit(x as f64, y as f64).0 == Some(target)).then(|| v.target_rect(target))).flatten();
+                        if let Some(rect) = at {
+                            let canvas = hwnd.0 as isize;
+                            post(move |app: &mut App| print::act(app, HWND(canvas as *mut _), target, rect));
+                        }
+                    }
+                    return LRESULT(0);
+                }
                 let clicked = with_view(|v| {
                     v.pan = None;
                     let pressed = std::mem::take(&mut v.retry_pressed);
@@ -1426,7 +1656,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             WM_SETCURSOR => {
                 if (lparam.0 & 0xffff) as u32 == HTCLIENT {
                     let cropping = with_app(|app| app.model.cropping()).unwrap_or(false);
-                    if !cropping {
+                    let over_target = with_view(|v| v.hot.is_some() && v.crop_drag.is_none()).unwrap_or(false);
+                    if over_target {
+                        set_cursor(IDC_HAND);
+                    } else if !cropping {
                         let panning = with_view(|v| v.pan.is_some()).unwrap_or(false);
                         set_cursor(if panning { IDC_SIZEALL } else { IDC_ARROW });
                     }
