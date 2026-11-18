@@ -1,16 +1,14 @@
 //! Compare and Original ⌄ (ticket 46; `Compare.swift`'s model side): two
 //! photographs side by side or in one frame, or the open one against its
 //! original. The open photograph is the one the panel edits, developed as
-//! ever; the other is developed once from its sidecar, at the canvas's
-//! size. Rules and geometry are in `crate::compare`; the view in
+//! ever; the other is developed once from its sidecar, as opening it would
+//! develop it, in a helper of its own once the open one has settled. Rules and geometry are in `crate::compare`; the view in
 //! `ui::compare`.
 
 use super::*;
 use crate::compare::{self as rules, Comparison, Layout, Origin, OriginalMode, OriginalReference, Side};
 use negs_library::Item;
 
-/// The other photograph's long side: the helper's thumbnails go to 1024.
-const OTHER_LONG_SIDE: u32 = 1024;
 /// The longest side a picture in the view keeps.
 const MAX_SHOWN: u32 = 3072;
 
@@ -95,6 +93,18 @@ pub struct Memory {
     shown: Option<Shown>,
     /// What the last context menu offered.
     offered: Option<rules::Offer>,
+    /// The other photograph's develop, once the edited one has settled.
+    waiting: Option<Waiting>,
+    /// Compare's own helper, so the open photograph's decode stays.
+    engine: Option<Arc<EngineClient>>,
+}
+
+/// A develop of the other photograph waiting its turn.
+struct Waiting {
+    item: Item,
+    state: EditState,
+    needs_match: bool,
+    request: u64,
 }
 
 impl Model {
@@ -181,6 +191,7 @@ impl Model {
         self.compare.other = None;
         self.compare.kept = None;
         self.compare.request += 1;
+        self.stop_compare_engine();
         self.mark(dirty::LAYOUT | dirty::CANVAS | dirty::CHROME | dirty::STATUS | dirty::COMPARE);
     }
 
@@ -272,40 +283,152 @@ impl Model {
             return;
         }
         let kept = self.compare.kept.as_ref().filter(|(i, _)| *i == item).map(|(_, s)| s.clone());
-        self.compare.other = Some((item.clone(), kept));
-        self.develop_compared(item);
-    }
-
-    fn develop_compared(&mut self, item: Item) {
-        crate::trace::event("compare_develop", || json!({"item": item.photo, "engine": self.engine.is_some()}));
-        let (Some(engine), Some(library)) = (self.engine.clone(), self.shelf.library.as_ref()) else { return };
-        let (stored, _) = library.thumbnail_state(&item).unwrap_or_else(|| (library.unedited_state(), false));
-        let Ok(mut state) = library_map::from_library(&stored, false) else { return };
-        json::set(&mut state.params, "io.output_color_space", json!("sRGB"));
+        self.compare.other = Some((item.clone(), kept.clone()));
         self.compare.request += 1;
         let request = self.compare.request;
-        let buffer = engine.directory().join(format!("compare-{request}.rgba"));
-        let mut command = json!({
-            "command": "thumbnail", "input": item.photo, "film": state.film, "paper": state.paper, "params": state.params,
-            "long_side": OTHER_LONG_SIDE, "source_generation": 2_000_000_000 + request, "preview_path": buffer,
-        });
-        if state.crop.cropped() {
-            let r = state.crop.rect;
-            command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": state.crop.angle});
+        let Some((state, needs_match)) = self.compared_state(&item) else { return };
+        if kept.is_none() {
+            self.load_compared_stand_in(&item, &state, request);
         }
-        let orientation = state.orientation();
+        self.compare.waiting = Some(Waiting { item, state, needs_match, request });
+        self.pump_compared();
+    }
+
+    /// `item`'s edits as opening it would restore them, or a new
+    /// photograph's (`comparedState`), and whether its match is to be
+    /// solved: wanted, possible, and not solved for these edits.
+    fn compared_state(&self, item: &Item) -> Option<(EditState, bool)> {
+        let library = self.shelf.library.as_ref()?;
+        let limit = self.state.limit_preview;
+        let raw = is_raw(&item.photo);
+        let matchable = |s: &EditState| s.brightness_match.is_some() && (raw || json::string(s.value("io.input_interpretation.mode")) == "auto");
+        match library.export_edits(item) {
+            Some(stored) => {
+                let state = library_map::from_library(&stored.state, limit).ok()?;
+                let needs = !stored.match_solved && matchable(&state);
+                Some((state, needs))
+            }
+            None => {
+                let state = library_map::from_library(&library.defaults().plain_state(), limit).ok()?;
+                let needs = matchable(&state);
+                Some((state, needs))
+            }
+        }
+    }
+
+    /// The other photograph's stand-in at once, as opening it would show
+    /// one (`load(_ other:)`): its last develop if kept, else its developed
+    /// thumbnail, else the camera's preview.
+    fn load_compared_stand_in(&self, item: &Item, state: &EditState, request: u64) {
+        let (kept, thumbnail) = (self.kept_key(item), self.filed_key(crate::edited_store::thumbnails(), item));
+        let (crop, orientation, photo, item) = (state.crop, state.orientation(), item.photo.clone(), item.clone());
+        // A develop to an Image Size is cropped by the helper already.
+        let cropped_render = state::size_mode(&state.params) == state::SizeMode::LongestSide && crop.cropped();
+        let as_shown = move |picture: &Picture, crop_it: bool| {
+            let pixels = (crop_it && crop.cropped()).then(|| (crop.pixels(Size::new(picture.width as f64, picture.height as f64)), crop.angle));
+            picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, pixels, orientation, picture.wide)).flatten()
+        };
         #[cfg(test)]
         let background = ui::testing::background();
-        engine.request(command, engine::timeout_for("thumbnail"), move |result| {
+        std::thread::spawn(move || {
             #[cfg(test)]
             let _background = background;
+            let shown = kept
+                .and_then(|(key, loose)| KeptDevelop::load(&key, loose.as_deref()))
+                .and_then(|(picture, _)| as_shown(&picture, !cropped_render))
+                .map(|shown| (shown, "kept"))
+                .or_else(|| {
+                    // Finished: cropped, turned and bordered.
+                    let picture = thumbnail.and_then(|(key, loose)| stand_in(&key, loose.as_deref()))?;
+                    let shown = picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, None, Default::default(), picture.wide)).flatten()?;
+                    Some((shown, "thumbnail"))
+                })
+                .or_else(|| crate::thumbnail::placeholder(&photo).and_then(|(picture, _)| as_shown(&picture, true)).map(|shown| (shown, "embedded")));
+            crate::trace::event("compare_stand_in", || json!({"request": request, "shown": shown.as_ref().map(|(_, kind)| *kind)}));
+            let Some((shown, _)) = shown else { return };
+            ui::post(move |app: &mut App| {
+                let model = &mut app.model;
+                if request != model.compare.request {
+                    return;
+                }
+                // Never over the develop or the open one's last picture.
+                if let Some((other, picture @ None)) = &mut model.compare.other
+                    && *other == item
+                {
+                    *picture = Some(shown);
+                    model.mark(dirty::COMPARE);
+                }
+            });
+        });
+    }
+
+    /// Develops the other photograph once the edited one has settled, never
+    /// two develops at once (`scheduleCompareDevelop`): in a helper of its
+    /// own, the match solved first as opening it would (the match cache
+    /// first), then a full preview `render` as the photo view's.
+    pub(super) fn pump_compared(&mut self) {
+        if self.compare.comparison.is_none() || !self.preview_current || self.matching_brightness || self.compare.waiting.is_none() {
+            return;
+        }
+        let Some(Waiting { item, state, needs_match, request }) = self.compare.waiting.take() else { return };
+        if request != self.compare.request {
+            return;
+        }
+        let Some(paths) = self.engine_paths().cloned() else { return };
+        let engine = match &self.compare.engine {
+            Some(engine) => engine.clone(),
+            None => match EngineClient::start(paths) {
+                Ok(engine) => {
+                    let engine = Arc::new(engine);
+                    self.compare.engine = Some(engine.clone());
+                    engine
+                }
+                Err(error) => return self.report(&error),
+            },
+        };
+        let solving = self.solving();
+        let space = self.preview_space().to_string();
+        crate::trace::event("compare_develop", || json!({"item": item.photo, "request": request, "match": needs_match}));
+        #[cfg(test)]
+        let background = ui::testing::background();
+        std::thread::spawn(move || {
+            #[cfg(test)]
+            let _background = background;
+            let generation = 2_000_000_000 + request;
+            // Unmatched if the solve fails, as the photograph would open.
+            let state = if needs_match {
+                super::batch::solve_match(&engine, &item.photo, &state, true, &solving, generation, "compare").map_or(state, |(solved, _)| solved)
+            } else {
+                state
+            };
+            let mut rendered = state.clone();
+            json::set(&mut rendered.params, "io.output_color_space", json!(space));
+            let buffer = engine.directory().join(format!("compare-{request}.rgba"));
+            let mut command = json!({
+                "command": "render", "input": item.photo, "source_generation": generation,
+                "film": rendered.film, "paper": rendered.paper, "params": rendered.params,
+                "limit_preview": rendered.limit_preview, "preview_path": buffer,
+            });
+            let crop = state.crop;
+            let cropped_render = state::size_mode(&state.params) == state::SizeMode::LongestSide && crop.cropped();
+            if cropped_render {
+                let r = crop.rect;
+                command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": crop.angle});
+            }
+            let (sender, receiver) = std::sync::mpsc::channel();
+            engine.request(command, engine::timeout_for("render"), move |result| {
+                let _ = sender.send(result);
+            });
+            let result = receiver.recv().map_err(|_| anyhow!("The helper stopped")).and_then(|r| r);
             crate::trace::event("compare_developed", || match &result {
-                Ok((_, r)) => json!({"request": request, "width": r["width"], "height": r["height"], "bytes": std::fs::metadata(&buffer).map(|m| m.len()).ok()}),
+                Ok((_, r)) => json!({"request": request, "width": r["width"], "height": r["height"], "matched": state.brightness_match.as_ref().and_then(|m| m.ev)}),
                 Err(error) => json!({"request": request, "error": format!("{error:#}")}),
             });
             let shown = result.ok().and_then(|(_, r)| {
                 let rgba = std::fs::read(&buffer).ok()?;
-                Shown::of(&rgba, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32, None, orientation, false)
+                let (w, h) = (json::number(&r["width"]) as u32, json::number(&r["height"]) as u32);
+                let pixels = (!cropped_render && crop.cropped()).then(|| (crop.pixels(Size::new(w as f64, h as f64)), crop.angle));
+                Shown::of(&rgba, w, h, pixels, state.orientation(), crate::picture::is_wide(json::string(&r["display_color_space"])))
             });
             let _ = std::fs::remove_file(&buffer);
             ui::post(move |app: &mut App| app.model.compared_developed(request, item, shown));
@@ -314,7 +437,7 @@ impl Model {
 
     fn compared_developed(&mut self, request: u64, item: Item, shown: Option<Shown>) {
         if request != self.compare.request {
-            return;
+            return self.pump_compared();
         }
         if let Some((other, picture)) = &mut self.compare.other
             && *other == item
@@ -322,6 +445,21 @@ impl Model {
         {
             *picture = shown;
             self.mark(dirty::COMPARE);
+        }
+        self.pump_compared();
+    }
+
+    /// The commands Compare's own helper was sent, in order.
+    #[cfg(test)]
+    pub fn compare_commands(&self) -> Vec<String> {
+        self.compare.engine.as_ref().map_or_else(Vec::new, |e| e.commands.lock().unwrap().iter().map(|c| json::string(&c["command"]).to_string()).collect())
+    }
+
+    /// Compare's helper, once compare is left.
+    fn stop_compare_engine(&mut self) {
+        self.compare.waiting = None;
+        if let Some(engine) = self.compare.engine.take() {
+            std::thread::spawn(move || engine.stop());
         }
     }
 

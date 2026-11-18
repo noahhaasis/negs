@@ -57,7 +57,34 @@ struct Setup {
     stamp: Option<String>,
 }
 
+impl Setup {
+    fn solving(&self) -> Solving {
+        Solving { prep: self.prep.clone(), print_exposure: self.print_exposure.clone(), preview_space: self.preview_space.clone(), stamp: self.stamp.clone() }
+    }
+}
+
+/// What a match solve away from the open photograph asks with, as opening
+/// it would: the defaults' Prep and print exposure (the solve's own
+/// exposure), the preview's colour space and the engine's stamp, so the
+/// match cache serves both.
+pub(super) struct Solving {
+    pub prep: Value,
+    pub print_exposure: Value,
+    pub preview_space: String,
+    pub stamp: Option<String>,
+}
+
 impl Model {
+    /// The solve's settings for a photograph that isn't open (`Solving`).
+    pub(super) fn solving(&mut self) -> Solving {
+        Solving {
+            prep: js::get(&self.defaults, "prep").clone(),
+            print_exposure: js::get(&self.defaults, "enlarger.print_exposure").clone(),
+            preview_space: self.preview_space().to_string(),
+            stamp: self.match_engine_stamp(),
+        }
+    }
+
     /// What Export acts on: the grid's selection, else the open photograph.
     pub fn export_targets(&self) -> Vec<negs_library::Item> {
         self.rating_targets()
@@ -432,7 +459,7 @@ fn export_item(mut item: Item, journal: &Journal, setup: &Setup, control: &Contr
         }
         if let Some(engine) = helper.as_ref() {
             let id = generation.fetch_add(1, Ordering::SeqCst) + 1;
-            match solve(engine, &item, setup, id) {
+            match solve_match(engine, &item.photo, &item.state, item.needs_match, &setup.solving(), id, "batch") {
                 Ok((solved, decoded)) => {
                     state = solved;
                     size = Some((decoded.0 as f64, decoded.1 as f64));
@@ -492,11 +519,21 @@ fn export_item(mut item: Item, journal: &Journal, setup: &Setup, control: &Contr
     }
 }
 
-/// Solves a batch photograph's match in the batch's helper, as opening it
-/// would (`reconcile_brightness_match`: the same request, reference and
-/// match cache), and gives its size, which the decode reads. The state
-/// comes back matched, or as it was if its match isn't needed.
-fn solve(engine: &EngineClient, item: &Item, setup: &Setup, generation: u64) -> Result<(EditState, (u32, u32))> {
+/// Solves the match of `state` for `source`, a photograph that isn't open,
+/// in a helper of its own (the batch's, or Compare's), as opening it would
+/// (`reconcile_brightness_match`: the same request, reference and match
+/// cache), and gives its size, which the decode reads. The state comes back
+/// matched, or as it was if its match isn't needed (`needs_match`).
+/// `name` keeps its scratch files apart.
+pub(super) fn solve_match(
+    engine: &EngineClient,
+    source: &std::path::Path,
+    edits: &EditState,
+    needs_match: bool,
+    setup: &Solving,
+    generation: u64,
+    name: &str,
+) -> Result<(EditState, (u32, u32))> {
     let ask = |command: Value| -> Result<Value> {
         let name = command["command"].as_str().unwrap_or_default().to_string();
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -505,12 +542,11 @@ fn solve(engine: &EngineClient, item: &Item, setup: &Setup, generation: u64) -> 
         });
         receiver.recv()?
     };
-    let source = &item.photo;
-    let mut request = item.state.clone();
+    let mut request = edits.clone();
     js::set(&mut request.params, "io.output_color_space", Value::String(setup.preview_space.clone()));
     js::set(&mut request.params, "prep", setup.prep.clone());
     js::set(&mut request.params, "enlarger.print_exposure", setup.print_exposure.clone());
-    let buffer = engine.directory().join("batch-decode.rgba");
+    let buffer = engine.directory().join(format!("{name}-decode.rgba"));
     let decode = json!({
         "command": "thumbnail", "input": source, "source_generation": generation,
         "film": request.film, "paper": request.paper, "params": request.params,
@@ -518,15 +554,15 @@ fn solve(engine: &EngineClient, item: &Item, setup: &Setup, generation: u64) -> 
     });
     let raw_named = is_raw(source);
     let (decoded, preview) = std::thread::scope(|scope| {
-        let preview = (raw_named && item.needs_match).then(|| scope.spawn(|| crate::brightness::read_camera_preview(source)));
+        let preview = (raw_named && needs_match).then(|| scope.spawn(|| crate::brightness::read_camera_preview(source)));
         let decoded = ask(decode);
         (decoded, preview.map(|thread| thread.join().unwrap_or_else(|_| Err(anyhow!("The camera preview couldn’t be read.")))))
     });
     let _ = std::fs::remove_file(&buffer);
     let decoded = decoded?;
     let size = (js::number(&decoded["source_width"]) as u32, js::number(&decoded["source_height"]) as u32);
-    if !item.needs_match {
-        return Ok((item.state.clone(), size));
+    if !needs_match {
+        return Ok((edits.clone(), size));
     }
     let key = setup.stamp.as_ref().and_then(|stamp| crate::match_cache::key(source, &request, stamp));
     let kept = key.as_ref().and_then(|key| crate::match_cache::shared().solved(key));
@@ -534,7 +570,7 @@ fn solve(engine: &EngineClient, item: &Item, setup: &Setup, generation: u64) -> 
         Some(kept) => kept,
         None => {
             let png = crate::brightness::reference(source, js::boolean(&decoded["raw"]), preview, size)?;
-            let reference = engine.directory().join(format!("batch-brightness-{generation}.png"));
+            let reference = engine.directory().join(format!("{name}-brightness-{generation}.png"));
             std::fs::write(&reference, png)?;
             let placed = ask(json!({
                 "command": "place_exposure", "input": source, "source_generation": generation,
@@ -551,6 +587,6 @@ fn solve(engine: &EngineClient, item: &Item, setup: &Setup, generation: u64) -> 
             (ev, limited)
         }
     };
-    let matched = batch::matched(&item.state, ev, limited, state::match_inputs(&item.state)).unwrap_or_else(|| item.state.clone());
+    let matched = batch::matched(edits, ev, limited, state::match_inputs(edits)).unwrap_or_else(|| edits.clone());
     Ok((matched, size))
 }

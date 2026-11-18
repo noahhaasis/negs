@@ -2138,6 +2138,49 @@ lifecycle_test! {
     }
 }
 
+// MARK: Compare
+
+lifecycle_test! {
+    /// The Mac's `develop(_ other:)`: the other photograph develops in
+    /// Compare's own helper once the open one has settled, its match solved
+    /// first as opening it would, then a full preview `render`. Opening it
+    /// afterwards finds that match in the cache and solves nothing.
+    fn compare_develops_the_other_as_opening_it_would() {
+        use crate::compare::Origin;
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+        assert!(h.model().shelf.library.is_some());
+        let items = h.model().shown_items();
+        assert_eq!(items.len(), 2);
+        h.clear_logs();
+        h.edit(|m| m.compare(items[0].clone(), items[1].clone(), Origin::Photo));
+        h.idle();
+        let m = h.model();
+        assert_eq!(m.compare_commands(), ["thumbnail", "place_exposure", "render"], "decode, solve, develop");
+        let other = m.compared_other().expect("developed");
+        assert_eq!((other.width, other.height), (480, 320));
+        assert!(h.command_names().iter().all(|c| c != "render" && c != "place_exposure"), "the open helper isn't used: {:?}", h.command_names());
+        h.edit(|m| m.leave_compare());
+        h.clear_logs();
+        h.open(&b);
+        h.idle();
+        assert!(h.command_names().iter().all(|c| c != "place_exposure"), "the match was kept: {:?}", h.command_names());
+        assert!(h.model().state.brightness_match.as_ref().is_some_and(|m| m.ev.is_some()));
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 // MARK: The film side's release (ticket 41)
 
 lifecycle_test! {

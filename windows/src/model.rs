@@ -3071,6 +3071,8 @@ impl Model {
                 self.preview_cache.save(key, frame);
             }
             self.reconcile_brightness_match();
+            // Compare's other photograph develops once this one has settled.
+            self.pump_compared();
         }
         let seconds = json::number(&result["elapsed_ms"]) / 1000.0;
         let time = format!("developed in {seconds:.*} s", if seconds < 10.0 { 2 } else { 1 });
