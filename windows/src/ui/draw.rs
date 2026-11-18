@@ -324,6 +324,21 @@ impl Canvas {
         self.gdi = true;
     }
 
+    /// Direct2D and DirectWrite into the buffer (`d2d.rs`), in DIPs at
+    /// `scale`, mixed freely with the GDI and shapes above. False when
+    /// Direct2D can't draw; callers then keep their GDI drawing.
+    pub fn d2d(&mut self, scale: f32, plain: bool, draw: impl FnMut(&mut super::d2d::Painter)) -> bool {
+        if self.gdi {
+            unsafe {
+                let _ = GdiFlush();
+            }
+        }
+        let drawn = super::d2d::paint(self.dc, self.w, self.h, scale, plain, draw);
+        // Direct2D wrote through the DC: flush before touching the pixels.
+        self.gdi = true;
+        drawn
+    }
+
     /// Copies the buffer to `target`, opaque: buttons paint into 32-bit
     /// buffers whose alpha the system composes with.
     pub fn present(mut self, target: HDC) {

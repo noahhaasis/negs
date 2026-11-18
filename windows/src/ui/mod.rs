@@ -10,6 +10,7 @@
 
 pub mod canvas;
 mod chrome;
+mod d2d;
 mod dialogs;
 mod draw;
 mod drop;
@@ -19,6 +20,7 @@ pub mod inspector;
 mod motion;
 mod panes;
 mod presets;
+mod sampler;
 mod strip;
 mod theme;
 mod titlebar;
@@ -1364,6 +1366,9 @@ pub fn run() {
     // The installer/uninstaller waits for every app to stop before touching data.
     let _app_lifetime_mutex = unsafe { CreateMutexW(None, false, w!("Local\\Negs.AppLifetime")) };
     let launched = platform::qpc();
+    if sampler::run_if_asked() {
+        return;
+    }
     let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| !p.to_string_lossy().starts_with('-') && p.is_file());
     let path = path.map(|p| std::path::absolute(&p).unwrap_or(p));
     if std::env::var_os("NEGS_ALLOW_MULTIPLE").is_none() && forward_to_running(path.as_deref()) {
@@ -1693,6 +1698,15 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| {
                     app.report.stamp("inspector_shown");
                     inspector::report_geometry(app);
+                });
+                // Direct2D, DirectWrite and Newsreader, on their own thread:
+                // nothing before this waits for them.
+                d2d::prepare(|shared| {
+                    let cost = shared.cost;
+                    post(move |app: &mut App| {
+                        app.report.stamp("drawing_ready");
+                        app.report.line(&format!("drawing_cost d2d_us {} dwrite_us {} fonts_us {}", cost.d2d.as_micros(), cost.dwrite.as_micros(), cost.fonts.as_micros()));
+                    });
                 });
                 LRESULT(0)
             }

@@ -42,6 +42,10 @@ foreach ($name in @('spektrafilm-native.exe', 'spektrafilm.exe', 'spektrafilm-f6
 }
 Copy-Item -LiteralPath data -Destination $stage -Recurse
 Copy-Item -LiteralPath LICENSE -Destination $stage
+# The fonts built into the executables, under the SIL Open Font License 1.1:
+# Newsreader (the interface) and Barlow Condensed (film borders).
+Copy-Item -LiteralPath macos/Fonts/OFL-Newsreader.txt -Destination $stage
+Copy-Item -LiteralPath crates/spektrafilm-io/fonts/OFL-BarlowCondensed.txt -Destination $stage
 if ($WinSparkleDll) {
     Copy-Item -LiteralPath $WinSparkleDll -Destination (Join-Path $stage 'WinSparkle.dll')
     $license = Join-Path (Split-Path $WinSparkleDll -Parent) 'COPYING'
