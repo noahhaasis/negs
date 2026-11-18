@@ -2452,13 +2452,14 @@ impl Model {
         }
         // A pending brightness match is solved first, on a decode alone, so
         // the old exposure is never rendered (ticket 39). The solve's end
-        // renders the matched edit (`render_after_match`).
-        if !self.interacting()
-            && !self.cropping()
-            && self.brightness_match_pending()
-            && self.match_decode_failed != Some((revision, generation))
-        {
-            self.reconcile_brightness_match();
+        // renders the matched edit (`render_after_match`). A solve that runs
+        // already is waited for even while a slider is pressed or Crop is
+        // open, which only keep a new one from starting: a render scheduled
+        // by the edit before them would show the old exposure.
+        if self.brightness_match_pending() && self.match_decode_failed != Some((revision, generation)) {
+            if !self.interacting() && !self.cropping() {
+                self.reconcile_brightness_match();
+            }
             if self.matching_brightness {
                 return;
             }

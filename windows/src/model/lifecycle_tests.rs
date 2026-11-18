@@ -552,8 +552,8 @@ lifecycle_test! {
 
 lifecycle_test! {
     /// Matching turned off while the solve runs: the exposure stays where it
-    /// was, and the edit renders once the solve (whose answer no longer
-    /// applies) is back, once; nothing stays held.
+    /// was, and the edit renders once, at once; the superseded solve's
+    /// answer, if it is still asked for, isn't applied. Nothing is held.
     fn turning_the_match_off_mid_solve_leaves_nothing_held() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
@@ -572,7 +572,10 @@ lifecycle_test! {
         assert!((crate::json::number(m.value(state::PREP_EXPOSURE)) - gold_exposure).abs() < 1e-9, "the solve's answer isn't applied");
         assert_eq!(h.frames.iter().map(|f| (f.revision, f.kind)).collect::<Vec<_>>(), [(edited, FrameKind::Settled)]);
         assert_eq!(h.renders(), [settled(edited, h.app.model.source_generation)]);
-        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render"]);
+        let names = h.command_names();
+        assert_eq!(names[0], "thumbnail", "{names:?}");
+        assert_eq!(names.iter().filter(|c| *c == "render").count(), 1, "{names:?}");
+        assert!(names.iter().filter(|c| *c == "place_exposure").count() <= 1, "{names:?}");
         assert_eq!(h.model().undo_title(), Some("Stop Matching Camera Brightness"));
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
@@ -906,7 +909,7 @@ fn a_stale_solve_waits_for(blocker: Blocker) {
     // S1 comes back stale; nothing can start S2 yet.
     h.idle();
     let m = h.model();
-    assert!(m.held_frame().is_none() && m.render_log.is_empty(), "nothing renders while its match is pending");
+    assert!(m.held_frame().is_none() && m.render_log.is_empty(), "nothing renders while its match is pending: {:?}", m.render_log);
     assert!(m.brightness_match_pending() && !m.matching_brightness);
     assert_eq!(m.shown_frame, Some(previous), "the old exposure isn't shown");
     assert!(h.frames.is_empty(), "{:?}", h.frames);
@@ -1417,8 +1420,9 @@ fn export_now(h: &mut Harness, file: &std::path::Path) {
 
 lifecycle_test! {
     /// B2 review S1: Undo while a film change's solve runs. The undone
-    /// state's match is solved, so it renders at once, its quick frame shown,
-    /// not held, and settles whether or not the stale solve is back. A Fast
+    /// state's match is solved, and the helper still holds its output (the
+    /// solve's decode doesn't replace it), so it renders at once at export
+    /// size, shown, not held, whether or not the stale solve is back. A Fast
     /// Export asked for meanwhile finishes.
     fn undo_during_a_solve_settles_the_undone_state() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
@@ -1428,9 +1432,9 @@ lifecycle_test! {
         until_solving(&mut h);
         h.edit(|m| m.perform_undo());
         let undone = h.model().revision;
-        h.run_until("the undone quick frame", |m| m.shown_frame.is_some_and(|f| f.revision == m.revision));
+        h.run_until("the undone frame", |m| m.shown_frame.is_some_and(|f| f.revision == m.revision));
         let m = h.model();
-        assert_eq!(m.shown_frame.map(|f| f.kind), Some(FrameKind::Quick));
+        assert_eq!(m.shown_frame.map(|f| f.kind), Some(FrameKind::Settled), "the kept output: no quick frame");
         assert!(m.held_frame().is_none(), "shown, not held");
         let (dir, file) = export_target("undo-solve");
         export_now(&mut h, &file);
@@ -1438,7 +1442,7 @@ lifecycle_test! {
         h.idle();
         let m = h.model();
         assert!(m.state.film == GOLD && m.revision == undone);
-        assert!(m.preview_current && !m.matching_brightness, "the undone state's quick frame settles");
+        assert!(m.preview_current && !m.matching_brightness, "the undone state settles");
         assert_eq!(h.renders().last(), Some(&settled(undone, generation)));
         assert!(h.renders().iter().all(|r| r.kind != FrameKind::Settled || r.revision == undone), "{:?}", h.renders());
         let m = h.model();
