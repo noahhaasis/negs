@@ -296,7 +296,8 @@ impl Default for Preferences {
             last_save_folder: None,
             window: None,
             window_pixels: None,
-            inspector_width: 404.0,
+            // The Mac's column starts at its narrowest (`EditorWindowController`).
+            inspector_width: 340.0,
             check_for_updates: true,
             image_size_long_side: None,
             previews: true,

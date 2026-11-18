@@ -32,6 +32,13 @@ pub(super) use print::draw_lock;
 mod software;
 
 pub use print::PrintWords;
+pub(super) use print::Target as LabelTarget;
+
+/// A click on Compare's label for the open photograph, as on the print's:
+/// its names open the tray (or the menu), the lock keeps the paper.
+pub(super) fn act_on_label(app: &mut App, hwnd: HWND, target: Target, at: Option<Rect>) {
+    print::act(app, hwnd, target, at)
+}
 use print::{Glyph, Target};
 
 /// The sheet the photograph lies on (Settings › Look › Viewer). High

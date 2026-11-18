@@ -132,8 +132,9 @@
   it; ← → step through the roll; Swap, Fit, 100% and Done are along the
   top, and a double click zooms both to actual size together. The status
   line says what differs ("differ in shutter and aperture") and the note
-  under the photographs which one you're editing. The strip makes way for
-  them. View › Grid (G) is in the menu too.
+  under the photographs which one you're editing. The one you're editing
+  keeps its film and paper menus and the paper lock, as in the photo
+  view. The strip makes way for them. View › Grid (G) is in the menu too.
 - **Grid · Photo · Compare** in the title bar, at the right, switch
   between the views, as the View menu does.
 - **Original ⌄** chooses what Original does: hold to see the whole, a
