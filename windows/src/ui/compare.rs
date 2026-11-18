@@ -223,7 +223,7 @@ pub fn sync(app: &mut App) {
             aspects[i] = shown.aspect();
             let key = Arc::as_ptr(&shown.rgba) as usize;
             if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) {
-                bitmaps[i] = Bitmap::from_rgba(&shown.rgba, shown.width, shown.height, shown.wide, color.as_deref(), 0).ok().map(|b| (key, Arc::new(b)));
+                bitmaps[i] = Bitmap::from_rgba(&shown.rgba, shown.width, shown.height, shown.wide, color.as_deref(), 0, false).ok().map(|b| (key, Arc::new(b)));
             }
         } else {
             bitmaps[i] = None;

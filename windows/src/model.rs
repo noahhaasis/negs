@@ -2550,7 +2550,7 @@ impl Model {
         self.previews.requests += 1;
         let buffer = engine.directory().join(format!("thumbnail-{}.rgba", self.previews.requests));
         command["preview_path"] = json!(buffer);
-        let (color, rotation) = (self.previews.color.clone(), self.rotation());
+        let (color, rotation, flip) = (self.previews.color.clone(), self.rotation(), self.state.flip());
         // A stock's tile can stand in for its develop when tried (`try_stock`).
         let stand_in = matches!(target, Target::Stock { .. });
         engine.request(command, engine::timeout_for("thumbnail"), move |result| {
@@ -2558,7 +2558,7 @@ impl Model {
                 let rgba = std::fs::read(&buffer)?;
                 let wide = crate::picture::is_wide(json::string(&r["display_color_space"]));
                 let (width, height) = (json::number(&r["width"]) as u32, json::number(&r["height"]) as u32);
-                let bitmap = previews::Bitmap::from_rgba(&rgba, width, height, wide, color.as_deref(), rotation)?;
+                let bitmap = previews::Bitmap::from_rgba(&rgba, width, height, wide, color.as_deref(), rotation, flip)?;
                 Ok(if stand_in { bitmap.keeping(rgba, width, height, wide) } else { bitmap })
             });
             let _ = std::fs::remove_file(&buffer);
