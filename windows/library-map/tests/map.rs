@@ -456,3 +456,22 @@ fn a_negative_reads_and_leaves_as_the_macs() {
     assert_eq!(guess.sentence(Orientation::default()), "No clear film found: the base is a guess from the thinnest part of the picture.");
     assert!(neg::same_base(&json!({"scale": 1.0}), &json!({"scale": 1.0 + 1e-12})));
 }
+
+/// Prep's Flat field row (`NegativeScan.FlatField`): the light frame's name
+/// or Off, and why the helper didn't use it, only for that light frame.
+#[test]
+fn the_flat_field_row_reads_as_the_macs() {
+    use negs_windows_library_map::negative::FlatField;
+    let off = FlatField::of("", &json!({"path": "", "used": false}));
+    assert_eq!((off.is_on(), off.value(), off.hint()), (false, "Off".to_string(), None));
+    let light = r"C:\Scans\light.tif";
+    let used = FlatField::of(light, &json!({"path": light, "used": true}));
+    assert_eq!((used.value(), used.hint()), ("light.tif".to_string(), None));
+    let refused = FlatField::of(light, &json!({"path": light, "used": false, "reason": "The light frame is another size."}));
+    assert_eq!(refused.hint().as_deref(), Some("The light frame is another size."));
+    let silent = FlatField::of("/scans/light.tif", &json!({"path": "/scans/light.tif", "used": false}));
+    assert_eq!(silent.hint().as_deref(), Some("The light frame isn't used on this frame."));
+    // An answer about another light frame says nothing yet.
+    let other = FlatField::of(light, &json!({"path": "/other.tif", "used": false}));
+    assert_eq!((other.used, other.hint()), (None, None));
+}

@@ -121,6 +121,55 @@ pub fn bounds(picture: &Value) -> Option<Value> {
     Some(Value::Array(["x0", "y0", "x1", "y1"].iter().map(|k| picture[*k].clone()).collect()))
 }
 
+/// `film_render.convert.flat_field`: the light frame each scan is divided
+/// by (§9.4), a path or empty for off. It sits with the backlight in the
+/// negative's convert settings, so it goes where they go (the roll).
+pub const FLAT_FIELD: &str = "film_render.convert.flat_field";
+
+/// Prep's Flat field row: the roll's light frame, and whether the helper
+/// used it on this frame (`NegativeScan.FlatField`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FlatField {
+    /// The light frame's path; empty is off.
+    pub path: String,
+    /// The helper's answer for this frame and this light frame: None until it has said.
+    pub used: Option<bool>,
+    pub reason: Option<String>,
+}
+
+impl FlatField {
+    pub const HELP: &'static str = "A frame of the bare light, shot with the roll's camera, lens and aperture. Each scan is divided by it before the base is read, so the light's falloff doesn't print.";
+
+    /// `answer` is a render's or a base detection's `flat_field` (`{path,
+    /// used, reason}`); one for another light frame is ignored.
+    pub fn of(path: &str, answer: &Value) -> Self {
+        let mut flat = Self { path: path.to_string(), ..Self::default() };
+        if !path.is_empty() && answer["path"].as_str() == Some(path) {
+            flat.used = Some(json::boolean(&answer["used"]));
+            flat.reason = Some(json::string(&answer["reason"]).to_string()).filter(|r| !r.is_empty());
+        }
+        flat
+    }
+
+    pub fn is_on(&self) -> bool {
+        !self.path.is_empty()
+    }
+
+    /// The row's value: the light frame's name, or Off.
+    pub fn value(&self) -> String {
+        if !self.is_on() {
+            return "Off".into();
+        }
+        let name = self.path.rsplit(['/', '\\']).next().unwrap_or(&self.path);
+        name.to_string()
+    }
+
+    /// Under the row: why this frame doesn't use it.
+    pub fn hint(&self) -> Option<String> {
+        (self.is_on() && self.used == Some(false)).then(|| self.reason.clone().unwrap_or_else(|| "The light frame isn't used on this frame.".into()))
+    }
+}
+
 /// Prep's word when the scan doesn't look like a colour negative.
 pub fn not_negative(raw: bool) -> &'static str {
     if raw { "This doesn't look like a colour negative. If it is, set White balance to Daylight." } else { "This doesn't look like a colour negative." }

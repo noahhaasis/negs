@@ -43,6 +43,9 @@ pub struct Memory {
     /// Prep's "Backlight…" was clicked: the Backlight row shows, until
     /// another photograph opens.
     pub backlight_shown: bool,
+    /// The helper's last word on the flat field (`flat_field` of a render
+    /// or a negative request) and the photograph it was about (`input`).
+    flat_answer: Value,
 }
 
 /// What `negative_base` read along the film's edge for one reading.
@@ -82,6 +85,8 @@ struct Asker {
     survey: Option<Survey>,
     /// The survey was read by this request: the model keeps it.
     fresh: bool,
+    /// The last answer's word on the flat field.
+    flat: Arc<std::sync::Mutex<Option<Value>>>,
 }
 
 impl Asker {
@@ -98,7 +103,11 @@ impl Asker {
         self.engine.request(command, engine::timeout_for(name), move |result| {
             let _ = tx.send(result);
         });
-        Ok(rx.recv().map_err(|_| anyhow!("The helper stopped"))??.1)
+        let reply = rx.recv().map_err(|_| anyhow!("The helper stopped"))??.1;
+        if !reply["flat_field"].is_null() {
+            *self.flat.lock().unwrap() = Some(reply["flat_field"].clone());
+        }
+        Ok(reply)
     }
 
     /// The picture and base a detection finds on this reading, read once.
@@ -397,6 +406,7 @@ impl Model {
             key: neg::key(&snapshot),
             survey: self.negative_survey().cloned(),
             fresh: false,
+            flat: Default::default(),
         };
         let request = self.begin_negative(working, detecting);
         let newest = self.negative.request.clone();
@@ -412,9 +422,13 @@ impl Model {
                     std::thread::sleep(SETTLE);
                 }
                 let result = if newest.load(Ordering::Relaxed) == request { Some(work(&mut asker)) } else { None };
+                let flat = asker.flat.lock().unwrap().take();
                 let survey = asker.fresh.then_some(asker.survey).flatten();
                 ui::post(move |app: &mut App| {
                     let model = &mut app.model;
+                    if let Some(flat) = flat.filter(|_| generation == model.source_generation) {
+                        model.note_flat_field(&flat);
+                    }
                     if let Some(survey) = survey.filter(|s| s.generation == model.source_generation) {
                         model.keep_survey(survey);
                     }
@@ -673,6 +687,48 @@ impl Model {
         let mut next = self.state.clone();
         next.crop = crop;
         self.apply(next, "Crop to Picture");
+    }
+
+    /// Keeps the helper's answer about the flat field for this photograph.
+    pub(super) fn note_flat_field(&mut self, answer: &Value) {
+        let Some(source) = &self.source else { return };
+        if answer.is_null() {
+            return;
+        }
+        let mut answer = answer.clone();
+        answer["input"] = json!(source);
+        if answer != self.negative.flat_answer {
+            self.negative.flat_answer = answer;
+            self.mark(dirty::INSPECTOR);
+        }
+    }
+
+    /// Prep's Flat field row: this frame's light frame and whether it was used.
+    pub fn flat_field(&self) -> neg::FlatField {
+        let answer = &self.negative.flat_answer;
+        let mine = self.source.as_ref().is_some_and(|s| answer["input"] == json!(s));
+        neg::FlatField::of(json::string(self.value(neg::FLAT_FIELD)), if mine { answer } else { &Value::Null })
+    }
+
+    /// Prep › Flat field › Choose…: the light frame for this negative (and,
+    /// with Use for whole roll, its roll). Finding the base again follows.
+    pub fn choose_flat_field(&mut self, light: &Path) {
+        if !self.is_negative() || self.cropping() || self.negative_busy() {
+            return;
+        }
+        let mut next = self.state.clone();
+        json::set(&mut next.params, neg::FLAT_FIELD, json!(light.to_string_lossy()));
+        self.apply(next, "Choose Flat Field");
+    }
+
+    /// Prep › Flat field › Off.
+    pub fn clear_flat_field(&mut self) {
+        if !self.is_negative() || self.cropping() || self.negative_busy() || !self.flat_field().is_on() {
+            return;
+        }
+        let mut next = self.state.clone();
+        json::set(&mut next.params, neg::FLAT_FIELD, json!(""));
+        self.apply(next, "Flat Field Off");
     }
 
     /// A new photograph: nothing read on the last one applies.

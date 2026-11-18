@@ -152,6 +152,8 @@ enum Kind {
     ColorFilter,
     /// Prep's buttons on a negative, at the row's end: title, tooltip.
     Actions(&'static [(&'static str, &'static str)]),
+    /// Prep › Flat field: the light frame's name, Choose… and Off (`FlatFieldRow`).
+    FlatField,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -168,6 +170,8 @@ enum Note {
     NegativeGuess,
     /// A RAW negative not on Daylight white balance.
     NegativeDaylight,
+    /// The light frame isn't used on this frame, and why.
+    FlatField,
 }
 
 /// Prep's buttons on a negative (`NegativePrep`).
@@ -494,6 +498,8 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::Note(Note::NegativeWarning), prep, None, When::Note);
     add(&mut rows, Kind::Note(Note::NegativeGuess), prep, None, When::Note);
     add(&mut rows, Kind::Actions(FIND_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::FlatField, prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::FlatField), prep, None, When::Note);
     add(&mut rows, Kind::Actions(CROP_BUTTONS), prep, None, When::Negative);
     // Behind "Backlight…", as on the Mac: Daylight suits most light pads and scanners.
     add(&mut rows, Kind::Choice("Backlight", crate::negative::SCAN_ILLUMINANT, &["D55", "D50", "D65"]), prep, None, When::Backlight);
@@ -834,6 +840,7 @@ fn note_text(model: &Model, note: Note) -> String {
             Some(base) if base.guessed() => "Pick from the rebate if the scan shows clear film; otherwise this guess can tint the print.".into(),
             _ => String::new(),
         },
+        Note::FlatField => model.flat_field().hint().unwrap_or_default(),
         Note::NegativeDaylight => {
             if model.is_raw && json::string(model.value("io.raw_white_balance.mode")) != "daylight" {
                 "Set White balance to Daylight for a negative on a daylight backlight; As shot can tint it.".into()
@@ -1249,6 +1256,22 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 controls.push(c);
             }
         }
+        Kind::FlatField => {
+            let help = crate::negative::FlatField::HELP;
+            let text = label("Flat field", fonts.ui);
+            super::dialogs::tooltip(text, help);
+            controls.push(text);
+            let value = ink_static("Off", Role::Readout, EDIT, true);
+            super::dialogs::tooltip(value, help);
+            controls.push(value);
+            for (part, title) in [(ACTION, "Choose…"), (RESET, "Off")] {
+                let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(part), fonts.ui);
+                draw::set_role(c, Role::Outlined);
+                draw::track_hover(c);
+                super::dialogs::tooltip(c, if part == ACTION { "Choose the light frame: a frame of the bare light, shot with this roll's camera, lens and aperture." } else { "Stop dividing the scan by the light frame." });
+                controls.push(c);
+            }
+        }
         Kind::BalancePrint(title, help) => {
             let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
             draw::set_role(c, Role::Outlined);
@@ -1520,6 +1543,25 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
                 let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
                 positions.push((c[0], right - button + margin, y, button, ins.px(35.0)));
                 ins.px(35.0)
+            }
+            Kind::FlatField => {
+                // The label, the light frame's name, then Choose… and (when on) Off at the row's end.
+                let on = window_text(c[1]) != "Off";
+                let mut x = right + margin;
+                for (i, title) in [(3, "Off"), (2, "Choose…")] {
+                    let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                    if i == 3 && !on {
+                        positions.push((c[3], x, y, 0, 0));
+                        continue;
+                    }
+                    x -= button;
+                    positions.push((c[i], x, y + (row_h - ins.px(35.0)) / 2, button, ins.px(35.0)));
+                    x -= ins.px(8.0) - 2 * margin;
+                }
+                let label = (column - gutter).min(ins.px(ink::width("Flat field", &ink::LABEL) as f64 + 12.0));
+                positions.push((c[0], gutter, y, label, row_h));
+                positions.push((c[1], gutter + label, y, (x + margin - gutter - label).max(0), row_h));
+                row_h.max(ins.px(39.0))
             }
             Kind::Actions(buttons) => {
                 // At the row's end, 8 apart, as `NegativePrep.buttons`.
@@ -2023,6 +2065,15 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 super::tone_graph::update(c[1], model, on, ins.dpi, decimal);
             }
             Kind::Actions(_) => enable_all(c, catalog && !model.negative_busy()),
+            Kind::FlatField => {
+                let flat = model.flat_field();
+                set_text(c[1], &flat.value());
+                ink::set_changed(c[0], flat.is_on());
+                enable_all(c, catalog && !model.negative_busy());
+                if !flat.is_on() {
+                    enable(c[3], false);
+                }
+            }
             Kind::BalancePrint(title, _) => {
                 set_text(c[0], if model.balancing_print { "Balancing…" } else { title });
                 enable(c[0], on && model.can_balance_print());
@@ -2275,6 +2326,13 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.choose_film_format(usize::try_from(index).ok().filter(|&i| i < state::FILM_FORMATS.len()));
         }
         (Kind::BalancePrint(..), ACTION) if code == BN_CLICKED => app.model.balance_print(),
+        (Kind::FlatField, ACTION) if code == BN_CLICKED => {
+            let main = app.main;
+            if let Some(light) = super::dialogs::choose_light_frame(main, app.model.source.as_deref()) {
+                app.model.choose_flat_field(&light);
+            }
+        }
+        (Kind::FlatField, RESET) if code == BN_CLICKED => app.model.clear_flat_field(),
         (Kind::Actions(buttons), p) if code == BN_CLICKED => {
             use crate::negative::Pick;
             match buttons.get(p as usize).map(|b| b.0) {

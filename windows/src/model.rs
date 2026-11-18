@@ -2942,6 +2942,7 @@ impl Model {
             session.update(shown, rotation, flip);
         }
         self.lens_supported = json::boolean(&result["lens_correction_supported"]);
+        self.note_flat_field(&result["flat_field"]);
         self.rendered_space = json::string(&result["output_color_space"]).to_string();
         if self.input_colour != result["input_colour"] {
             self.input_colour = result["input_colour"].clone();
