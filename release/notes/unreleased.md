@@ -1,5 +1,9 @@
 # Negs (unreleased)
 
+## Mac
+
+- The photo keeps its zoom and position when you change the film or paper.
+
 ## Windows
 
 - **The Mac's look.** The window is drawn in the Mac app's themes, chosen

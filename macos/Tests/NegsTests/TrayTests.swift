@@ -280,6 +280,70 @@ import XCTest
         model.previews.filmShown = false
     }
 
+    func testFilmAndPaperTriesKeepTheZoomedCropInPlace() async throws {
+        let (model, undo, fixture) = try await opened()
+        defer { model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
+        model.beginCrop()
+        let crop = try XCTUnwrap(model.cropSession)
+        crop.rect = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+        grouped(undo) { model.endCrop(apply: true) }
+
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: CanvasArea(model: model))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 560), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+
+        func scrollView(in view: NSView) -> ImageScrollView? {
+            if let scroll = view as? ImageScrollView { return scroll }
+            return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+        }
+        func shows(_ image: CGImage, in layer: CALayer) -> Bool {
+            (layer.contents as AnyObject?) === image || layer.sublayers?.contains { shows(image, in: $0) } == true
+        }
+        for paper in [false, true] {
+            let target = try XCTUnwrap(paper ? model.papers.first { $0.id != model.paper }?.id : others(model, count: 1).first)
+            model.openTray(paper: paper)
+            if paper { model.previews.paperShown = true } else { model.previews.filmShown = true }
+            model.pumpPreviews()
+            let tile = try XCTUnwrap(model.previews.tile(target, paper: paper))
+            try await waitUntil(seconds: 60) { tile.image != nil && !tile.dimmed }
+            let pixels = try XCTUnwrap(tile.image)
+
+            host.layoutSubtreeIfNeeded()
+            let scroll = try XCTUnwrap(scrollView(in: host))
+            scroll.fitting = false
+            scroll.magnification = 16
+            scroll.contentView.scroll(to: CGPoint(x: 21, y: 9))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            let before = scroll.contentView.bounds
+            XCTAssertTrue(scroll.zoomedFromFit)
+            XCTAssertGreaterThan(abs(before.midX - (scroll.documentView?.bounds.midX ?? 0)), 1)
+            XCTAssertGreaterThan(abs(before.midY - (scroll.documentView?.bounds.midY ?? 0)), 1)
+
+            func checkViewport() throws {
+                let visible = try XCTUnwrap(scrollView(in: host))
+                XCTAssertEqual(visible.magnification, 16, accuracy: 1e-6)
+                XCTAssertEqual(visible.contentView.bounds, before)
+            }
+            model.tryStock(target)
+            XCTAssertEqual(paper ? model.paper : model.film, target)
+            try await waitUntil {
+                host.layoutSubtreeIfNeeded()
+                guard let layer = scrollView(in: host)?.documentView?.layer else { return false }
+                return shows(pixels, in: layer)
+            }
+            try checkViewport()
+            try await waitUntil { model.previewCurrent }
+            host.layoutSubtreeIfNeeded()
+            try checkViewport()
+
+            grouped(undo) { model.endTray(keep: true) }
+            if paper { model.previews.paperShown = false } else { model.previews.filmShown = false }
+        }
+    }
+
     /// The tile comes cut to the crop but not turned or mirrored: standing
     /// in on the canvas, it's turned and mirrored as the photograph is.
     func testTheTriedStocksTileIsTurnedAsThePhotograph() async throws {
