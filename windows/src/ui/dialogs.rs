@@ -408,7 +408,9 @@ impl SaveEvents {
         encoding.updating.set(true);
         unsafe {
             let _ = customize.SetSelectedControlItem(DEPTH, if settings.bit_depth == 16 { 1 } else { 0 });
-            let _ = customize.SetControlState(DEPTH, if jpeg { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            for id in [LABEL_DEPTH, DEPTH] {
+                let _ = customize.SetControlState(id, if jpeg { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            }
             let _ = customize.SetControlItemState(SPACE, PROPHOTO as u32, if settings.bit_depth == 16 { CDCS_ENABLEDVISIBLE } else { CDCS_VISIBLE });
             let _ = customize.SetSelectedControlItem(SPACE, settings.color_space as u32);
             for id in [LABEL_QUALITY + IN_GROUP, LABEL_QUALITY, QUALITY, QUALITY_RANGE_TEXT] {
