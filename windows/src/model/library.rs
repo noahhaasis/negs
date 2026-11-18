@@ -81,6 +81,12 @@ impl Model {
         self.shelf.library.as_ref()?.open_item().cloned()
     }
 
+    /// The open photograph's edits can't be shown here (from a newer Mac):
+    /// it shows the defaults, never filed under its stored look.
+    pub(super) fn library_blocked(&self) -> bool {
+        self.shelf.blocked.is_some() && self.shelf.blocked == self.library_item()
+    }
+
     /// What the strip lists: the filter's photographs, the open one always.
     pub fn shown_items(&self) -> Vec<Item> {
         let Some(library) = &self.shelf.library else { return vec![] };

@@ -249,6 +249,8 @@ pub fn open(app: &mut App) {
         app.grid = Some(Grid { hwnd, ..Default::default() });
         app.layout();
     }
+    // The grid shows the open photograph as edited.
+    app.model.file_open_thumbnail();
     app.model.shelf.in_grid = true;
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
     let grid = app.grid.as_mut().unwrap();

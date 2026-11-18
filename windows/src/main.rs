@@ -26,6 +26,7 @@ mod rendered_preview;
 mod session;
 mod sheet_rules;
 mod state;
+mod thumb_compose;
 mod thumbnail;
 mod tone_graph;
 mod trace;
