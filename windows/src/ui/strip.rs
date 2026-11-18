@@ -253,7 +253,10 @@ fn request(app: &mut App) {
     let open = strip.cells.iter().position(|c| c.open);
     let ahead = rules::prefetch_order(strip.cells.len(), &on_screen, open);
     let wants: Vec<&Want> = on_screen.iter().chain(&ahead).map(|&i| &strip.cells[i].want).collect();
-    app.thumbs.read(&wants, ThumbSize::Strip);
+    // Launch's develop first: reading previews beside it cost it 3 %.
+    if app.model.first_render_shown || app.model.render_failed {
+        app.thumbs.read(&wants, ThumbSize::Strip);
+    }
     let all: Vec<Want> = strip.cells.iter().map(|c| c.want.clone()).collect();
     app.thumbs.pump(&app.model, &all, range, open);
 }

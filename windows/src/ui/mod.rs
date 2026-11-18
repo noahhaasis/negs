@@ -638,6 +638,8 @@ impl App {
             if self.model.image.is_some() && !self.model.first_render_shown {
                 self.model.first_render_shown = true;
                 self.report.stamp("first_image_scene");
+                // The strip's thumbnails waited for it.
+                self.model.dirty |= dirty::STRIP;
             }
         }
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
