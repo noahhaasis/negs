@@ -25,7 +25,8 @@ doctest = false
 spektrafilm-io = { path = "../../crates/spektrafilm-io", default-features = false }
 negs-library = { path = "../../crates/negs-library" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact float reading: the catalog's defaults must equal the sidecar tables' to the bit.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # state.rs's one Win32 call, stood in for.
 windows = { package = "negs-windows-stub", path = "windows-stub" }

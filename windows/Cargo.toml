@@ -19,7 +19,8 @@ path = "src/main.rs"
 # Crop, border and 35mm geometry, so the canvas cuts the same pixels as the exporter.
 spektrafilm-io = { path = "../crates/spektrafilm-io", default-features = false }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact float reading: the catalog's defaults must equal the sidecar tables' to the bit.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 anyhow = "1"
 # The `implement` macro refers to windows-core by name.
 windows-core = "0.58"

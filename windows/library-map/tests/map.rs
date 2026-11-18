@@ -236,6 +236,43 @@ fn editor_steps_go_and_library_steps_stay() {
 
 /// Opening each fixture's photograph in a library, showing it on Windows
 /// and handing the editor's state back writes nothing.
+/// The catalog arrives as the helper's JSON text. Read back exactly (serde_json's
+/// `float_roundtrip`), its defaults are the table's to the last bit, so a new
+/// photograph's first edit stores that edit only: read one ulp off, every
+/// edited photograph also stored the glare and scanner levels.
+#[test]
+fn defaults_read_from_the_catalogs_text_are_the_tables() {
+    let t = table(LATEST_DEFAULTS);
+    let text = serde_json::to_string(&catalog_defaults()).unwrap();
+    let parsed: Value = serde_json::from_str(&text).unwrap();
+    let mut catalog = to_json(&parsed);
+    let mut lens = to_json(&catalog_defaults());
+    assert_eq!(catalog, lens);
+    // Without the lens corrections `apply_catalog` turns on: the table itself.
+    for json in [&mut catalog, &mut lens] {
+        if let Json::Object(top) = json {
+            let table_lens = t.params.get("io").get("lens_correction").clone();
+            if let Some(Json::Object(io)) = top.get_mut("io") {
+                io.insert("lens_correction".into(), table_lens);
+            }
+        }
+    }
+    assert_eq!(catalog.changes_from(&t.params), None);
+
+    let base = EditDefaults::for_table(&t);
+    let defaults = edit_defaults(&base, &parsed, &[], &stocks(), (None, None), true);
+    let mut fresh = negs_library::EditState::from_table(&t);
+    fresh.params = defaults.params.clone();
+    let mut win = from_library(&fresh, false).unwrap();
+    negs_windows_library_map::json::set(&mut win.params, "io.rotate_cw", serde_json::json!(1));
+    let stored = encode_edits(&to_library(&win, None), false, &t);
+    let params = stored.get("params");
+    let Json::Object(groups) = params else { panic!("no params: {stored:?}") };
+    let changed: Vec<&String> = groups.keys().collect();
+    assert!(changed.iter().all(|g| *g == "io"), "{changed:?}");
+    assert_eq!(params.get("io").get("rotate_cw"), &Json::Number(1.0));
+}
+
 #[test]
 fn opening_and_leaving_writes_nothing() {
     let dir = std::env::temp_dir().join(format!("negs-windows-map-{}", std::process::id()));
