@@ -14,7 +14,7 @@ pub fn group(title: &str) -> Option<&'static str> {
 }
 
 pub const FILM: &str = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data.";
-pub const PAPER: &str = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless Settings › Keep paper when changing film is on.";
+pub const PAPER: &str = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless the lock on “printed on”, under the photograph, is closed.";
 
 const PATHS: &[(&str, &str)] = &[
     // Prep: white balance and brightness

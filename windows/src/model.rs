@@ -1355,7 +1355,13 @@ impl Model {
     }
 
     pub fn rotate(&mut self) {
-        let turned = json::num(((self.rotation() + 1) % 4) as f64);
+        self.turn(true);
+    }
+
+    /// A quarter turn, as cropping's arrows and View › Rotate turn: while
+    /// cropping, with the crop.
+    pub fn turn(&mut self, clockwise: bool) {
+        let turned = json::num(((self.rotation() + if clockwise { 1 } else { 3 }) % 4) as f64);
         if self.cropping() {
             // Turns with the crop: one undo step on Done, undone by Cancel.
             let mut next = self.state.clone();
@@ -2104,7 +2110,7 @@ impl Model {
         self.mark(dirty::STRUCTURE | dirty::PRESETS | dirty::PREVIEWS);
     }
 
-    /// Settings › Keep paper when changing film. The film tiles show what a
+    /// The paper lock on "printed on". The film tiles show what a
     /// click would develop, so they follow it: their keys include the paper.
     pub fn set_keep_paper(&mut self, on: bool) {
         if self.prefs.keep_paper != on {
@@ -3588,7 +3594,7 @@ mod tests {
         assert!(!old.fotufilm && old.manufacturer_data);
     }
 
-    /// Settings › Keep paper when changing film, through the film menu.
+    /// The paper lock, through the film menu.
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
         let stock = |id: &str, paper: bool, target: &str| Stock {

@@ -50,3 +50,24 @@
 - Settings › Photographs › Fotufilm films can list all of Fotufilm's
   films, only those made from datasheets, or none. A film already in use
   stays listed.
+- **The photograph as a print.** It sits on the page as on the Mac: the
+  camera, ISO, shutter, aperture and focal length above it in italic with
+  the file name on the right, and "Film ⌄ printed on Paper ⌄" under it.
+  Click the film or the paper to choose another; the lock on "printed
+  on" keeps the paper when you change the film (this replaces the "Keep
+  paper when changing film" setting). Fitted, the photograph is
+  resampled to exactly the pixels it fills, so fine detail stays sharp.
+- **Viewer sheets.** Settings › Look › Viewer › Sheet puts the photograph
+  on the theme's own colour or one of seven sheets, from white to black;
+  the caption and label change their ink to suit. It replaces the custom
+  background colour. A print whose border would vanish into the sheet
+  sits on a light table's soft glow.
+- **Image Only and upside down.** F shows the photograph alone on its
+  sheet; holding T shows it upside down, for judging the composition. Esc
+  leaves Image Only first.
+- **Cropping in the Mac's style.** Trim marks at the print's corners
+  start a crop. The panel lists the aspect ratios with their film and
+  print formats, Landscape and Portrait, the angle and the size, with a
+  yellow Done; Return applies and Esc cancels. Straighten with the dial
+  under the photograph; its arrows turn it a quarter.
+- The window reopens at the size it was left at.

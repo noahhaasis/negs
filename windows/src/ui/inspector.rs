@@ -19,6 +19,7 @@ use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
+use super::d2d::{Ink, RectF as DRect, TextStyle};
 use super::draw::{self, Canvas, RectF, Role};
 use super::ink;
 use super::motion;
@@ -242,7 +243,7 @@ pub struct Inspector {
     line: i32,
     /// Motion: the next layout slides rows to their places; the slide
     /// running.
-    slide: bool,
+    pub(super) slide: bool,
     sliding: Option<Slide>,
     /// Where the last layout put each control (its top), to slide from.
     placed: std::collections::HashMap<isize, i32>,
@@ -304,7 +305,7 @@ pub fn register() {
     }
 }
 
-fn decimal_separator() -> char {
+pub(super) fn decimal_separator() -> char {
     use windows::Win32::Globalization::{GetLocaleInfoEx, LOCALE_SDECIMAL};
     let mut buffer = [0u16; 8];
     let n = unsafe { GetLocaleInfoEx(PCWSTR::null(), LOCALE_SDECIMAL, Some(&mut buffer)) };
@@ -2179,7 +2180,7 @@ fn grid_key(model: &Model, paper: bool) -> String {
 /// The film or paper menu's entries: the favourites, starred, then each
 /// group's heading (None, can't be chosen) and stocks. A favourite stays in
 /// its group too; the closed menu shows that entry, with the plain name.
-fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
+pub(super) fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
     let (films, papers) = (model.listed_films(), model.papers());
     let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
     let mut entries: Vec<(String, Option<(String, bool)>)> =
@@ -3998,9 +3999,12 @@ pub fn report_geometry(app: &mut App) {
 
 // MARK: Crop panel
 
-/// Replaces the adjustments while cropping (`CropInspector`). Cancel and
-/// Done stay at the bottom, like Reset below the adjustments; the controls
-/// above them scroll when the column is short.
+/// Replaces the adjustments while cropping (`CropInspector`), in the ink:
+/// "Crop" and Reset Crop over a rule; the aspect ratios as rows with a dot
+/// and their formats in italic, Orientation as two words, the angle as an
+/// ink slider, the size and the hints; under a rule at the foot "return
+/// applies · esc cancels" over Cancel and Done, Done twice as wide. The
+/// rows between scroll when the column is short.
 struct CropPanel {
     panel: HWND,
     rows: HWND,
@@ -4009,6 +4013,8 @@ struct CropPanel {
     custom: bool,
     scroll: i32,
     content: i32,
+    /// The rules' heights in the panel: under the header, over the foot.
+    rules: (i32, i32),
 }
 
 const C_ASPECT: u16 = CROP_FIRST; // ..+8
@@ -4025,6 +4031,33 @@ const C_DONE: u16 = CROP_FIRST + 19;
 const C_CANCEL: u16 = CROP_FIRST + 20;
 const C_SIZE_NOTE: u16 = CROP_FIRST + 21;
 const C_LABELS: u16 = CROP_FIRST + 30;
+/// The labels: Ratio, ×, Orientation, Angle, Size, the size's hint, the
+/// instructions, and the two sections' heads.
+const L_RATIO: u16 = C_LABELS + 1;
+const L_TIMES: u16 = C_LABELS + 2;
+const L_ORIENTATION: u16 = C_LABELS + 3;
+const L_STRAIGHTEN: u16 = C_LABELS + 4;
+const L_ANGLE: u16 = C_LABELS + 5;
+const L_SIZE: u16 = C_LABELS + 6;
+const L_HINT: u16 = C_LABELS + 7;
+const L_SIZE_HINT: u16 = C_LABELS + 8;
+
+/// The foot's words, the aspect formats and the orientation words (`Crop.swift`).
+const CROP_FOOT: TextStyle = TextStyle::serif(14.0, 400).italic();
+const CROP_HEAD: TextStyle = TextStyle::ui(12.0, 500);
+const ASPECT_FORMAT: TextStyle = TextStyle::serif(13.5, 400).italic();
+const ORIENTATION_WORD: TextStyle = TextStyle::serif(14.5, 400);
+const CROP_BUTTON: TextStyle = TextStyle::serif(15.0, 600);
+
+thread_local! {
+    /// The crop panel, and its rules' heights: under the header, over the foot.
+    static CROP_RULES: Cell<(isize, i32, i32)> = const { Cell::new((0, 0, 0)) };
+}
+
+/// `text`'s width in `style`, DIPs.
+fn measure_dips(text: &str, style: &TextStyle) -> f64 {
+    super::d2d::measure_text(text, style, 0.0, theme::tokens().plain).width as f64
+}
 
 impl CropPanel {
     fn get(&self, id: u16) -> HWND {
@@ -4039,21 +4072,45 @@ fn build_crop(app: &mut App) {
     let rows = create(w!("NegsCropRows"), "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), panel, 0, HFONT::default());
     let mut controls = vec![];
     let mut add = |id: u16, class: PCWSTR, text: &str, style: WINDOW_STYLE, font: HFONT| {
-        let parent = if matches!(id, C_CANCEL | C_DONE) { panel } else { rows };
+        let parent = if matches!(id, C_CANCEL | C_DONE | C_RESET) { panel } else { rows };
         let c = create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), parent, id, font);
         controls.push((id, c));
         c
     };
-    add(C_LABELS, w!("STATIC"), "Aspect Ratio", WINDOW_STYLE(0), fonts.section);
+    let mut ink_static = |id: u16, text: &str, role: Role| {
+        let c = add(id, w!("STATIC"), text, WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), fonts.ui);
+        draw::set_role(c, role);
+        super::accessible_role(c, 0x29);
+        c
+    };
+    ink_static(C_LABELS, "ASPECT RATIO", Role::Section);
+    ink_static(L_RATIO, "Ratio", Role::Label);
+    ink_static(L_TIMES, "×", Role::Unit);
+    ink_static(L_ORIENTATION, "Orientation", Role::Label);
+    ink_static(L_STRAIGHTEN, "STRAIGHTEN", Role::Section);
+    ink_static(L_ANGLE, "Angle", Role::Label);
+    ink_static(C_ANGLE_VALUE, "0°", Role::Readout);
+    ink_static(L_SIZE, "Size", Role::Label);
+    let size = ink_static(C_SIZE, "", Role::Readout);
+    super::dialogs::tooltip(size, "The exported photograph’s size, before the border.");
+    ink_static(L_SIZE_HINT, "The exported photograph’s size, before the border.", Role::Hint);
+    ink_static(C_SIZE_NOTE, "", Role::Hint);
+    ink_static(
+        L_HINT,
+        "Drag the corners or edges to crop, or inside to move it. Drag the dial under the photograph to straighten it; the arrows at its ends turn it a quarter. The border is added after cropping.",
+        Role::Hint,
+    );
+    // The aspect ratios and the orientation words, painted here (`WM_DRAWITEM`).
     for (i, aspect) in CropAspect::ALL.iter().enumerate() {
         let text = match aspect.format() {
-            Some(format) => format!("{}    {format}", aspect.title()),
+            Some(format) => format!("{}\t{format}", aspect.title()),
             None => aspect.title().to_string(),
         };
-        let group = if i == 0 { WS_GROUP | WS_TABSTOP } else { WINDOW_STYLE(0) };
-        add(C_ASPECT + i as u16, w!("BUTTON"), &text, group | WINDOW_STYLE(BS_AUTORADIOBUTTON as u32), fonts.ui);
+        let group = if i == 0 { WS_GROUP | WS_TABSTOP } else { WS_TABSTOP };
+        let c = add(C_ASPECT + i as u16, w!("BUTTON"), &text, group | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+        draw::track_hover(c);
+        super::accessible_name(c, &text.replace('\t', ", "));
     }
-    add(C_LABELS + 1, w!("STATIC"), "Ratio", WINDOW_STYLE(0), fonts.ui);
     for id in [C_WIDTH, C_HEIGHT] {
         let e = add(id, w!("EDIT"), "", WS_TABSTOP | WS_GROUP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), fonts.ui);
         draw::set_role(e, Role::Field);
@@ -4063,15 +4120,15 @@ fn build_crop(app: &mut App) {
             let _ = SetWindowSubclass(e, Some(ratio_subclass), 1, 0);
         }
     }
-    add(C_LABELS + 2, w!("STATIC"), "×", WINDOW_STYLE(SS_CENTER.0), fonts.ui);
-    add(C_LABELS + 3, w!("STATIC"), "Orientation", WINDOW_STYLE(0), fonts.ui);
-    add(C_LANDSCAPE, w!("BUTTON"), "Landscape", WS_TABSTOP | WS_GROUP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32), fonts.ui);
-    add(C_PORTRAIT, w!("BUTTON"), "Portrait", WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32), fonts.ui);
-    add(C_LABELS + 4, w!("STATIC"), "Straighten", WS_GROUP, fonts.section);
-    add(C_LABELS + 5, w!("STATIC"), "Angle", WINDOW_STYLE(0), fonts.ui);
-    add(C_ANGLE_VALUE, w!("STATIC"), "0.0°", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
-    let reset = add(C_ANGLE_RESET, w!("BUTTON"), "\u{E777}", WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), fonts.glyph_small);
+    for (id, title) in [(C_LANDSCAPE, "Landscape"), (C_PORTRAIT, "Portrait")] {
+        let group = if id == C_LANDSCAPE { WS_GROUP | WS_TABSTOP } else { WS_TABSTOP };
+        let c = add(id, w!("BUTTON"), title, group | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+        draw::track_hover(c);
+    }
+    let reset = add(C_ANGLE_RESET, w!("BUTTON"), "↺", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), fonts.ui);
+    draw::set_role(reset, Role::ResetMark);
     draw::track_hover(reset);
+    super::accessible_name(reset, "Straighten to 0°");
     super::dialogs::tooltip(reset, "Straighten to 0°");
     let angle = add(C_ANGLE, TRACKBAR_CLASSW, "Angle", WS_TABSTOP | WINDOW_STYLE(TBS_NOTICKS | TBS_HORZ | TBS_BOTH), HFONT::default());
     unsafe {
@@ -4081,49 +4138,56 @@ fn build_crop(app: &mut App) {
         SendMessageW(angle, TBM_SETPAGESIZE, WPARAM(0), LPARAM(50));
         let _ = SetWindowSubclass(angle, Some(trackbar_subclass), 1, C_ANGLE_RESET as usize);
     }
+    draw::set_role(angle, Role::InkSlider);
     draw::track_hover(angle);
     draw::set_default_pos(angle, 0);
     super::dialogs::tooltip(angle, "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.");
-    add(C_LABELS + 6, w!("STATIC"), "Size", WINDOW_STYLE(0), fonts.ui);
-    let size = add(C_SIZE, w!("STATIC"), "", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
-    super::dialogs::tooltip(size, "The exported photograph’s size, before the border.");
-    add(C_SIZE_NOTE, w!("STATIC"), "", WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), fonts.small);
-    let reset_crop = add(C_RESET, w!("BUTTON"), "Reset Crop", WS_TABSTOP | WS_GROUP, fonts.ui);
+    let reset_crop = add(C_RESET, w!("BUTTON"), "Reset Crop", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_PUSHBUTTON as u32), fonts.ui);
+    draw::set_role(reset_crop, Role::WordButton);
+    draw::track_hover(reset_crop);
     super::dialogs::tooltip(reset_crop, "Show the whole, unturned photograph again.");
-    add(
-        C_LABELS + 7,
-        w!("STATIC"),
-        "Drag the corners or edges to crop, or drag inside to move it. Drag the dial below the photograph to straighten it. Press Enter to apply or Esc to cancel. The border is added after cropping.",
-        WINDOW_STYLE(0),
-        fonts.small,
-    );
-    add(C_CANCEL, w!("BUTTON"), "Cancel", WS_TABSTOP | WS_GROUP, fonts.ui);
-    add(C_DONE, w!("BUTTON"), "Done", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), fonts.ui);
+    let cancel = add(C_CANCEL, w!("BUTTON"), "Cancel", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+    draw::track_hover(cancel);
+    super::dialogs::tooltip(cancel, "Discard the crop (Esc)");
+    let done = add(C_DONE, w!("BUTTON"), "Done", WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+    draw::track_hover(done);
+    super::dialogs::tooltip(done, "Apply the crop (Return)");
     let custom = app.model.crop_session.as_ref().is_some_and(|s| s.aspect == CropAspect::Custom);
     let ins = &mut app.inspector;
     unsafe {
         let _ = MoveWindow(panel, 0, 0, ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top, false);
     }
-    ins.crop = Some(CropPanel { panel, rows, controls, custom, scroll: 0, content: 0 });
+    ins.crop = Some(CropPanel { panel, rows, controls, custom, scroll: 0, content: 0, rules: (0, 0) });
     layout_crop(ins);
 }
 
-/// Pins Cancel and Done, then places the controls above them.
+/// Places the header and the foot, then the rows between them.
 fn layout_crop(ins: &mut Inspector) {
     let Some(crop) = &ins.crop else { return };
     let (w, h) = (ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top);
-    let pad = ins.px(16.0);
-    let (button, tall) = (ins.px(88.0), ins.px(32.0));
-    let footer = h - pad - tall;
+    let gutter = ins.px(ink::GUTTER);
+    let header = ins.px(ink::PANE_HEADER);
+    // The foot: 11 above the words, 8 between them and the buttons, 16 below.
+    let tall = ins.px(36.0);
+    let foot = ins.px(11.0 + 18.0 + 8.0) + tall + ins.px(16.0);
+    let top_of_foot = h - foot;
+    let third = ((w - 2 * gutter - ins.px(10.0)) / 3).max(1);
+    let reset_width = ins.px(measure_dips("Reset Crop", &ink::WORD) + 2.0 * ink::MARGIN);
     let rows = crop.rows;
     place(
         &[
-            (rows, 0, 0, w, (footer - ins.px(8.0)).max(0)),
-            (crop.get(C_CANCEL), w - pad - 2 * button - ins.px(8.0), footer, button, tall),
-            (crop.get(C_DONE), w - pad - button, footer, button, tall),
+            (rows, 0, header + 1, w, (top_of_foot - header - 1).max(0)),
+            (crop.get(C_RESET), w - gutter - reset_width + ins.px(ink::MARGIN), ins.px(8.0), reset_width, ins.px(24.0)),
+            (crop.get(C_CANCEL), gutter, h - ins.px(16.0) - tall, third, tall),
+            (crop.get(C_DONE), gutter + third + ins.px(10.0), h - ins.px(16.0) - tall, w - 2 * gutter - third - ins.px(10.0), tall),
         ],
         0,
     );
+    if let Some(crop) = ins.crop.as_mut() {
+        crop.rules = (header, top_of_foot);
+        // For its paint, which comes while the app may be busy.
+        CROP_RULES.with(|r| r.set((crop.panel.0 as isize, header, top_of_foot)));
+    }
     // Once more when the scroll bar comes or goes, which changes the width.
     for _ in 0..2 {
         let mut client = RECT::default();
@@ -4153,68 +4217,76 @@ fn layout_crop(ins: &mut Inspector) {
             break;
         }
     }
-    // The panel draws the fields' frames, which reach past the fields.
     unsafe {
         let _ = InvalidateRect(rows, None, false);
+        if let Some(crop) = &ins.crop {
+            let _ = InvalidateRect(crop.panel, None, false);
+        }
     }
 }
 
-/// Where the controls above Cancel and Done go in a `width` wide panel,
-/// unscrolled, and the height they take.
+/// Where the rows go in a `width` wide panel, unscrolled, and the height
+/// they take: the ink's gutters and row heights.
 fn crop_rows(ins: &Inspector, width: i32) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
     let Some(crop) = &ins.crop else { return (vec![], 0) };
-    let pad = ins.px(16.0);
-    let right = width - pad;
-    let row = ins.px(24.0);
-    let mut y = ins.px(16.0);
+    let gutter = ins.px(ink::GUTTER);
+    let right = width - gutter;
+    let row = ins.px(ink::ROW);
+    let mut y = 0;
     let mut positions = vec![];
     let mut place = |id: u16, x: i32, y: i32, w: i32, h: i32| positions.push((crop.get(id), x, y, w, h));
-    place(C_LABELS, pad, y, right - pad, ins.px(24.0));
-    y += ins.px(32.0);
+    place(C_LABELS, gutter, y, right - gutter, ins.px(ink::SECTION_HEAD));
+    y += ins.px(ink::SECTION_HEAD);
     for i in 0..CropAspect::ALL.len() as u16 {
-        place(C_ASPECT + i, pad, y, right - pad, row);
-        y += row + ins.px(4.0);
+        place(C_ASPECT + i, 0, y, width, row - ins.px(3.0));
+        y += row - ins.px(3.0);
     }
-    y += ins.px(4.0);
-    for id in [C_LABELS + 1, C_WIDTH, C_LABELS + 2, C_HEIGHT] {
+    for id in [L_RATIO, C_WIDTH, L_TIMES, C_HEIGHT] {
         unsafe {
             let _ = ShowWindow(crop.get(id), if crop.custom { SW_SHOWNA } else { SW_HIDE });
         }
     }
     if crop.custom {
-        let field = ins.px(56.0);
-        place(C_LABELS + 1, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
-        let r = ins.field(pad + ins.px(96.0), y, field);
-        place(C_WIDTH, r.left, r.top, r.right - r.left, r.bottom - r.top);
-        place(C_LABELS + 2, pad + ins.px(96.0) + field, y + ins.px(2.0), ins.px(20.0), ins.px(20.0));
-        let r = ins.field(pad + ins.px(116.0) + field, y, field);
+        let field = ins.px(52.0);
+        place(L_RATIO, gutter, y, ins.px(ink::SLIDER_LABEL), row);
+        let times = ins.px(16.0);
+        let r = ins.field(right - field, y + (row - ins.px(24.0)) / 2, field);
         place(C_HEIGHT, r.left, r.top, r.right - r.left, r.bottom - r.top);
-        y += ins.px(32.0);
+        place(L_TIMES, right - field - times, y, times, row);
+        let r = ins.field(right - 2 * field - times, y + (row - ins.px(24.0)) / 2, field);
+        place(C_WIDTH, r.left, r.top, r.right - r.left, r.bottom - r.top);
+        y += row;
     }
-    place(C_LABELS + 3, pad, y + ins.px(6.0), ins.px(88.0), ins.px(20.0));
-    let half = (right - pad - ins.px(96.0)) / 2;
-    place(C_LANDSCAPE, pad + ins.px(96.0), y, half, ins.px(32.0));
-    place(C_PORTRAIT, pad + ins.px(96.0) + half, y, half, ins.px(32.0));
-    y += ins.px(48.0);
-    place(C_LABELS + 4, pad, y, right - pad, ins.px(24.0));
-    y += ins.px(32.0);
-    place(C_LABELS + 5, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
-    place(C_ANGLE_RESET, right - ins.px(24.0) - ins.px(56.0), y, ins.px(24.0), ins.px(22.0));
-    place(C_ANGLE_VALUE, right - ins.px(56.0), y + ins.px(2.0), ins.px(56.0), ins.px(20.0));
-    y += ins.px(22.0);
-    place(C_ANGLE, pad - ins.px(8.0), y, right - pad + ins.px(16.0), ins.px(26.0));
-    y += ins.px(40.0);
-    place(C_LABELS + 6, pad, y, ins.px(88.0), ins.px(20.0));
-    place(C_SIZE, pad + ins.px(88.0), y, right - pad - ins.px(88.0), ins.px(20.0));
-    y += ins.px(24.0);
-    place(C_SIZE_NOTE, pad, y, right - pad, ins.px(48.0));
-    y += ins.px(56.0);
-    place(C_RESET, pad, y, right - pad, ins.px(32.0));
-    y += ins.px(48.0);
-    // The hint wraps to as many lines as the width needs.
-    let hint = footer_height(ins, crop.get(C_LABELS + 7), right - pad);
-    place(C_LABELS + 7, pad, y, right - pad, hint);
-    y += hint + ins.px(8.0);
+    let words = ins.px(measure_dips("Landscape", &ORIENTATION_WORD) + 4.0);
+    let portrait = ins.px(measure_dips("Portrait", &ORIENTATION_WORD) + 4.0);
+    place(L_ORIENTATION, gutter, y, ins.px(ink::SLIDER_LABEL), row + ins.px(4.0));
+    place(C_PORTRAIT, right - portrait, y, portrait, row + ins.px(4.0));
+    place(C_LANDSCAPE, right - portrait - ins.px(14.0) - words, y, words, row + ins.px(4.0));
+    y += row + ins.px(4.0) + ins.px(10.0);
+    place(L_STRAIGHTEN, gutter, y, right - gutter, ins.px(ink::SECTION_HEAD));
+    y += ins.px(ink::SECTION_HEAD);
+    // As a Lab slider: the label, the slider, the value and ↺.
+    let label = ins.px(ink::SLIDER_LABEL);
+    let value = ins.px(ink::VALUE_WIDTH);
+    let reset = ins.px(ink::RESET_WIDTH);
+    place(L_ANGLE, gutter, y, label, row);
+    place(C_ANGLE, gutter + label, y, (right - gutter - label - value - reset).max(0), row);
+    place(C_ANGLE_VALUE, right - reset - value, y, value, row);
+    place(C_ANGLE_RESET, right - reset, y, reset, row);
+    y += row + ins.px(14.0);
+    place(L_SIZE, gutter, y, label, row);
+    place(C_SIZE, gutter + label, y, right - gutter - label, row);
+    y += row;
+    for id in [L_SIZE_HINT, C_SIZE_NOTE, L_HINT] {
+        let text_height = footer_height(ins, crop.get(id), right - gutter);
+        if text_height > 0 && !window_text(crop.get(id)).is_empty() {
+            place(id, gutter, y, right - gutter, text_height);
+            y += text_height + ins.px(6.0);
+        } else {
+            place(id, gutter, y, right - gutter, 0);
+        }
+    }
+    y += ins.px(10.0);
     (positions, y)
 }
 
@@ -4230,14 +4302,25 @@ fn sync_crop(app: &mut App) {
     app.inspector.crop_shown = cropping;
     let Some(session) = &app.model.crop_session else { return };
     let decimal = app.inspector.decimal;
-    for (i, aspect) in CropAspect::ALL.iter().enumerate() {
-        set_check(crop.get(C_ASPECT + i as u16), *aspect == session.aspect);
+    // The painted rows read the session; they repaint when it changes.
+    for i in 0..CropAspect::ALL.len() as u16 {
+        let c = crop.get(C_ASPECT + i);
+        let chosen = CropAspect::ALL[i as usize] == session.aspect;
+        super::accessible_value(c, if chosen { "Chosen" } else { "" });
+        unsafe {
+            let _ = InvalidateRect(c, None, false);
+        }
     }
     let portrait = session.orientation_portrait();
-    set_check(crop.get(C_LANDSCAPE), !portrait);
-    set_check(crop.get(C_PORTRAIT), portrait);
-    enable(crop.get(C_LANDSCAPE), session.aspect.turns());
-    enable(crop.get(C_PORTRAIT), session.aspect.turns());
+    for (id, chosen) in [(C_LANDSCAPE, !portrait), (C_PORTRAIT, portrait)] {
+        let c = crop.get(id);
+        enable(c, session.aspect.turns());
+        super::accessible_value(c, if chosen { "Chosen" } else { "" });
+        unsafe {
+            let _ = InvalidateRect(c, None, false);
+        }
+    }
+    enable(crop.get(L_ORIENTATION), session.aspect.turns());
     unsafe {
         for (id, value) in [(C_WIDTH, session.custom.width), (C_HEIGHT, session.custom.height)] {
             if GetFocus() != crop.get(id) {
@@ -4250,10 +4333,11 @@ fn sync_crop(app: &mut App) {
         }
         let _ = ShowWindow(crop.get(C_ANGLE_RESET), if session.angle != 0.0 { SW_SHOWNA } else { SW_HIDE });
     }
+    ink::set_changed(crop.get(L_ANGLE), session.angle != 0.0);
     set_text(crop.get(C_ANGLE_VALUE), &format!("{}°", format(session.angle, 0.1, decimal)));
     // The draft's pixels in the frame an export develops; with a target, a
     // smaller crop needs a larger frame, up to the working limit.
-    let (size, note) = match app.model.crop_draft_size() {
+    let (size, note, warn) = match app.model.crop_draft_size() {
         Some(Ok(size)) => {
             let source = app.model.source_size.0 as f64;
             let scale = size.working.0 as f64 / source;
@@ -4264,26 +4348,138 @@ fn sync_crop(app: &mut App) {
             } else {
                 format!("Image Size develops the whole frame at {} of the source.", crate::model::percent(scale))
             };
-            ((size.photo.0 as f64, size.photo.1 as f64), note)
+            ((size.photo.0 as f64, size.photo.1 as f64), note, false)
         }
         Some(Err(error)) => {
             let shown = session.shown();
-            ((shown.width, shown.height), error.to_string())
+            ((shown.width, shown.height), error.to_string(), true)
         }
         None => {
             let shown = session.shown();
-            ((shown.width, shown.height), String::new())
+            ((shown.width, shown.height), String::new(), false)
         }
     };
     set_text(crop.get(C_SIZE), &format!("{} × {} px", size.0.round() as i64, size.1.round() as i64));
+    let note_changed = window_text(crop.get(C_SIZE_NOTE)) != note;
     set_text(crop.get(C_SIZE_NOTE), &note);
+    ink::set_look(crop.get(C_SIZE_NOTE), ink::Look { warn, ..Default::default() });
     enable(crop.get(C_RESET), session.modified());
     let custom = session.aspect == CropAspect::Custom;
     if let Some(crop) = app.inspector.crop.as_mut()
-        && crop.custom != custom
+        && (crop.custom != custom || note_changed)
     {
         crop.custom = custom;
         layout_crop(&mut app.inspector);
+    }
+}
+
+/// Paints a crop row the panel draws itself: an aspect ratio (a dot, the
+/// ratio, its format in italic at the right), an orientation word (`paper`
+/// with the pencil under it when chosen), or Cancel and Done.
+fn draw_crop_item(item: &DRAWITEMSTRUCT, session: Option<&crate::crop::CropSession>) {
+    let hwnd = item.hwndItem;
+    let id = item.CtlID as u16;
+    let s = draw::dpi_of(hwnd);
+    let t = theme::tokens();
+    let r = item.rcItem;
+    let (w, h) = ((r.right - r.left) as f32 / s, (r.bottom - r.top) as f32 / s);
+    let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
+    let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
+    let focused = item.itemState.0 & ODS_FOCUS.0 != 0 && draw::focus_cues(hwnd);
+    let hot = !disabled && draw::is_hot(hwnd);
+    let alpha = if disabled { theme::DISABLED_OPACITY } else { 1.0 };
+    let gutter = ink::GUTTER as f32;
+    let text = window_text(hwnd);
+    let mut c = Canvas::new(item.hDC, r);
+    c.clear(theme::gdi(t.hex.panel));
+    c.d2d(s, t.plain, |p| {
+        match id {
+            i if (C_ASPECT..C_ASPECT + CropAspect::ALL.len() as u16).contains(&i) => {
+                let chosen = session.is_some_and(|s| s.aspect == CropAspect::ALL[(i - C_ASPECT) as usize]);
+                let (title, format) = text.split_once('\t').unwrap_or((&text, ""));
+                let ring = if chosen { t.hex.paper } else if hot { t.hex.dim } else { t.hex.track };
+                let (cx, cy) = (gutter + 4.5, h / 2.0);
+                if chosen {
+                    p.fill_ellipse(cx, cy, 4.5, 4.5, Ink::hex(t.hex.paper));
+                } else {
+                    p.stroke_round_rect(DRect::new(cx - 3.9, cy - 3.9, 7.8, 7.8), 3.9, 1.2, Ink::hex(ring));
+                }
+                let m = p.measure(title, &ink::LABEL, 0.0);
+                let y = ((h + 0.7 * ink::LABEL.size) / 2.0 - m.baseline).round();
+                p.text(title, &ink::LABEL, gutter + 19.0, y, Ink::hex(if chosen || hot { t.hex.paper } else { t.hex.label }));
+                if !format.is_empty() {
+                    let f = p.measure(format, &ASPECT_FORMAT, 0.0);
+                    p.text(format, &ASPECT_FORMAT, w - gutter - f.width, y + m.baseline - f.baseline, Ink::hex(t.hex.dim));
+                }
+            }
+            C_LANDSCAPE | C_PORTRAIT => {
+                let chosen = session.is_some_and(|s| s.orientation_portrait() == (id == C_PORTRAIT));
+                let m = p.measure(&text, &ORIENTATION_WORD, 0.0);
+                let y = ((h + 0.7 * ORIENTATION_WORD.size) / 2.0 - m.baseline).round();
+                if chosen && !disabled {
+                    p.underline(DRect::new(2.0, y + m.baseline + 3.0, m.width, 6.0), &t, false);
+                }
+                let color = if chosen { t.hex.paper } else if hot { t.hex.label } else { t.hex.dim };
+                p.text(&text, &ORIENTATION_WORD, 2.0, y, Ink::hex(color).alpha(alpha));
+            }
+            C_CANCEL => {
+                // Outlined, square-cornered, 36 tall beside Done.
+                if pressed || hot {
+                    p.fill_rect(DRect::new(0.0, 0.0, w, h), Ink::hex(t.hex.paper).alpha(if pressed { 0.09 } else { 0.04 }));
+                }
+                p.stroke_rect(DRect::new(0.5, 0.5, w - 1.0, h - 1.0), 1.0, Ink::hex(if hot || pressed { t.hex.dim } else { t.hex.track }));
+                let m = p.measure(&text, &CROP_BUTTON, 0.0);
+                p.text(&text, &CROP_BUTTON, ((w - m.width) / 2.0).round(), ((h + 0.7 * CROP_BUTTON.size) / 2.0 - m.baseline).round(), Ink::hex(t.hex.paper));
+            }
+            C_DONE => {
+                // The pencil's yellow, filled.
+                let sink = if pressed { 1.0 } else { 0.0 };
+                let face = DRect::new(0.0, sink, w, h - sink);
+                p.fill_round_rect(face, 3.0, Ink::hex(t.hex.fill));
+                if pressed {
+                    p.fill_round_rect(face, 3.0, Ink::hex(0).alpha(0.12));
+                } else if hot {
+                    p.fill_round_rect(face, 3.0, Ink::hex(0xffffff).alpha(0.08));
+                }
+                let m = p.measure(&text, &CROP_BUTTON, 0.0);
+                p.text(&text, &CROP_BUTTON, ((w - m.width) / 2.0).round(), face.y + ((h + 0.7 * CROP_BUTTON.size) / 2.0 - m.baseline).round(), Ink::hex(t.hex.on_fill));
+            }
+            _ => {}
+        }
+        if focused {
+            ink::focus_box(p, DRect::new(0.0, 0.0, w, h), &t);
+        }
+    });
+    c.present(item.hDC);
+}
+
+/// The panel's header word, its rules, and the foot's line.
+fn paint_crop_panel(hwnd: HWND) {
+    let t = theme::tokens();
+    let s = draw::dpi_of(hwnd);
+    let (_, header, foot) = CROP_RULES.with(Cell::get);
+    let rules = (header, foot);
+    unsafe {
+        let mut ps = PAINTSTRUCT::default();
+        let dc = BeginPaint(hwnd, &mut ps);
+        let mut client = RECT::default();
+        let _ = GetClientRect(hwnd, &mut client);
+        let mut c = Canvas::new(dc, client);
+        c.clear(theme::gdi(t.hex.panel));
+        let (w, _) = (client.right as f32 / s, client.bottom as f32 / s);
+        let gutter = ink::GUTTER as f32;
+        c.d2d(s, t.plain, |p| {
+            let m = p.measure("Crop", &CROP_HEAD, 0.0);
+            p.text("Crop", &CROP_HEAD, gutter, 13.0 + 12.0 * 0.8 - m.baseline + 3.0, Ink::hex(t.hex.paper));
+            let (header, foot) = (rules.0 as f32 / s, rules.1 as f32 / s);
+            p.fill_rect(DRect::new(0.0, header, w, 1.0), Ink::hex(t.hex.line));
+            p.fill_rect(DRect::new(0.0, foot, w, 1.0), Ink::hex(t.hex.line));
+            let words = "return applies · esc cancels";
+            let f = p.measure(words, &CROP_FOOT, 0.0);
+            p.text(words, &CROP_FOOT, ((w - f.width) / 2.0).round(), foot + 11.0, Ink::hex(t.hex.label));
+        });
+        c.present(dc);
+        let _ = EndPaint(hwnd, &ps);
     }
 }
 
@@ -4400,17 +4596,31 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 }
                 SetBkMode(dc, TRANSPARENT);
                 let p = theme::palette();
-                let id = GetDlgCtrlID(control) as u16;
-                let footer = id == C_LABELS + 7 || id == C_SIZE_NOTE;
-                let color = if draw::is_dimmed(control) { p.disabled } else if footer { p.secondary } else { p.text };
-                SetTextColor(dc, COLORREF(color));
+                SetTextColor(dc, COLORREF(p.text));
                 LRESULT(theme::brush(p.panel).0 as isize)
+            }
+            WM_DRAWITEM => {
+                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
+                if !ink::draw_item(item) {
+                    // The session is read without the app when it's busy:
+                    // a repaint follows once it's free.
+                    if with_app(|app| draw_crop_item(item, app.model.crop_session.as_ref())).is_none() {
+                        draw_crop_item(item, None);
+                        let _ = InvalidateRect(item.hwndItem, None, false);
+                    }
+                }
+                LRESULT(1)
             }
             WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
-                draw::paint_panel(hwnd, theme::palette().panel);
+                let is_panel = CROP_RULES.with(Cell::get).0 == hwnd.0 as isize;
+                if is_panel {
+                    paint_crop_panel(hwnd);
+                } else {
+                    draw::paint_panel(hwnd, theme::palette().panel);
+                }
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),

@@ -787,7 +787,8 @@ impl Model {
     }
 
     /// Chooses the film new photographs open with; its own paper comes with
-    /// it unless the paper is kept, as when choosing a photograph's film.
+    /// it unless the paper lock is closed, as when choosing a photograph's
+    /// film (`choose_film`).
     pub fn set_new_photo_film(&mut self, film: &str) {
         let (old_film, old_paper) = self.new_photo_stocks();
         let choice = crate::state::EditState { film: old_film, paper: old_paper, ..Default::default() };
