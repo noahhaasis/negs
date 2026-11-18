@@ -684,7 +684,7 @@ impl App {
             }
         }
         // The band says the file's name alone (`TitleBar.swift`).
-        let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_else(|| "Negs".into());
+        let name = model.compare_title().or_else(|| model.source.as_deref().map(crate::model::file_name)).unwrap_or_else(|| "Negs".into());
         titlebar::set_title(self.main, &name);
         panes::sync(self.panes, model.pane() == crate::model::Pane::Presets);
         self.update_taskbar();

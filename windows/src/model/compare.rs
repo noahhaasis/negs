@@ -9,8 +9,8 @@ use super::*;
 use crate::compare::{self as rules, Comparison, Layout, Origin, OriginalMode, OriginalReference, Side};
 use negs_library::Item;
 
-/// The other photograph's long side: sharp on a large screen's half.
-const OTHER_LONG_SIDE: u32 = 2048;
+/// The other photograph's long side: the helper's thumbnails go to 1024.
+const OTHER_LONG_SIDE: u32 = 1024;
 /// The longest side a picture in the view keeps.
 const MAX_SHOWN: u32 = 3072;
 
@@ -192,7 +192,7 @@ impl Model {
         if let Some(c) = &mut self.compare.comparison {
             std::mem::swap(&mut c.first, &mut c.second);
             c.active_first = !c.active_first;
-            self.mark(dirty::COMPARE | dirty::STATUS);
+            self.mark(dirty::COMPARE | dirty::STATUS | dirty::CHROME);
         }
     }
 
@@ -450,6 +450,13 @@ impl Model {
             None => {}
         }
         self.comparison().is_some()
+    }
+
+    /// The title bar's name while comparing two photographs: "A.NEF and B.NEF".
+    pub fn compare_title(&self) -> Option<String> {
+        let c = self.comparison()?;
+        let (Side::Photo(a), Side::Photo(b)) = (&c.first, &c.second) else { return None };
+        Some(format!("{} and {}", super::file_name(&a.photo), super::file_name(&b.photo)))
     }
 
     /// The status line's words in compare: the two, by number and stock.
