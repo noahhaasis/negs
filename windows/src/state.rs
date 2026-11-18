@@ -204,6 +204,64 @@ pub struct Stock {
     pub manufacturer_data: bool,
 }
 
+/// A camera colour filter from the catalog (`ColorFilter` in
+/// `Parameters.swift`, issue #21): its params key, the colour it's named
+/// by, the measured glass, and the glass's colour for its disc.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorFilter {
+    pub key: String,
+    pub name: String,
+    pub glass: String,
+    pub colour: u32,
+}
+
+impl ColorFilter {
+    pub const PATH: &'static str = "camera.color_filter";
+    pub const NONE: &'static str = "none";
+
+    pub fn new(value: &Value) -> Self {
+        Self {
+            key: json::string(&value["key"]).into(),
+            name: json::string(&value["name"]).into(),
+            glass: json::string(&value["glass"]).into(),
+            colour: u32::from_str_radix(json::string(&value["colour"]).trim_start_matches('#'), 16).unwrap_or(0x888888),
+        }
+    }
+
+    /// What each filter does to a black-and-white photograph.
+    pub fn effect(key: &str) -> &'static str {
+        match key {
+            "hoya_x1" => "Lightens foliage; darkens red lips and skin a little, for a tanned look.",
+            "hoya_x0" => "Lightens foliage and darkens the sky a little. Kind to skin outdoors.",
+            "hoya_y2" => "Darkens blue sky a touch so clouds stand out. The everyday filter.",
+            "hoya_ya3" => "Darker sky, stronger clouds, less haze. Hides freckles and blemishes.",
+            "hoya_r1" => "Near-black blue sky, bright red and brick, pale skin and lips. Cuts haze hard.",
+            _ => "No glass in front of the lens.",
+        }
+    }
+
+    /// What the filter does, then what it costs the film
+    /// (`ColorFilterPicker.hint`): "… Takes 1,3 stops on Ilford HP5 Plus;
+    /// auto exposure gives it." `decimal` is the locale's separator.
+    pub fn hint(filter: Option<&ColorFilter>, stops: Option<f64>, film: &str, metered: bool, decimal: char) -> String {
+        let Some(filter) = filter else { return Self::effect(Self::NONE).into() };
+        let mut text = Self::effect(&filter.key).to_string();
+        if let Some(stops) = stops {
+            let rounded = (stops * 10.0).round() / 10.0;
+            let number = if rounded.fract() == 0.0 { format!("{rounded:.0}") } else { format!("{rounded:.1}").replace('.', &decimal.to_string()) };
+            let plural = if (stops - 1.0).abs() < 0.05 { "" } else { "s" };
+            text += &format!(" Takes {number} stop{plural} on {film}");
+            text += if metered { "; auto exposure gives it." } else { "." };
+        }
+        text
+    }
+
+    /// The disc's tooltip.
+    pub fn help(filter: Option<&ColorFilter>) -> String {
+        filter.map_or_else(|| "No filter in front of the lens.".into(), |f| format!("{} · {}. {}", f.name, f.glass, Self::effect(&f.key)))
+    }
+}
+
 /// Enlarger › Shifts move (`FilterLink` in `Parameters.swift`): how the
 /// magenta and yellow shift sliders move each other. Together is the
 /// red↔cyan axis. Linked, they also reset together. A preference of the app,

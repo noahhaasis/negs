@@ -58,7 +58,7 @@ pub const INPUT_PATHS: [&str; 5] =
     ["io.input_interpretation.mode", "io.input_interpretation.color_space", "io.input_interpretation.linear", "io.input_color_space", "io.input_cctf_decoding"];
 pub const FILM_DEVELOPMENT: &str = "film_render.development_time";
 pub const PRINT_DEVELOPMENT: &str = "print_render.development_time";
-const CAMERA_LOOSE: [&str; 3] = ["camera.exposure_compensation_ev", "camera.film_format_mm", "camera.lens_blur_um"];
+const CAMERA_LOOSE: [&str; 4] = ["camera.exposure_compensation_ev", "camera.film_format_mm", "camera.lens_blur_um", state::ColorFilter::PATH];
 
 fn control_modified(control: &Adjustment, model: &Model) -> bool {
     !matches!(control, Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. }) && model.is_modified(control.path())
@@ -169,6 +169,10 @@ pub fn edits(tab: Tab, model: &Model, decimal: char) -> Vec<Edit> {
                             out.push(Edit { title: "Film format".into(), value, target: Target::FilmFormat });
                         }
                         path(&mut out, "Lens blur (µm)", "camera.lens_blur_um", "");
+                        if model.is_modified(state::ColorFilter::PATH) {
+                            let value = model.chosen_color_filter().map_or_else(|| "None".into(), |f| f.name.clone());
+                            out.push(Edit { title: "Color filter".into(), value, target: Target::Param(state::ColorFilter::PATH) });
+                        }
                     }
                     Section::Film => path(&mut out, "Film development", FILM_DEVELOPMENT, " min"),
                     Section::Print => {

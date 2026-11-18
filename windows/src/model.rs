@@ -456,6 +456,10 @@ pub struct Model {
     nullable_paths: Vec<String>,
     catalog: Value,
     pub stocks: Vec<Stock>,
+    /// The catalog's camera colour filters, in its order.
+    pub color_filters: Vec<state::ColorFilter>,
+    /// The filter the Color Filter switch puts back once it took it off.
+    pub last_color_filter: String,
     pub source: Option<PathBuf>,
     /// The developed preview. None until the first render of `source` completes.
     pub image: Option<Picture>,
@@ -651,6 +655,8 @@ impl Model {
             nullable_paths: vec![],
             catalog: Value::Null,
             stocks: vec![],
+            color_filters: vec![],
+            last_color_filter: "hoya_y2".into(),
             source: None,
             image: None,
             placeholder: None,
@@ -778,6 +784,45 @@ impl Model {
         self.prefs.fotufilm_films = films.key().into();
         self.prefs.save();
         self.mark(dirty::INSPECTOR | dirty::PREVIEWS);
+    }
+    /// The camera colour filter in front of the lens, or `ColorFilter::NONE`.
+    pub fn color_filter(&self) -> &str {
+        match self.value(state::ColorFilter::PATH).as_str() {
+            Some(key) if !key.is_empty() => key,
+            _ => state::ColorFilter::NONE,
+        }
+    }
+    /// The catalog's filter in front of the lens; None for none.
+    pub fn chosen_color_filter(&self) -> Option<&state::ColorFilter> {
+        let key = self.color_filter();
+        self.color_filters.iter().find(|f| f.key == key)
+    }
+    /// Lab › Camera › Color Filter: puts the glass `key` in front of the lens
+    /// (or takes it off), one undo step.
+    pub fn set_color_filter(&mut self, key: &str) {
+        if key != state::ColorFilter::NONE {
+            self.last_color_filter = key.to_string();
+        }
+        let mut next = self.state.clone();
+        json::set(&mut next.params, state::ColorFilter::PATH, Value::String(key.to_string()));
+        self.apply(next, if key == state::ColorFilter::NONE { "Remove Color Filter" } else { "Change Color Filter" });
+    }
+    /// The module's switch: off takes the glass off, on puts the last one back.
+    pub fn switch_color_filter(&mut self, on: bool) {
+        let key = if on { self.last_color_filter.clone() } else { state::ColorFilter::NONE.to_string() };
+        self.set_color_filter(&key);
+    }
+    /// How many stops the filter takes on the current film; None for colour
+    /// films and for a film the glass leaves blind.
+    pub fn color_filter_stops(&self, key: &str) -> Option<f64> {
+        let film = &self.state.film;
+        let profile = self.catalog["profiles"].as_array()?.iter().find(|p| p["id"].as_str() == Some(film.as_str()))?;
+        profile["color_filter_stops"][key].as_f64()
+    }
+    /// The module shows for B&W films, or while a filter is set (by a
+    /// preset, or kept from a B&W film), with a warning on colour film.
+    pub fn shows_color_filter(&self) -> bool {
+        !self.color_filters.is_empty() && (self.film_is_bw() || self.color_filter() != state::ColorFilter::NONE)
     }
     pub fn filter_link(&self) -> state::FilterLink {
         state::FilterLink::from_key(&self.prefs.filter_shift_link)
@@ -978,6 +1023,7 @@ impl Model {
         // Edits made meanwhile reach the library before the state below resets them.
         self.library_sync();
         self.stocks = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
+        self.color_filters = catalog["color_filters"].as_array().map(|a| a.iter().map(state::ColorFilter::new).collect()).unwrap_or_default();
         self.defaults = catalog["defaults"].clone();
         // The engine leaves lens corrections off for params from before them,
         // so their crops keep their place; the app corrects every new edit.

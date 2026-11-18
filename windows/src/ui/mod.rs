@@ -11,6 +11,7 @@
 
 mod alert;
 pub mod canvas;
+mod color_filter;
 mod d2d;
 mod dialogs;
 mod draw;
@@ -1468,6 +1469,7 @@ pub fn run() {
         strip::register();
         inspector::register();
         tone_graph::register();
+        color_filter::register();
         presets::register();
         status::register();
 

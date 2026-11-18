@@ -103,6 +103,8 @@ enum When {
     FilmStyle,
     /// Hidden for B&W films (one emulsion): per-channel grain lanes.
     ColorFilm,
+    /// Lab › Camera › Color Filter: B&W films, or while a filter is set.
+    ColorFilter,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -142,6 +144,8 @@ enum Kind {
     FilterLink(&'static str),
     /// The tone graph atop Print Curves, with its label and channel buttons.
     ToneGraph,
+    /// Color Filter's glass discs, the hint and the colour film warning.
+    ColorFilter,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -512,6 +516,9 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::FilmFormat, lab, None, When::Always);
     add(&mut rows, Kind::Slider(state::FILM_FORMAT), lab, None, When::CustomFormat);
     add(&mut rows, Kind::Slider(state::LENS_BLUR), lab, None, When::Shows(Section::Camera, state::LENS_BLUR.path()));
+    // Its switch takes the glass off and puts the last one back.
+    let filter = add(&mut rows, Kind::Group { title: "Color Filter", enable: Some(state::ColorFilter::PATH) }, lab, None, When::ColorFilter);
+    add(&mut rows, Kind::ColorFilter, lab, Some(filter), When::ColorFilter);
     groups(&mut rows, Section::Camera);
     section_more(&mut rows, Section::Camera);
     add(&mut rows, Kind::Section("Film"), lab, None, When::Always);
@@ -689,6 +696,7 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
         When::CustomWhiteBalance => model.is_raw && json::string(model.value("io.raw_white_balance.mode")) == "custom",
         When::Scanning => scanning,
         When::ColorFilm => !model.film_is_bw(),
+        When::ColorFilter => model.shows_color_filter(),
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
         When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
         When::Note => matches!(row.kind, Kind::Note(note) if !note_text(model, note).is_empty()),
@@ -708,6 +716,29 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
     // changed from its default.
     let basic = row.basic.is_none_or(|(index, place)| crate::edits::control_shows(model, index, place));
     shown && basic && row.group.is_none_or(|g| group_shown(g))
+}
+
+/// A module's switch: on for a bool path, and for Color Filter while a
+/// glass is in front of the lens.
+fn switch_on(model: &Model, path: &str) -> bool {
+    if path == state::ColorFilter::PATH { model.color_filter() != state::ColorFilter::NONE } else { json::boolean(model.value(path)) }
+}
+
+/// Under Color Filter's discs: what the glass does and costs this film, and
+/// on colour film the warning (`ColorFilterPicker`).
+fn color_filter_hints(model: &Model, decimal: char) -> (String, String) {
+    let chosen = model.chosen_color_filter();
+    let film = model.stocks.iter().find(|s| !s.paper && s.id == model.state.film).map_or("this film", |s| s.name.as_str());
+    // Auto exposure meters through the glass, and so does matching the camera's brightness.
+    let metered = json::boolean(model.value("camera.auto_exposure")) || model.matches_brightness();
+    let stops = chosen.and_then(|f| model.color_filter_stops(&f.key));
+    let hint = state::ColorFilter::hint(chosen, stops, film, metered, decimal);
+    let warning = if chosen.is_some() && !model.film_is_bw() {
+        "Taking filters are made for black-and-white film. On colour film this one tints the whole photograph.".to_string()
+    } else {
+        String::new()
+    };
+    (hint, warning)
 }
 
 /// What an export makes, over the Export button: "6048 × 4024 · PNG 16-bit
@@ -926,10 +957,17 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
     // A note's height follows its text, so set it before laying out.
     let mut note_changed = false;
     for row in ins.rows.iter().filter(|r| r.shown) {
-        if let Kind::Note(note) = row.kind {
-            let text = note_text(model, note);
-            if window_text(row.controls[0]) != text {
-                set_text(row.controls[0], &text);
+        let texts = match row.kind {
+            Kind::Note(note) => vec![(row.controls[0], note_text(model, note))],
+            Kind::ColorFilter => {
+                let (hint, warning) = color_filter_hints(model, ins.decimal);
+                vec![(row.controls[1], hint), (row.controls[2], warning)]
+            }
+            _ => continue,
+        };
+        for (control, text) in texts {
+            if window_text(control) != text {
+                set_text(control, &text);
                 note_changed = true;
             }
         }
@@ -1102,6 +1140,11 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             }
             super::dialogs::tooltip(c, crate::help::text(state::FILM_FORMAT.path()).unwrap_or_default());
             controls.push(c);
+        }
+        Kind::ColorFilter => {
+            controls.push(super::color_filter::create(parent, id(ACTION)));
+            controls.push(ink_static("", Role::Hint, LABEL, false));
+            controls.push(ink_static("", Role::Hint, EDIT, false));
         }
         Kind::ToneGraph => {
             let text = create(w!("STATIC"), "Tone graph", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.small);
@@ -1373,6 +1416,19 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
                 }
                 positions.push((c[1], gutter, y + ins.px(36.0), right - gutter, ins.px(168.0)));
                 ins.px(36.0 + 168.0 + 6.0)
+            }
+            Kind::ColorFilter => {
+                let picker = ins.px(super::color_filter::HEIGHT);
+                positions.push((c[0], 0, y, width, picker));
+                let mut height = picker;
+                for &hint in &c[1..] {
+                    let text_height = if window_text(hint).is_empty() { 0 } else { footer_height(ins, hint, right - gutter) };
+                    positions.push((hint, gutter, y + height, right - gutter, text_height));
+                    if text_height > 0 {
+                        height += text_height + ins.px(6.0);
+                    }
+                }
+                height + ins.px(4.0)
             }
             Kind::BalancePrint(title, _) => {
                 let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
@@ -1697,7 +1753,8 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
     let mut group_off = vec![false; ins.rows.len()];
     for (i, row) in ins.rows.iter().enumerate() {
         if let Kind::Group { enable: Some(path), .. } = row.kind {
-            group_off[i] = !json::boolean(model.value(path));
+            // The glass can be changed with the filter off (`disablesContent: false`).
+            group_off[i] = path != state::ColorFilter::PATH && !switch_on(model, path);
         }
     }
     let decimal = ins.decimal;
@@ -1744,11 +1801,15 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     (Some(index), _) => crate::edits::group_count(index, model) > 0,
                     (None, "Output") => output_changed(model),
                     (None, "Input Colour") => crate::edits::INPUT_PATHS.iter().any(|p| model.is_modified(p)),
+                    (None, "Color Filter") => model.is_modified(state::ColorFilter::PATH),
                     _ => false,
                 };
-                let off = switch.is_some_and(|path| !json::boolean(model.value(path)));
+                let off = switch.is_some_and(|path| !switch_on(model, path));
                 let skipped = row.print && scanning;
-                let summary = index.and_then(|index| group_summary(model, index, decimal)).unwrap_or_default();
+                let summary = match title {
+                    "Color Filter" => model.chosen_color_filter().map_or_else(|| "Off".into(), |f| f.name.clone()),
+                    _ => index.and_then(|index| group_summary(model, index, decimal)).unwrap_or_default(),
+                };
                 unsafe {
                     // Read out with its state, as the foldouts are.
                     let open = expanded[i] as isize + 2 * skipped as isize + 4;
@@ -1761,7 +1822,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 ink::set_look(c[0], ink::Look { open: expanded[i], off, edited, skipped, summary, ..Default::default() });
                 enable(c[0], catalog);
                 if let Some(path) = switch {
-                    set_check(c[1], json::boolean(model.value(path)));
+                    set_check(c[1], switch_on(model, path));
                     enable(c[1], catalog && !skipped);
                     ink::set_look(c[1], ink::Look { skipped, ..Default::default() });
                 }
@@ -1829,6 +1890,10 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     }
                 }
                 enable_all(c, on);
+            }
+            Kind::ColorFilter => {
+                super::color_filter::update(c[0], model, on);
+                ink::set_look(c[2], ink::Look { warn: true, ..Default::default() });
             }
             Kind::ToneGraph => {
                 // Not off with the print curves: a contrast drag turns them on.
@@ -2063,6 +2128,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.prefs.save();
             app.model.dirty |= dirty::STRUCTURE;
         }
+        (Kind::Group { enable: Some(state::ColorFilter::PATH), .. }, CHECK) if code == BN_CLICKED => app.model.switch_color_filter(checked()),
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::MatchBrightness, CHECK) if code == BN_CLICKED => app.model.set_matches_brightness(checked()),

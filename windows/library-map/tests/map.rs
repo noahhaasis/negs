@@ -378,3 +378,23 @@ fn linked_shifts_move_as_the_macs() {
     assert_eq!(FilterLink::ALL.map(FilterLink::title), ["Separately", "Together", "Opposite ways"]);
     assert_eq!(FilterLink::from_key(""), FilterLink::Separate);
 }
+
+/// Color Filter's hint, as `ColorFilterPicker.hint` words it: what the
+/// glass does, then the stops it takes on this film in the locale's decimals.
+#[test]
+fn colour_filter_hints_read_as_the_macs() {
+    use state::ColorFilter;
+    let yellow = ColorFilter::new(&json!({"key": "hoya_y2", "name": "Yellow", "glass": "Hoya Y2", "colour": "#f2c84b"}));
+    assert_eq!(yellow.colour, 0xf2c84b);
+    assert_eq!(ColorFilter::hint(None, None, "Tri-X", false, '.'), "No glass in front of the lens.");
+    assert_eq!(
+        ColorFilter::hint(Some(&yellow), Some(1.34), "Ilford HP5 Plus", true, ','),
+        "Darkens blue sky a touch so clouds stand out. The everyday filter. Takes 1,3 stops on Ilford HP5 Plus; auto exposure gives it."
+    );
+    assert_eq!(
+        ColorFilter::hint(Some(&yellow), Some(1.02), "Tri-X", false, '.'),
+        "Darkens blue sky a touch so clouds stand out. The everyday filter. Takes 1 stop on Tri-X."
+    );
+    assert_eq!(ColorFilter::hint(Some(&yellow), None, "Portra", false, '.'), ColorFilter::effect("hoya_y2"));
+    assert_eq!(ColorFilter::help(Some(&yellow)), "Yellow · Hoya Y2. Darkens blue sky a touch so clouds stand out. The everyday filter.");
+}
