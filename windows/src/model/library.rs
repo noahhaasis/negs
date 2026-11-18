@@ -81,6 +81,12 @@ impl Model {
         self.shelf.library.as_ref()?.open_item().cloned()
     }
 
+    /// The open photograph's edits can't be shown here (from a newer Mac):
+    /// it shows the defaults, never filed under its stored look.
+    pub(super) fn library_blocked(&self) -> bool {
+        self.shelf.blocked.is_some() && self.shelf.blocked == self.library_item()
+    }
+
     /// What the strip lists: the filter's photographs, the open one always.
     pub fn shown_items(&self) -> Vec<Item> {
         let Some(library) = &self.shelf.library else { return vec![] };
@@ -223,10 +229,10 @@ impl Model {
             data: paths.data.clone(),
             app: env!("CARGO_PKG_VERSION").into(),
             bin: Box::new(super::recycle_bin::RecycleBin),
-            // Settings › Show camera JPEGs separately, off; Save ratings and
-            // edits next to photos, on. Neither is in Windows' Settings yet.
-            pairing: true,
-            sidecars: true,
+            // Settings › Show camera JPEGs separately and Save ratings and
+            // edits next to photos.
+            pairing: !self.prefs.library.separate_camera_jpegs,
+            sidecars: self.prefs.library.sidecars(),
             id_seed: None,
         };
         let mut library = match Library::new(folder, config) {
@@ -450,6 +456,38 @@ impl Model {
         self.library_outcome(outcome, None);
         self.prune_selection();
         self.mark(dirty::STRIP);
+    }
+
+    /// Settings › RAW + JPEG › Show camera JPEGs separately: the folder is
+    /// listed again, a RAW and its camera JPEG as one photograph or two.
+    pub fn set_separate_camera_jpegs(&mut self, on: bool) {
+        if self.prefs.library.separate_camera_jpegs == on {
+            return;
+        }
+        self.prefs.library.separate_camera_jpegs = on;
+        self.prefs.save();
+        if let Some(library) = self.shelf.library.as_mut() {
+            library.set_pairing(!on);
+            self.prune_selection();
+            self.mark(dirty::STRIP | dirty::CHROME);
+        }
+    }
+
+    /// Settings › Edits › Save ratings and edits next to photos. Off, nothing
+    /// is remembered per photograph (an edit waiting to be saved isn't) and
+    /// sidecars already there are left alone; every photograph's thumbnail
+    /// shows it as new. On, they're read again (`sidecarsEnabled`).
+    pub fn set_sidecars(&mut self, on: bool) {
+        if self.prefs.library.sidecars() == on {
+            return;
+        }
+        self.prefs.library.sidecars = Some(on);
+        self.prefs.save();
+        self.shelf.save_due = None;
+        if let Some(library) = self.shelf.library.as_mut() {
+            library.set_sidecars(on);
+            self.mark(dirty::STRIP | dirty::CHROME);
+        }
     }
 
     fn prune_selection(&mut self) {

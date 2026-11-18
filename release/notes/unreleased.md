@@ -80,20 +80,23 @@
   command, keeps it too. The film tray has Search; the paper tray has the
   paper lock's switch. While a stock develops its tile stands in, turned
   like the photograph. With the tiles off in Settings, the names open a
-  menu instead.
+  menu instead. A group's name in the tray's foot glides the row to it,
+  and screen readers name every tile, star and switch in it.
 - The film and paper are chosen only under the photograph now, as on the
   Mac: Film and Paper above Prep · Lab · Output are gone, and the
   development times moved to the Lab's Film and Print sections.
 - The film, the paper and the paper lock under the photograph explain
   themselves when you rest the pointer on them.
-- The window reopens at the size it was left at.
+- The window reopens at exactly the size it was left at, at 125 % and
+  150 % display scaling too.
 - **The film strip as on the Mac.** Each frame sits on black film at its
   photograph's own shape, the open one whole with a pencil line under it
   and the rest dimmed. Ratings show as hand-drawn stars, picks in a
   pencilled box, rejects crossed out, with a soft shadow behind them, and
   edited photographs carry a dot. The tongue at the strip's right end
-  hides and shows it. The strip and the status line are as tall as the
-  tray, so the photograph no longer moves when the tray opens.
+  hides and shows it, its slanted edge smooth. The strip and the status
+  line are as tall as the tray, so the photograph no longer moves when
+  the tray opens.
 - **The grid.** G lays the folder out as a contact sheet over the window,
   unfolding out of the strip: rows of photographs at their own shapes,
   "Showing all ⌄ 34 photographs" above them (click the words to filter,
@@ -101,14 +104,21 @@
   a drag across the gaps and the arrow keys select; ratings and flags
   apply to the selection. Ctrl+plus and minus, or Ctrl and the wheel,
   change the size. E, Return, Esc or a double click go back to the
-  photograph.
+  photograph. The wheel glides, and a thin scroll bar shows at the right
+  edge while it scrolls; drag it, or click above or below it to page.
 - **Thumbnails as you developed them.** The strip and the grid show each
   photograph with its edits, developed in the background and kept in
   Negs' own cache, the ones in view first (only those while energy saver
-  is on). Negs no longer asks Windows for thumbnails, which wrote
-  `Thumbs.db` files into network folders.
+  is on), cropped, turned and inside their borders. The photograph you
+  leave shows its edits at once, made from what was on screen. Negs no
+  longer asks Windows for thumbnails, which wrote `Thumbs.db` files into
+  network folders.
+- Settings › Photographs has the Mac's switches for showing camera JPEGs
+  beside their RAWs ("Show camera JPEGs separately") and for "Save
+  ratings and edits next to photos". Both keep today's behaviour unless
+  you change them.
 - A photograph you come back to opens on its last develop, sharper than
-  the camera's preview, while it develops again.
+  the camera's preview, while it develops again, even after an update.
 - While cropping, the status line says the aspect and the size of the
   crop.
 - **Compare.** Select two photographs in the strip or grid and press C

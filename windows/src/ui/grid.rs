@@ -10,12 +10,16 @@
 //! frames fly to their places.
 //!
 //! Made on first use; only the rows in view are painted, through Direct2D
-//! on the GPU (`surface.rs`), with the strip's frames and marks.
+//! on the GPU (`surface.rs`), with the strip's frames and marks. A wheel's
+//! notch glides there and eases off; the overlay scroll bar at the right
+//! edge shows while it scrolls (and under the pointer), then fades, and
+//! can be dragged or clicked above or below its knob to page.
 
 use std::time::Instant;
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
@@ -31,6 +35,8 @@ use crate::model::dirty;
 use crate::sheet_rules::{self as rules, Part, Rect, SheetLayout, ThumbSize};
 
 const TIMER_FLIGHT: usize = 1;
+/// A wheel's glide and the scroll bar's fade.
+const TIMER_SCROLL: usize = 2;
 const SENTENCE: TextStyle = TextStyle::serif(17.0, 400).italic();
 const FOOT: TextStyle = TextStyle::ui(12.0, 400);
 /// The Size slider's track at the foot's right.
@@ -63,6 +69,15 @@ pub struct Grid {
     /// The sentence's words that act, as painted.
     places: Vec<(RectF, Act)>,
     painted: u64,
+    /// Where a wheel's glide is going, and when it last moved.
+    glide: Option<f64>,
+    ticked: Option<Instant>,
+    /// When the grid last scrolled: the scroll bar shows a second after.
+    scrolled_at: Option<Instant>,
+    /// The pointer is over the scroll bar's edge (it widens and stays).
+    bar_hover: bool,
+    /// Dragging the knob: where in it the pointer took it.
+    bar_drag: Option<f64>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -234,6 +249,8 @@ pub fn open(app: &mut App) {
         app.grid = Some(Grid { hwnd, ..Default::default() });
         app.layout();
     }
+    // The grid shows the open photograph as edited.
+    app.model.file_open_thumbnail();
     app.model.shelf.in_grid = true;
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
     let grid = app.grid.as_mut().unwrap();
@@ -392,6 +409,7 @@ fn paint(app: &mut App, hwnd: HWND) {
         if f.opening { e } else { rules::flight_length(f.longest) - e }
     });
     let range = grid.layout.indices(grid.scroll - rules::GRID_MARGIN, grid.scroll + viewport + rules::GRID_MARGIN);
+    let (bar, wide) = bar_look(grid);
     let mut places = std::mem::take(&mut grid.places);
     places.clear();
     let Grid { cells, layout, scroll, surface, flight, .. } = grid;
@@ -429,6 +447,7 @@ fn paint(app: &mut App, hwnd: HWND) {
                 }
             }
         });
+        paint_scroll_bar(p, &t, *scroll, layout.height, viewport, ox + w as f32, oy + rules::SENTENCE as f32, bar, wide);
         sentence(p, &parts, &t, ox, oy, &mut places);
         foot_line(p, &foot, size, &t, ox, oy + (h - rules::FOOT) as f32, w as f32, &mut places);
       });
@@ -546,10 +565,111 @@ fn slide(app: &mut App, x: f64) {
 
 fn scroll_by(app: &mut App, delta: f64) {
     let Some(grid) = app.grid.as_mut() else { return };
+    grid.glide = None;
     grid.scroll += delta;
     clamp(grid);
+    scrolled(grid);
     invalidate(grid.hwnd);
     request(app);
+}
+
+/// The grid scrolled: the bar shows, and fades a second later.
+fn scrolled(grid: &mut Grid) {
+    grid.scrolled_at = Some(Instant::now());
+    unsafe {
+        SetTimer(grid.hwnd, TIMER_SCROLL, 8, None);
+    }
+}
+
+/// A wheel's turn, in Windows' units (120 a notch): a notch glides there,
+/// adding to a glide under way; a touchpad's finer steps, which Windows
+/// already coasts, go at once, as everything does with animations off.
+fn wheel(app: &mut App, delta: f64) {
+    let step = -delta * rules::WHEEL_STEP / 120.0;
+    if delta % 120.0 != 0.0 || !super::motion::enabled() {
+        return scroll_by(app, step);
+    }
+    let Some(grid) = app.grid.as_mut() else { return };
+    let (_, viewport) = sheet_size(grid);
+    let end = (grid.layout.height - viewport).max(0.0);
+    let to = (grid.glide.unwrap_or(grid.scroll) + step).clamp(0.0, end);
+    if grid.glide.is_none() {
+        grid.ticked = Some(Instant::now());
+    }
+    grid.glide = Some(to);
+    scrolled(grid);
+}
+
+/// The scroll bar's knob opacity now, and whether it's widened.
+fn bar_look(grid: &Grid) -> (f32, bool) {
+    if grid.flight.is_some() {
+        return (0.0, false);
+    }
+    if grid.bar_hover || grid.bar_drag.is_some() {
+        return (1.0, true);
+    }
+    let since = grid.scrolled_at.map_or(f64::INFINITY, |t| t.elapsed().as_secs_f64() * 1000.0);
+    (rules::bar_opacity(since) as f32, false)
+}
+
+/// The glide's next step and the bar's fade; the timer stops once both are done.
+fn scroll_tick(app: &mut App) {
+    let Some(grid) = app.grid.as_mut() else { return };
+    let now = Instant::now();
+    let mut moved = false;
+    if let Some(to) = grid.glide {
+        let dt = grid.ticked.map_or(16.0, |t| (now - t).as_secs_f64() * 1000.0);
+        grid.ticked = Some(now);
+        let before = grid.scroll;
+        grid.scroll = rules::wheel_glide(grid.scroll, to, dt);
+        clamp(grid);
+        moved = grid.scroll != before;
+        if grid.scroll == to || !moved {
+            grid.glide = None;
+        }
+        grid.scrolled_at = Some(now);
+    }
+    let since = grid.scrolled_at.map_or(f64::INFINITY, |t| (now - t).as_secs_f64() * 1000.0);
+    let fading = since > rules::BAR_SHOWN_MS && since < rules::BAR_SHOWN_MS + rules::BAR_FADE_MS + 50.0;
+    let held = grid.bar_hover || grid.bar_drag.is_some();
+    // Held under the pointer, it waits for the pointer to leave.
+    if grid.glide.is_none() && (held || since >= rules::BAR_SHOWN_MS + rules::BAR_FADE_MS + 50.0) {
+        unsafe {
+            let _ = KillTimer(grid.hwnd, TIMER_SCROLL);
+        }
+    }
+    if moved || (fading && !held) {
+        invalidate(grid.hwnd);
+    }
+    if moved {
+        request(app);
+    }
+}
+
+/// The knob's place in the window (DIPs: top, length), if the sheet scrolls.
+fn knob(grid: &Grid) -> Option<(f64, f64)> {
+    let (_, viewport) = sheet_size(grid);
+    rules::bar_knob(grid.scroll, grid.layout.height, viewport).map(|(top, length)| (rules::SENTENCE + top, length))
+}
+
+/// Whether a point in the window is on the scroll bar's edge.
+fn on_bar(grid: &Grid, (x, y): (f64, f64)) -> bool {
+    let (w, viewport) = sheet_size(grid);
+    knob(grid).is_some() && grid.flight.is_none() && x >= w - rules::BAR_REACH && y >= rules::SENTENCE && y < rules::SENTENCE + viewport
+}
+
+/// The overlay scroll bar (macOS's overlay scroller): a rounded knob in
+/// the theme's paper at half strength, `opacity` of that, at the right
+/// edge `right` of a track `viewport` long from `top`. Shared with the
+/// grid bench.
+pub fn paint_scroll_bar(p: &mut Painter, t: &Tokens, scroll: f64, content: f64, viewport: f64, right: f32, top: f32, opacity: f32, wide: bool) {
+    if opacity <= 0.0 {
+        return;
+    }
+    let Some((y, length)) = rules::bar_knob(scroll, content, viewport) else { return };
+    let width = if wide { rules::BAR_WIDE } else { rules::BAR_WIDTH } as f32;
+    let r = RectF::new(right - rules::BAR_INSET as f32 - width, top + y as f32, width, length as f32);
+    p.fill_round_rect(r, width / 2.0, Ink::hex(t.hex.paper).alpha(0.5 * opacity));
 }
 
 /// Scrolls `index` into view, with room for its box.
@@ -661,6 +781,22 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 with_app(tick);
                 LRESULT(0)
             }
+            WM_TIMER if wparam.0 == TIMER_SCROLL => {
+                with_app(scroll_tick);
+                LRESULT(0)
+            }
+            WM_MOUSELEAVE => {
+                with_app(|app| {
+                    let Some(grid) = app.grid.as_mut() else { return };
+                    if grid.bar_hover && grid.bar_drag.is_none() {
+                        grid.bar_hover = false;
+                        // It fades a second after the pointer leaves.
+                        scrolled(grid);
+                        invalidate(grid.hwnd);
+                    }
+                });
+                LRESULT(0)
+            }
             WM_LBUTTONDOWN => {
                 let _ = SetFocus(hwnd);
                 SetCapture(hwnd);
@@ -670,6 +806,17 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                         return;
                     }
                     let at = point(hwnd, lparam);
+                    if on_bar(grid, at) {
+                        // The knob drags; above or below it pages.
+                        let Some((top, length)) = knob(grid) else { return };
+                        if at.1 >= top && at.1 < top + length {
+                            grid.bar_drag = Some(at.1 - top);
+                            grid.glide = None;
+                            return invalidate(hwnd);
+                        }
+                        let (_, viewport) = sheet_size(grid);
+                        return scroll_by(app, if at.1 < top { -viewport } else { viewport });
+                    }
                     match act_at(grid, at) {
                         Some(Act::Filter) => return filter_menu(app, hwnd),
                         Some(Act::Clear) => return app.model.set_library_filter(negs_library::Filter::default()),
@@ -706,6 +853,24 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                     if grid.sliding {
                         return slide(app, at.0);
                     }
+                    if let Some(grab) = grid.bar_drag {
+                        let (_, viewport) = sheet_size(grid);
+                        grid.scroll = rules::bar_scroll(at.1 - rules::SENTENCE - grab, grid.layout.height, viewport);
+                        clamp(grid);
+                        scrolled(grid);
+                        invalidate(hwnd);
+                        return request(app);
+                    }
+                    let hover = grid.dragging.is_none() && on_bar(grid, at);
+                    if hover != grid.bar_hover {
+                        grid.bar_hover = hover;
+                        if hover {
+                            let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                            let _ = TrackMouseEvent(&mut track);
+                        }
+                        scrolled(grid);
+                        invalidate(hwnd);
+                    }
                     let Some((start, _, base)) = grid.dragging.clone() else { return };
                     let now = (at.0, at.1 - rules::SENTENCE + grid.scroll);
                     grid.dragging = Some((start, now, base.clone()));
@@ -722,6 +887,12 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                     if let Some(grid) = app.grid.as_mut() {
                         grid.dragging = None;
                         grid.sliding = false;
+                        if grid.bar_drag.take().is_some() {
+                            let at = point(hwnd, lparam);
+                            grid.bar_hover = on_bar(grid, at);
+                            scrolled(grid);
+                            invalidate(hwnd);
+                        }
                     }
                 });
                 LRESULT(0)
@@ -754,7 +925,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                     if GetKeyState(VK_CONTROL.0 as i32) < 0 {
                         set_size(app, app.model.prefs.grid_size + rules::GRID_SIZE_STEP * delta / 120.0);
                     } else {
-                        scroll_by(app, -delta * 100.0 / 120.0);
+                        wheel(app, delta);
                     }
                 });
                 LRESULT(0)

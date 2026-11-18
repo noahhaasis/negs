@@ -417,9 +417,10 @@ pub struct RenderRequest {
     pub interactive_scale: Option<f64>,
 }
 
-/// A settled develop's pixels, for `edited_store::renders`.
+/// A settled develop's pixels, for `edited_store::renders` and the open
+/// photograph's thumbnail.
 struct KeptDevelop {
-    pixels: Vec<u8>,
+    pixels: Arc<Vec<u8>>,
     width: u32,
     height: u32,
     photo: (f64, f64),
@@ -428,18 +429,61 @@ struct KeptDevelop {
     generation: u64,
 }
 
+/// The open photograph's thumbnail, filed from its settled preview as it's
+/// left (`saveOpenThumbnail`): composed and saved off the UI thread, then
+/// shown in the strip and grid at once.
+pub struct OpenThumbnail {
+    pixels: Arc<Vec<u8>>,
+    width: u32,
+    height: u32,
+    wide: bool,
+    crop: CropSettings,
+    finish: crate::thumb_compose::Finish,
+    key: String,
+    loose: Option<String>,
+}
+
+impl OpenThumbnail {
+    fn file(self) {
+        std::thread::spawn(move || {
+            let store = crate::edited_store::thumbnails();
+            if store.contains(&self.key) {
+                return;
+            }
+            let long = crate::sheet_rules::EDITED_LONG_SIDE;
+            let Some(image) = crate::thumb_compose::from_preview(&self.pixels, self.width, self.height, self.wide, &self.crop, &self.finish, long) else { return };
+            let (w, h) = image.dimensions();
+            let Some(jpeg) = crate::edited_store::jpeg(image.as_raw(), w, h, long) else { return };
+            if store.save(&jpeg, &self.key, self.loose.as_deref()).is_err() {
+                return;
+            }
+            let Some((bgra, w, h)) = crate::edited_store::decode(&jpeg) else { return };
+            crate::trace::event("thumbnail_filed", || json!({"key": self.key, "width": w, "height": h}));
+            let key = self.key;
+            ui::post(move |app: &mut App| {
+                app.thumbs.filed(key, bgra, w, h);
+                app.model.dirty |= dirty::STRIP;
+            });
+        });
+    }
+}
+
 impl KeptDevelop {
-    /// Writes it, 2560 px on its long side at most (off the UI thread).
-    fn save(self, key: &str) {
+    /// Writes it, 2560 px on its long side at most (off the UI thread),
+    /// and points `loose` at it, so it still stands in after an update.
+    fn save(self, key: &str, loose: Option<&str>) {
         let store = crate::edited_store::renders();
         if let Some(jpeg) = crate::edited_store::jpeg(&self.pixels, self.width, self.height, crate::sheet_rules::RENDER_LONG_SIDE) {
-            let _ = store.save(&crate::edited_store::render_file(jpeg, self.photo, &self.space), key, None);
+            let _ = store.save(&crate::edited_store::render_file(jpeg, self.photo, &self.space), key, loose);
         }
     }
 
-    /// The kept develop filed as `key`, as the canvas's stand-in.
-    fn load(key: &str) -> Option<(Picture, Size)> {
+    /// The kept develop filed as `key`, else the last one kept for the same
+    /// edits under an older engine (`previousKey`), as the canvas's stand-in.
+    fn load(key: &str, loose: Option<&str>) -> Option<(Picture, Size)> {
         let store = crate::edited_store::renders();
+        let key = if store.contains(key) { key.to_string() } else { store.previous(loose?)? };
+        let key = key.as_str();
         let file = std::fs::read(store.path(key)).ok()?;
         let ((w, h), space) = crate::edited_store::render_trailer(&file)?;
         let (mut rgba, pw, ph) = crate::edited_store::decode(&file)?;
@@ -2007,14 +2051,19 @@ impl Model {
             self.mark(dirty::ERROR | dirty::CHROME);
             return;
         }
-        // The develop on screen is kept for the photograph being left.
+        // Its thumbnail is filed from the develop on screen, which is kept
+        // for it too.
+        let thumbnail = self.open_thumbnail();
         let kept = self.kept.take().filter(|k| k.revision == self.revision && k.generation == self.source_generation && self.preview_current);
         let left = self.library_item();
         // Its folder's library opens it, saving the one before: the edits
         // come from its sidecar, as a restored session's do.
         let (path, session) = self.library_opening(path, session);
-        if let (Some(kept), Some(key)) = (kept, left.and_then(|item| self.kept_key(&item))) {
-            std::thread::spawn(move || kept.save(&key));
+        if let (Some(kept), Some((key, loose))) = (kept, left.and_then(|item| self.kept_key(&item))) {
+            std::thread::spawn(move || kept.save(&key, loose.as_deref()));
+        }
+        if let Some(thumbnail) = thumbnail {
+            thumbnail.file();
         }
         // It opens on its own last develop, if one was kept for these edits.
         let kept_key = self.library_item().and_then(|item| self.kept_key(&item));
@@ -2131,7 +2180,7 @@ impl Model {
         let fallback = move || {
             #[cfg(test)]
             let _background = background;
-            if let Some((picture, size)) = kept_key.as_deref().and_then(KeptDevelop::load).or_else(|| crate::thumbnail::placeholder(&path)) {
+            if let Some((picture, size)) = kept_key.and_then(|(key, loose)| KeptDevelop::load(&key, loose.as_deref())).or_else(|| crate::thumbnail::placeholder(&path)) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
             }
         };
@@ -2166,8 +2215,50 @@ impl Model {
         self.changed_with_cache(!restoring);
     }
 
+    /// Files the open photograph's thumbnail from its preview, as the grid
+    /// shows (`showGrid`): its edits are saved first.
+    pub fn file_open_thumbnail(&mut self) {
+        if let Some(thumbnail) = self.open_thumbnail() {
+            thumbnail.file();
+        }
+    }
+
+    /// The open photograph's thumbnail to file, under the Mac's conditions
+    /// (`saveOpenThumbnail`): its develop settled for the edits shown (no
+    /// interactive frame, no crop under way, no brightness match waiting),
+    /// and those edits saved, so the thumbnail is filed under their look;
+    /// without stored edits, only when it shows none. Saves them first.
+    fn open_thumbnail(&mut self) -> Option<OpenThumbnail> {
+        let item = self.library_item()?;
+        let settled = self.preview_current && !self.showing_interactive_frame && self.crop_session.is_none() && !self.brightness_match_pending() && self.previews.tray.is_none();
+        let kept = self.kept.as_ref().filter(|k| settled && k.revision == self.revision && k.generation == self.source_generation)?;
+        let (pixels, width, height, wide) = (kept.pixels.clone(), kept.width, kept.height, crate::picture::is_wide(&kept.space));
+        if self.library_blocked() {
+            return None;
+        }
+        self.library_save();
+        let library = self.shelf.library.as_ref()?;
+        if library.open_item() != Some(&item) || library.unsaved() {
+            return None;
+        }
+        let file = library.file(&item)?;
+        let unedited;
+        let look = match library.look(&item) {
+            Some(look) => look,
+            None if !library.open_edited() => {
+                unedited = negs_library::thumbnail::unedited_look(&library.unedited_state());
+                &unedited
+            }
+            None => return None,
+        };
+        let key = crate::edited_store::thumbnails().key(file, &item, look)?;
+        let loose = crate::edited_store::Store::loose_key(file, &item, look);
+        let finish = crate::thumb_compose::Finish::of(&self.state, self.engine_paths().map(|p| p.data.clone()));
+        Some(OpenThumbnail { pixels, width, height, wide, crop: self.state.crop, finish, key, loose })
+    }
+
     /// The name `item`'s kept develop is filed under, with its edits as saved.
-    fn kept_key(&self, item: &negs_library::Item) -> Option<String> {
+    fn kept_key(&self, item: &negs_library::Item) -> Option<(String, Option<String>)> {
         let library = self.shelf.library.as_ref()?;
         let file = library.file(item)?;
         let unedited;
@@ -2178,7 +2269,8 @@ impl Model {
                 &unedited
             }
         };
-        crate::edited_store::renders().key(file, item, look)
+        let key = crate::edited_store::renders().key(file, item, look)?;
+        Some((key, crate::edited_store::Store::loose_key(file, item, look)))
     }
 
     fn show_placeholder(&mut self, picture: Picture, size: Size, generation: u64) {
@@ -2842,7 +2934,7 @@ impl Model {
             self.showing_cached_preview = false;
             if let Some((key, frame)) = rendered.cached {
                 self.kept = Some(KeptDevelop {
-                    pixels: frame.pixels.clone(),
+                    pixels: Arc::new(frame.pixels.clone()),
                     width: frame.width,
                     height: frame.height,
                     photo: (frame.photo_width, frame.photo_height),

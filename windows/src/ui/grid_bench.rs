@@ -1,8 +1,8 @@
 //! `NEGS_GRID_BENCH=d2d|warp|wgpu`: instead of the app, the grid's scroll
 //! case drawn by one painting path, to choose between them (phase 7): 300
 //! thumbnails packed as the grid packs them, flung down and back up for
-//! six seconds in a 1600 × 1000 window, a sentence over them and the
-//! marks on some, then the frame times written to
+//! six seconds in a 1600 × 1000 window, a sentence over them, the
+//! marks on some and the scroll bar, then the frame times written to
 //! `grid-bench-<mode>.json` in `NEGS_PROFILE_DIR` (else the working
 //! folder) and the window closed.
 //!
@@ -203,6 +203,7 @@ fn run(mode: Mode) -> anyhow::Result<serde_json::Value> {
                             p.pick_box(BoxInk::Grid, &names[i], r, Ink::hex(t.hex.paper), true);
                         }
                     });
+                    super::grid::paint_scroll_bar(p, &t, scroll, layout.height, viewport, width as f32, rules::SENTENCE as f32, 1.0, false);
                     p.text("Showing all 300 photographs", &SENTENCE, 22.0, 12.0, Ink::hex(t.hex.dim));
                 });
                 if !presented {

@@ -148,9 +148,21 @@ pub struct LibraryPreferences {
     /// Settings › New photographs › Film and Paper; the table's until chosen.
     pub new_photo_film: Option<String>,
     pub new_photo_paper: Option<String>,
+    /// Settings › RAW + JPEG › Show camera JPEGs separately: off, a RAW's
+    /// camera JPEG of the same name goes with it as one photograph.
+    #[serde(rename = "separateCameraJPEGs")]
+    pub separate_camera_jpegs: bool,
+    /// Settings › Edits › Save ratings and edits next to photos; on until
+    /// turned off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sidecars: Option<bool>,
 }
 
 impl LibraryPreferences {
+    pub fn sidecars(&self) -> bool {
+        self.sidecars.unwrap_or(true)
+    }
+
     pub fn filter(&self) -> Filter {
         self.library_filter.as_ref().map(|v| Filter::from_json(&to_json(v))).unwrap_or_default()
     }

@@ -218,6 +218,16 @@ pub fn wheel(offset: f64, delta: i32, sideways: bool, visible: f64, content: f64
     clamp(if sideways { offset + step } else { offset - step }, visible, content)
 }
 
+/// A group clicked in the foot glides there over 0.25 s (`TrayScroll`).
+pub const GLIDE_MS: f64 = 250.0;
+
+/// The offset `elapsed_ms` into a glide from `from` to `to`, eased in and
+/// out; `to` once it's over.
+pub fn glide(from: f64, to: f64, elapsed_ms: f64) -> f64 {
+    let t = (elapsed_ms / GLIDE_MS).clamp(0.0, 1.0);
+    from + (to - from) * t * t * (3.0 - 2.0 * t)
+}
+
 /// What's under a point of the row, in DIPs from its left edge (with the
 /// scroll added) and from its top.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,6 +268,28 @@ pub fn star_rect(left: f64) -> (f64, f64, f64, f64) {
 pub fn star_help(favourite: bool) -> &'static str {
     if favourite { "Remove from favourites" } else { "Add to favourites" }
 }
+
+/// What a screen reader says for a tile's star (`starLabel`).
+pub fn star_label(name: &str, favourite: bool) -> String {
+    if favourite { format!("Remove {name} from favourites") } else { format!("Add {name} to favourites") }
+}
+
+/// A tile's accessible value: the one tried, or the one the tray opened on.
+pub fn tile_value(selected: bool, before: bool) -> &'static str {
+    match (selected, before) {
+        (true, false) => "Trying",
+        (false, true) => "Before",
+        _ => "",
+    }
+}
+
+/// The foot's group names, as a screen reader says them.
+pub fn index_label(title: &str) -> String {
+    format!("Show {title}")
+}
+
+/// The paper lock's switch, as a screen reader says it.
+pub const KEEP_PAPER_LABEL: &str = "Keep paper when changing film";
 
 /// The foot's hint: how to try before anything is tried, how to keep or go back after.
 pub fn hint(before: Option<&str>) -> String {
@@ -544,6 +576,26 @@ mod tests {
 
     fn row() -> Vec<Section> {
         sections(vec![group("Color Negative", &["gold", "portra", "ektar"]), group("Black & White", &["hp5", "trix"])], entries(&["portra", "trix"]), "")
+    }
+
+    #[test]
+    fn a_group_glides_there_eased_in_a_quarter_second() {
+        assert_eq!(glide(100.0, 500.0, 0.0), 100.0);
+        assert_eq!(glide(100.0, 500.0, GLIDE_MS / 2.0), 300.0);
+        assert!(glide(100.0, 500.0, GLIDE_MS / 10.0) < 100.0 + 400.0 / 10.0, "it starts slowly");
+        assert_eq!(glide(100.0, 500.0, GLIDE_MS), 500.0);
+        assert_eq!(glide(100.0, 500.0, 10.0 * GLIDE_MS), 500.0);
+    }
+
+    #[test]
+    fn screen_readers_hear_the_macs_words() {
+        assert_eq!(star_label("Portra 400", true), "Remove Portra 400 from favourites");
+        assert_eq!(star_label("Portra 400", false), "Add Portra 400 to favourites");
+        assert_eq!(tile_value(true, false), "Trying");
+        assert_eq!(tile_value(false, true), "Before");
+        assert_eq!(tile_value(true, true), "");
+        assert_eq!(tile_value(false, false), "");
+        assert_eq!(index_label("Black & White"), "Show Black & White");
     }
 
     #[test]
