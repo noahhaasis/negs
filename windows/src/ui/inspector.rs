@@ -3943,10 +3943,10 @@ mod tests {
         model.previews.tray = Some(crate::previews::TrayVisit::new(false, model.state.clone(), String::new()));
         let shown = |model: &Model| -> Vec<(bool, Vec<String>)> { model.tray_sections().into_iter().map(|s| (s.favourites, s.stocks.into_iter().map(|e| e.id).collect())).collect() };
         let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        // Not searching: the favourites first, then every group.
+        // Not searching: Scan's Your negative, the favourites, then every group.
         for query in ["", "   "] {
             model.previews.tray.as_mut().unwrap().query = query.into();
-            assert_eq!(shown(&model), [(true, ids(&["gold"])), (false, ids(&["gold", "portra"])), (false, ids(&["trix"]))]);
+            assert_eq!(shown(&model), [(false, ids(&[crate::negative::STOCK_ID])), (true, ids(&["gold"])), (false, ids(&["gold", "portra"])), (false, ids(&["trix"]))]);
         }
         let search = |model: &mut Model, query: &str| {
             model.previews.tray.as_mut().unwrap().query = query.into();
@@ -3973,6 +3973,10 @@ mod tests {
             for control in group.controls {
                 if let Adjustment::BalancePrint { title, .. } = control {
                     assert!(rows.iter().any(|r| matches!(r.kind, Kind::BalancePrint(t, _) if t == *title)));
+                    continue;
+                }
+                if let Adjustment::FilterLink { .. } = control {
+                    assert!(rows.iter().any(|r| matches!(r.kind, Kind::FilterLink(_))));
                     continue;
                 }
                 assert!(paths.contains(&control.path()), "{}", control.path());

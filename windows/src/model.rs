@@ -3992,8 +3992,14 @@ mod tests {
         // Not a film in the paper's place, nor a paper as a film.
         model.try_stock("endura");
         assert_eq!(model.state.film, "portra");
+        // Back to Scan's Your negative, the first group (as the Mac's
+        // `StockTrayRules.step`), held there, and on again.
         model.step_tray(-1);
-        assert_eq!(model.state.film, "portra", "held at the favourites' start");
+        assert!(model.is_negative(), "back from the favourites to Your negative");
+        model.step_tray(-1);
+        assert!(model.is_negative(), "held at the row's start");
+        model.step_tray(1);
+        assert_eq!((model.state.film.as_str(), model.is_negative()), ("portra", false));
         model.step_tray(1);
         assert_eq!(model.state.film, "gold", "on from the favourites into the group");
         model.step_tray(1);
