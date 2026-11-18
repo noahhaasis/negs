@@ -13,7 +13,7 @@ use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement};
+use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement, w};
 
 use super::App;
 use super::alert::Alert;
@@ -303,20 +303,25 @@ const DEPTH: u32 = 6;
 const SPACE: u32 = 7;
 const QUALITY: u32 = 8;
 const QUALITY_RANGE_TEXT: u32 = 9;
-const GROUP_ENGINE: u32 = 10;
-const GROUP_SIZE: u32 = 11;
-const GROUP_DEPTH: u32 = 12;
-const GROUP_SPACE: u32 = 13;
-const GROUP_QUALITY: u32 = 14;
+// Each control's label, a text of its own above it: the dialog draws
+// visual groups' labels itself, too dim to read in its dark mode. Each
+// label and its control share a visual group without a label (the label's
+// id + IN_GROUP), which keeps them in one column.
+const LABEL_ENGINE: u32 = 10;
+const LABEL_SIZE: u32 = 11;
+const LABEL_DEPTH: u32 = 12;
+const LABEL_SPACE: u32 = 13;
+const LABEL_QUALITY: u32 = 14;
 // A batch's own rows (`batch`).
 const FORMAT: u32 = 15;
 const NAMING: u32 = 16;
 const CUSTOM: u32 = 17;
 const EXAMPLE: u32 = 18;
 const EXISTING: u32 = 19;
-const GROUP_FORMAT: u32 = 20;
-const GROUP_NAMING: u32 = 21;
-const GROUP_EXISTING: u32 = 22;
+const LABEL_FORMAT: u32 = 20;
+const LABEL_NAMING: u32 = 21;
+const LABEL_EXISTING: u32 = 22;
+const IN_GROUP: u32 = 100;
 const BATCH_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a007);
 
 /// A batch's File Name and If a File Exists rows (the Mac's `BatchRows`):
@@ -399,6 +404,20 @@ struct SaveEvents {
     extras: String,
     /// A batch: the format is a list, and the naming rows show.
     batch: Option<Rc<BatchRows>>,
+    /// Whether the dialog's own controls were found once it showed
+    /// (`dialog_look::dress`), and the batch's example among them.
+    dressed: Cell<bool>,
+    example: Cell<Option<HWND>>,
+}
+
+/// The pixel field and its "px" show only for a long or short edge, as on
+/// the Mac.
+fn show_pixels(customize: &IFileDialogCustomize, size: ExportSize) {
+    let state = if size.edge == Edge::Full { CDCS_INACTIVE } else { CDCS_ENABLEDVISIBLE };
+    unsafe {
+        let _ = customize.SetControlState(PIXELS, state);
+        let _ = customize.SetControlState(PX, state);
+    }
 }
 
 impl SaveEvents {
@@ -411,10 +430,12 @@ impl SaveEvents {
         encoding.updating.set(true);
         unsafe {
             let _ = customize.SetSelectedControlItem(DEPTH, if settings.bit_depth == 16 { 1 } else { 0 });
-            let _ = customize.SetControlState(DEPTH, if jpeg { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            for id in [LABEL_DEPTH, DEPTH] {
+                let _ = customize.SetControlState(id, if jpeg { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            }
             let _ = customize.SetControlItemState(SPACE, PROPHOTO as u32, if settings.bit_depth == 16 { CDCS_ENABLEDVISIBLE } else { CDCS_VISIBLE });
             let _ = customize.SetSelectedControlItem(SPACE, settings.color_space as u32);
-            for id in [GROUP_QUALITY, QUALITY, QUALITY_RANGE_TEXT] {
+            for id in [LABEL_QUALITY + IN_GROUP, LABEL_QUALITY, QUALITY, QUALITY_RANGE_TEXT] {
                 let _ = customize.SetControlState(id, if jpeg { CDCS_ENABLEDVISIBLE } else { CDCS_INACTIVE });
             }
         }
@@ -437,12 +458,15 @@ impl SaveEvents {
                 if let Some(text) = edit_text(customize, CUSTOM) {
                     *rows.custom.borrow_mut() = text;
                 }
-                let example = wide(rows.example(self.encoding.format.get()));
-                let _ = customize.SetControlLabel(EXAMPLE, pcwstr(&example));
+                let example = rows.example(self.encoding.format.get());
+                let _ = customize.SetControlLabel(EXAMPLE, pcwstr(&wide(&example)));
+                if let Some(shown) = self.example.get() {
+                    super::dialog_look::set_fitted(shown, &example);
+                }
                 let settings = self.encoding.settings(customize);
                 let text = wide(crate::batch::message(rows.count, engine.unwrap_or(ExportEngine::Fast), size, settings, &self.encoding.preview_space));
                 let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
-                let _ = customize.SetControlState(PIXELS, if size.edge == Edge::Full { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+                show_pixels(customize, size);
                 return;
             }
             let lead = match engine {
@@ -454,7 +478,7 @@ impl SaveEvents {
             let space = self.encoding.settings(customize).summary(self.export, &self.encoding.preview_space).map(|s| format!(" {s}.")).unwrap_or_default();
             let text = wide(format!("{lead}{}{summary}{space}", self.extras));
             let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
-            let _ = customize.SetControlState(PIXELS, if size.edge == Edge::Full { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            show_pixels(customize, size);
         }
     }
 }
@@ -511,7 +535,18 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
     fn OnFolderChanging(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<()> {
         Ok(())
     }
-    fn OnFolderChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+    /// The first is once the dialog is up: its own controls are found and,
+    /// in a dark theme, recoloured, and the example is fitted.
+    fn OnFolderChange(&self, dialog: Option<&IFileDialog>) -> windows::core::Result<()> {
+        let Some(dialog) = dialog else { return Ok(()) };
+        if self.dressed.replace(true) {
+            return Ok(());
+        }
+        let dressed = super::dialog_look::dress(dialog);
+        self.example.set(dressed.example);
+        if let Ok(customize) = dialog.cast::<IFileDialogCustomize>() {
+            self.message(&customize);
+        }
         Ok(())
     }
     fn OnSelectionChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
@@ -661,6 +696,8 @@ pub fn save(app: &mut App, export: bool) {
         encoding: encoding.clone(),
         extras,
         batch: None,
+        dressed: Cell::new(false),
+        example: Cell::new(None),
     }
     .into();
     let name = model.default_name(format);
@@ -688,7 +725,8 @@ pub fn save(app: &mut App, export: bool) {
             let customize: IFileDialogCustomize = dialog.cast().ok()?;
             if export {
                 let label = wide("Engine:");
-                let _ = customize.StartVisualGroup(GROUP_ENGINE, pcwstr(&label));
+                let _ = customize.StartVisualGroup(LABEL_ENGINE + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_ENGINE, pcwstr(&label));
                 let _ = customize.AddComboBox(ENGINE);
                 for (i, e) in ExportEngine::ALL.iter().enumerate() {
                     let t = wide(e.title());
@@ -698,7 +736,8 @@ pub fn save(app: &mut App, export: bool) {
                 let _ = customize.EndVisualGroup();
             }
             let label = wide("Size:");
-            let _ = customize.StartVisualGroup(GROUP_SIZE, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_SIZE + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_SIZE, pcwstr(&label));
             let _ = customize.AddComboBox(SIZE);
             for (i, edge) in Edge::ALL.iter().enumerate() {
                 let t = wide(edge.title());
@@ -711,7 +750,8 @@ pub fn save(app: &mut App, export: bool) {
             let _ = customize.AddText(PX, pcwstr(&px));
             let _ = customize.EndVisualGroup();
             let label = wide("Bit depth:");
-            let _ = customize.StartVisualGroup(GROUP_DEPTH, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_DEPTH + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_DEPTH, pcwstr(&label));
             let _ = customize.AddComboBox(DEPTH);
             for (i, title) in ["8-bit", "16-bit"].iter().enumerate() {
                 let t = wide(title);
@@ -719,7 +759,8 @@ pub fn save(app: &mut App, export: bool) {
             }
             let _ = customize.EndVisualGroup();
             let label = wide("Colour space:");
-            let _ = customize.StartVisualGroup(GROUP_SPACE, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_SPACE + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_SPACE, pcwstr(&label));
             let _ = customize.AddComboBox(SPACE);
             for (i, title) in COLOR_SPACES.iter().enumerate() {
                 let t = wide(if i == PROPHOTO { "ProPhoto RGB (16-bit)" } else { title });
@@ -727,7 +768,8 @@ pub fn save(app: &mut App, export: bool) {
             }
             let _ = customize.EndVisualGroup();
             let label = wide("JPEG quality:");
-            let _ = customize.StartVisualGroup(GROUP_QUALITY, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_QUALITY + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_QUALITY, pcwstr(&label));
             let text = wide(quality.to_string());
             let _ = customize.AddEditBox(QUALITY, pcwstr(&text));
             let range = wide(format!("({}–{})", QUALITY_RANGE.0, QUALITY_RANGE.1));
@@ -815,6 +857,8 @@ pub fn batch(app: &mut App) {
         encoding: encoding.clone(),
         extras: String::new(),
         batch: Some(rows.clone()),
+        dressed: Cell::new(false),
+        example: Cell::new(None),
     }
     .into();
     let folder = prefs.save_folder().map(|p| p.to_path_buf());
@@ -833,9 +877,10 @@ pub fn batch(app: &mut App) {
                 let _ = dialog.SetFolder(&folder);
             }
             let customize: IFileDialogCustomize = dialog.cast().ok()?;
-            let combo = |group: u32, label: &str, id: u32, items: &[&str], selected: usize| {
+            let combo = |label_id: u32, label: &str, id: u32, items: &[&str], selected: usize| {
                 let label = wide(label);
-                let _ = customize.StartVisualGroup(group, pcwstr(&label));
+                let _ = customize.StartVisualGroup(label_id + IN_GROUP, w!(""));
+                let _ = customize.AddText(label_id, pcwstr(&label));
                 let _ = customize.AddComboBox(id);
                 for (i, title) in items.iter().enumerate() {
                     let t = wide(title);
@@ -844,39 +889,40 @@ pub fn batch(app: &mut App) {
                 let _ = customize.SetSelectedControlItem(id, selected as u32);
             };
             let formats: Vec<&str> = OutputFormat::ALL.iter().map(|f| f.title()).collect();
-            combo(GROUP_FORMAT, "Format:", FORMAT, &formats, OutputFormat::ALL.iter().position(|f| *f == format).unwrap_or(0));
+            combo(LABEL_FORMAT, "Format:", FORMAT, &formats, OutputFormat::ALL.iter().position(|f| *f == format).unwrap_or(0));
             let _ = customize.EndVisualGroup();
             let engines: Vec<&str> = ExportEngine::ALL.iter().map(|e| e.title()).collect();
-            combo(GROUP_ENGINE, "Engine:", ENGINE, &engines, if engine == ExportEngine::Reference { 0 } else { 1 });
+            combo(LABEL_ENGINE, "Engine:", ENGINE, &engines, if engine == ExportEngine::Reference { 0 } else { 1 });
             let _ = customize.EndVisualGroup();
             let edges: Vec<&str> = Edge::ALL.iter().map(|e| e.title()).collect();
-            combo(GROUP_SIZE, "Size:", SIZE, &edges, Edge::ALL.iter().position(|e| *e == size.edge).unwrap_or(0));
+            combo(LABEL_SIZE, "Size:", SIZE, &edges, Edge::ALL.iter().position(|e| *e == size.edge).unwrap_or(0));
             let pixels = wide(size.pixels.to_string());
             let _ = customize.AddEditBox(PIXELS, pcwstr(&pixels));
             let px = wide("px");
             let _ = customize.AddText(PX, pcwstr(&px));
             let _ = customize.EndVisualGroup();
-            combo(GROUP_DEPTH, "Bit depth:", DEPTH, &["8-bit", "16-bit"], 0);
+            combo(LABEL_DEPTH, "Bit depth:", DEPTH, &["8-bit", "16-bit"], 0);
             let _ = customize.EndVisualGroup();
             let spaces: Vec<&str> = COLOR_SPACES.iter().enumerate().map(|(i, s)| if i == PROPHOTO { "ProPhoto RGB (16-bit)" } else { s }).collect();
-            combo(GROUP_SPACE, "Colour space:", SPACE, &spaces, encoding.chosen_space.get());
+            combo(LABEL_SPACE, "Colour space:", SPACE, &spaces, encoding.chosen_space.get());
             let _ = customize.EndVisualGroup();
             let label = wide("JPEG quality:");
-            let _ = customize.StartVisualGroup(GROUP_QUALITY, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_QUALITY + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_QUALITY, pcwstr(&label));
             let text = wide(quality.to_string());
             let _ = customize.AddEditBox(QUALITY, pcwstr(&text));
             let range = wide(format!("({}–{})", QUALITY_RANGE.0, QUALITY_RANGE.1));
             let _ = customize.AddText(QUALITY_RANGE_TEXT, pcwstr(&range));
             let _ = customize.EndVisualGroup();
             let namings: Vec<&str> = Naming::ALL.iter().map(|n| n.title()).collect();
-            combo(GROUP_NAMING, "File name:", NAMING, &namings, Naming::ALL.iter().position(|n| *n == rows.naming.get()).unwrap_or(0));
+            combo(LABEL_NAMING, "File name:", NAMING, &namings, Naming::ALL.iter().position(|n| *n == rows.naming.get()).unwrap_or(0));
             let custom = wide(rows.custom.borrow().as_str());
             let _ = customize.AddEditBox(CUSTOM, pcwstr(&custom));
-            let _ = customize.EndVisualGroup();
             let empty = wide("");
             let _ = customize.AddText(EXAMPLE, pcwstr(&empty));
+            let _ = customize.EndVisualGroup();
             let existing: Vec<&str> = Existing::ALL.iter().map(|e| e.title()).collect();
-            combo(GROUP_EXISTING, "If a file exists:", EXISTING, &existing, Existing::ALL.iter().position(|e| *e == rows.existing.get()).unwrap_or(0));
+            combo(LABEL_EXISTING, "If a file exists:", EXISTING, &existing, Existing::ALL.iter().position(|e| *e == rows.existing.get()).unwrap_or(0));
             let _ = customize.EndVisualGroup();
             let _ = customize.AddText(MESSAGE, pcwstr(&empty));
             let cookie = dialog.Advise(&events).ok();

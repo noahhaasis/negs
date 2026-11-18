@@ -15,6 +15,7 @@ pub mod canvas;
 mod color_filter;
 pub mod compare;
 mod d2d;
+mod dialog_look;
 mod dialogs;
 mod draw;
 mod drop;
