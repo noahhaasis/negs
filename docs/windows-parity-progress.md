@@ -194,7 +194,69 @@ decisions made with their reasons, and what was carried over. See
     - The Custom name example updates on control events only.
   - The helper frees no film memory off macOS until a Vulkan budget exists.
   - Lightroom's cold start with a signed-in account is untested (the Mac's
-    dropped files).
+    dropped files). Since tested: see the addendum below.
+
+### Addendum: the export dialogs, and Lightroom live (merged `f0176be`; branch `win-p8b-open-export`)
+
+- **The export dialogs in Windows' dark mode** (`9958159` to `e7e6440`, merged
+  `f0176be`):
+  - **The trouble.** Windows 10's dark file dialog leaves the controls Export adds
+    light. Their texts painted on the light system face (240,240,240) and their
+    fields were white. The labels were too dim to read, and the batch's example was
+    cut off ("…_200.pr").
+  - **What the trace showed** (`NEGS_RENDER_TRACE`, event `file_dialog_window`).
+    Each added text or field sits alone in a `FloatNotifySink` window with id 0. A
+    visual group's label has no window: the dialog draws it itself, in a grey that
+    can't be changed.
+  - **The fix** (`ui/dialog_look.rs`):
+    - The added texts and fields paint in the dialog's dark pane (56,56,56) with
+      white text. The fields take `DarkMode_CFD`, as the dialog's own Folder field
+      does.
+    - Each label is now a text of its own above its control. Label and control
+      share a visual group without a label, which keeps them in one column.
+    - The example wraps to its width after the file name's underscores.
+    - The pixel field shows only for Long Edge and Short Edge, as on the Mac.
+    - JPEG's fixed bit depth dims its label.
+  - **The light theme** (`0a1cc60`, undone by `449433d`):
+    - Forcing the app light at launch, as the Mac's theme sets its panels, left
+      Windows 10's file dialog dark on a dark Windows.
+    - The dialogs therefore follow Windows' own light or dark mode, whatever the
+      theme, and that alone decides whether their controls are dressed dark.
+    - A dialog on a light Windows wasn't seen: the PC's Windows is dark.
+  - **Gates:**
+    - The full suite after merging 8a: 277 of 277.
+    - Screenshots in `~/.negs/windows-parity/phase8b/dialog/`:
+      - `darkroom/`: `batch-dialog`, `single-dialog`, and `single-long-jpeg` (Long
+        Edge 3000 with JPEG quality).
+      - `daylight/`: `batch-dialog` and `single-dialog`.
+- **Lightroom live**, signed in, the goat `_NHA9788.NEF` only. Noah allowed Add for
+  it, Cancel on a stale import and closing Lightroom normally.
+  - **The signed-out cold start (earlier) wasn't dropped.** After Noah signed in,
+    Lightroom showed its import ("Add 1 Photo") for that TIFF. That TIFF had
+    already been deleted from Negs' scratch cache, so the import was cancelled.
+  - **Warm, with Lightroom running:**
+    - Negs said "Sent 1 photograph to Lightroom", and Lightroom showed
+      "Add 1 Photo" for `_NHA9788-Negs.tif`. Add was clicked.
+    - Lightroom's local storage then held
+      `originals\2021\2021-12-23\_NHA9788-Negs.tif`: 144,969,810 bytes, 16 bits a
+      sample, filed under the capture date.
+    - Relaunching Negs found the copy (`lightroom_detected` `copied: 1`) and
+      deleted its cached TIFF.
+  - **Cold, after closing Lightroom normally:**
+    - Negs started Lightroom, which came up on "Add 1 Photo" for
+      `_NHA9788-Negs 2.tif` (renamed, as the library had the first). The cold
+      start doesn't drop files on Windows.
+    - After Add, Lightroom said "Some photos were not added. Previously added (1)",
+      because it knows the pixels already. That box was left open.
+    - Negs' copy waits (`waiting: 1`) and goes after a week, as the clean-up
+      intends for a TIFF Lightroom never copies.
+  - Screenshots in `~/.negs/windows-parity/phase8b/lightroom/`:
+    - `lr-import-dialog` (the stale import), `cancel-target`, `add-target-warm`
+      and `add-target-cold` (where each click went);
+    - `lr-warm-import`, `warm/sent`, `lr-cold-import`, `cold/sent` and
+      `lr-cold-not-added`.
+  - **Left:** Noah removes the test photo from his library.
+    `_NHA9788-Negs 2.tif` stays in the scratch profile's cache.
 
 ## 2026-11-19: phase 8c merged, polish on the strip, grid and tray (`1396397`, branch tip `b5a0fd0`)
 
