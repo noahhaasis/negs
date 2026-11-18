@@ -51,6 +51,20 @@ struct Words {
     facts: Option<crate::photo_facts::PhotoFacts>,
     film: String,
     paper: Option<String>,
+    /// The open photograph's: its names open the tray, as the print label's.
+    opens: Option<Opens>,
+}
+
+/// What the open photograph's label opens, and how it reads (`PrintLabel`).
+#[derive(Clone, Default, PartialEq)]
+struct Opens {
+    /// The paper lock is closed: "always printed on".
+    keep_paper: bool,
+    /// Read as a negative: "Your negative ⌄ read as <film> ⌄".
+    read_as: Option<String>,
+    /// The film's (false) or the paper's (true) tray is open.
+    tray: Option<bool>,
+    read_as_open: bool,
 }
 
 struct View {
@@ -65,6 +79,8 @@ struct View {
     comparison: Option<rules::Comparison>,
     /// Where the photographs were last drawn, in DIPs.
     frames: [RectF; 2],
+    /// The open photograph's names and lock, in DIPs.
+    targets: Vec<(super::canvas::LabelTarget, RectF)>,
     /// At 100% (`model.fit_image` off), the zoom past each fit, and the
     /// point both are centred on, as fractions of the photographs.
     actual: bool,
@@ -94,6 +110,7 @@ impl Default for View {
             words: Default::default(),
             comparison: None,
             frames: [none, none],
+            targets: Vec::new(),
             actual: false,
             relative: 1.0,
             centre: (0.5, 0.5),
@@ -268,10 +285,20 @@ pub fn sync(app: &mut App) {
             bitmaps[i] = None;
         }
         words[i] = match side {
-            Side::Original(item) => Words { number: String::new(), facts: facts(&item.photo), film: app.model.original_word().to_string(), paper: None },
+            Side::Original(item) => Words { number: String::new(), facts: facts(&item.photo), film: app.model.original_word().to_string(), paper: None, opens: None },
             Side::Photo(item) => {
-                let (film, paper) = app.model.compared_stocks(item);
-                Words { number: app.model.frame_number(item), facts: facts(&item.photo), film, paper }
+                let (mut film, paper) = app.model.compared_stocks(item);
+                let model = &app.model;
+                let opens = (model.library_item().as_ref() == Some(item)).then(|| {
+                    let read_as = model.tray().is_some_and(|t| t.read_as);
+                    Opens {
+                        keep_paper: model.prefs.keep_paper,
+                        read_as: model.is_negative().then(|| std::mem::replace(&mut film, crate::negative::NAME.to_string())),
+                        tray: model.tray_shown().filter(|_| !read_as),
+                        read_as_open: model.tray_shown() == Some(false) && read_as,
+                    }
+                });
+                Words { number: app.model.frame_number(item), facts: facts(&item.photo), film, paper, opens }
             }
         };
     }
@@ -372,22 +399,85 @@ fn caption(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, ot
 }
 
 /// Under a photograph: its film, and on the next line (or after it, `inline`,
-/// when it ends before `limit`) "printed on" its paper.
-fn label(p: &mut Painter, ink: &SheetInk, words: &Words, edge: f32, top: f32, right: bool, inline: bool, limit: f32) {
+/// when it ends before `limit`) "printed on" its paper. The open
+/// photograph's names keep their `⌄` and the paper its lock, as the print
+/// label's (`PrintLabel`); returns where they take clicks.
+#[allow(clippy::too_many_arguments)]
+fn label(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, edge: f32, top: f32, right: bool, inline: bool, limit: f32) -> Vec<(super::canvas::LabelTarget, RectF)> {
+    use super::canvas::LabelTarget as Target;
+    const INNER: f32 = 7.0;
+    const CARET: f32 = 10.0;
+    const LOCK: (f32, f32) = (10.0, 12.0);
+    let mut targets = vec![];
+    let opens = words.opens.as_ref();
+    let caret = if opens.is_some() { INNER + CARET } else { 0.0 };
+    // The `⌄` after a name, its top left at (x, y).
+    let draw_caret = |p: &mut Painter, x: f32, y: f32| {
+        p.line((x + 1.5, y + 2.5), (x + 4.5, y + 5.5), 1.15, Ink::hex(ink.dim));
+        p.line((x + 4.5, y + 5.5), (x + 7.5, y + 2.5), 1.15, Ink::hex(ink.dim));
+    };
     let fm = p.measure(&words.film, &FILM, 0.0);
-    let fx = if right { edge - fm.width } else { edge };
+    // Read as a negative: "read as" and the film on the film's row, the paper always below.
+    let read_as = opens.and_then(|o| o.read_as.as_deref());
+    let (km_read, rm) = (p.measure("read as", &KIND, 0.0), p.measure(read_as.unwrap_or(""), &PAPER, 0.0));
+    let read_width = if read_as.is_some() { INNER + km_read.width + INNER + rm.width + caret } else { 0.0 };
+    let fx = if right { edge - fm.width - caret - read_width } else { edge };
     p.text(&words.film, &FILM, fx, top, Ink::hex(ink.paper));
-    let Some(paper) = words.paper.as_ref() else { return };
-    let km = p.measure("printed on", &KIND, 0.0);
-    let pm = p.measure(paper, &PAPER, 0.0);
-    let end = if inline { fx + fm.width + 14.0 } else { edge } + km.width + 8.0 + pm.width;
-    if end > limit {
-        return;
+    if let Some(o) = opens {
+        draw_caret(p, fx + fm.width + INNER + 1.0, top + fm.baseline - 6.0);
+        targets.push((Target::Film, RectF::new(fx, top, fm.width + caret, fm.height + 5.0)));
+        if o.tray == Some(false) {
+            p.underline(RectF::new(fx, top + fm.baseline + 2.0, fm.width, 5.0), t, false);
+        }
+        if let Some(name) = read_as {
+            let x = fx + fm.width + caret + INNER;
+            let baseline = top + fm.baseline;
+            p.text("read as", &KIND, x, baseline - km_read.baseline, Ink::hex(ink.dim));
+            let x = x + km_read.width + INNER;
+            p.text(name, &PAPER, x, baseline - rm.baseline, Ink::hex(ink.paper));
+            draw_caret(p, x + rm.width + INNER + 1.0, baseline - 6.0);
+            targets.push((Target::ReadAs, RectF::new(x, baseline - rm.baseline, rm.width + caret, rm.height + 5.0)));
+            if o.read_as_open {
+                p.underline(RectF::new(x, baseline + 2.0, rm.width, 5.0), t, false);
+            }
+        }
     }
-    let (x, baseline) = if inline { (fx + fm.width + 14.0, top + fm.baseline) } else { (edge, top + fm.height + 4.0 + pm.baseline) };
-    let x = if right && !inline { edge - km.width - 8.0 - pm.width } else { x };
-    p.text("printed on", &KIND, x, baseline - km.baseline, Ink::hex(ink.dim));
-    p.text(paper, &PAPER, x + km.width + 8.0, baseline - pm.baseline, Ink::hex(ink.paper));
+    let Some(paper) = words.paper.as_ref() else { return targets };
+    let inline = inline && read_as.is_none();
+    let kind = if opens.is_some_and(|o| o.keep_paper) { "always printed on" } else { "printed on" };
+    let lock = if opens.is_some() { LOCK.0 + 5.0 } else { 0.0 };
+    let km = p.measure(kind, &KIND, 0.0);
+    let pm = p.measure(paper, &PAPER, 0.0);
+    let film_end = fx + fm.width + caret;
+    let end = if inline { film_end + 14.0 } else { edge } + lock + km.width + 8.0 + pm.width + caret;
+    if end > limit {
+        return targets;
+    }
+    let (x, baseline) = if inline { (film_end + 14.0, top + fm.baseline) } else { (edge, top + fm.height + 4.0 + pm.baseline) };
+    let x = if right && !inline { edge - lock - km.width - 8.0 - pm.width - caret } else { x };
+    let x = match opens {
+        Some(o) => {
+            let (lock_ink, kind_ink) = if o.keep_paper { (ink.accent, ink.label) } else { (ink.track, ink.dim) };
+            super::canvas::draw_lock(p, o.keep_paper, x, baseline - LOCK.1 + 1.0, Ink::hex(lock_ink));
+            p.text(kind, &KIND, x + lock, baseline - km.baseline, Ink::hex(kind_ink));
+            targets.push((Target::Lock, RectF::new(x, baseline - 14.0, lock + km.width, 19.0)));
+            x + lock
+        }
+        None => {
+            p.text(kind, &KIND, x, baseline - km.baseline, Ink::hex(ink.dim));
+            x
+        }
+    };
+    let px = x + km.width + 8.0;
+    p.text(paper, &PAPER, px, baseline - pm.baseline, Ink::hex(ink.paper));
+    if let Some(o) = opens {
+        draw_caret(p, px + pm.width + INNER + 1.0, baseline - 6.0);
+        targets.push((Target::Paper, RectF::new(px, baseline - pm.baseline, pm.width + caret, pm.height + 5.0)));
+        if o.tray == Some(true) {
+            p.underline(RectF::new(px, baseline + 2.0, pm.width, 5.0), t, false);
+        }
+    }
+    targets
 }
 
 /// The columns `x0..x1` of `image` covering `frame` (its largest centred
@@ -522,6 +612,7 @@ fn paint(hwnd: HWND, dc: HDC) {
             }
         }
         let words = v.words.clone();
+        let mut targets = Vec::new();
         let edited = |i: usize| comparison.active_first == (i == 0) && !matches!(if i == 0 { &comparison.first } else { &comparison.second }, Side::Original(_));
         c.d2d(s, t.plain, |p| {
             if slider {
@@ -531,8 +622,8 @@ fn paint(hwnd: HWND, dc: HDC) {
                 caption(p, &t, &ink, &words[1], &words[0], f.x + f.w, middle, true, edited(1), false, f.w / 2.0 - 12.0);
                 // The first's paper only when it clears the second's film.
                 let second = p.measure(&words[1].film, &FILM, 0.0).width;
-                label(p, &ink, &words[0], f.x, f.y + f.h + 8.0, false, true, f.x + f.w - second - 24.0);
-                label(p, &ink, &words[1], f.x + f.w, f.y + f.h + 8.0, true, true, f32::NEG_INFINITY);
+                targets.extend(label(p, &t, &ink, &words[0], f.x, f.y + f.h + 8.0, false, true, f.x + f.w - second - 24.0));
+                targets.extend(label(p, &t, &ink, &words[1], f.x + f.w, f.y + f.h + 8.0, true, true, f32::NEG_INFINITY));
                 // The line, with a grip in its middle.
                 let x = f.x + f.w * comparison.split as f32;
                 let cy = f.y + f.h / 2.0;
@@ -563,10 +654,11 @@ fn paint(hwnd: HWND, dc: HDC) {
                     // As wide as its frame, or the room up to the other's.
                     let room = if i == 0 { (frames[1].x - f.x - 24.0).max(f.w) } else { w as f32 - f.x - 16.0 };
                     caption(p, &t, &ink, &words[i], &words[1 - i], f.x, f.y - 20.0, false, edited(i), true, room);
-                    label(p, &ink, &words[i], f.x, f.y + f.h + 8.0, false, false, w as f32 - 12.0);
+                    targets.extend(label(p, &t, &ink, &words[i], f.x, f.y + f.h + 8.0, false, false, w as f32 - 12.0));
                 }
             }
         });
+        v.targets = targets;
     });
     c.present(dc);
 }
@@ -678,6 +770,14 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_LBUTTONDOWN => {
                 let p = at(lparam, hwnd);
+                // The open photograph's names and lock, as on the print.
+                if let Some((target, r)) = VIEW.with(|v| v.borrow().targets.iter().find(|(_, r)| contains(r, p)).copied()) {
+                    let s = draw::dpi_of(hwnd) as f64;
+                    let at = crate::crop::Rect::new(r.x as f64 * s, r.y as f64 * s, r.w as f64 * s, r.h as f64 * s);
+                    let raw = hwnd.0 as isize;
+                    post(move |app: &mut App| super::canvas::act_on_label(app, HWND(raw as *mut _), target, Some(at)));
+                    return LRESULT(0);
+                }
                 let (frames, comparison, actual, centre) = VIEW.with(|v| {
                     let v = v.borrow();
                     (v.frames, v.comparison.clone(), v.relative > 1.0, v.centre)
@@ -778,7 +878,8 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                     let slider = v.comparison.as_ref().is_some_and(|c| c.layout == Layout::Slider) && (v.relative <= 1.0 || on_knob);
                     (v.frames.iter().any(|r| contains(r, point)), slider)
                 });
-                let cursor = if over_frame && !slider { IDC_HAND } else if over_frame { IDC_SIZEWE } else { IDC_ARROW };
+                let on_name = VIEW.with(|v| v.borrow().targets.iter().any(|(_, r)| contains(r, point)));
+                let cursor = if on_name || (over_frame && !slider) { IDC_HAND } else if over_frame { IDC_SIZEWE } else { IDC_ARROW };
                 let _ = SetCursor(LoadCursorW(None, cursor).unwrap_or_default());
                 LRESULT(1)
             }
