@@ -404,6 +404,13 @@ impl Library {
         self.redo.last().map(|s| s.action.as_str())
     }
 
+    /// How many library steps Undo and Redo hold: a front end that keeps
+    /// one undo stack with its editor's steps adds a library step when an
+    /// action made one.
+    pub fn undo_depth(&self) -> (usize, usize) {
+        (self.undo.len(), self.redo.len())
+    }
+
     // MARK: Settings
 
     /// The engine's defaults and Settings › New photographs. A photograph

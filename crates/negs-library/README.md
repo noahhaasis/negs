@@ -111,6 +111,7 @@ library.delete(&plan);
 // Undo: the front end keeps one undo stack with the editor's own steps,
 // and calls these for the library's, in order.
 library.undo_name(); library.undo(); library.redo();
+let (undo_steps, redo_steps) = library.undo_depth();   // did an action add one?
 
 // The folder watcher (and window activation) calls:
 let (changed_by_others, outcome) = library.refresh(interacting);
