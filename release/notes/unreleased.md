@@ -140,7 +140,8 @@
   and the grid offer "Open in Lightroom": the photographs are developed
   to full-size 16-bit TIFFs and handed to Lightroom together, so it asks
   once. Copies for Lightroom are deleted once it has its own; Lightroom
-  Classic's stay in Pictures › Negs for Lightroom. The right-click menu
-  also gains Export.
+  Classic's stay in Pictures › Negs for Lightroom. Settings › Upkeep ›
+  Lightroom shows how much is waiting there, with a button to delete it.
+  The right-click menu also gains Export.
 - Negs frees the film's memory when you go to the grid, and when Windows
   runs low on memory.

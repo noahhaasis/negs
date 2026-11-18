@@ -16,8 +16,114 @@ decisions made with their reasons, and what was carried over. See
 | 5 | Tray | done, merged (see log) |
 | 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | done, merged `f9b8f47` |
-| 8 | Remaining features, Flip added (Open in Lightroom last) | 8c merged `1396397`; 8a, 8b in progress |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | 8c merged `1396397`; 8b ready on `win-p8b-open-export` (see log); 8a in progress |
 | 9 | Validation and release | not started |
+
+## 2026-11-19: phase 8b, faster open, batch export and Open in Lightroom (branch `win-p8b-open-export`)
+
+- **What users see:**
+  - **Faster open (ticket 39).** While Match camera brightness is pending, the
+    helper decodes the RAW once and the camera preview is read beside it. Then the
+    match is solved, and the one render at the matched exposure follows. The
+    darker or lighter first frame is gone. Matches are kept in
+    `BrightnessMatches.json` (2,000, least recently used out), so a photograph you
+    come back to skips its solve.
+  - The camera preview's Adobe RGB to sRGB conversion uses exact tables:
+    975 → 170 ms on an M1, byte-identical over all 2^24 colours.
+  - **The stand-in.** As a photograph opens, its developed thumbnail shows on the
+    canvas at once, as the Mac's `standIn` does. A launch restore reads it off the
+    UI thread.
+  - **The film-side release (ticket 41).** Opening the grid and Windows'
+    low-memory notification send `release_film_cache`. The helper keeps no film
+    side off macOS yet, so for now it answers 0 bytes.
+  - **Batch export.** With several photographs selected in the grid,
+    File › Export ("Export 8 Photographs…") opens the folder dialog. Its options
+    are the single export's, plus File Name (Name_Film, Name or Custom) and If a
+    File Exists. Each photograph develops with its own edits; an unsolved match is
+    solved in the batch's helper and stored. The status line and the grid's foot
+    show "Exporting 1 of 8 photographs" with Cancel. Afterwards they show
+    "Exported 7 of 8 · 1 failed" with Show, whose popover lists what failed and
+    why, with Retry Failed and Show in Explorer. A batch cut short by quitting is
+    offered again at the next launch.
+  - **Open in Lightroom (ticket 48)** appears in four places: File, under Export in
+    the Output foot, and the strip's and grid's context menus (which also gain
+    Export). It develops full-size 16-bit TIFFs (`{name}-Negs.tif`, rated) and hands
+    them to Lightroom in one launch. A Lightroom that isn't running is started first
+    and given its window and 3 s more.
+    - The cloud Lightroom's TIFFs wait in Negs' cache. Each is deleted once
+      Lightroom has a copy, or after a week. Classic's go to Pictures › Negs for
+      Lightroom and are kept.
+    - The menu letters are G (Li&ghtroom) and C (&Classic), because O, L and E are
+      taken.
+  - **Settings › Upkeep › Lightroom** shows how much was sent ("145.0 MB sent")
+    with Delete Sent Copies. Classic's button asks first.
+- **Gates:**
+  - The PC build at each step.
+  - The full suite (`test-parity.cmd`, scratch profile) at `fcf4a6f`: 257 of 257,
+    including the three new lifecycle tests (batch, Lightroom hand-off, stand-in).
+    After the cleanup commit, the five Lightroom tests pass again at `45f9001`.
+    Their detection check (`NEGS_EXPECT_LIGHTROOM`) finds
+    `C:\Program Files\Adobe\Adobe Lightroom CC\lightroom.exe`. The hand-off records
+    every file in one call.
+  - `negs-library` tests pass on the Mac. The Mac cross-check is at its baseline
+    warnings, with and without `--tests`.
+  - **Export byte-identity**, main `a1114a9` against the branch: an unedited
+    `_NHA9790.NEF` with the match on, exported as a 16-bit TIFF from scratch copies
+    and profiles. Both files are 144,969,586 bytes with the same SHA-256
+    (`B574F0A9…E03A`).
+  - **Startup ABBA**, 8 runs each, `_NHA9786.NEF` (a scratch copy). Defender used
+    0 CPU-s over 5 s beforehand. Medians in ms from process start:
+
+    | Build | Window composited | Inspector shown | GPU ready | First image |
+    |---|---|---|---|---|
+    | main `a1114a9` | 90.0 | 194.3 | 623.5 | 8569.6 |
+    | branch | 91.5 | 198.2 | 633.4 | 2705.2 |
+
+    The branch's warm runs reuse the solved match. With `BrightnessMatches.json`
+    and the cache emptied before every run (4 runs each, ABBA), the first image
+    takes 8613.8 ms on main and 3104.4 ms on the branch. The window, inspector and
+    GPU stamps are within noise.
+  - **Batch** in Darkroom and Daylight: 8 photographs selected. One was deleted
+    mid-batch, and it failed as "The photograph is missing." The other 7 PNGs were
+    written.
+  - **Lightroom live test**, with Noah's OK, one goat photo (`_NHA9788.NEF`, a
+    scratch copy), Lightroom not running:
+    - Negs wrote `_NHA9788-Negs.tif` (144,969,810 bytes) and started Lightroom one
+      second later. It said "Sent 1 photograph to Lightroom".
+    - Lightroom opened signed out, on Adobe's Sign in dialog. Nothing reached its
+      library: no Negs file appeared under its `Data` folder. Nothing was clicked
+      in Lightroom.
+    - The warm-start send and the library check wait for Noah to sign in. One
+      retry is left.
+  - Screenshots in `~/.negs/windows-parity/phase8b/`:
+    - `{darkroom,daylight}/`: `grid`, `batch-sheet`, `batch-progress`,
+      `batch-outcome` and (Daylight) `batch-popover`. `mac-batch-sheet` is the
+      Mac's.
+    - `lightroom/`: `file-menu`, `output-foot`, `settings-lightroom`, `sent` and
+      `lr-cold` (Lightroom's Sign in dialog).
+- **Decisions:**
+  - `BrightnessMatches.json` is keyed by the file's identity, not its contents:
+    SHA-256 of path, size, mtime, engine and the exact request. It is cheap on the
+    UI thread.
+  - Cleanup looks in two places. One is the Mac's `*.lrlibrary` in Pictures. The
+    other is where Lightroom on Windows keeps local storage:
+    `%LOCALAPPDATA%\Adobe\Lightroom CC\Data\<catalog>\originals`, which uses the
+    same date folders (seen on the PC).
+  - No Ctrl+Alt+E shortcut: on German keyboards Ctrl+Alt is AltGr.
+  - The stand-in shows uncropped, unturned and without a border, under the tray's
+    stand-in sizing.
+- **Different from the Mac or left:**
+  - There is no quick first frame: the solve comes first, as on the Mac since
+    ticket 39.
+  - Batch:
+    - No notification is shown while the app is inactive.
+    - Extensions are `.jpg`/`.tif`.
+    - The folder dialog is used even for a single target that isn't open.
+    - Resume is offered after launch's first image.
+    - The Custom name example updates on control events only.
+  - The helper frees no film memory off macOS until a Vulkan budget exists.
+  - Lightroom's cold start with a signed-in account is untested (the Mac's
+    dropped files).
 
 ## 2026-11-19: phase 8c merged, polish on the strip, grid and tray (`1396397`, branch tip `b5a0fd0`)
 
