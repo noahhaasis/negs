@@ -183,6 +183,57 @@ pub struct Stock {
     pub times: Vec<f64>,
     /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
     pub grain: Value,
+    /// Ported from Fotufilm; and, for those, whether from the manufacturer's
+    /// data rather than modelled from sample photographs (Settings › Fotufilm films).
+    pub fotufilm: bool,
+    pub manufacturer_data: bool,
+}
+
+/// Settings › Fotufilm films (`FotufilmFilms` in `Parameters.swift`): which
+/// of the films ported from Fotufilm the film menu and grid list. Only the
+/// lists: an edit or a preset with a hidden film keeps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FotufilmFilms {
+    All,
+    Datasheets,
+    Off,
+}
+
+impl FotufilmFilms {
+    pub const ALL: [FotufilmFilms; 3] = [FotufilmFilms::All, FotufilmFilms::Datasheets, FotufilmFilms::Off];
+
+    /// As the Mac stores it (`fotufilmFilms`); anything else is All.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "datasheets" => Self::Datasheets,
+            "off" => Self::Off,
+            _ => Self::All,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Datasheets => "datasheets",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Datasheets => "From datasheets",
+            Self::Off => "None",
+        }
+    }
+
+    pub fn lists(self, stock: &Stock) -> bool {
+        match self {
+            Self::All => true,
+            Self::Datasheets => !stock.fotufilm || stock.manufacturer_data,
+            Self::Off => !stock.fotufilm,
+        }
+    }
 }
 
 /// Grain arrays that stay null until edited, so the film's preset from the
@@ -233,6 +284,9 @@ impl Stock {
             target: json::string(&value["target_print"]).into(),
             times: value["development_times"].as_array().map(|a| a.iter().map(json::number).collect()).unwrap_or_default(),
             grain: value["grain"].clone(),
+            // A catalog from before these fields lists every film.
+            fotufilm: json::boolean(&value["fotufilm"]),
+            manufacturer_data: value["manufacturer_data"] != Value::Bool(false),
         }
     }
 
@@ -850,7 +904,7 @@ mod tests {
     #[test]
     fn stocks_group_like_the_mac() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool, target: &str| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null,
+            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
         };
         let films = [
             stock("gold", "Gold", false, false, false, "endura"),
@@ -874,7 +928,7 @@ mod tests {
     #[test]
     fn film_search_matches_every_word_in_name_id_or_group() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: String::new(), times: vec![], grain: Value::Null,
+            id: id.into(), name: name.into(), paper, positive, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
         };
         // The Mac's fixture: Gold 200, Velvia 50 and Tri-X 400.
         let films = [stock("gold", "Gold 200", false, false, false), stock("velvia", "Velvia 50", false, true, false), stock("trix", "Tri-X 400", false, false, true)];

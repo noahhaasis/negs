@@ -296,7 +296,7 @@ pub fn row_hot(hwnd: HWND) -> bool {
 /// leaves it.
 pub fn repaint_row(hwnd: HWND) {
     let Some((panel, block)) = row_of(hwnd) else { return };
-    if draw::class_of(panel) != "NegsRows" {
+    if !matches!(draw::class_of(panel).as_str(), "NegsRows" | "NegsSettingsPage") {
         return;
     }
     for part in 0..ROW_PARTS {

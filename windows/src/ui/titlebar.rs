@@ -200,17 +200,22 @@ pub fn layout(main: HWND, bar: HWND) {
     }
 }
 
+/// The caption buttons a window has: all three, or Close alone for a
+/// window that can't be minimised (Settings).
+fn captions(hwnd: HWND) -> &'static [Caption] {
+    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
+    if style & WS_MINIMIZEBOX.0 != 0 { &[Caption::Minimize, Caption::Maximize, Caption::Close] } else { &[Caption::Close] }
+}
+
 fn caption_rect(main: HWND, which: Caption) -> RECT {
     let mut client = RECT::default();
     unsafe {
         let _ = GetClientRect(main, &mut client);
     }
     let w = px(main, CAPTION_BUTTON);
-    let index = match which {
-        Caption::Minimize => 3,
-        Caption::Maximize => 2,
-        Caption::Close => 1,
-    };
+    let shown = captions(main);
+    let Some(at) = shown.iter().position(|&c| c == which) else { return RECT::default() };
+    let index = (shown.len() - at) as i32;
     RECT { left: client.right - index * w, top: 0, right: client.right - (index - 1) * w, bottom: height(main) }
 }
 
@@ -218,7 +223,7 @@ fn caption_at(main: HWND, x: i32, y: i32) -> Option<Caption> {
     if full_screen(main) {
         return None;
     }
-    [Caption::Minimize, Caption::Maximize, Caption::Close].into_iter().find(|&c| {
+    captions(main).iter().copied().find(|&c| {
         let r = caption_rect(main, c);
         x >= r.left && x < r.right && y >= r.top && y < r.bottom
     })
@@ -264,7 +269,8 @@ pub fn nchittest(main: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         }
         let dpi = GetDpiForWindow(main).max(96);
         let frame = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-        if !IsZoomed(main).as_bool() && p.y < frame {
+        let sizable = GetWindowLongW(main, GWL_STYLE) as u32 & WS_THICKFRAME.0 != 0;
+        if sizable && !IsZoomed(main).as_bool() && p.y < frame {
             let mut client = RECT::default();
             let _ = GetClientRect(main, &mut client);
             return LRESULT(if p.x < frame * 2 { HTTOPLEFT } else if p.x >= client.right - frame * 2 { HTTOPRIGHT } else { HTTOP } as isize);
@@ -288,7 +294,7 @@ fn caption_of(hit: WPARAM) -> Option<Caption> {
 }
 
 fn invalidate_captions(main: HWND) {
-    let r = RECT { left: caption_rect(main, Caption::Minimize).left, top: 0, right: caption_rect(main, Caption::Close).right, bottom: height(main) };
+    let r = RECT { left: caption_rect(main, captions(main)[0]).left, top: 0, right: caption_rect(main, Caption::Close).right, bottom: height(main) };
     unsafe {
         let _ = InvalidateRect(main, Some(&r), false);
     }
@@ -388,13 +394,50 @@ pub fn paint(main: HWND, dc: HDC) {
     c.present(dc);
 }
 
+/// The band of a window of the app's own, such as Settings: `bg`, its
+/// title in Newsreader 15 600 at 16 DIPs, Close, and a rule along its foot.
+pub fn paint_band(hwnd: HWND, dc: HDC, title: &str) {
+    let t = theme::tokens();
+    let s = draw::dpi_of(hwnd);
+    let band = height(hwnd);
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
+    }
+    let active = unsafe { GetActiveWindow() } == hwnd;
+    let windows10_edge = theme::build() < 22000;
+    let mut c = Canvas::new(dc, RECT { left: 0, top: 0, right: client.right, bottom: band });
+    c.clear(theme::gdi(t.hex.bg));
+    let (w, h) = (c.w as f32 / s, band as f32 / s);
+    c.d2d(s, t.plain, |p| {
+        let m = p.measure(title, &NAME, 0.0);
+        let baseline = h / 2.0 + NAME.size * 0.33;
+        p.text(title, &NAME, 16.0, (baseline - m.baseline).round(), Ink::hex(if active { t.hex.paper } else { t.hex.dim }));
+        paint_captions(p, hwnd, &t, active, s);
+        if windows10_edge {
+            p.fill_rect(d2d::RectF::new(0.0, 0.0, w, 1.0 / s), Ink::hex(if active { t.hex.track } else { t.hex.line }));
+        }
+        p.fill_rect(d2d::RectF::new(0.0, h - 1.0, w, 1.0), Ink::hex(t.hex.line));
+    });
+    c.present(dc);
+}
+
+/// Repaints a window's band and its caption buttons (activation).
+pub fn invalidate_band(hwnd: HWND) {
+    unsafe {
+        let mut client = RECT::default();
+        let _ = GetClientRect(hwnd, &mut client);
+        let _ = InvalidateRect(hwnd, Some(&RECT { left: 0, top: 0, right: client.right, bottom: height(hwnd) }), false);
+    }
+}
+
 /// Minimise, maximise or restore, and close: Windows' own buttons, 46 DIP
 /// wide, with their glyphs drawn as lines in the theme's ink. Close turns
 /// Windows' red under the pointer.
 fn paint_captions(p: &mut Painter, main: HWND, t: &Tokens, active: bool, s: f32) {
     let maximized = unsafe { IsZoomed(main) }.as_bool();
     let ink = if active { t.hex.label } else { t.hex.dim };
-    for which in [Caption::Minimize, Caption::Maximize, Caption::Close] {
+    for &which in captions(main) {
         let r = caption_rect(main, which);
         let r = d2d::RectF::new(r.left as f32 / s, r.top as f32 / s, (r.right - r.left) as f32 / s, (r.bottom - r.top) as f32 / s);
         let hot = HOT.with(Cell::get) == Some(which);

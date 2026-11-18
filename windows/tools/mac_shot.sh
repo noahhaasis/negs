@@ -6,9 +6,11 @@
 #   theme: darkroom|contactSheet|lightTable|daylight|plain|plainDark (default darkroom)
 # Steps file, one per line:
 #   shot <name>            capture the window to <out>/<name>.png
+#   shotfront <name>       capture the app's frontmost window instead (Settings)
 #   key <char> [cmd,opt,shift,ctrl]   keystroke, e.g. "key g" or "key , cmd"
 #   code <keycode> [mods]  key code, e.g. "code 53" (Esc)
 #   click <x> <y> [n]      window-relative points, n clicks
+#   clickfront <x> <y> [n] the same in the frontmost window
 #   wait <seconds>
 # Needs: dist/negs-macos-dev/Negs.app (scripts/package_macos_app.sh --dev).
 set -euo pipefail
@@ -55,10 +57,13 @@ mods() {
 while read -r verb a b c; do
   case "$verb" in
     ''|'#'*) ;;
-    shot) front; sleep 0.4; set -- $("$bin" window "$pid"); screencapture -x -o -l "$1" "$out/$a.png"; echo "shot $out/$a.png" ;;
+    shot|shotfront) front; sleep 0.4
+      if [ "$verb" = shot ]; then set -- $("$bin" window "$pid"); else set -- $("$bin" front "$pid"); fi
+      screencapture -x -o -l "$1" "$out/$a.png"; echo "shot $out/$a.png" ;;
     key) front; osascript -e "tell application \"System Events\" to keystroke \"$a\"$(mods "${b:-}")" ;;
     code) front; osascript -e "tell application \"System Events\" to key code $a$(mods "${b:-}")" ;;
-    click) front; set -- $("$bin" window "$pid")
+    click|clickfront) front
+      if [ "$verb" = click ]; then set -- $("$bin" window "$pid"); else set -- $("$bin" front "$pid"); fi
       # System Events clicks (accessibility); CGEvents from here don't reach SwiftUI.
       for _ in $(seq 1 "${c:-1}"); do
         osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to click at {$(( $2 + a )), $(( $3 + b ))}" >/dev/null

@@ -528,6 +528,12 @@ pub struct Model {
     pub renaming_preset: Option<PathBuf>,
     /// New Preset's file while it is first named: Escape removes it.
     unnamed_preset: Option<PathBuf>,
+    /// The preset applied last to each photograph, by its file: its tile
+    /// has the pencil ring (`appliedPresets`).
+    applied_presets: HashMap<PathBuf, PathBuf>,
+    /// The presets whose tiles are on screen, by index, with a row read
+    /// ahead: only they are developed. None until the pane says.
+    visible_presets: Option<std::ops::Range<usize>>,
     /// The film, paper and preset thumbnails.
     pub previews: Previews,
     /// Lab › Film format › Custom picked while the value is still a format's,
@@ -676,6 +682,8 @@ impl Model {
             preset_status: HashMap::new(),
             renaming_preset: None,
             unnamed_preset: None,
+            applied_presets: HashMap::new(),
+            visible_presets: None,
             previews: Previews::default(),
             custom_film_format: false,
             matching_brightness: false,
@@ -702,8 +710,27 @@ impl Model {
     pub fn has_catalog(&self) -> bool {
         !self.stocks.is_empty()
     }
+    #[cfg(test)]
     pub fn films(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| !s.paper).collect()
+    }
+    /// The films the menu and the grid list (Settings › Fotufilm films). The
+    /// photograph's film stays listed, so the menu always shows its choice.
+    pub fn listed_films(&self) -> Vec<&Stock> {
+        let shown = self.fotufilm_films();
+        self.stocks.iter().filter(|s| !s.paper && (shown.lists(s) || s.id == self.state.film)).collect()
+    }
+    pub fn fotufilm_films(&self) -> state::FotufilmFilms {
+        state::FotufilmFilms::from_key(&self.prefs.fotufilm_films)
+    }
+    /// Settings › Fotufilm films: the film menu and grid list again.
+    pub fn set_fotufilm_films(&mut self, films: state::FotufilmFilms) {
+        if self.fotufilm_films() == films {
+            return;
+        }
+        self.prefs.fotufilm_films = films.key().into();
+        self.prefs.save();
+        self.mark(dirty::INSPECTOR | dirty::PREVIEWS);
     }
     pub fn papers(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| s.paper).collect()
@@ -1497,7 +1524,7 @@ impl Model {
             return;
         }
         match self.preset_library.read(preset).and_then(|data| presets::text(&data)) {
-            Ok(text) => self.request_preset(preset.name(), text, 0),
+            Ok(text) => self.request_preset(preset.path.clone(), text, 0),
             Err(error) => {
                 self.report(&error);
                 self.refresh_presets();
@@ -1507,16 +1534,17 @@ impl Model {
 
     /// The engine keeps the photograph's settings from the params it's
     /// given; ask again if they changed while it answered.
-    fn request_preset(&mut self, name: String, text: String, attempt: u32) {
+    fn request_preset(&mut self, preset: PathBuf, text: String, attempt: u32) {
         let Some(engine) = self.engine.clone() else { return };
         let snapshot = self.state.clone();
         let command = json!({"command": "preset_import", "text": text, "params": snapshot.params});
         engine.request(command, engine::timeout_for("preset_import"), move |result| {
-            ui::post(move |app: &mut App| app.model.preset_imported(name, text, snapshot, attempt, result));
+            ui::post(move |app: &mut App| app.model.preset_imported(preset, text, snapshot, attempt, result));
         });
     }
 
-    fn preset_imported(&mut self, name: String, text: String, snapshot: EditState, attempt: u32, result: Result<(u64, Value)>) {
+    fn preset_imported(&mut self, preset: PathBuf, text: String, snapshot: EditState, attempt: u32, result: Result<(u64, Value)>) {
+        let name = preset.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let result = match result {
             Ok((_, result)) => result,
             Err(error) => {
@@ -1529,7 +1557,7 @@ impl Model {
         }
         if self.state != snapshot {
             if attempt < 2 {
-                self.request_preset(name, text, attempt + 1);
+                self.request_preset(preset, text, attempt + 1);
             }
             return;
         }
@@ -1544,8 +1572,11 @@ impl Model {
         next.paper = paper;
         next.params = result["params"].clone();
         self.apply(next, format!("Apply Preset “{name}”"));
+        if let Some(source) = self.source.clone() {
+            self.applied_presets.insert(source, preset);
+        }
         self.status = format!("Applied preset “{name}”");
-        self.mark(dirty::STATUS);
+        self.mark(dirty::STATUS | dirty::PRESETS);
     }
 
     /// Saves the film, paper and Lab settings as a new preset, named after
@@ -1662,10 +1693,29 @@ impl Model {
             return;
         }
         self.unnamed_preset = None;
+        self.forget_applied(&preset.path);
         if let Err(error) = self.preset_library.delete(preset) {
             self.report(&error);
         }
         self.refresh_presets();
+    }
+
+    /// The preset applied last to the photograph on screen, if it's listed.
+    pub fn applied_preset(&self) -> Option<&PathBuf> {
+        self.source.as_ref().and_then(|s| self.applied_presets.get(s))
+    }
+
+    fn forget_applied(&mut self, preset: &Path) {
+        self.applied_presets.retain(|_, p| p != preset);
+    }
+
+    /// The presets whose tiles are on screen (and a row ahead); thumbnails
+    /// are made for those only.
+    pub fn set_visible_presets(&mut self, range: std::ops::Range<usize>) {
+        if self.visible_presets.as_ref() != Some(&range) {
+            self.visible_presets = Some(range);
+            self.mark(dirty::PREVIEWS);
+        }
     }
 
     pub fn rename_preset(&mut self, preset: &PresetFile, name: &str) {
@@ -1678,13 +1728,19 @@ impl Model {
             return;
         }
         match self.preset_library.rename(preset, name) {
-            Ok(renamed) => self.previews.move_preset(&preset.path, &renamed.path),
+            Ok(renamed) => {
+                self.previews.move_preset(&preset.path, &renamed.path);
+                for applied in self.applied_presets.values_mut().filter(|p| **p == preset.path) {
+                    *applied = renamed.path.clone();
+                }
+            }
             Err(error) => self.report(&error),
         }
         self.refresh_presets();
     }
 
     pub fn delete_preset(&mut self, preset: &PresetFile) {
+        self.forget_applied(&preset.path);
         if let Err(error) = self.preset_library.delete(preset) {
             self.report(&error);
         }
@@ -2116,7 +2172,7 @@ impl Model {
             if !self.grid_shown(paper) {
                 continue;
             }
-            let (films, papers) = (self.films(), self.papers());
+            let (films, papers) = (self.listed_films(), self.papers());
             // While the Film grid searches, only its matches, as listed.
             let query = if paper { "" } else { self.previews.film_query.as_str() };
             let searching = !query.trim().is_empty();
@@ -2132,9 +2188,13 @@ impl Model {
         let checking = self.presets.iter().any(|p| matches!(self.preset_status.get(p), None | Some(PresetStatus::Checking)));
         if self.preset_thumbnails_shown() && !checking {
             let kept: Option<Vec<String>> = self.catalog["preset_kept"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect());
+            let visible = self.visible_presets.clone().unwrap_or(0..0);
             let valid: Vec<(&PresetFile, &str, &Value)> = self
                 .presets
                 .iter()
+                .enumerate()
+                .filter(|(i, _)| visible.contains(i))
+                .map(|(_, p)| p)
                 .filter_map(|p| match self.preset_status.get(p) {
                     Some(PresetStatus::Valid { text, white_balance, .. }) => Some((p, text.as_str(), white_balance)),
                     _ => None,
@@ -3512,11 +3572,35 @@ mod tests {
         Rendered { id: 1, revision: model.revision, generation: model.source_generation, interactive, result, picture, cached: None }
     }
 
+    /// Settings › Fotufilm films: From datasheets hides the sampled ports,
+    /// None every port; the photograph's film stays listed.
+    #[test]
+    fn fotufilm_films_filter_the_lists_but_keep_the_film_in_use() {
+        let stock = |id: &str, fotufilm: bool, manufacturer_data: bool| Stock {
+            id: id.into(), name: id.into(), paper: false, positive: false, bw: false, target: String::new(), times: vec![], grain: Value::Null, fotufilm, manufacturer_data,
+        };
+        let mut model = Model::new(Preferences::default());
+        model.stocks = vec![stock("portra", false, true), stock("sheet", true, true), stock("sampled", true, false)];
+        model.state.film = "portra".into();
+        let listed = |m: &Model| m.listed_films().iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(listed(&model), ["portra", "sheet", "sampled"]);
+        // Set directly: `set_fotufilm_films` writes the settings file.
+        model.prefs.fotufilm_films = state::FotufilmFilms::Datasheets.key().into();
+        assert_eq!(listed(&model), ["portra", "sheet"]);
+        model.prefs.fotufilm_films = state::FotufilmFilms::Off.key().into();
+        assert_eq!(listed(&model), ["portra"]);
+        model.state.film = "sampled".into();
+        assert_eq!(listed(&model), ["portra", "sampled"]);
+        // An old catalog without the fields lists every film.
+        let old = Stock::new(&json!({"id": "x", "name": "X"}));
+        assert!(!old.fotufilm && old.manufacturer_data);
+    }
+
     /// Settings › Keep paper when changing film, through the film menu.
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
         let stock = |id: &str, paper: bool, target: &str| Stock {
-            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null,
+            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
         };
         for keep in [false, true] {
             let mut model = Model::new(Preferences { keep_paper: keep, ..Preferences::default() });

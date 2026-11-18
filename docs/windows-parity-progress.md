@@ -11,10 +11,10 @@ decisions made with their reasons, and what was carried over. See
 | 0 | Baseline | done |
 | 1 | Drawing foundation | done, merged `e142fba` |
 | 2 | Window shell | done, merged `a9a0763` |
-| 3 | Inspector | 3a done (merged, see log); 3b presets tiles + Settings tabs in progress (`win-p3b-presets-settings`, owns the PC) |
-| 4 | Canvas | not started |
+| 3 | Inspector | done: 3a and 3b merged (see log) |
+| 4 | Canvas | in progress: `win-p4-canvas` (owns the PC) |
 | 5 | Tray | not started |
-| 6 | Library (crate can start in parallel after phase 0) | crate done, merged (see log); Windows glue after phase 5 |
+| 6 | Library | crate merged; glue in progress on `win-p6b-library-glue` (Mac only until it gets the PC) |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
@@ -33,6 +33,85 @@ screenshots, polishing commits, and the single PC. Agreed:
    commits as they come, no history polishing; the Windows test suite only in phases
    4 and 8.
 4. **Phases 4 and 5 stay separate agents,** so neither runs out of context.
+
+## 2026-11-19: phase 3b, presets tiles and Settings (branch `win-p3b-presets-settings`)
+
+- **What users see:**
+  - Presets are tiles in two columns, as in `PresetInspector.swift`: the photograph
+    developed through each preset, its name in Newsreader 15, its film, and "printed
+    on" its paper (or "not printed · film scan"). The preset applied last to the
+    photograph has the pencil ring (`applied_presets` in the model, by photograph, as
+    the Mac's `appliedPresets`). A click applies, a drag sorts live, dropped files
+    import before the tile under the pointer, and the foot says "click to apply · drag
+    to sort · drop files to import" (or "drop to import" with the loose drop ring).
+  - Empty: "No presets yet", the Mac's sentence with "New" upright, Import Presets….
+  - Each tile's menu: Apply, Rename (F2), Export…, Show in Folder, Delete… (Del, the
+    alert card). Arrows move between tiles; Enter or Space applies; Shift+F10 opens the
+    menu. Each tile is a push button named by the preset, with "Applied last. film,
+    printed on paper" as its MSAA value. Renaming is a field over the name with the
+    pencil under it.
+  - Only the tiles on screen and a row either side are developed
+    (`Model::set_visible_presets`); the pane is still built on first show.
+  - Settings is an owned, themed window (its own 38 DIP band, Close only), made on the
+    first Ctrl+, and hidden by Esc, Ctrl+W or Close. Tabs as the inspector's:
+    Photographs · Speed · Upkeep · Look, with the Mac's wording. Changes apply at once.
+    It reopens on the last tab.
+  - Look: the six themes as miniatures with the BOX ring on the chosen one and
+    `AppTheme`'s hint under them.
+  - Photographs › Films › Fotufilm films: All / From datasheets / None, stored as the
+    Mac's `fotufilmFilms`. It filters the film menu, the grid and the film previews in
+    the Windows app (no `crates/` change); the film in use stays listed.
+- **Where the Windows settings went:**
+  - Photographs › New photographs: Edits (Keep the previous edits / Start fresh) and
+    Match to camera brightness. The Mac has Film/Paper and sidecar Edits here
+    instead; Edits stays until sidecars (phase 6).
+  - Photographs › Films: Fotufilm films, and Keep paper when changing film. The Mac
+    replaced Keep paper with the paper lock (phase 4).
+  - Speed: previews, Limit preview to 12 MP, Use less memory for export.
+  - Upkeep: updates (automatic, Check Now with the last check), or "not configured".
+  - Look › Viewer: the custom viewer background and its colour. **This is the slot
+    for phase 4's viewer sheet picker**, which replaces it.
+  - Left out until their features exist: RAW + JPEG, sidecar Edits, the thumbnail
+    cache, Lightroom, Remove All App Data and Quit….
+- **Startup**, one ABBA (main `aea6dff` vs branch, 6 runs, Defender idle: MsMpEng
+  0 cpu-s in the 5 s before and after). `inspector_shown` medians 173.4 / 189.1 ms
+  (+15.7). First window 77.5 / 78.5 ms; first image 1158 / 1150 ms. B was bimodal
+  (170–175 and 203–206). An earlier 8-run ABBA in the same session gave 182.3 /
+  180.1 ms (−2.2), so this is noise. Settings and the Presets pane are not built at
+  launch.
+- **Slider drag (3a's WARP path vs the pre-3a GDI path),** dragging Exposure with a
+  temporary trace (not committed): no dispatch over 16.7 ms on either. The inspector's
+  paints per mouse move are about 1.6 ms new against 0.8 ms old: trackbar 0.32 ms
+  both, the value field 0.30 / 0.18, the rows 0.17 / 0.15, plus two 0.31 ms buttons
+  (value box and reset). The film strip repaints on every move on both paths (2.6 ms):
+  that's the largest cost, and it isn't 3a's.
+- **Tests:** 190/190 on the PC with a scratch `NEGS_PROFILE_DIR`. The Mac cross-check
+  is clean (the same 14 warnings as main).
+- **Tooling:** `mac_shot.sh` has `shotfront` and `clickfront` (`winshot front`). In a
+  `pc_shot` job, `"front": true` targets the app's frontmost window, and a `"drag"`
+  step presses, moves and lets go. `shot.ps1` posts WM_CLOSE to the main window:
+  `CloseMainWindow` hit a tooltip's SysShadow window while a tip was up.
+- **Merged** after the coordinator's `12f5da4`. **Incident:** 3a's `test-parity.cmd` ran
+  the suite without `NEGS_PROFILE_DIR`, and a test overwrote Noah's real
+  `%APPDATA%\Negs\settings.json` (19 Nov 09:04; recent files became a temp file,
+  everything else defaults). The earlier contents can't be recovered. Fixed:
+  `test-parity.cmd` now sets a scratch profile, and test builds default to a temp
+  profile in `session.rs`. Noah was told.
+- **Decided (coordinator):** Keep paper goes when the paper lock lands in phase 4, as on
+  the Mac. The strip repainting on every slider move goes to phase 7 (the strip
+  rewrite), not before.
+- **Mismatches left vs macOS:**
+  - Keep paper and the Edits choice are in Settings until the paper lock and sidecars.
+  - The custom background is where the viewer sheet goes.
+  - The rename field types in Segoe UI 15 (GDI EDIT), with the Newsreader pencil
+    under it.
+  - Tiles and tab words show the focus box after a click once keyboard cues are on,
+    as Windows does.
+  - The theme swatches tick the chosen theme even when `NEGS_THEME` forces another.
+    This only happens in the harness.
+  - Scrolling with many presets and the "can't be read" tile were not shot on the PC.
+- Screenshots: `~/.negs/windows-parity/phase3b/`, with the Mac Settings references in
+  `phase3b/mac/`.
 
 ## 2026-11-19: phase 3a merged (branch tip `786d7f8`)
 
