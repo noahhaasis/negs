@@ -439,10 +439,14 @@ pub fn open(files: &[PathBuf], app: &Path, starting: impl FnOnce()) -> anyhow::R
         }
         std::thread::sleep(Duration::from_secs(3));
     }
-    // Lightroom's own quoting: each path in quotes, as Explorer passes them.
-    let arguments = files.iter().map(|f| format!("\"{}\"", f.display())).collect::<Vec<_>>().join(" ");
-    std::process::Command::new(app).raw_arg(arguments).spawn().map_err(|e| anyhow::anyhow!("{e}"))?;
+    std::process::Command::new(app).raw_arg(arguments(files)).spawn().map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(())
+}
+
+/// The command line's arguments: each path in quotes, as Explorer passes
+/// them (a path can't hold a quote on Windows).
+pub fn arguments(files: &[PathBuf]) -> String {
+    files.iter().map(|f| format!("\"{}\"", f.display())).collect::<Vec<_>>().join(" ")
 }
 
 /// A visible top-level window over 300 px tall of a process running `app`.
@@ -501,6 +505,21 @@ mod tests {
         let apps = Apps { cloud: None, classic: Some(PathBuf::from("x")) };
         assert_eq!(apps.kinds(), [Kind::Classic]);
         assert!(Apps::default().kinds().is_empty());
+    }
+
+    /// Lightroom gets every file in one command line, each quoted, spaces
+    /// and all. On a PC with it, `NEGS_EXPECT_LIGHTROOM` names the
+    /// executable detection must find (nothing is launched).
+    #[test]
+    fn lightroom_is_found_and_given_every_file_at_once() {
+        let files = [PathBuf::from(r"C:\Users\A B\AppData\Local\Negs\Lightroom\IMG_1-Negs.tif"), PathBuf::from(r"C:\x\IMG_2-Negs 2.tif")];
+        assert_eq!(arguments(&files), r#""C:\Users\A B\AppData\Local\Negs\Lightroom\IMG_1-Negs.tif" "C:\x\IMG_2-Negs 2.tif""#);
+        let apps = detect();
+        if let Some(expected) = std::env::var_os("NEGS_EXPECT_LIGHTROOM") {
+            let found = apps.cloud.as_deref().expect("Lightroom found");
+            assert!(found.to_string_lossy().eq_ignore_ascii_case(&expected.to_string_lossy()), "{apps:?}");
+            assert_eq!(apps.kinds(), [Kind::Cloud], "{apps:?}");
+        }
     }
 
     #[test]
