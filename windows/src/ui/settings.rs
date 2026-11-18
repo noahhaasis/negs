@@ -8,8 +8,9 @@
 //! Ctrl+,), then hidden and shown again.
 //!
 //! Where the Windows settings went: Photographs has the new photographs'
-//! film and paper and the brightness match, and Films the Fotufilm films
-//! (Keep paper became the paper lock on the label). Speed has the previews
+//! film and paper and the brightness match, Films the Fotufilm films
+//! (Keep paper became the paper lock on the label), then RAW + JPEG pairing
+//! and the sidecars, as on the Mac. Speed has the previews
 //! and the export memory, Upkeep the updates, and Look the themes and the
 //! viewer sheet.
 
@@ -74,6 +75,8 @@ impl Tab {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tick {
     MatchNew,
+    SeparateJpegs,
+    Sidecars,
     Previews,
     LimitPreview,
     LowMemory,
@@ -97,6 +100,10 @@ enum Hint {
     NewPhotos,
     /// The chosen theme's line.
     Theme,
+    /// What Show camera JPEGs separately does, on or off.
+    Pairing,
+    /// What Save ratings and edits next to photos does, on or off.
+    Sidecars,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -117,6 +124,13 @@ const NEW_PHOTOS: &str = "A photo you haven’t edited opens with this film and 
 /// A slide film is scanned, without a paper (the Mac strikes the paper through).
 const NEW_PHOTOS_SLIDE: &str = "Not printed: scanning the film. A photo you haven’t edited opens with this film, and its thumbnail shows it. Photos you’ve edited keep their own.";
 
+/// Under Settings › RAW + JPEG, as the switch stands (`Settings.swift`).
+const SEPARATE_JPEGS: &str = "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are two photos.";
+const PAIRED_JPEGS: &str = "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are one photo: the RAW develops, the JPEG goes to the Recycle Bin with it, and Original can show it. A JPEG you’ve already rated or edited stays a photo of its own.";
+/// Under Settings › Edits.
+const SIDECARS_ON: &str = "Each photo remembers its own edits in a small file beside it, such as IMG_0412.CR3.negs, which travels with the folder. A photo you haven’t edited starts with the film and paper above, default Prep and Lab settings and no border; the Image Size and output colour stay.";
+const SIDECARS_OFF: &str = "Ratings and edits won’t be saved. Reopening a photo starts from the defaults.";
+
 /// Each page's rows, as the Mac's sections (`SettingsView`).
 fn items(tab: Tab) -> Vec<Item> {
     match tab {
@@ -130,6 +144,12 @@ fn items(tab: Tab) -> Vec<Item> {
             Item::Section("Films"),
             Item::Choice("Fotufilm films", Choice::Fotufilm),
             Item::Hint(Hint::Text("Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.")),
+            Item::Section("RAW + JPEG"),
+            Item::Tick("Show camera JPEGs separately", Tick::SeparateJpegs),
+            Item::Hint(Hint::Pairing),
+            Item::Section("Edits"),
+            Item::Tick("Save ratings and edits next to photos", Tick::Sidecars),
+            Item::Hint(Hint::Sidecars),
         ],
         Tab::Speed => vec![
             Item::Section("Previews"),
@@ -346,6 +366,10 @@ fn hint_text(model: &Model, hint: Hint) -> &'static str {
         Hint::NewPhotos if model.new_photo_film_is_slide() => NEW_PHOTOS_SLIDE,
         Hint::NewPhotos => NEW_PHOTOS,
         Hint::Theme => theme::chosen().hint(),
+        Hint::Pairing if model.prefs.library.separate_camera_jpegs => SEPARATE_JPEGS,
+        Hint::Pairing => PAIRED_JPEGS,
+        Hint::Sidecars if model.prefs.library.sidecars() => SIDECARS_ON,
+        Hint::Sidecars => SIDECARS_OFF,
     }
 }
 
@@ -353,6 +377,8 @@ fn ticked(model: &Model, tick: Tick) -> bool {
     let prefs = &model.prefs;
     match tick {
         Tick::MatchNew => prefs.match_new_photos,
+        Tick::SeparateJpegs => prefs.library.separate_camera_jpegs,
+        Tick::Sidecars => prefs.library.sidecars(),
         Tick::Previews => prefs.previews,
         Tick::LimitPreview => prefs.limits_preview(),
         Tick::LowMemory => prefs.low_memory_export,
@@ -682,6 +708,8 @@ fn command(app: &mut App, id: u16, code: u32) {
             let model = &mut app.model;
             match tick {
                 Tick::MatchNew => model.set_match_new_photos(on),
+                Tick::SeparateJpegs => model.set_separate_camera_jpegs(on),
+                Tick::Sidecars => model.set_sidecars(on),
                 Tick::Previews => model.set_previews(on),
                 Tick::LimitPreview => model.set_limit_preview(on),
                 Tick::LowMemory => model.set_low_memory_export(on),
@@ -963,13 +991,16 @@ mod tests {
     #[test]
     fn pages_follow_the_macs_sections() {
         let sections = |tab| items(tab).into_iter().filter_map(|i| if let Item::Section(t) = i { Some(t) } else { None }).collect::<Vec<_>>();
-        assert_eq!(sections(Tab::Photographs), ["New photographs", "Films"]);
+        assert_eq!(sections(Tab::Photographs), ["New photographs", "Films", "RAW + JPEG", "Edits"]);
         // New photographs: the Mac's Film, Paper and brightness match, not the old Edits choice.
         let photographs = items(Tab::Photographs);
         let choices: Vec<_> = photographs.iter().filter_map(|i| if let Item::Choice(t, _) = i { Some(*t) } else { None }).collect();
         assert_eq!(choices, ["Film", "Paper", "Fotufilm films"]);
         assert_eq!(photographs[1..4], [Item::Choice("Film", Choice::NewFilm), Item::Choice("Paper", Choice::NewPaper), Item::Hint(Hint::NewPhotos)]);
         assert!(photographs.contains(&Item::Tick("Match to camera brightness", Tick::MatchNew)));
+        // RAW + JPEG and Edits: the Mac's two switches, in its words.
+        assert!(photographs.contains(&Item::Tick("Show camera JPEGs separately", Tick::SeparateJpegs)));
+        assert!(photographs.contains(&Item::Tick("Save ratings and edits next to photos", Tick::Sidecars)));
         assert_eq!(sections(Tab::Speed), ["Previews", "Export"]);
         assert_eq!(sections(Tab::Upkeep), ["Updates"]);
         assert_eq!(sections(Tab::Look), ["Theme", "Viewer"]);

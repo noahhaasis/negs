@@ -13,7 +13,9 @@
 //!   of their own develop the missing ones, those on screen first, then
 //!   outward; in Low Power only those on screen. Each is the stored edits as
 //!   opening shows them (a brightness match solved as opening would solve
-//!   it), 512 px, cropped and turned, saved as a JPEG under its key.
+//!   it), 512 px, cropped, turned and inside its border, saved as a JPEG
+//!   under its key. The open photograph's is filed from its preview as
+//!   it's left (`Model::file_thumbnail`), costing no develop.
 //! - **Memory**: bounded caches of pixels per size, and the GPU bitmaps
 //!   made from them, uploaded as they arrive, never while painting.
 
@@ -239,6 +241,13 @@ impl Thumbs {
         }
     }
 
+    /// The open photograph's thumbnail, filed from its preview as it was
+    /// left: shown at once.
+    pub fn filed(&mut self, key: String, bgra: Vec<u8>, width: u32, height: u32) {
+        self.failed.remove(&key);
+        self.arrived(Arrived::Edited { key, pixels: Pixels::new(bgra, width, height, false), read: None });
+    }
+
     fn upload(&mut self, pixels: &Pixels) {
         if let Some(image) = surface::upload(&pixels.bgra, pixels.width, pixels.height) {
             let bytes = image.bytes();
@@ -344,7 +353,8 @@ struct DevelopJob {
     /// A brightness match to solve first: the prep exposure above it.
     solve: Option<f64>,
     raw: bool,
-    rotation: i32,
+    /// Turned and bordered as the edit view shows it.
+    finish: crate::thumb_compose::Finish,
 }
 
 fn develop_job(model: &Model, want: &Want, key: String) -> Option<DevelopJob> {
@@ -365,7 +375,8 @@ fn develop_job(model: &Model, want: &Want, key: String) -> Option<DevelopJob> {
         let r = state.crop.rect;
         command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": state.crop.angle});
     }
-    Some(DevelopJob { key, loose: want.loose.clone(), source: source.clone(), command, solve, raw: crate::model::is_raw(&source), rotation: state.rotation() })
+    let finish = crate::thumb_compose::Finish::of(&state, model.engine_paths().map(|p| p.data.clone()));
+    Some(DevelopJob { key, loose: want.loose.clone(), source: source.clone(), command, solve, raw: crate::model::is_raw(&source), finish })
 }
 
 fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) {
@@ -425,12 +436,7 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
         let (w, h) = (js::number(&result["width"]) as u32, js::number(&result["height"]) as u32);
         let rgba = rgba?;
         let image = image::RgbaImage::from_raw(w, h, rgba).ok_or_else(|| anyhow::anyhow!("short buffer"))?;
-        let image = match job.rotation.rem_euclid(4) {
-            1 => image::imageops::rotate90(&image),
-            2 => image::imageops::rotate180(&image),
-            3 => image::imageops::rotate270(&image),
-            _ => image,
-        };
+        let image = crate::thumb_compose::finish(image, &job.finish);
         let (w, h) = image.dimensions();
         let rgba = image.into_raw();
         let jpeg = edited_store::jpeg(&rgba, w, h, rules::EDITED_LONG_SIDE).ok_or_else(|| anyhow::anyhow!("encode"))?;
