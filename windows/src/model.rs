@@ -495,6 +495,19 @@ impl KeptDevelop {
     }
 }
 
+/// The developed thumbnail filed as `key`, else the last one filed for the
+/// same edits under an older engine, as the canvas's stand-in.
+fn stand_in(key: &str, loose: Option<&str>) -> Option<Picture> {
+    let store = crate::edited_store::thumbnails();
+    let key = if store.contains(key) { key.to_string() } else { store.previous(loose?)? };
+    let file = std::fs::read(store.path(&key)).ok()?;
+    let (mut rgba, w, h) = crate::edited_store::decode(&file)?;
+    for p in rgba.chunks_exact_mut(4) {
+        p.swap(0, 2);
+    }
+    Some(Picture::new(rgba, w, h))
+}
+
 pub struct Model {
     pub state: EditState,
     pub defaults: Value,
@@ -507,6 +520,10 @@ pub struct Model {
     pub image: Option<Picture>,
     /// The unprocessed photograph, shown while the first render develops.
     pub placeholder: Option<Picture>,
+    /// The photograph's developed thumbnail, shown as it opens until the
+    /// kept develop or the camera's preview is read (`standIn`): cropped,
+    /// turned and bordered already.
+    pub stand_in: Option<Picture>,
     /// The last settled develop's pixels, kept as the photograph is left
     /// (`edited_store::renders`), so it opens on them next time.
     kept: Option<KeptDevelop>,
@@ -719,6 +736,7 @@ impl Model {
             source: None,
             image: None,
             placeholder: None,
+            stand_in: None,
             kept: None,
             original: None,
             histogram: None,
@@ -1965,6 +1983,12 @@ impl Model {
         }
         // It opens on its own last develop, if one was kept for these edits.
         let kept_key = self.library_item().and_then(|item| self.kept_key(&item));
+        // The developed thumbnail stands in until then, if it's been made:
+        // read now (a few ms), so the window's next frame shows it rather
+        // than an empty canvas. A restored session tries its saved frame
+        // first, then reads it off the UI thread.
+        let stand_in_key = self.library_item().and_then(|item| self.filed_key(crate::edited_store::thumbnails(), &item));
+        self.stand_in = None;
         let path = path.as_path();
         self.source = Some(path.to_path_buf());
         self.image = None;
@@ -1995,6 +2019,14 @@ impl Model {
         let generation = self.source_generation;
         let restoring = session.is_some();
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
+        let stand_in_key = match stand_in_key {
+            Some((key, loose)) if !restoring => {
+                self.stand_in = stand_in(&key, loose.as_deref());
+                crate::trace::event("stand_in", || json!({"shown": self.stand_in.is_some()}));
+                None
+            }
+            key => key,
+        };
         if self.prefs.fresh_edits {
             self.custom_film_format = false;
         }
@@ -2076,6 +2108,9 @@ impl Model {
         let fallback = move || {
             #[cfg(test)]
             let _background = background;
+            if let Some(picture) = stand_in_key.and_then(|(key, loose)| stand_in(&key, loose.as_deref())) {
+                ui::post(move |app: &mut App| app.model.show_stand_in(picture, generation));
+            }
             if let Some((picture, size)) = kept_key.and_then(|(key, loose)| KeptDevelop::load(&key, loose.as_deref())).or_else(|| crate::thumbnail::placeholder(&path)) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
             }
@@ -2096,7 +2131,7 @@ impl Model {
                         if model.render_state().rendered() != expected { std::thread::spawn(fallback); return; }
                         model.image = Some(picture); model.image_size = size; model.is_raw = raw; model.lens_supported = lens_supported;
                         model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
-                        model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
+                        model.showing_cached_preview = true; model.placeholder = None; model.stand_in = None; model.hide_activity();
                         model.shown_frame = Some(FrameTag { request: 0, revision: model.revision, generation, kind: FrameKind::Cached });
                         #[cfg(test)]
                         model.frame_log.extend(model.shown_frame);
@@ -2155,6 +2190,12 @@ impl Model {
 
     /// The name `item`'s kept develop is filed under, with its edits as saved.
     fn kept_key(&self, item: &negs_library::Item) -> Option<(String, Option<String>)> {
+        self.filed_key(crate::edited_store::renders(), item)
+    }
+
+    /// The name `item`'s kept develop or developed thumbnail (`store`) is
+    /// filed under, with its edits as saved, and its loose key.
+    fn filed_key(&self, store: &crate::edited_store::Store, item: &negs_library::Item) -> Option<(String, Option<String>)> {
         let library = self.shelf.library.as_ref()?;
         let file = library.file(item)?;
         let unedited;
@@ -2165,14 +2206,23 @@ impl Model {
                 &unedited
             }
         };
-        let key = crate::edited_store::renders().key(file, item, look)?;
+        let key = store.key(file, item, look)?;
         Some((key, crate::edited_store::Store::loose_key(file, item, look)))
+    }
+
+    fn show_stand_in(&mut self, picture: Picture, generation: u64) {
+        if generation != self.source_generation || self.image.is_some() || self.placeholder.is_some() {
+            return;
+        }
+        self.stand_in = Some(picture);
+        self.mark(dirty::CANVAS);
     }
 
     fn show_placeholder(&mut self, picture: Picture, size: Size, generation: u64) {
         if generation != self.source_generation || self.image.is_some() {
             return;
         }
+        self.stand_in = None;
         self.placeholder_size = size;
         self.placeholder = Some(picture);
         self.mark(dirty::CANVAS | dirty::INSPECTOR);
@@ -2812,6 +2862,7 @@ impl Model {
         self.showing_interactive_frame = rendered.interactive;
         self.image = Some(rendered.picture);
         self.placeholder = None;
+        self.stand_in = None;
         self.update_histogram();
         let film = FilmHistogram::parse(&result["film_histogram"]);
         if film != self.film_histogram {

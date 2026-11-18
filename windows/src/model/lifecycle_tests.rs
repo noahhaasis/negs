@@ -2264,3 +2264,44 @@ lifecycle_test! {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+// MARK: The stand-in
+
+lifecycle_test! {
+    /// As a photograph opens, its developed thumbnail stands in at once,
+    /// before anything is decoded (`standIn`); its develop replaces it.
+    /// Without a thumbnail filed for its edits there's none.
+    fn a_photograph_opens_on_its_developed_thumbnail() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::edited_store::thumbnails().set_engine(Some("harness-engine".into()));
+        crate::edited_store::renders().set_engine(Some("harness-engine".into()));
+        let dir = std::env::temp_dir().join(format!("negs-harness-stand-in-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(600, 400, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.edit(|m| m.open(&a));
+        assert!(h.model().stand_in.is_none(), "nothing filed yet");
+        h.idle();
+        let item = h.model().library_item().unwrap();
+        let (key, _) = h.model().filed_key(crate::edited_store::thumbnails(), &item).expect("a key");
+        // Leaving it files its thumbnail from the preview.
+        h.open(&b);
+        h.run_until("the thumbnail filed", |_| crate::edited_store::thumbnails().contains(&key));
+        h.idle();
+        h.edit(|m| m.open(&a));
+        let m = h.model();
+        let stand_in = m.stand_in.as_ref().expect("the developed thumbnail stands in at once");
+        assert!(m.image.is_none() && m.placeholder.is_none());
+        assert_eq!(stand_in.width.max(stand_in.height), crate::sheet_rules::EDITED_LONG_SIDE.min(600));
+        h.idle();
+        let m = h.model();
+        assert!(m.image.is_some() && m.stand_in.is_none(), "the develop replaces it");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
