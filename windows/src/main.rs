@@ -23,6 +23,7 @@ mod presets;
 mod previews;
 mod rendered_preview;
 mod session;
+mod sheet_rules;
 mod state;
 mod thumbnail;
 mod tone_graph;
