@@ -1625,7 +1625,8 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
                 }
                 let label = (column - gutter).min(ins.px(ink::width("Flat field", &ink::LABEL) as f64 + 12.0));
                 positions.push((c[0], gutter, y, label, row_h));
-                positions.push((c[1], gutter + label, y, (x + margin - gutter - label).max(0), row_h));
+                // Clear of the buttons' windows, which paint their margins.
+                positions.push((c[1], gutter + label, y, (x - margin - gutter - label).max(0), row_h));
                 row_h.max(ins.px(39.0))
             }
             Kind::Actions(buttons) => {
