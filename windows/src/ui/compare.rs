@@ -393,6 +393,15 @@ fn label(p: &mut Painter, ink: &SheetInk, words: &Words, edge: f32, top: f32, ri
 /// The columns `x0..x1` of `image` covering `frame` (its largest centred
 /// part with the frame's shape, as `draw_thumbnail` draws all of it), or
 /// at 100% the part `shown_part` gives.
+/// `image`'s rectangle fitted into `frame`, centred.
+fn fitted(frame: RECT, image: &Bitmap) -> RECT {
+    let (fw, fh) = ((frame.right - frame.left) as f64, (frame.bottom - frame.top) as f64);
+    let scale = (fw / image.width.max(1) as f64).min(fh / image.height.max(1) as f64);
+    let (w, h) = ((image.width as f64 * scale).round() as i32, (image.height as f64 * scale).round() as i32);
+    let (left, top) = (frame.left + (frame.right - frame.left - w) / 2, frame.top + (frame.bottom - frame.top - h) / 2);
+    RECT { left, top, right: left + w, bottom: top + h }
+}
+
 fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap, relative: f64, centre: (f64, f64)) {
     let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
     if fw <= 0 || fh <= 0 || x1 <= x0 {
@@ -493,7 +502,13 @@ fn paint(hwnd: HWND, dc: HDC) {
             let split = frame.left + ((frame.right - frame.left) as f64 * comparison.split).round() as i32;
             c.round_rect(draw::RectF::of(frame), 0.0, blank);
             for (i, (x0, x1)) in [(0, (frame.left, split)), (1, (split, frame.right))] {
-                if let Some((_, image)) = &v.bitmaps[i] {
+                let Some((_, image)) = &v.bitmaps[i] else { continue };
+                if i == 1 && relative <= 1.0 {
+                    // The second, fitted into the first's frame: black where its proportions leave room.
+                    c.round_rect(draw::RectF::of(RECT { left: x0, ..frame }), 0.0, theme::gdi(0));
+                    let fitted = fitted(frame, image);
+                    draw_part(&mut c, fitted, x0.max(fitted.left), x1.min(fitted.right), image, 1.0, (0.5, 0.5));
+                } else {
                     draw_part(&mut c, frame, x0, x1, image, relative, centre);
                 }
             }
