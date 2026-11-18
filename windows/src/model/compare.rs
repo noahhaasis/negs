@@ -91,6 +91,8 @@ pub struct Memory {
     /// What the open photograph's picture was shown from: its id and edit.
     shown_key: Option<(u64, u64, String)>,
     shown: Option<Shown>,
+    /// What the picture being made off the UI thread is made from.
+    making: Option<(u64, u64, String)>,
     /// What the last context menu offered.
     offered: Option<rules::Offer>,
     /// The other photograph's develop, once the edited one has settled.
@@ -241,7 +243,7 @@ impl Model {
         }
         // The one open until now keeps its picture; the other's is the open one's stand-in.
         let open = self.library_item();
-        let shown = self.compared_open();
+        let shown = self.compared_open_now();
         let other = self.compare.other.take();
         if let (Some(open), Some(shown)) = (open, shown) {
             self.compare.kept = Some((open.clone(), shown.clone()));
@@ -469,22 +471,57 @@ impl Model {
 
     /// The open photograph as shown: its settled develop (the preview's
     /// pixels leave memory once on the GPU), cropped, mirrored and turned.
+    /// Made off the UI thread (a develop is cropped, turned and scaled down
+    /// in about a second): the picture last made shows until then.
     pub fn compared_open(&mut self) -> Option<Shown> {
+        let Some((key, job)) = self.open_shown_job() else { return self.compare.shown.clone() };
+        if self.compare.making.as_ref() != Some(&key) {
+            self.compare.making = Some(key.clone());
+            #[cfg(test)]
+            let background = ui::testing::background();
+            std::thread::spawn(move || {
+                #[cfg(test)]
+                let _background = background;
+                let shown = job();
+                ui::post(move |app: &mut App| app.model.compared_open_made(key, shown));
+            });
+        }
+        self.compare.shown.clone()
+    }
+
+    /// `compared_open` at once, for a photograph about to be closed.
+    fn compared_open_now(&mut self) -> Option<Shown> {
+        if let Some((key, job)) = self.open_shown_job() {
+            self.compared_open_made(key, job());
+        }
+        self.compare.shown.clone()
+    }
+
+    /// What the open photograph's picture would be made from now, and the
+    /// making; None while the one shown is current.
+    fn open_shown_job(&self) -> Option<((u64, u64, String), impl FnOnce() -> Option<Shown> + Send + 'static)> {
         let orientation = self.state.orientation();
         let crop = self.state.crop;
         let cropped_render = self.size_mode() == state::SizeMode::LongestSide && crop.cropped();
-        let Some(kept) = self.kept.as_ref().filter(|k| k.generation == self.source_generation) else { return self.compare.shown.clone() };
+        let kept = self.kept.as_ref().filter(|k| k.generation == self.source_generation)?;
         let key = (kept.generation, kept.revision, format!("{crop:?}{orientation:?}"));
         if self.compare.shown_key.as_ref() == Some(&key) {
-            return self.compare.shown.clone();
+            return None;
         }
         let pixels = (!cropped_render && crop.cropped()).then(|| (crop.pixels(Size::new(kept.width as f64, kept.height as f64)), crop.angle));
-        let shown = Shown::of(&kept.pixels, kept.width, kept.height, pixels, orientation, crate::picture::is_wide(&kept.space));
-        if shown.is_some() {
+        let (rgba, width, height, wide) = (kept.pixels.clone(), kept.width, kept.height, crate::picture::is_wide(&kept.space));
+        Some((key, move || Shown::of(&rgba, width, height, pixels, orientation, wide)))
+    }
+
+    fn compared_open_made(&mut self, key: (u64, u64, String), shown: Option<Shown>) {
+        if self.compare.making.as_ref() == Some(&key) {
+            self.compare.making = None;
+        }
+        if shown.is_some() && self.compare.comparison.is_some() {
             self.compare.shown_key = Some(key);
             self.compare.shown = shown;
+            self.mark(dirty::COMPARE);
         }
-        self.compare.shown.clone()
     }
 
     /// The original as shown beside the open photograph.

@@ -57,6 +57,9 @@ struct View {
     hwnd: HWND,
     /// Each side's picture, by the pixels it was made from.
     bitmaps: [Option<(usize, Arc<Bitmap>)>; 2],
+    /// The pixels each side shows next, and those being made into a picture.
+    wanted: [Option<usize>; 2],
+    making: [Option<usize>; 2],
     aspects: [f64; 2],
     words: [Words; 2],
     comparison: Option<rules::Comparison>,
@@ -85,6 +88,8 @@ impl Default for View {
         Self {
             hwnd: HWND::default(),
             bitmaps: [None, None],
+            wanted: [None; 2],
+            making: [None; 2],
             aspects: [1.5; 2],
             words: Default::default(),
             comparison: None,
@@ -203,6 +208,34 @@ fn ensure(app: &App) -> HWND {
     }
 }
 
+/// Makes side `i`'s picture off the UI thread (a few hundred milliseconds
+/// for a large one), then shows it if it's still the one wanted.
+fn make_bitmap(i: usize, key: usize, shown: crate::model::compare::Shown, color: Option<Arc<crate::icc::Transform>>) {
+    VIEW.with(|v| v.borrow_mut().making[i] = Some(key));
+    #[cfg(test)]
+    let background = super::testing::background();
+    std::thread::spawn(move || {
+        #[cfg(test)]
+        let _background = background;
+        let bitmap = Bitmap::from_rgba(&shown.rgba, shown.width, shown.height, shown.wide, color.as_deref(), 0, false).ok().map(Arc::new);
+        crate::trace::event("compare_picture", || serde_json::json!({"side": i, "width": shown.width, "height": shown.height}));
+        post(move |app: &mut App| {
+            let wanted = VIEW.with(|v| {
+                let mut v = v.borrow_mut();
+                if v.making[i] == Some(key) {
+                    v.making[i] = None;
+                }
+                v.wanted[i] == Some(key)
+            });
+            if wanted && let Some(bitmap) = bitmap {
+                VIEW.with(|v| v.borrow_mut().bitmaps[i] = Some((key, bitmap)));
+                // The frame takes the new picture's shape.
+                app.model.dirty |= crate::model::dirty::COMPARE;
+            }
+        });
+    });
+}
+
 /// Brings the pictures and words up to date with the model.
 pub fn sync(app: &mut App) {
     let Some(comparison) = app.model.comparison().cloned() else {
@@ -214,17 +247,23 @@ pub fn sync(app: &mut App) {
         return;
     };
     let color = app.model.previews.color.clone();
-    let mut bitmaps: [Option<(usize, Arc<Bitmap>)>; 2] = VIEW.with(|v| v.borrow().bitmaps.clone());
+    let (mut bitmaps, making) = VIEW.with(|v| {
+        let v = v.borrow();
+        (v.bitmaps.clone(), v.making)
+    });
     let mut aspects = [1.5; 2];
     let mut words: [Words; 2] = Default::default();
+    let mut wanted = [None; 2];
     for (i, side) in [&comparison.first, &comparison.second].into_iter().enumerate() {
         let shown = app.model.compared_side(side);
         if let Some(shown) = &shown {
-            aspects[i] = shown.aspect();
             let key = Arc::as_ptr(&shown.rgba) as usize;
-            if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) {
-                bitmaps[i] = Bitmap::from_rgba(&shown.rgba, shown.width, shown.height, shown.wide, color.as_deref(), 0, false).ok().map(|b| (key, Arc::new(b)));
+            wanted[i] = Some(key);
+            if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) && making[i] != Some(key) {
+                make_bitmap(i, key, shown.clone(), color.clone());
             }
+            // The picture drawn sets the frame's shape until the next is made.
+            aspects[i] = bitmaps[i].as_ref().map_or(shown.aspect(), |(_, b)| b.width as f64 / b.height.max(1) as f64);
         } else {
             bitmaps[i] = None;
         }
@@ -240,6 +279,7 @@ pub fn sync(app: &mut App) {
         let mut v = v.borrow_mut();
         v.bitmaps = bitmaps;
         v.aspects = aspects;
+        v.wanted = wanted;
         v.words = words;
         let open = |side: &Side| matches!(side, Side::Photo(item) if app.model.library_item().as_ref() == Some(item));
         v.open = if open(&comparison.first) || !open(&comparison.second) { 0 } else { 1 };
