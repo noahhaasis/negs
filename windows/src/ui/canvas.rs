@@ -272,8 +272,9 @@ struct View {
     /// What clicks can reach (names, lock, trim marks, the dial's arrows),
     /// where they were last drawn, in pixels.
     targets: Vec<(Target, Rect)>,
-    /// The paper lock's tooltip as last set: where, and whether it's closed.
-    lock_tip: Option<(RECT, bool)>,
+    /// The label's tooltips as last set: where the film, the paper and the
+    /// lock are, and whether the lock is closed.
+    label_tips: Option<([RECT; 3], bool)>,
     /// The target under the pointer, and the pointer is over the print.
     hot: Option<Target>,
     over_print: bool,
@@ -377,7 +378,7 @@ pub fn init(hwnd: HWND, dpi: u32) {
             running: None,
             presented: None,
             targets: Vec::new(),
-            lock_tip: None,
+            label_tips: None,
             hot: None,
             over_print: false,
             pressed: None,
@@ -1073,21 +1074,28 @@ impl View {
         (r.width > 0.0 && r.height > 0.0).then_some(r)
     }
 
-    /// The paper lock's tooltip follows the lock (`ControlHelp.paperLock`,
-    /// `paperKept`): over it as last drawn, nowhere while it isn't.
-    fn follow_lock_tip(&mut self) {
-        let rect = self.target_rect(Target::Lock).map_or(RECT::default(), |r| RECT {
-            left: r.x.floor() as i32,
-            top: r.y.floor() as i32,
-            right: r.max_x().ceil() as i32,
-            bottom: r.max_y().ceil() as i32,
-        });
+    /// The label's tooltips follow its names and the paper lock
+    /// (`ControlHelp.film`, `paper`, `paperLock`, `paperKept`): over each as
+    /// last drawn, nowhere while it isn't.
+    fn follow_label_tips(&mut self) {
+        let place = |target| {
+            self.target_rect(target).map_or(RECT::default(), |r| RECT {
+                left: r.x.floor() as i32,
+                top: r.y.floor() as i32,
+                right: r.max_x().ceil() as i32,
+                bottom: r.max_y().ceil() as i32,
+            })
+        };
+        let rects = [place(Target::Film), place(Target::Paper), place(Target::Lock)];
         let kept = self.scene.words.keep_paper;
-        if self.lock_tip == Some((rect, kept)) || self.hwnd.is_invalid() {
+        if self.label_tips == Some((rects, kept)) || self.hwnd.is_invalid() {
             return;
         }
-        self.lock_tip = Some((rect, kept));
-        super::dialogs::area_tooltip(self.hwnd, 1, rect, if kept { crate::help::PAPER_KEPT } else { crate::help::PAPER_LOCK });
+        self.label_tips = Some((rects, kept));
+        let lock = if kept { crate::help::PAPER_KEPT } else { crate::help::PAPER_LOCK };
+        for (part, (rect, text)) in rects.into_iter().zip([crate::help::FILM, crate::help::PAPER, lock]).enumerate() {
+            super::dialogs::area_tooltip(self.hwnd, part + 1, rect, text);
+        }
     }
 
     fn build(&mut self, items: &mut Vec<Draw>) {
@@ -1146,7 +1154,7 @@ impl View {
                 }
             }
         }
-        self.follow_lock_tip();
+        self.follow_label_tips();
         self.retry = None;
         if scene.cropping.is_none() {
             if let Some((name, reason)) = &scene.failed {

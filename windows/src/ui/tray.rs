@@ -362,8 +362,8 @@ fn escape(app: &App) -> Escape {
 }
 
 /// Whether a press at `msg` leaves the tray open: on the tray, or on a
-/// name that opens it (the label's names and lock, the inspector's Film
-/// and Paper). Any other click keeps the stock and closes it.
+/// name that opens it (the label's names and lock). Any other click keeps
+/// the stock and closes it.
 pub fn keeps_open(app: &App, msg: &MSG) -> bool {
     let tray = hwnd();
     let target = msg.hwnd;
@@ -374,7 +374,7 @@ pub fn keeps_open(app: &App, msg: &MSG) -> bool {
         let (x, y) = ((msg.lParam.0 & 0xffff) as i16 as i32, ((msg.lParam.0 >> 16) & 0xffff) as i16 as i32);
         return super::canvas::opens_tray_at(x, y);
     }
-    super::inspector::opens_tray(app, target)
+    false
 }
 
 // MARK: Painting
