@@ -991,13 +991,16 @@ mod tests {
     #[test]
     fn pages_follow_the_macs_sections() {
         let sections = |tab| items(tab).into_iter().filter_map(|i| if let Item::Section(t) = i { Some(t) } else { None }).collect::<Vec<_>>();
-        assert_eq!(sections(Tab::Photographs), ["New photographs", "Films"]);
+        assert_eq!(sections(Tab::Photographs), ["New photographs", "Films", "RAW + JPEG", "Edits"]);
         // New photographs: the Mac's Film, Paper and brightness match, not the old Edits choice.
         let photographs = items(Tab::Photographs);
         let choices: Vec<_> = photographs.iter().filter_map(|i| if let Item::Choice(t, _) = i { Some(*t) } else { None }).collect();
         assert_eq!(choices, ["Film", "Paper", "Fotufilm films"]);
         assert_eq!(photographs[1..4], [Item::Choice("Film", Choice::NewFilm), Item::Choice("Paper", Choice::NewPaper), Item::Hint(Hint::NewPhotos)]);
         assert!(photographs.contains(&Item::Tick("Match to camera brightness", Tick::MatchNew)));
+        // RAW + JPEG and Edits: the Mac's two switches, in its words.
+        assert!(photographs.contains(&Item::Tick("Show camera JPEGs separately", Tick::SeparateJpegs)));
+        assert!(photographs.contains(&Item::Tick("Save ratings and edits next to photos", Tick::Sidecars)));
         assert_eq!(sections(Tab::Speed), ["Previews", "Export"]);
         assert_eq!(sections(Tab::Upkeep), ["Updates"]);
         assert_eq!(sections(Tab::Look), ["Theme", "Viewer"]);
