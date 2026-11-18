@@ -12,12 +12,58 @@ decisions made with their reasons, and what was carried over. See
 | 1 | Drawing foundation | done, merged `e142fba` |
 | 2 | Window shell | done, merged `a9a0763` |
 | 3 | Inspector | done: 3a and 3b merged (see log) |
-| 4 | Canvas | in progress: `win-p4-canvas` (owns the PC) |
+| 4 | Canvas | done, merged `8f5bdde` |
 | 5 | Tray | not started |
-| 6 | Library | crate merged; glue in progress on `win-p6b-library-glue` (Mac only until it gets the PC) |
+| 6 | Library | crate merged; glue built on the Mac (`win-p6b-library-glue`), now on the PC for its gates |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
+
+## 2026-11-19: phase 4 merged, the canvas (`8f5bdde`, branch tip `5726c97`)
+
+- **What users see:**
+  - The caption above the print (EXIF facts left, the file name right; the name goes first
+    when the line is short; a portrait's caption is centred).
+  - The label under it: "Film ⌄ printed on Paper ⌄". Each name opens the fold-out
+    tiles, or a menu when previews are off or in Image Only.
+  - The paper lock on "printed on". **Keep paper and the custom background settings are
+    gone**, as on the Mac.
+  - The Mac's 48/54/68 layout; the empty window's words are centred on the print.
+  - Cropping: trim marks start it, a straighten dial with quarter-turn arrows, and the crop
+    panel in the ink style (Cancel, yellow Done, "return applies · esc cancels").
+  - F is Image Only, holding T shows the photograph upside down, and Esc leaves Image Only
+    first.
+  - Settings › Look › Viewer › Sheet: the theme's own plus the 7 sheets. The caption and
+    label take the sheet's ink; the light table glow is contrast-gated against the sheet.
+  - The exact fit (ticket 38): a fitted photograph is Lanczos-resampled in linear light,
+    on the GPU or on a thread for the software canvas, after a 150 ms pause in sizing.
+  - The window reopens at its last size, within 1 px at 125% (it used to drift a pixel
+    per launch).
+  - Phase 2 carry-overs: the status line and strip hide while a file is dragged in; the
+    Developing tag's moving line works on the software canvas.
+- **Gates:**
+  - Mac cross-check clean. PC build passed; `test-parity.cmd` 203 passed, 0 failed.
+  - Exact fit against Pillow LANCZOS in linear light: CPU mean |Δ| 0.0000/255, max 1;
+    GPU (6016×4016 develop, three sizes) mean ≤ 0.054/255, max 1, detail ratio 1.0000–1.0001.
+  - Startup ABBA, 8 each, medians in ms (base b360278 → head):
+    `first_window_composited` 85.7 → 86.6, `inspector_shown` 181.8 → 179.5,
+    `gpu_ready` 410.2 → 420.1, `first_image_on_screen` 1170.4 → 1203.7.
+    Three head runs had `gpu_ready` ≈ 540 and pulled the last median up; the others
+    were ≈ 1170, like base. Defender was scanning the freshly copied exes. To be
+    settled by the full ABBA after phase 6.
+  - Screenshots, Darkroom and Daylight: `~/.negs/windows-parity/phase4/`. Photo and crop
+    views match the Mac's layout and type closely.
+- **Decided (agent, accepted):** Rotate starts a crop; the hand cursor over the label's
+  targets; the Developing tag on the theme background; `text.rs` replaced by DirectWrite;
+  the exact fit only when fitted, settled, unrotated, not cropping or sizing, and
+  zoomed out; the crop shade blends encoded colour as Core Animation does.
+- **Mismatches left:**
+  - No Flip in the crop panel: the Windows engine has no `io.flip` parameter, and that
+    needs an engine change (Noah's call).
+  - While cropping, the status line still shows the size and develop time; the Mac shows
+    "Cropping · Original · 6016 × 4016 px" and dims Fit/100%. Carry to phase 7.
+  - The window size can be 1 px off at fractional scales.
+- **For Noah:** a tooltip on the paper lock? An `io.flip` engine parameter for Flip?
 
 ## 2026-11-19: speed-ups agreed with Noah
 
@@ -101,8 +147,9 @@ screenshots, polishing commits, and the single PC. Agreed:
   the Mac. The strip repainting on every slider move goes to phase 7 (the strip
   rewrite), not before.
 - **Mismatches left vs macOS:**
-  - Keep paper and the Edits choice are in Settings until the paper lock and sidecars.
-  - The custom background is where the viewer sheet goes.
+  - Keep paper and the Edits choice are in Settings until the paper lock and sidecars
+    (Keep paper went in phase 4; the Edits choice goes with phase 6's glue).
+  - The custom background is where the viewer sheet goes (replaced in phase 4).
   - The rename field types in Segoe UI 15 (GDI EDIT), with the Newsreader pencil
     under it.
   - Tiles and tab words show the focus box after a click once keyboard cues are on,
