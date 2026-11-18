@@ -381,6 +381,9 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
         return finish(None, true);
     }
     job.command["source_generation"] = json!(generation);
+    // Every request names it, the decode and the solve's too.
+    let buffer = engine.directory().join(format!("thumbnail-{generation}.rgba"));
+    job.command["preview_path"] = json!(buffer);
     let ask = |command: Value| -> anyhow::Result<Value> {
         let (tx, rx) = std::sync::mpsc::channel();
         let timeout = engine::timeout_for("thumbnail");
@@ -415,8 +418,6 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
                 }
             }
         }
-        let buffer = engine.directory().join(format!("thumbnail-{generation}.rgba"));
-        job.command["preview_path"] = json!(buffer);
         let result = ask(job.command.clone());
         let rgba = std::fs::read(&buffer);
         let _ = std::fs::remove_file(&buffer);
