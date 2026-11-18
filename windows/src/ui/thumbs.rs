@@ -268,6 +268,7 @@ impl Thumbs {
         }
         let low_power = low_power();
         let target = rules::helpers(cores(), memory(), low_power);
+        crate::trace::event("thumbnail_pump", || json!({"busy": self.busy, "helpers": target, "low_power": low_power, "keys": wants.iter().filter(|w| w.key.is_some()).count()}));
         if self.busy >= target {
             return;
         }
@@ -436,6 +437,10 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
         let (bgra, w, h) = edited_store::decode(&jpeg).ok_or_else(|| anyhow::anyhow!("decode"))?;
         Ok(Pixels::new(bgra, w, h, false))
     })();
+    crate::trace::event("thumbnail_developed", || match &developed {
+        Ok(p) => json!({"key": job.key, "width": p.width, "height": p.height}),
+        Err(error) => json!({"key": job.key, "error": format!("{error:#}")}),
+    });
     match developed {
         Ok(pixels) => finish(Some(pixels), false),
         Err(_) => finish(None, false),

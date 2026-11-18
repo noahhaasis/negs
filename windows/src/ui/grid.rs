@@ -474,11 +474,12 @@ fn sentence(p: &mut Painter, parts: &[Part], t: &Tokens, ox: f32, oy: f32, place
             } else {
                 p.fill_rect(RectF::new(x, baseline + 2.0, m.width, 1.0), Ink::hex(t.hex.dim));
             }
-            let chevron = " ⌄";
-            let c = p.measure(chevron, &SENTENCE, 0.0);
-            p.text(chevron, &SENTENCE, x + m.width, baseline - c.baseline, Ink::hex(t.hex.dim));
-            places.push((RectF::new(x - 4.0, oy, m.width + c.width + 8.0, rules::SENTENCE as f32), Act::Filter));
-            x += c.width;
+            // The chevron, 7 × 3.5, drawn: Newsreader has no ⌄.
+            let (cx, cy) = (x + m.width + 8.0, baseline - 4.0);
+            p.line((cx - 3.5, cy - 1.75), (cx, cy + 1.75), 1.2, Ink::hex(t.hex.dim));
+            p.line((cx, cy + 1.75), (cx + 3.5, cy - 1.75), 1.2, Ink::hex(t.hex.dim));
+            places.push((RectF::new(x - 4.0, oy, m.width + 20.0, rules::SENTENCE as f32), Act::Filter));
+            x += 14.0;
         } else if let Some(act) = act {
             places.push((RectF::new(x, oy, m.width + 6.0, rules::SENTENCE as f32), act));
         }

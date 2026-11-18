@@ -1500,7 +1500,7 @@ pub fn run() {
         let status = status::create(main);
         let canvas = create(w!("NegsCanvas"), "Photograph preview", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
         let empty = create(w!("NegsEmpty"), "", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
-        let strip = create(w!("NegsStrip"), "Film Strip", WS_CHILD | WS_TABSTOP | WS_HSCROLL, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
+        let strip = create(w!("NegsStrip"), "Film Strip", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
         let panes = panes::create(main, fonts.ui);
         let inspector = inspector::Inspector::create(main, &fonts, dpi);
         canvas::init(canvas, dpi);

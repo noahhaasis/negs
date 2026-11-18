@@ -46,6 +46,7 @@ pub fn read_stamp(paths: EnginePaths, done: impl FnOnce(&mut crate::ui::App) + S
     }
     let _ = std::thread::Builder::new().name("negs-stamp".into()).spawn(move || {
         let stamp = stamp(&paths);
+        crate::trace::event("thumbnail_stamp", || serde_json::json!({"stamp": stamp}));
         thumbnails().set_engine(stamp.clone());
         renders().set_engine(stamp);
         crate::ui::post(done);
