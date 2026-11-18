@@ -29,18 +29,28 @@ impl Shown {
     /// `rgba` (width × height) cropped to `pixels` and straightened by the
     /// crop's angle (degrees, as the canvas turns it), mirrored, then turned.
     fn of(rgba: &[u8], width: u32, height: u32, pixels: Option<(crate::crop::Rect, f64)>, orientation: crate::crop::Orientation, wide: bool) -> Option<Shown> {
-        let image = image::RgbaImage::from_raw(width, height, rgba.to_vec())?;
+        // Read in place: a develop is 100 MB.
+        let source = image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(width, height, rgba)?;
         let image = match pixels {
-            Some((r, angle)) if angle != 0.0 => straightened(&image, r, angle),
+            Some((r, angle)) if angle != 0.0 => straightened(&source, r, angle),
             Some((r, _)) => {
                 let x = (r.x.round().max(0.0) as u32).min(width.saturating_sub(1));
                 let y = (r.y.round().max(0.0) as u32).min(height.saturating_sub(1));
                 let w = (r.width.round() as u32).clamp(1, width - x);
                 let h = (r.height.round() as u32).clamp(1, height - y);
-                image::imageops::crop_imm(&image, x, y, w, h).to_image()
+                let stride = width as usize * 4;
+                let rows = (y as usize..(y + h) as usize).flat_map(|row| rgba[row * stride + x as usize * 4..][..w as usize * 4].iter().copied());
+                image::RgbaImage::from_raw(w, h, rows.collect())?
             }
-            None => image,
+            None if width.max(height) > MAX_SHOWN && width.max(height) / 2 >= MAX_SHOWN * 3 / 4 => halved(&source),
+            None => image::RgbaImage::from_raw(width, height, rgba.to_vec())?,
         };
+        // Halved while that keeps three quarters of the size wanted: a
+        // fraction of a filtered resize's time.
+        let mut image = image;
+        while image.width().max(image.height()) > MAX_SHOWN && image.width().max(image.height()) / 2 >= MAX_SHOWN * 3 / 4 {
+            image = halved(&image);
+        }
         let image = if orientation.flip { image::imageops::flip_horizontal(&image) } else { image };
         let image = match orientation.turns.rem_euclid(4) {
             1 => image::imageops::rotate90(&image),
@@ -61,10 +71,32 @@ impl Shown {
     }
 }
 
+/// `image` at half its size, each pixel the mean of four.
+fn halved<C: std::ops::Deref<Target = [u8]>>(image: &image::ImageBuffer<image::Rgba<u8>, C>) -> image::RgbaImage {
+    let (width, height) = image.dimensions();
+    let (w, h) = ((width / 2).max(1), (height / 2).max(1));
+    let source: &[u8] = image.as_raw();
+    let stride = width as usize * 4;
+    let mut out = vec![0u8; w as usize * h as usize * 4];
+    for (y, row) in out.chunks_exact_mut(w as usize * 4).enumerate() {
+        let y0 = (2 * y).min(height as usize - 1);
+        let y1 = (2 * y + 1).min(height as usize - 1);
+        for (x, pixel) in row.chunks_exact_mut(4).enumerate() {
+            let x0 = (2 * x).min(width as usize - 1) * 4;
+            let x1 = (2 * x + 1).min(width as usize - 1) * 4;
+            for c in 0..4 {
+                let sum = source[y0 * stride + x0 + c] as u32 + source[y0 * stride + x1 + c] as u32 + source[y1 * stride + x0 + c] as u32 + source[y1 * stride + x1 + c] as u32;
+                pixel[c] = ((sum + 2) / 4) as u8;
+            }
+        }
+    }
+    image::RgbaImage::from_raw(w, h, out).expect("sized")
+}
+
 /// The crop `r` (pixels) of `image` straightened by `angle` degrees about
 /// the photograph's centre, as the canvas's shader samples it: each pixel
 /// of the crop reads the photograph turned back by the angle.
-fn straightened(image: &image::RgbaImage, r: crate::crop::Rect, angle: f64) -> image::RgbaImage {
+fn straightened<C: std::ops::Deref<Target = [u8]>>(image: &image::ImageBuffer<image::Rgba<u8>, C>, r: crate::crop::Rect, angle: f64) -> image::RgbaImage {
     let (width, height) = image.dimensions();
     let (w, h) = ((r.width.round() as u32).max(1), (r.height.round() as u32).max(1));
     let (s, k) = angle.to_radians().sin_cos();
@@ -706,5 +738,21 @@ mod tests {
         assert_eq!((turned.width, turned.height), (2, 1));
         let near = |v: u8, want: u8| (v as i32 - want as i32).abs() <= 1;
         assert!(near(turned.rgba[0], 70) && near(turned.rgba[4], 60), "{:?}", &turned.rgba[..8]);
+    }
+
+    /// A develop larger than the view keeps is halved, each pixel the mean
+    /// of four, while that keeps three quarters of the size; then filtered.
+    #[test]
+    fn compare_halves_a_large_develop() {
+        let (w, h) = (MAX_SHOWN * 2, 4u32);
+        let rgba: Vec<u8> = (0..w * h).flat_map(|i| [if i % 2 == 0 { 100 } else { 201 }, 0, 0, 255]).collect();
+        let shown = Shown::of(&rgba, w, h, None, Default::default(), false).unwrap();
+        assert_eq!((shown.width, shown.height), (MAX_SHOWN, 2));
+        assert_eq!(&shown.rgba[..4], &[151, 0, 0, 255]);
+        let cropped = Shown::of(&rgba, w, h, Some((crate::crop::Rect { x: 1.0, y: 0.0, width: (w - 2) as f64, height: 4.0 }, 0.0)), Default::default(), false).unwrap();
+        assert_eq!((cropped.width, cropped.height, cropped.rgba[0]), (MAX_SHOWN - 1, 2, 151));
+        let (w, h) = (MAX_SHOWN + 100, 2u32);
+        let shown = Shown::of(&vec![9u8; (w * h * 4) as usize], w, h, None, Default::default(), false).unwrap();
+        assert_eq!((shown.width, shown.rgba[0]), (MAX_SHOWN, 9));
     }
 }

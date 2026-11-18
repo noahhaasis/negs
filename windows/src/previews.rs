@@ -189,17 +189,31 @@ impl Bitmap {
         ensure!(rgba.len() == width as usize * height as usize * 4, "The image engine returned an invalid thumbnail buffer.");
         let decode: Vec<f32> = (0..256).map(|i| srgb_decode(i as f32 / 255.0)).collect();
         let m = crate::gpu::REC2020_TO_SRGB;
-        let shown: Vec<[u8; 3]> = rgba
-            .chunks_exact(4)
-            .map(|p| {
-                let mut rgb = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
-                if wide {
-                    let c = rgb;
-                    rgb = std::array::from_fn(|i| m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2]);
-                }
-                present(rgb, cm).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        let convert = |pixels: &[u8]| -> Vec<[u8; 3]> {
+            pixels
+                .chunks_exact(4)
+                .map(|p| {
+                    let mut rgb = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
+                    if wide {
+                        let c = rgb;
+                        rgb = std::array::from_fn(|i| m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2]);
+                    }
+                    present(rgb, cm).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+                })
+                .collect()
+        };
+        // A large picture (Compare's) across the cores; each pixel as alone.
+        let pixels = rgba.len() / 4;
+        let threads = if pixels >= 1 << 20 { std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8) } else { 1 };
+        let shown: Vec<[u8; 3]> = if threads == 1 {
+            convert(rgba)
+        } else {
+            let chunk = pixels.div_ceil(threads) * 4;
+            std::thread::scope(|scope| {
+                let parts: Vec<_> = rgba.chunks(chunk).map(|part| scope.spawn(|| convert(part))).collect();
+                parts.into_iter().flat_map(|part| part.join().expect("converted")).collect()
             })
-            .collect();
+        };
         let turns = rotation.rem_euclid(4);
         let (w, h) = (width as usize, height as usize);
         let (out_w, out_h) = if turns % 2 == 1 { (h, w) } else { (w, h) };
