@@ -408,24 +408,26 @@ mod tests {
         assert_eq!(bytes[3], 255);
     }
     #[test]
-    fn crop_dim_is_applied_in_linear_light() {
+    fn crop_shade_is_applied_in_linear_light() {
         let mut out = Raster {
             w: 2,
             h: 1,
             pixels: vec![0; 8],
             cm: None,
             decode: std::array::from_fn(|i| decode(i as f32 / 255.0)),
+            clip: None,
         };
         let p = PhotoUniform {
             origin_scale: [0.0, 0.0, 1.0, 0.0],
             shown: [2.0, 1.0, 0.0, 1.0],
             clip: [0.0, 0.0, 1.0, 1.0],
             quad: [0.0, 0.0, 2.0, 1.0],
-            extra: [0.45, 0.0, 0.0, 0.0],
+            extra: [0.6, 0.0, 0.0, 0.0],
         };
         out.photo(&[255; 8], 2, 1, &p);
         assert_eq!(out.pixels[0], 255);
-        assert!((out.pixels[4] as i32 - 179).abs() <= 1);
+        // rgba(8, 7, 6, .6) over white, mixed in linear light.
+        assert!((out.pixels[4] as i32 - 170).abs() <= 1, "{}", out.pixels[4]);
     }
     #[test]
     fn quarter_turn_follows_photo_uniforms() {
@@ -436,6 +438,7 @@ mod tests {
             pixels: vec![0; 8],
             cm: None,
             decode: std::array::from_fn(|i| decode(i as f32 / 255.0)),
+            clip: None,
         };
         let p = PhotoUniform {
             origin_scale: [0.0, 0.0, 1.0, 0.0],

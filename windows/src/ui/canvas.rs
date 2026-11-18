@@ -7,6 +7,8 @@
 //! while the app is busy (a modal dialog, a re-entrant call).
 
 use std::cell::RefCell;
+#[cfg(test)]
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
