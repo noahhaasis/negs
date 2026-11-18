@@ -4,7 +4,7 @@
 #   "theme": "light|dark|", "width": 1440, "height": 900, "settle_ms": 4000,
 #   "env": {"NAME": "value"}, "keep_profile": "dir (optional)", "keep_size": true,
 #   "steps": [ {"shot": "start"}, {"keys": "{F8}", "wait": 800, "shot": "presets"},
-#              {"click": [x, y], "wait": 500}, {"key": "VK name", ...} ] }
+#              {"click": [x, y], "ctrl": true, "wait": 500}, {"key": "VK name", ...} ] }
 # "drag": [x0, y0, x1, y1, steps, ms] presses at the first point, moves to the
 # second in steps ms apart, and lets go.
 # A step with "front": true clicks in, and shoots, the app's frontmost
@@ -107,7 +107,12 @@ foreach ($s in $job.steps) {
     $p = New-Object NegsWin+POINT; $p.X = [int]$s.click[0]; $p.Y = [int]$s.click[1]
     [NegsWin]::ClientToScreen($target, [ref]$p) | Out-Null
     [NegsWin]::SetCursorPos($p.X, $p.Y) | Out-Null
+    # "ctrl"/"shift": true holds the modifier through the click.
+    if ($s.ctrl) { [NegsWin]::keybd_event(0x11, 0, 0, [IntPtr]::Zero) }
+    if ($s.shift) { [NegsWin]::keybd_event(0x10, 0, 0, [IntPtr]::Zero) }
     [NegsWin]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); [NegsWin]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
+    if ($s.shift) { [NegsWin]::keybd_event(0x10, 0, 2, [IntPtr]::Zero) }
+    if ($s.ctrl) { [NegsWin]::keybd_event(0x11, 0, 2, [IntPtr]::Zero) }
     if ($s.double) { [NegsWin]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); [NegsWin]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero) }
   }
   if ($s.drag) {
