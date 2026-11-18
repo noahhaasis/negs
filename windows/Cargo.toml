@@ -32,6 +32,8 @@ pollster = "0.4"
 bytemuck = { version = "1.25", features = ["derive"] }
 # The pencil marks' geometry, ported from the macOS app (tested on any OS).
 negs-marks = { path = "marks" }
+# The library: .negs sidecars, ratings, flags, per-photograph edits, undo.
+negs-library = { path = "../crates/negs-library" }
 
 [build-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }

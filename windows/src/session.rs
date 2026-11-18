@@ -49,6 +49,11 @@ pub struct EditorSession {
     pub inspector_visible: bool,
     #[serde(default = "yes")]
     pub fit_image: bool,
+    /// The photograph's sidecar keeps its edits, and `state` is only what
+    /// was on screen. Sessions from before the library lack it: their state
+    /// is the photograph's edits, which go to a sidecar without any.
+    #[serde(default)]
+    pub library: bool,
 }
 
 fn yes() -> bool {
@@ -211,6 +216,10 @@ pub struct Preferences {
     /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
     /// Old settings files lack it: Darkroom.
     pub app_theme: String,
+    /// The library's: its filter, Copy Edits…'s groups, Advance After
+    /// Rating, New photographs' film and paper, under the Mac's keys.
+    #[serde(flatten)]
+    pub library: crate::model::LibraryPreferences,
 }
 
 /// Starred for new users, as on the web and the Mac; once they change the
@@ -260,6 +269,7 @@ impl Default for Preferences {
             // A neutral dark grey, near the dark theme's.
             viewer_background: "#242424".into(),
             app_theme: "darkroom".into(),
+            library: Default::default(),
         }
     }
 }
@@ -411,6 +421,7 @@ mod tests {
             state: EditState { params: json!({"io": {"rotate_cw": 1}}), ..Default::default() },
             inspector_visible: true,
             fit_image: true,
+            library: false,
         }
     }
 

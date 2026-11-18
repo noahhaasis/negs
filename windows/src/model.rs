@@ -27,6 +27,13 @@ use crate::tone_graph::{self, Controls, Curve, FilmHistogram};
 use spektrafilm_io::image_size::PHOTO_LONG_SIDE_RANGE;
 use crate::ui::{self, App};
 
+// The library: sidecars, ratings, flags and per-photograph edits.
+mod library;
+pub mod library_map;
+mod recycle_bin;
+pub use library::Shelf;
+pub use library_map::{LibraryKey, LibraryPreferences, Step};
+
 pub mod dirty {
     pub const CANVAS: u32 = 1;
     pub const INSPECTOR: u32 = 1 << 1;
@@ -235,10 +242,11 @@ impl ExportSize {
     }
 }
 
-/// One undo step: the state to restore and the action's name.
+/// One undo step: the state to restore, or a library action, and the
+/// action's name.
 struct UndoStack {
-    undo: Vec<(EditState, Cow<'static, str>)>,
-    redo: Vec<(EditState, Cow<'static, str>)>,
+    undo: Vec<(Step, Cow<'static, str>)>,
+    redo: Vec<(Step, Cow<'static, str>)>,
 }
 
 /// What a finished render brings back to the UI thread.
@@ -560,6 +568,8 @@ pub struct Model {
     helper_output: Option<(u64, Value)>,
     /// The render `image` came from; None for no image.
     pub shown_frame: Option<FrameTag>,
+    /// The open photograph's folder as a library (`library.rs`).
+    pub shelf: Shelf,
     /// Every render request sent, in order (tests only).
     #[cfg(test)]
     pub render_log: Vec<RenderRequest>,
@@ -677,6 +687,7 @@ impl Model {
             quick_frame: None,
             helper_output: None,
             shown_frame: None,
+            shelf: Shelf::default(),
             #[cfg(test)]
             render_log: vec![],
             #[cfg(test)]
@@ -853,6 +864,8 @@ impl Model {
     }
 
     fn apply_catalog(&mut self, catalog: Value) {
+        // Edits made meanwhile reach the library before the state below resets them.
+        self.library_sync();
         self.stocks = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
         self.defaults = catalog["defaults"].clone();
         // The engine leaves lens corrections off for params from before them,
@@ -884,6 +897,8 @@ impl Model {
         self.state = next;
         self.mark(dirty::STRUCTURE | dirty::INSPECTOR | dirty::CHROME | dirty::STATUS);
         self.schedule_tone_curve();
+        // The open photograph shows its saved edits under the new catalog.
+        self.library_catalog_changed();
     }
 
     // MARK: Parameters
@@ -1256,6 +1271,8 @@ impl Model {
         self.reconcile_brightness_match();
         self.release_held();
         self.settle_outputs();
+        // Saved to the photograph's sidecar a second after the last change.
+        self.library_edited();
     }
 
     /// What decides which inspector rows exist.
@@ -1272,7 +1289,7 @@ impl Model {
     }
 
     fn register_undo(&mut self, previous: EditState, action: impl Into<Cow<'static, str>>) {
-        self.undo.undo.push((previous, action.into()));
+        self.undo.undo.push((Step::Edit(previous), action.into()));
         self.undo.redo.clear();
         self.mark(dirty::CHROME);
     }
@@ -1281,10 +1298,14 @@ impl Model {
         if self.cropping() {
             return;
         }
-        let Some((previous, action)) = self.undo.undo.pop() else { return };
+        let Some((step, action)) = self.undo.undo.pop() else { return };
+        let previous = match step {
+            Step::Edit(previous) => previous,
+            Step::Library { before, after } => return self.library_undo(before, after, action, true),
+        };
         let previous = self.with_preferences(previous);
         if previous != self.state {
-            self.undo.redo.push((self.state.clone(), action));
+            self.undo.redo.push((Step::Edit(self.state.clone()), action));
             self.replace_state(previous);
         }
         self.mark(dirty::CHROME | dirty::ZOOM);
@@ -1295,10 +1316,14 @@ impl Model {
         if self.cropping() {
             return;
         }
-        let Some((next, action)) = self.undo.redo.pop() else { return };
+        let Some((step, action)) = self.undo.redo.pop() else { return };
+        let next = match step {
+            Step::Edit(next) => next,
+            Step::Library { before, after } => return self.library_undo(before, after, action, false),
+        };
         let next = self.with_preferences(next);
         if next != self.state {
-            self.undo.undo.push((self.state.clone(), action));
+            self.undo.undo.push((Step::Edit(self.state.clone()), action));
             self.replace_state(next);
         }
         self.mark(dirty::CHROME);
@@ -1339,7 +1364,9 @@ impl Model {
         if let Some(session) = &self.crop_session {
             saved.crop = session.settings();
         }
-        Some(EditorSession { schema: EditorSession::SCHEMA, source, state: saved, inspector_visible: self.inspector_visible, fit_image: self.fit_image })
+        // With a library, the photograph's sidecar keeps its edits.
+        let library = self.library_item().is_some_and(|i| i.photo == source);
+        Some(EditorSession { schema: EditorSession::SCHEMA, source, state: saved, inspector_visible: self.inspector_visible, fit_image: self.fit_image, library })
     }
 
     fn restore(&mut self, session: EditorSession) -> Result<()> {
@@ -1736,6 +1763,10 @@ impl Model {
             self.mark(dirty::ERROR | dirty::CHROME);
             return;
         }
+        // Its folder's library opens it, saving the one before: the edits
+        // come from its sidecar, as a restored session's do.
+        let (path, session) = self.library_opening(path, session);
+        let path = path.as_path();
         self.source = Some(path.to_path_buf());
         self.image = None;
         self.shown_frame = None;
@@ -1827,8 +1858,9 @@ impl Model {
             self.state = self.with_preferences(self.state.clone());
         }
         self.is_raw = is_raw(path);
-        self.undo.undo.clear();
-        self.undo.redo.clear();
+        // Changes to several photographs (Paste Edits, Duplicate) stay undoable.
+        library_map::drop_editor_steps(&mut self.undo.undo);
+        library_map::drop_editor_steps(&mut self.undo.redo);
         self.zoom(fit);
         self.prefs.note_recent(path);
         self.prefs.save();
@@ -3274,8 +3306,13 @@ impl Model {
                 self.mark(dirty::CHROME);
                 let staging = engine::staging_path(&destination);
                 let command = self.save_command(&staging, size, save);
+                let rating = self.export_rating();
                 engine.request(command, engine::timeout_for("save"), move |result| {
                     let moved = result.map(|_| {
+                        // The rating goes in as Lightroom writes it, before the file is in place.
+                        if let Some(rating) = rating {
+                            negs_library::xmp::embed_in_file(&staging, rating)?;
+                        }
                         crate::platform::replace_file(&staging, &destination)
                     });
                     let _ = std::fs::remove_file(&staging);
@@ -3333,8 +3370,14 @@ impl Model {
         self.exporting = true;
         self.export_started = Instant::now();
         self.mark(dirty::CHROME | dirty::STATUS);
+        let rating = self.export_rating();
         std::thread::spawn(move || {
             let outcome = engine::run_export(&request, &handle);
+            // The rating, as Lightroom writes it (`xmp:Rating`); the pixels stay.
+            let outcome = outcome.and_then(|done| match rating {
+                Some(rating) => negs_library::xmp::embed_in_file(&request.destination, rating).map(|_| done).map_err(anyhow::Error::from),
+                None => Ok(done),
+            });
             ui::post(move |app: &mut App| {
                 let model = &mut app.model;
                 model.exporting = false;
@@ -3363,6 +3406,7 @@ impl Model {
     }
 
     pub fn shutdown(&mut self) {
+        self.library_close_quietly();
         self.closing = true;
         self.cancel_brightness_match();
         self.drop_held("close");
@@ -3685,7 +3729,7 @@ mod tests {
         json::set(&mut state.params, "prep.shadows", json!(15));
         state.limit_preview = true;
         state.brightness_match = Some(state::BrightnessMatch { ev: Some(0.3), inputs: Some(json!({"a": 1})), highlight_limited: true });
-        let session = EditorSession { schema: EditorSession::SCHEMA, source: file.clone(), state, inspector_visible: true, fit_image: true };
+        let session = EditorSession { schema: EditorSession::SCHEMA, source: file.clone(), state, inspector_visible: true, fit_image: true, library: false };
         model.open_restoring(&file, Some(session.clone()));
         assert_eq!(json::number(model.state.value("post.contrast")), 0.0);
         assert_eq!(json::number(model.state.value("prep.shadows")), 15.0);
@@ -4161,7 +4205,7 @@ mod preset_tests {
         let photo = live.folder.join("photo.png");
         std::fs::create_dir_all(&live.folder).unwrap();
         std::fs::write(&photo, b"x").unwrap();
-        let session = EditorSession { schema: EditorSession::SCHEMA, source: photo, state: live.model.state.clone(), inspector_visible: true, fit_image: true };
+        let session = EditorSession { schema: EditorSession::SCHEMA, source: photo, state: live.model.state.clone(), inspector_visible: true, fit_image: true, library: false };
         let store = crate::session::SessionStore { file: live.folder.join("session.json") };
         store.save(&session).unwrap();
         let loaded = store.load().unwrap().unwrap();
