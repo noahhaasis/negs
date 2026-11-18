@@ -15,9 +15,100 @@ decisions made with their reasons, and what was carried over. See
 | 4 | Canvas | done, merged `8f5bdde` |
 | 5 | Tray | done, merged (see log) |
 | 6 | Library | done: crate and glue merged (`c421063`) |
-| 7 | Strip and grid | not started |
-| 8 | Remaining features, Flip added (Open in Lightroom last) | not started |
+| 7 | Strip and grid | done, merged `f9b8f47` |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | in progress |
 | 9 | Validation and release | not started |
+
+## 2026-11-19: phase 7 merged, the strip and grid (`f9b8f47`, branch tip `774d5ef`)
+
+- **What users see:**
+  - **The strip:** 158 DIP of film over the 28 DIP status line, which is the tray's
+    186, so the canvas no longer refits when the tray opens.
+    - Frames are at the photograph's real proportions. The open one is whole with
+      the pencil under it; the others are dimmed, and a reject more.
+    - Marks: hand stars, the pick box, the reject cross, the edited dot and "+J".
+      Their halo is a real blur.
+    - The leader tongue hides and shows the strip. It is hidden while cropping, as
+      on the Mac.
+    - The strip repaints only when what it shows changes, not on slider moves. The
+      scroll bar that covered the pencil is gone.
+  - **The grid:** G opens it over the window, unfolding out of the strip.
+    - Packed rows; "Showing all ⌄ 34 photographs" (its words open the filter menu,
+      × clears it); the count and the Size slider at the foot (`gridSize` in prefs).
+    - Selection: click, Ctrl, Shift, a band, arrows, Home/End, Ctrl+A. Ctrl+plus,
+      Ctrl+minus and Ctrl+wheel change the size.
+    - E, Enter, Esc or a double click fold it back. Ratings, flags and the edit
+      commands act on the grid's selection (`Shelf.in_grid`).
+  - **Thumbnails:**
+    - Developed thumbnails are filed under the Mac's key in `Cache\Thumbnails`. An
+      older engine's stands in, then the embedded preview.
+    - Missing ones develop on-screen first, then outward; with energy saver on,
+      only on-screen ones. Reading covers ±32 around the view.
+    - Explorer's thumbnails are no longer used, so `Thumbs.db` is no longer written.
+    - The strip uses the library's folder watcher only.
+  - **Opening on the last develop:** leaving a photograph keeps its settled develop
+    (2560 px) in `Cache\Renders`. It stands in until the new develop arrives.
+  - **While cropping:** the status line reads "Cropping · Original · 6016 × 4016 px",
+    with Fit and 100% dimmed.
+  - Phase 5's items are fixed: the canvas refit, and the tray's hint (it shows only
+    when it fits whole).
+- **Painting decision: Direct2D on the GPU, not wgpu.** Measured with
+  `NEGS_GRID_BENCH`: 300 thumbnails, 6 s of flings, 1582×953 px at 125 %, GTX 1660
+  SUPER.
+
+  | Path | Median frame | p95 frame | Frames over 20 ms |
+  |---|---|---|---|
+  | Direct2D, hardware | 16.67 ms | 16.79 ms | 1 of ~333 |
+  | wgpu (Vulkan) | 16.4 ms | 33.3 ms | about a third |
+  | Direct2D on WARP | 33.3 ms | 33.4–50 ms | nearly all (30 fps, usable) |
+
+  It is smoother and simpler: it reuses the painter, marks and text, and WARP works
+  without Vulkan. The device is made after the canvas's, never during launch.
+- **Gates:**
+  - The PC build.
+  - The full Windows suite (`test-parity.cmd`, scratch profile): 235 passed.
+  - `windows/sheet-rules`: 16 pass on the Mac. The Mac cross-check passes, with and
+    without `--tests`.
+  - Screenshots in `~/.negs/windows-parity/phase7/{darkroom,daylight}/` match the
+    Mac's prep, grid and crop references.
+    - The first crop shot showed one frame. The cause was a filter the shot script
+      left on, not a bug.
+- **Startup** (ABBA, 8 runs against main's exe, Defender quiet, a D750 NEF from a
+  scratch copy):
+
+  | | first window | inspector | gpu_ready | first image |
+  |---|---|---|---|---|
+  | main | 103.6 | 215.35 | 666.05 | 8459 |
+  | branch | 103.95 | 211.05 | 644.4 | 8513 |
+
+  - The first image is +54 ms (0.6 %).
+  - The first try cost about +355 ms. The fix is that the strip's device, thumbnail
+    reading, the leader window and the engine stamp now wait until after launch's
+    first image.
+  - The cost: on a cold start the strip shows bare film until the first image. That
+    is accepted for now, and phase 8's faster open shortens it.
+  - The absolute numbers are higher than phase 6's because this photograph waits
+    about 4 s for the camera-brightness reference. That wait is a phase 8 item.
+- **Decisions:**
+  - `negs-library` gained `Library::thumbnail_state`, `unedited_state` and
+    `thumbnail::unedited_look`. They read sidecars and write nothing.
+  - A Windows loose-key stand-in is a small `.latest` file, since Windows lets only
+    administrators make symbolic links.
+  - The brightness reference for thumbnails stays exact, as opening solves it.
+  - Added the `image` crate's `jpeg` feature and `Win32_System_Power`.
+- **Carried to phase 8:**
+  - Batch export from the grid selection, as the Mac's batch sheet, with `xmp:Rating`.
+  - The tray's tiles onto the GPU surface (`ui::tray::paint_tiles` is still on the
+    device-context path).
+  - Borders on developed thumbnails.
+  - Saving the open photograph's thumbnail from its preview when it is left.
+  - The last develop as a stand-in for strip thumbnails.
+  - The Grid · Photo switch in the title bar and a View menu item.
+  - Grid scrolling with inertia and a scroll bar.
+  - The leader's anti-aliased slanted edge (it is a window region now).
+  - A thumbnail with a brightness match takes about 5 s, mostly the 4 s reference
+    step (with faster open).
+  - A warning now also names `fonts.glyph`.
 
 ## 2026-11-19: phase 5 merged, the tray (branch tip `5eb7e04`)
 
