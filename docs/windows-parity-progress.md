@@ -13,11 +13,58 @@ decisions made with their reasons, and what was carried over. See
 | 2 | Window shell | done, merged `a9a0763` |
 | 3 | Inspector | done: 3a and 3b merged (see log) |
 | 4 | Canvas | done, merged `8f5bdde` |
-| 5 | Tray | built on the Mac (`win-p5-tray`), PC gates next |
+| 5 | Tray | done, merged (see log) |
 | 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | not started |
 | 8 | Remaining features, Flip added (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
+
+## 2026-11-19: phase 5 merged, the tray (branch tip `5eb7e04`)
+
+- **What users see:**
+  - Clicking the film or paper name under the print opens a tray along the bottom,
+    where the strip and status line were.
+    - The tiles are grouped, with each group's name written up the side, favourites
+      first.
+    - The stock being tried is ringed in pencil, and the stock the tray opened on says
+      "before".
+    - Stars mark favourites; click one to star or unstar.
+  - Trying and keeping:
+    - A click tries a stock, and ← → step through them.
+    - Return, Done, or a click elsewhere keeps the stock, as one undo step for the
+      whole visit. Esc goes back to the stock the tray opened on.
+  - The foot: the group index, Search (films), the hint (cut in the middle, as on
+    the Mac), the paper lock switch, and Done.
+  - While a tried stock develops, its cached tile stands in on the canvas, turned like
+    the photograph.
+  - The Esc order: typing, then the tray, then the crop, then Image Only.
+  - The paper lock and the stock names have the Mac's tooltips (Noah: "if non-invasive").
+  - The inspector's Film/Paper rows and fold-out grids are gone, as on the Mac. The
+    development-time rows moved to the top of Lab's Film and Print sections.
+- **Gates:**
+  - Mac cross-check at the warning baseline; 15 tray-rules unit tests pass.
+  - PC `test-parity.cmd` 221/221. That includes the new
+    `a_tray_visit_reaches_the_sidecar_once_when_kept`: no sidecar after tries and Esc,
+    one write when kept, one undo step.
+  - On the PC, scratch copies: Esc after 3 tries writes no `.negs`.
+  - Screenshots, Darkroom and Daylight: `~/.negs/windows-parity/phase5/`. They match
+    `04-film-tray.png` closely.
+- **Decided (coordinator):**
+  - Drop the inspector's Film/Paper rows, as on the Mac.
+  - The canvas refit when the tray opens waits for phase 7's strip height.
+  - Tile painting sits behind `ui::tray::paint_tiles`, for phase 7's painting decision.
+  - A kept film change writes the sidecar a second time when its brightness match
+    finishes, about 5 s later. That is the match's own save (any film change does it),
+    not the tray, so it's accepted.
+- **Mismatches left:**
+  - The canvas refits when the tray opens (phase 7).
+  - At a 1440 px window the foot's hint is cut to a stub ("clic…"). Hiding it when
+    there's no room would read better (phase 7, with the strip height).
+  - No "Scan / Your negative" group (phase 8).
+  - Clicking a group jumps instead of a 0.25 s scroll.
+  - Search is in Segoe UI with a grey placeholder.
+  - The star's shadow is an outline.
+  - Screen readers see only "Films"/"Papers".
 
 ## 2026-11-19: phase 6b merged, the library glue (`c421063`, branch tip `51c9a91`)
 

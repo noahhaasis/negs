@@ -509,13 +509,12 @@ pub enum Role {
     Summary = 45,
     Unit = 46,
     Module = 47,
-    Foldout = 48,
     Well = 49,
 }
 
 const ROLE: PCWSTR = w!("NegsRole");
 
-const ROLES: [Role; 32] = [
+const ROLES: [Role; 31] = [
     Role::Primary,
     Role::Secondary,
     Role::Glyph,
@@ -546,7 +545,6 @@ const ROLES: [Role; 32] = [
     Role::Summary,
     Role::Unit,
     Role::Module,
-    Role::Foldout,
     Role::Well,
 ];
 

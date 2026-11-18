@@ -28,6 +28,7 @@ mod state;
 mod thumbnail;
 mod tone_graph;
 mod trace;
+mod tray_rules;
 mod ui;
 mod updates;
 

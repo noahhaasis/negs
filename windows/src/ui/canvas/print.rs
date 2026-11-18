@@ -60,6 +60,8 @@ pub struct PrintWords {
     pub original: bool,
     /// The paper lock is closed: a new film keeps the paper.
     pub keep_paper: bool,
+    /// The film's (false) or the paper's (true) tray is open: the pencil under its name.
+    pub tray: Option<bool>,
 }
 
 /// What a click on the canvas can reach, outside cropping's frame.
@@ -85,6 +87,8 @@ pub enum Glyph {
     Turn(bool),
     /// The pencil's strike through a name, this many tenths of a DIP wide.
     Strike(u32),
+    /// Light table's highlighter under a name, this many tenths of a DIP wide.
+    Highlight(u32),
 }
 
 impl Glyph {
@@ -94,6 +98,7 @@ impl Glyph {
             Glyph::Lock(_) => LOCK,
             Glyph::Turn(_) => (24.0, 24.0),
             Glyph::Strike(w) => (w as f64 / 10.0, 6.0),
+            Glyph::Highlight(w) => (w as f64 / 10.0, 6.0 + negs_marks::HIGHLIGHTER_WIDTH),
         }
     }
 
@@ -105,26 +110,7 @@ impl Glyph {
                 p.line((1.5, 2.5), (4.5, 5.5), 1.15, white);
                 p.line((4.5, 5.5), (7.5, 2.5), 1.15, white);
             }
-            Glyph::Lock(closed) => {
-                // SF Symbols' `lock` and `lock.open` at 10.5 pt medium: a
-                // body with a shackle over it, swung up and right when open.
-                p.fill_round_rect(RectF::new(1.0, 5.5, 8.0, 6.0), 1.4, white);
-                let id = if closed { 1 } else { 2 };
-                let shackle = move || {
-                    let (left, right, top, foot) = if closed { (2.9, 7.1, 1.2, 5.8) } else { (5.4, 9.6, 0.2, 5.8) };
-                    let r = (right - left) / 2.0;
-                    let k = 0.5523 * r;
-                    let left_foot = if closed { foot } else { 3.4 };
-                    Path(vec![
-                        Seg::Move(Pt { x: left, y: left_foot }),
-                        Seg::Line(Pt { x: left, y: top + r }),
-                        Seg::Cubic(Pt { x: left, y: top + r - k }, Pt { x: left + r - k, y: top }, Pt { x: left + r, y: top }),
-                        Seg::Cubic(Pt { x: left + r + k, y: top }, Pt { x: right, y: top + r - k }, Pt { x: right, y: top + r }),
-                        Seg::Line(Pt { x: right, y: foot }),
-                    ])
-                };
-                p.path(0x10c0 + id, shackle, 0.0, 0.0, Some(1.3), white);
-            }
+            Glyph::Lock(closed) => draw_lock(p, closed, 0.0, 0.0, white),
             Glyph::Turn(clockwise) => {
                 // `arrow.clockwise` at 14 pt: most of a circle, its head at the top.
                 let id = if clockwise { 1 } else { 2 };
@@ -162,8 +148,35 @@ impl Glyph {
                 p.path(0x7a50 + id, head, 0.0, 0.0, None, white);
             }
             Glyph::Strike(w) => p.pencil(RectF::new(0.0, 0.0, w as f32 / 10.0, 6.0), white),
+            Glyph::Highlight(w) => {
+                let inset = negs_marks::HIGHLIGHTER_WIDTH as f32 / 2.0;
+                p.pencil_width(RectF::new(inset, inset, w as f32 / 10.0 - 2.0 * inset, 6.0), negs_marks::HIGHLIGHTER_WIDTH as f32, white);
+            }
         }
     }
+}
+
+/// The paper lock, `LOCK` DIPs, with its top left at (`x`, `y`): SF
+/// Symbols' `lock` and `lock.open` at 10.5 pt medium, a body with a
+/// shackle over it, swung up and right when open. Also the paper tray's
+/// switch (`ui::tray`).
+pub fn draw_lock(p: &mut Painter, closed: bool, x: f32, y: f32, ink: Ink) {
+    p.fill_round_rect(RectF::new(x + 1.0, y + 5.5, 8.0, 6.0), 1.4, ink);
+    let id = if closed { 1 } else { 2 };
+    let shackle = move || {
+        let (left, right, top, foot) = if closed { (2.9, 7.1, 1.2, 5.8) } else { (5.4, 9.6, 0.2, 5.8) };
+        let r = (right - left) / 2.0;
+        let k = 0.5523 * r;
+        let left_foot = if closed { foot } else { 3.4 };
+        Path(vec![
+            Seg::Move(Pt { x: left, y: left_foot }),
+            Seg::Line(Pt { x: left, y: top + r }),
+            Seg::Cubic(Pt { x: left, y: top + r - k }, Pt { x: left + r - k, y: top }, Pt { x: left + r, y: top }),
+            Seg::Cubic(Pt { x: left + r + k, y: top }, Pt { x: right, y: top + r - k }, Pt { x: right, y: top + r }),
+            Seg::Line(Pt { x: right, y: foot }),
+        ])
+    };
+    p.path(0x10c0 + id, shackle, x, y, Some(1.3), ink);
 }
 
 /// `text` in `style`, measured in DIPs (zero until Direct2D is ready).
@@ -352,7 +365,9 @@ impl View {
         if opens {
             self.glyph(items, Glyph::Caret, ink.dim, 1.0, left + fm.width as f64 + INNER + 1.0, film_baseline - 6.0);
             self.targets.push((Target::Film, film_rect));
-            if hot == Some(Target::Film) {
+            if words.tray == Some(false) {
+                self.open_mark(items, left, film_baseline - fm.baseline as f64 + fm.height as f64, fm.width as f64, ink);
+            } else if hot == Some(Target::Film) {
                 items.push(Draw::Fill(QuadInstance::fill(rect(left * s, (film_baseline - fm.baseline as f64 + fm.height as f64 + 4.0) * s, fm.width as f64 * s, 1.5 * s), hex(ink.track, 1.0))));
             }
         }
@@ -382,7 +397,9 @@ impl View {
             self.glyph(items, Glyph::Caret, ink.dim, 1.0, x + pm.width as f64 + INNER + 1.0, paper_baseline - 6.0);
             let r = Rect::new(x * s, (paper_baseline - pm.baseline as f64) * s, (pm.width as f64 + INNER + caret) * s, (pm.height as f64 + 5.0) * s);
             self.targets.push((Target::Paper, r));
-            if hot == Some(Target::Paper) {
+            if words.tray == Some(true) {
+                self.open_mark(items, x, paper_baseline - pm.baseline as f64 + pm.height as f64, pm.width as f64, ink);
+            } else if hot == Some(Target::Paper) {
                 items.push(Draw::Fill(QuadInstance::fill(rect(x * s, (paper_baseline - pm.baseline as f64 + pm.height as f64 + 4.0) * s, pm.width as f64 * s, 1.5 * s), hex(ink.track, 1.0))));
             }
         }
@@ -392,6 +409,21 @@ impl View {
             self.word(items, "the original", THE_ORIGINAL, ink.paper, x + pm.width as f64 + 6.0, paper_baseline);
         } else if scanning {
             self.strike(items, x, paper_top, pm.width as f64, pm.height as f64, 0.54, 0.88, ink);
+        }
+    }
+
+    /// The pencil under a name whose tray is open (`StockName`'s
+    /// underline): 6 DIPs tall at the foot of the name's box and the 5 DIPs
+    /// below it; Light table's highlighter, lifted behind the name's foot.
+    fn open_mark(&mut self, items: &mut Vec<Draw>, x: f64, foot: f64, width: f64, ink: &SheetInk) {
+        let w = (width * 10.0).round().max(10.0) as u32;
+        if ink.highlighter {
+            let reach = negs_marks::HIGHLIGHTER_WIDTH / 2.0;
+            let ink_ = crate::ui::theme::HIGHLIGHTER_INK;
+            let s = self.scale();
+            items.push(Draw::Glyph(Glyph::Highlight(w + (20.0 * reach) as u32), hex(ink_, crate::ui::theme::HIGHLIGHTER_OPACITY), (((x - reach) * s).round(), ((foot - 5.0 - reach) * s).round())));
+        } else {
+            self.glyph(items, Glyph::Strike(w), ink.accent, 1.0, x, foot - 1.0);
         }
     }
 
@@ -507,15 +539,10 @@ pub(super) fn act(app: &mut App, hwnd: HWND, target: Target, at: Option<Rect>) {
     match target {
         Target::Film | Target::Paper => {
             let paper = target == Target::Paper;
-            if model.prefs.previews && !app.view.image_only {
-                // The stock's tiles in the adjustments, as the Mac's label
-                // opens its tray: a second click closes them.
-                let open = model.grid_shown(paper);
-                model.show_pane(crate::model::Pane::Adjustments);
-                if model.previews.open(paper) == open {
-                    model.toggle_foldout(paper);
-                }
-                app.inspector.slide = true;
+            // Its tray, keeping the other's stock; a second click keeps
+            // this one and closes it. Settings can turn the tiles off: then the menu.
+            if model.can_open_tray(paper) {
+                model.toggle_tray(paper);
             } else {
                 choose_from_menu(app, hwnd, paper, at);
             }
@@ -531,8 +558,7 @@ pub(super) fn act(app: &mut App, hwnd: HWND, target: Target, at: Option<Rect>) {
     }
 }
 
-/// The film or paper as a menu under its name: with previews off, or in
-/// Image Only, where the adjustments are away.
+/// The film or paper as a menu under its name, with the tiles off.
 fn choose_from_menu(app: &mut App, hwnd: HWND, paper: bool, at: Option<Rect>) {
     let entries = crate::ui::inspector::stock_entries(&app.model, paper);
     let current = if paper { app.model.state.paper.clone() } else { app.model.state.film.clone() };

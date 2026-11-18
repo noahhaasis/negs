@@ -165,6 +165,16 @@ pub struct Bitmap {
     pub bgra: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// A stock's tile keeps the helper's pixels too, for the tray's stand-in.
+    pub source: Option<Source>,
+}
+
+/// The helper's RGBA thumbnail as it came: unturned, in its display space.
+pub struct Source {
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub wide: bool,
 }
 
 impl Bitmap {
@@ -204,7 +214,13 @@ impl Bitmap {
                 bgra[(y * out_w + x) * 4..][..4].copy_from_slice(&[b, g, r, 255]);
             }
         }
-        Ok(Bitmap { bgra, width: out_w as u32, height: out_h as u32 })
+        Ok(Bitmap { bgra, width: out_w as u32, height: out_h as u32, source: None })
+    }
+
+    /// Keeps the helper's pixels (`from_rgba`'s arguments) for a stand-in.
+    pub fn keeping(mut self, rgba: Vec<u8>, width: u32, height: u32, wide: bool) -> Bitmap {
+        self.source = Some(Source { rgba, width, height, wide });
+        self
     }
 }
 
@@ -268,6 +284,11 @@ impl Thumb {
         self.dimmed = false;
     }
 
+    /// It shows exactly `key`'s thumbnail.
+    pub fn shows(&self, key: &Key) -> bool {
+        self.image.is_some() && self.shown.as_ref() == Some(key)
+    }
+
     /// Drops the thumbnail; true if there was one.
     pub fn clear(&mut self) -> bool {
         let had = self.shown.is_some() || self.image.is_some();
@@ -283,17 +304,28 @@ pub enum Target {
     Preset(PathBuf),
 }
 
-/// The tiles and the foldouts' open state. The setting itself is
+/// A visit to the film or paper tray (`tray_rules::Visit`).
+pub type TrayVisit = crate::tray_rules::Visit<EditState>;
+
+/// A tried stock's tile, enlarged on the canvas until the develop of the
+/// edit it shows is in (IMPLEMENTATION.md §5.1): the helper's pixels as
+/// they came, unturned, so the canvas turns and colour-manages them as it
+/// does the photograph.
+#[derive(Clone)]
+pub struct Trial {
+    pub picture: crate::picture::Picture,
+    /// The edit it stands in for.
+    pub revision: u64,
+    pub generation: u64,
+}
+
+/// The tiles, the tray and the stand-in. The setting itself is
 /// `Preferences::previews`.
 #[derive(Default)]
 pub struct Previews {
-    /// Collapsed at every launch.
-    pub film_open: bool,
-    pub paper_open: bool,
-    /// The Film grid's search field, as typed: for this session, kept while
-    /// the foldout closes and opens again, as the Mac's `StockFoldout` keeps
-    /// its query. Not a preference.
-    pub film_query: String,
+    /// The film or paper tray, while it's open: closed at every launch.
+    pub tray: Option<TrayVisit>,
+    pub trial: Option<Trial>,
     thumbs: HashMap<Target, Thumb>,
     /// A thumbnail request is with the helper.
     pub busy: bool,
@@ -304,8 +336,9 @@ pub struct Previews {
 }
 
 impl Previews {
+    /// The film's (or the paper's) tray is open.
     pub fn open(&self, paper: bool) -> bool {
-        if paper { self.paper_open } else { self.film_open }
+        self.tray.as_ref().is_some_and(|t| t.paper == paper)
     }
 
     pub fn thumb(&self, target: &Target) -> Option<&Thumb> {
@@ -479,7 +512,7 @@ mod tests {
         assert_eq!(display(Some(&shown), &Key { generation: 2, request: "a".into() }), Display::Placeholder);
 
         let mut thumb = Thumb::default();
-        let bitmap = Arc::new(Bitmap { bgra: vec![0; 4], width: 1, height: 1 });
+        let bitmap = Arc::new(Bitmap { bgra: vec![0; 4], width: 1, height: 1, source: None });
         thumb.show(Some(bitmap), shown.clone());
         assert_eq!(thumb.mark(&shown), (false, false));
         assert_eq!(thumb.mark(&Key { generation: 1, request: "b".into() }), (true, true));

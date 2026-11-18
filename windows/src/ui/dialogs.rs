@@ -32,12 +32,14 @@ const PRESET_EXPORT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d
 thread_local! {
     static TOOLTIP: Cell<isize> = const { Cell::new(0) };
     static TIPS: RefCell<Vec<(isize, Vec<u16>)>> = const { RefCell::new(Vec::new()) };
+    /// The tips over parts of a window: its handle, the part, the text.
+    static AREAS: RefCell<Vec<(isize, usize, Vec<u16>)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Sets `hwnd`'s tooltip, sharing one tooltip window.
-pub fn tooltip(hwnd: HWND, text: &str) {
+/// The one tooltip window, made the first time, with the app's delays.
+fn shared_tip() -> HWND {
     unsafe {
-        let tip = TOOLTIP.with(|t| {
+        TOOLTIP.with(|t| {
             if t.get() == 0 {
                 let tip = CreateWindowExW(
                     WS_EX_TOPMOST,
@@ -65,7 +67,63 @@ pub fn tooltip(hwnd: HWND, text: &str) {
                 t.set(tip.0 as isize);
             }
             HWND(t.get() as *mut _)
+        })
+    }
+}
+
+/// Sets the tooltip over part of `owner`: `rect`, in its client pixels
+/// (empty while the part isn't there). It shows after the app's delay
+/// while the pointer rests there, and a press hides it, as on a control.
+pub fn area_tooltip(owner: HWND, part: usize, rect: RECT, text: &str) {
+    unsafe {
+        let tip = shared_tip();
+        let text = wide(text);
+        let key = owner.0 as isize;
+        // None: new; Some(changed text).
+        let known = AREAS.with(|areas| {
+            let mut areas = areas.borrow_mut();
+            match areas.iter_mut().find(|(h, p, _)| *h == key && *p == part) {
+                // The same text keeps its buffer: the tooltip points at it.
+                Some((_, _, existing)) if *existing == text => Some(false),
+                Some((_, _, existing)) => {
+                    *existing = text.clone();
+                    Some(true)
+                }
+                None => {
+                    areas.push((key, part, text.clone()));
+                    None
+                }
+            }
         });
+        // The text pointer stays valid: AREAS keeps it.
+        let pointer = AREAS.with(|areas| areas.borrow().iter().find(|(h, p, _)| *h == key && *p == part).map(|(_, _, t)| t.as_ptr()).unwrap());
+        let info = TTTOOLINFOW {
+            cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+            uFlags: TTF_SUBCLASS,
+            hwnd: owner,
+            uId: part,
+            rect,
+            lpszText: PWSTR(pointer as *mut _),
+            ..Default::default()
+        };
+        match known {
+            None => {
+                SendMessageW(tip, TTM_ADDTOOLW, WPARAM(0), LPARAM(&info as *const _ as isize));
+            }
+            Some(changed) => {
+                if changed {
+                    SendMessageW(tip, TTM_UPDATETIPTEXTW, WPARAM(0), LPARAM(&info as *const _ as isize));
+                }
+                SendMessageW(tip, TTM_NEWTOOLRECTW, WPARAM(0), LPARAM(&info as *const _ as isize));
+            }
+        }
+    }
+}
+
+/// Sets `hwnd`'s tooltip, sharing one tooltip window.
+pub fn tooltip(hwnd: HWND, text: &str) {
+    unsafe {
+        let tip = shared_tip();
         let text = wide(text);
         let known = TIPS.with(|tips| {
             let mut tips = tips.borrow_mut();

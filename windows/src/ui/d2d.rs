@@ -1248,6 +1248,22 @@ impl Painter<'_> {
         self.text_in(text, style, RectF::new(x, y, 0.0, 0.0), Align::Leading, ink)
     }
 
+    /// `text` on one line turned a quarter anticlockwise, reading upward
+    /// from (`x`, `y`): the line's start at `y`, its top along `x` (the
+    /// tray's group names, `rotationEffect(.degrees(-90))`).
+    pub fn text_up(&mut self, text: &str, style: &TextStyle, x: f32, y: f32, ink: Ink) -> TextMetrics {
+        if text.is_empty() {
+            return TextMetrics::default();
+        }
+        let Some(layout) = self.layout(text, style, 0.0, Align::Leading) else { return TextMetrics::default() };
+        unsafe {
+            self.rt.SetTransform(&turned(-90.0, 0.0, 0.0, x as f64, y as f64));
+            self.rt.DrawTextLayout(D2D_POINT_2F { x: 0.0, y: 0.0 }, &layout, self.ink(ink), D2D1_DRAW_TEXT_OPTIONS_NONE);
+            self.rt.SetTransform(&IDENTITY);
+        }
+        metrics(&layout)
+    }
+
     /// `text` in `r`'s width (0: unbounded), aligned, from its top.
     pub fn text_in(&mut self, text: &str, style: &TextStyle, r: RectF, align: Align, ink: Ink) -> TextMetrics {
         if text.is_empty() {

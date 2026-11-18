@@ -28,6 +28,7 @@ use crate::icc;
 use crate::picture::Picture;
 
 mod print;
+pub(super) use print::draw_lock;
 mod software;
 
 pub use print::PrintWords;
@@ -271,6 +272,9 @@ struct View {
     /// What clicks can reach (names, lock, trim marks, the dial's arrows),
     /// where they were last drawn, in pixels.
     targets: Vec<(Target, Rect)>,
+    /// The label's tooltips as last set: where the film, the paper and the
+    /// lock are, and whether the lock is closed.
+    label_tips: Option<([RECT; 3], bool)>,
     /// The target under the pointer, and the pointer is over the print.
     hot: Option<Target>,
     over_print: bool,
@@ -374,6 +378,7 @@ pub fn init(hwnd: HWND, dpi: u32) {
             running: None,
             presented: None,
             targets: Vec::new(),
+            label_tips: None,
             hot: None,
             over_print: false,
             pressed: None,
@@ -536,6 +541,12 @@ pub fn zoom_by(factor: f64) {
     });
 }
 
+/// Whether a press at (`x`, `y`), canvas pixels, is on a stock's name or
+/// the paper lock under the print: those leave an open tray open.
+pub fn opens_tray_at(x: i32, y: i32) -> bool {
+    with_view(|v| matches!(v.print_hit(x as f64, y as f64).0, Some(Target::Film | Target::Paper | Target::Lock))).unwrap_or(false)
+}
+
 /// Builds the scene from the model and applies the zoom rules.
 pub fn update_scene(app: &mut App) {
     let model = &app.model;
@@ -546,6 +557,20 @@ pub fn update_scene(app: &mut App) {
         _ => (None, Size::ZERO, false),
     };
     let cropped = model.state.crop.size_of(size);
+    // A stock just tried in the tray: its tile until its develop is in
+    // (`EditorModel.trialImage`). The tile is cropped already, so it's shown
+    // uncropped at the cropped photograph's size, turned as the photograph is;
+    // while zoomed into a cropped photograph that would move the view, so not then.
+    let fitting = with_view(|v| v.fitting).unwrap_or(true);
+    let trial = model.shown_trial().filter(|_| fitting || !model.state.crop.cropped()).map(|trial| {
+        let tile = (trial.picture.width, trial.picture.height);
+        let (w, h) = crate::tray_rules::stand_in_size(tile, (cropped.width, cropped.height));
+        (trial.picture.clone(), Size::new(w, h))
+    });
+    let (picture, size, developed, crop) = match trial {
+        Some((picture, size)) => (Some(picture), size, false, CropSettings::default()),
+        None => (picture, size, developed, model.state.crop),
+    };
     let border = model.state.border.shown(cropped.width as u32, cropped.height as u32);
     let cropping = model.crop_session.as_ref().map(|s| CropScene {
         photo: s.photo,
@@ -559,7 +584,7 @@ pub fn update_scene(app: &mut App) {
         developed,
         size,
         rotation: model.rotation(),
-        crop: model.state.crop,
+        crop,
         border,
         film: model.state.film.clone(),
         badge: model.badge(),
@@ -639,6 +664,7 @@ fn print_words(app: &App) -> PrintWords {
         scanning: crate::json::boolean(model.value("io.scan_film")),
         original: model.holding_original && model.original.is_some(),
         keep_paper: model.prefs.keep_paper,
+        tray: model.tray_shown(),
     }
 }
 
@@ -1048,6 +1074,30 @@ impl View {
         (r.width > 0.0 && r.height > 0.0).then_some(r)
     }
 
+    /// The label's tooltips follow its names and the paper lock
+    /// (`ControlHelp.film`, `paper`, `paperLock`, `paperKept`): over each as
+    /// last drawn, nowhere while it isn't.
+    fn follow_label_tips(&mut self) {
+        let place = |target| {
+            self.target_rect(target).map_or(RECT::default(), |r| RECT {
+                left: r.x.floor() as i32,
+                top: r.y.floor() as i32,
+                right: r.max_x().ceil() as i32,
+                bottom: r.max_y().ceil() as i32,
+            })
+        };
+        let rects = [place(Target::Film), place(Target::Paper), place(Target::Lock)];
+        let kept = self.scene.words.keep_paper;
+        if self.label_tips == Some((rects, kept)) || self.hwnd.is_invalid() {
+            return;
+        }
+        self.label_tips = Some((rects, kept));
+        let lock = if kept { crate::help::PAPER_KEPT } else { crate::help::PAPER_LOCK };
+        for (part, (rect, text)) in rects.into_iter().zip([crate::help::FILM, crate::help::PAPER, lock]).enumerate() {
+            super::dialogs::area_tooltip(self.hwnd, part + 1, rect, text);
+        }
+    }
+
     fn build(&mut self, items: &mut Vec<Draw>) {
         let scene = self.scene.clone();
         let s = self.scale();
@@ -1104,6 +1154,7 @@ impl View {
                 }
             }
         }
+        self.follow_label_tips();
         self.retry = None;
         if scene.cropping.is_none() {
             if let Some((name, reason)) = &scene.failed {

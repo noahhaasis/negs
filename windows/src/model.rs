@@ -51,6 +51,8 @@ pub mod dirty {
     pub const PREVIEWS: u32 = 1 << 12;
     /// The tone graph's curve or film histogram arrived.
     pub const TONE_GRAPH: u32 = 1 << 13;
+    /// The tray opened, closed, or what it shows changed.
+    pub const TRAY: u32 = 1 << 14;
     pub const ALL: u32 = u32::MAX;
 }
 
@@ -714,11 +716,13 @@ impl Model {
     pub fn films(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| !s.paper).collect()
     }
-    /// The films the menu and the grid list (Settings › Fotufilm films). The
-    /// photograph's film stays listed, so the menu always shows its choice.
+    /// The films the menu and the tray list (Settings › Fotufilm films). The
+    /// photograph's film stays listed, so the menu always shows its choice,
+    /// and while the tray is open the one it opened on.
     pub fn listed_films(&self) -> Vec<&Stock> {
         let shown = self.fotufilm_films();
-        self.stocks.iter().filter(|s| !s.paper && (shown.lists(s) || s.id == self.state.film)).collect()
+        let before = self.previews.tray.as_ref().map(|t| t.before.film.as_str());
+        self.stocks.iter().filter(|s| !s.paper && (shown.lists(s) || s.id == self.state.film || before == Some(s.id.as_str()))).collect()
     }
     pub fn fotufilm_films(&self) -> state::FotufilmFilms {
         state::FotufilmFilms::from_key(&self.prefs.fotufilm_films)
@@ -1258,6 +1262,9 @@ impl Model {
         if next == self.state {
             return;
         }
+        // Any other edit keeps the stock being tried and closes the tray, so
+        // the visit stays one undo step before it.
+        self.end_tray(true);
         if !self.interacting() {
             let previous = self.state.clone();
             self.register_undo(previous, action);
@@ -1762,6 +1769,8 @@ impl Model {
             return;
         }
         self.hold_original(false);
+        // The straighten dial takes the label's place: a stock being tried is kept.
+        self.end_tray(true);
         self.crop_session = Some(CropSession::new(self.state.clone(), self.shown_image_size(), self.rotation()));
         self.mark(dirty::CROP | dirty::CANVAS | dirty::CHROME | dirty::LAYOUT | dirty::STRIP);
     }
@@ -1810,6 +1819,8 @@ impl Model {
     }
 
     fn open_restoring(&mut self, path: &Path, session: Option<EditorSession>) {
+        // A stock being tried is kept, as by a click outside the tray.
+        self.end_tray(true);
         if std::fs::File::open(path).is_err() {
             self.prefs.recent_files.retain(|p| !crate::session::same_path(p, path));
             self.prefs.save();
@@ -2096,12 +2107,12 @@ impl Model {
         if self.prefs.previews == on {
             return;
         }
+        // The tray goes, keeping the stock being tried.
+        if !on {
+            self.end_tray(true);
+        }
         self.prefs.previews = on;
         self.prefs.save();
-        // The grid goes, and its search with it, as the Mac's foldout does.
-        if !on {
-            self.previews.film_query.clear();
-        }
         if !on && self.previews.clear() {
             if let Some(engine) = &self.engine {
                 engine.request(json!({"command": "release_thumbnails"}), engine::timeout_for("release_thumbnails"), |_| {});
@@ -2120,26 +2131,9 @@ impl Model {
         }
     }
 
-    /// Opens or closes the Film or Paper foldout.
-    pub fn toggle_foldout(&mut self, paper: bool) {
-        let open = if paper { &mut self.previews.paper_open } else { &mut self.previews.film_open };
-        *open = !*open;
-        self.mark(dirty::STRUCTURE | dirty::PREVIEWS);
-    }
-
-    /// Whether the Film or Paper grid is open and on screen.
-    pub fn grid_shown(&self, paper: bool) -> bool {
-        self.prefs.previews
-            && self.previews.open(paper)
-            && self.inspector_visible
-            && self.pane() == Pane::Adjustments
-            && !self.cropping()
-            && !(paper && json::boolean(self.value("io.scan_film")))
-    }
-
     /// Whether any thumbnails are on screen.
     pub fn previews_on_screen(&self) -> bool {
-        self.grid_shown(false) || self.grid_shown(true) || self.preset_thumbnails_shown()
+        self.tray_shown().is_some() || self.preset_thumbnails_shown()
     }
 
     /// Whether the Presets list, with its thumbnails, is on screen.
@@ -2166,21 +2160,18 @@ impl Model {
         let generation = self.source_generation;
         let state = self.render_state();
         let mut wanted = vec![];
-        for paper in [false, true] {
-            if !self.grid_shown(paper) {
-                continue;
-            }
-            let (films, papers) = (self.listed_films(), self.papers());
-            // While the Film grid searches, only its matches, as listed.
-            let query = if paper { "" } else { self.previews.film_query.as_str() };
-            let searching = !query.trim().is_empty();
-            let groups = if paper { state::paper_groups(&papers) } else { state::matching(query, state::film_groups(&films, &papers)) };
-            // The favourites first, so their thumbnails come first; a search hides them.
-            let favorites = if searching { vec![] } else { self.favorite_stocks(paper) };
-            let rest = groups.iter().flat_map(|g| g.stocks.iter().copied()).filter(|s| !favorites.iter().any(|f| f.id == s.id));
-            for stock in favorites.iter().copied().chain(rest) {
+        // The open tray's tiles in its order, the favourites first (each
+        // once); while searching, only the matches.
+        if let Some(paper) = self.tray_shown() {
+            let mut listed: Vec<String> = vec![];
+            for entry in self.tray_sections().into_iter().flat_map(|s| s.stocks) {
+                if listed.contains(&entry.id) {
+                    continue;
+                }
+                let Some(stock) = self.stocks.iter().find(|s| s.paper == paper && s.id == entry.id) else { continue };
                 let command = previews::stock_command(&state, stock, &self.stocks, self.prefs.keep_paper, source, generation);
                 wanted.push((Target::Stock { id: stock.id.clone(), paper }, previews::Key::new(generation, &command), command));
+                listed.push(entry.id);
             }
         }
         let checking = self.presets.iter().any(|p| matches!(self.preset_status.get(p), None | Some(PresetStatus::Checking)));
@@ -2232,11 +2223,15 @@ impl Model {
         let buffer = engine.directory().join(format!("thumbnail-{}.rgba", self.previews.requests));
         command["preview_path"] = json!(buffer);
         let (color, rotation) = (self.previews.color.clone(), self.rotation());
+        // A stock's tile can stand in for its develop when tried (`try_stock`).
+        let stand_in = matches!(target, Target::Stock { .. });
         engine.request(command, engine::timeout_for("thumbnail"), move |result| {
             let bitmap = result.and_then(|(_, r)| {
                 let rgba = std::fs::read(&buffer)?;
                 let wide = crate::picture::is_wide(json::string(&r["display_color_space"]));
-                previews::Bitmap::from_rgba(&rgba, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32, wide, color.as_deref(), rotation)
+                let (width, height) = (json::number(&r["width"]) as u32, json::number(&r["height"]) as u32);
+                let bitmap = previews::Bitmap::from_rgba(&rgba, width, height, wide, color.as_deref(), rotation)?;
+                Ok(if stand_in { bitmap.keeping(rgba, width, height, wide) } else { bitmap })
             });
             let _ = std::fs::remove_file(&buffer);
             ui::post(move |app: &mut App| app.model.thumbnail_finished(target, key, bitmap));
@@ -2808,16 +2803,24 @@ impl Model {
         }
         self.activity_timer = true;
         ui::after(Duration::from_millis(400), |app: &mut App| {
-            let model = &mut app.model;
-            if !model.activity_timer {
-                return;
-            }
-            model.activity_timer = false;
-            if !model.preview_current && !model.showing_cached_preview && !model.interacting() && !model.render_failed && model.source.is_some() {
-                model.shows_activity = true;
-                model.mark(dirty::CANVAS);
+            // A tried stock's tile is up: the tag only once the develop runs long.
+            if app.model.activity_timer && app.model.shown_trial().is_some() {
+                ui::after(Duration::from_millis(1100), |app: &mut App| app.model.show_activity());
+            } else {
+                app.model.show_activity();
             }
         });
+    }
+
+    fn show_activity(&mut self) {
+        if !self.activity_timer {
+            return;
+        }
+        self.activity_timer = false;
+        if !self.preview_current && !self.showing_cached_preview && !self.interacting() && !self.render_failed && self.source.is_some() {
+            self.shows_activity = true;
+            self.mark(dirty::CANVAS);
+        }
     }
 
     fn hide_activity(&mut self) {
@@ -3616,39 +3619,116 @@ mod tests {
         }
     }
 
-    /// The Film grid's search: thumbnails only for its matches, in the order
-    /// the grid lists them, without the favourites; cleared, every film
+    /// The film tray's search: thumbnails only for its matches, in the order
+    /// the tray lists them, without the favourites; cleared, every film
     /// again with the favourites first. Searching never edits.
     #[test]
     fn a_film_search_asks_only_for_its_matching_thumbnails() {
         let prefs = Preferences { previews: true, inspector_pane: "Adjustments".into(), favorite_films: vec!["gold".into()], ..Preferences::default() };
         let mut model = catalog_model(prefs);
         model.source = Some(PathBuf::from("photo.png"));
-        model.previews.film_open = true;
-        model.previews.paper_open = true;
         let wanted = |model: &Model, paper: bool| -> Vec<String> {
             model.wanted_previews().into_iter().filter_map(|(target, ..)| match target { Target::Stock { id, paper: p } if p == paper => Some(id), _ => None }).collect()
         };
+        assert!(wanted(&model, false).is_empty(), "nothing until the tray opens");
+        model.open_tray(false);
         assert_eq!(wanted(&model, false), ["gold", "portra"]);
         let (edit, undo) = (model.state.clone(), model.undo_title().map(str::to_owned));
-        model.previews.film_query = "PORTRA".into();
+        model.set_tray_query("PORTRA");
         assert_eq!(wanted(&model, false), ["portra"]);
         // A favourite that matches is asked for once, under its group.
-        model.previews.film_query = "gold color negative".into();
+        model.set_tray_query("gold color negative");
         assert_eq!(wanted(&model, false), ["gold"]);
         // Both, in catalog order: the favourite no longer leads.
-        model.previews.film_query = "color".into();
+        model.set_tray_query("color");
         assert_eq!(wanted(&model, false), ["portra", "gold"]);
-        model.previews.film_query = "nothing like it".into();
+        model.set_tray_query("nothing like it");
         assert!(wanted(&model, false).is_empty());
-        // Papers have no search.
-        assert_eq!(wanted(&model, true), ["endura", "crystal"]);
         // Only spaces, or cleared: everything, favourites first.
         for query in ["   ", ""] {
-            model.previews.film_query = query.into();
+            model.set_tray_query(query);
             assert_eq!(wanted(&model, false), ["gold", "portra"]);
         }
+        // Papers have no search; one tray at a time.
+        model.open_tray(true);
+        assert!(model.previews.open(true) && !model.previews.open(false));
+        assert_eq!(wanted(&model, true), ["endura", "crystal"]);
+        assert!(wanted(&model, false).is_empty());
+        model.set_tray_query("crystal");
+        assert_eq!(wanted(&model, true), ["endura", "crystal"]);
         assert_eq!((model.state.clone(), model.undo_title().map(str::to_owned)), (edit, undo));
+    }
+
+    /// A visit to the tray is one undo step however many stocks were tried;
+    /// Esc puts back the stock from before; another edit keeps the stock
+    /// being tried first, as its own step after the visit's.
+    #[test]
+    fn a_visit_to_the_tray_is_one_undo_step() {
+        let prefs = Preferences { previews: true, favorite_films: vec!["portra".into()], ..Preferences::default() };
+        let mut model = catalog_model(prefs);
+        model.source = Some(PathBuf::from("photo.png"));
+        model.choose_film("gold");
+        let steps = model.undo.undo.len();
+        let gold = model.state.clone();
+        model.open_tray(false);
+        model.try_stock("portra");
+        assert_eq!(model.state.film, "portra");
+        // Not a film in the paper's place, nor a paper as a film.
+        model.try_stock("endura");
+        assert_eq!(model.state.film, "portra");
+        model.step_tray(-1);
+        assert_eq!(model.state.film, "portra", "held at the favourites' start");
+        model.step_tray(1);
+        assert_eq!(model.state.film, "gold", "on from the favourites into the group");
+        model.step_tray(1);
+        assert_eq!(model.state.film, "gold", "held at the row's end");
+        model.step_tray(-1);
+        assert_eq!(model.state.film, "portra");
+        assert_eq!(model.undo.undo.len(), steps, "tries aren't steps");
+        assert_eq!(model.tray_before_name().as_deref(), Some("gold"));
+        model.end_tray(true);
+        assert!(model.tray().is_none());
+        assert_eq!((model.undo.undo.len(), model.undo_title()), (steps + 1, Some("Change Film")));
+        model.perform_undo();
+        assert_eq!(model.state.film, "gold");
+        assert_eq!(model.state, model.with_preferences(gold.clone()));
+
+        // Esc: back, and no step.
+        model.open_tray(false);
+        model.try_stock("portra");
+        model.end_tray(false);
+        assert_eq!((model.state.film.as_str(), model.undo.undo.len()), ("gold", steps));
+
+        // Another edit keeps the stock first, as a step of its own.
+        model.open_tray(false);
+        model.try_stock("portra");
+        model.set("post.contrast", json!(10));
+        assert!(model.tray().is_none());
+        assert_eq!(model.undo.undo.len(), steps + 2);
+        model.perform_undo();
+        assert_eq!(model.state.film, "portra");
+        model.perform_undo();
+        assert_eq!(model.state.film, "gold");
+
+        // Search: Return tries the first match, then keeps; Esc clears, then goes back.
+        model.open_tray(false);
+        model.set_tray_query("portra");
+        model.tray_submit();
+        assert_eq!(model.state.film, "portra");
+        assert!(model.tray().is_some());
+        model.tray_cancel_search();
+        assert_eq!(model.tray().map(|t| t.query.as_str()), Some(""));
+        model.tray_cancel_search();
+        assert!(model.tray().is_none());
+        assert_eq!(model.state.film, "gold");
+        // Cropping and turning the tiles off close it, keeping the stock.
+        model.open_tray(false);
+        model.try_stock("portra");
+        model.set_previews(false);
+        assert!(model.tray().is_none());
+        assert_eq!((model.state.film.as_str(), model.undo_title()), ("portra", Some("Change Film")));
+        model.open_tray(false);
+        assert!(model.tray().is_none(), "no tray without its tiles");
     }
 
     /// Lens corrections: on for every new edit and after Reset, though the
@@ -4137,6 +4217,9 @@ mod tests {
         assert!(model.preview_current && !model.shows_quick_frame() && model.render_id == 1);
     }
 }
+
+// The film and paper tray: trying, keeping and going back.
+mod tray;
 
 #[cfg(test)]
 pub mod harness;
