@@ -568,6 +568,16 @@ pub struct App {
 }
 
 impl App {
+    /// The strip and grid's device, after the canvas's: launch never waits
+    /// for it, and the two drivers' set-ups don't contend. Until it's made
+    /// the strip is bare film, and no thumbnail is read.
+    pub fn prepare_surfaces(&mut self) {
+        surface::prepare(|app, ms, hardware| {
+            crate::trace::event("surface_ready", || serde_json::json!({"ms": ms, "hardware": hardware}));
+            app.surfaces_ready();
+        });
+    }
+
     /// The strip and grid's device is made (again): they repaint through it.
     pub fn surfaces_ready(&mut self) {
         strip::surfaces_ready(self);
@@ -1744,11 +1754,6 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| {
                     app.report.stamp("inspector_shown");
                     inspector::report_geometry(app);
-                    // The strip and grid's GPU device, which launch never waits for.
-                    surface::prepare(|app, ms, hardware| {
-                        crate::trace::event("surface_ready", || serde_json::json!({"ms": ms, "hardware": hardware}));
-                        app.surfaces_ready();
-                    });
                 });
                 LRESULT(0)
             }

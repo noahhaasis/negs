@@ -181,6 +181,10 @@ impl Thumbs {
     /// Asks for `wants` at `size`, most wanted first (replacing what was
     /// asked before at any size but what's already being read).
     pub fn read(&mut self, wants: &[&Want], size: ThumbSize) {
+        // Nothing to show them with yet: launch keeps the cores.
+        if !surface::ready() {
+            return;
+        }
         let queue = self.queue.get_or_insert_with(start_readers).clone();
         let mut queued = queue.jobs.lock().unwrap_or_else(|e| e.into_inner());
         let mut kept = Vec::with_capacity(queued.len());
@@ -253,10 +257,13 @@ impl Thumbs {
     /// `open` index `wants`.
     pub fn pump(&mut self, model: &Model, wants: &[Want], on_screen: std::ops::Range<usize>, open: Option<usize>) {
         let Some(paths) = model.engine_paths() else { return };
+        if !surface::ready() || model.shelf.library.is_none() {
+            return;
+        }
         if edited_store::thumbnails().engine().is_none() {
             return edited_store::read_stamp(paths.clone(), |app: &mut App| app.thumbnails_known());
         }
-        if !surface::ready() || model.shelf.library.is_none() || !model.render_idle() {
+        if !model.render_idle() {
             return;
         }
         let low_power = low_power();
@@ -443,6 +450,11 @@ fn start_readers() -> Arc<Queue> {
         let queue = queue.clone();
         let _ = std::thread::Builder::new().name(format!("negs-thumbs-{n}")).spawn(move || {
             crate::thumbnail::com_thread();
+            // Under the photograph's own develop, which runs at normal priority.
+            unsafe {
+                use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
+                let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+            }
             loop {
                 let job = {
                     let mut jobs = queue.jobs.lock().unwrap_or_else(|e| e.into_inner());

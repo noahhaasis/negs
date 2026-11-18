@@ -406,6 +406,7 @@ pub fn start_gpu(hwnd: HWND) {
                 Ok((gpu, surface)) => {
                     app.report.stamp("gpu_ready");
                     gpu_ready(gpu, surface);
+                    app.prepare_surfaces();
                     // Pictures made before the GPU was ready upload now, off the UI thread.
                     let pictures: Vec<Picture> =
                         [&app.model.image, &app.model.placeholder].into_iter().flatten().cloned().collect();
@@ -423,6 +424,7 @@ pub fn start_gpu(hwnd: HWND) {
                 }
                 Err(error) => {
                     app.report.line(&format!("software_canvas {error:#}"));
+                    app.prepare_surfaces();
                     with_view(|view| {
                         view.update_color_management();
                         invalidate(view.hwnd);

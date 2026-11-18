@@ -73,6 +73,7 @@ pub struct Strip {
     leader: HWND,
     leader_hover: bool,
     leader_shown: bool,
+    leader_place: (i32, i32),
 }
 
 pub fn register() {
@@ -261,6 +262,8 @@ fn request(app: &mut App) {
 pub fn surfaces_ready(app: &mut App) {
     app.thumbs.device_lost();
     app.model.dirty |= dirty::STRIP;
+    let ((column, edge), shown) = (app.strip_view.leader_place, app.strip_view.leader_shown);
+    layout_leader(app, column, edge, shown);
     invalidate(app.strip);
     super::grid::surfaces_ready(app);
 }
@@ -586,6 +589,12 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
 /// Where the leader stands: on the strip's top edge at its right end, or
 /// on the status line's with the strip hidden, over the canvas.
 pub fn layout_leader(app: &mut App, column: i32, edge: i32, shown: bool) {
+    app.strip_view.leader_place = (column, edge);
+    app.strip_view.leader_shown = shown;
+    // Made once the window is up (`surfaces_ready`): launch doesn't wait.
+    if app.strip_view.leader.is_invalid() && !super::surface::ready() {
+        return;
+    }
     let leader = ensure_leader(app);
     let s = app.scale();
     let (w, h) = ((rules::LEADER_WIDTH * s).round() as i32, (rules::LEADER_RAISED * s).round() as i32);
