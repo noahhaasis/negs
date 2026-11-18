@@ -61,7 +61,7 @@ impl PhotoFacts {
         format!("{} s", one_decimal(seconds, decimal))
     }
 
-    /// The caption's items by part (`PhotoFacts.parts`), in `PARTS` order.
+    /// The caption's items by part (`PhotoFacts.parts`), in `compare::PARTS` order.
     pub fn parts(&self, decimal: char) -> [Option<String>; 5] {
         [
             self.camera.clone(),
@@ -77,9 +77,6 @@ impl PhotoFacts {
         self.parts(decimal).into_iter().flatten().collect()
     }
 }
-
-/// The parts' names, as the status line says what differs.
-pub const PARTS: [&str; 5] = ["camera", "ISO", "shutter", "aperture", "focal length"];
 
 /// At most one decimal, none when whole ("4", "2,8").
 fn one_decimal(value: f64, decimal: char) -> String {

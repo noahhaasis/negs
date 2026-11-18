@@ -926,7 +926,8 @@ pub fn differences(app: &App) -> String {
     let (Side::Photo(a), Side::Photo(b)) = (&c.first, &c.second) else { return String::new() };
     let (fa, fb) = (facts(&a.photo), facts(&b.photo));
     let (sa, sb) = (app.model.compared_stocks(a), app.model.compared_stocks(b));
-    rules::differences(fa.as_ref(), fb.as_ref(), (&sa.0, &sb.0), (sa.1.as_deref(), sb.1.as_deref()))
+    let (pa, pb) = (fa.map(|f| f.parts('.')), fb.map(|f| f.parts('.')));
+    rules::differences(pa.as_ref(), pb.as_ref(), (&sa.0, &sb.0), (sa.1.as_deref(), sb.1.as_deref()))
 }
 
 /// Stacked: ← → step the bottom one.
