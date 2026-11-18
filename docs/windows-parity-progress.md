@@ -16,8 +16,8 @@ decisions made with their reasons, and what was carried over. See
 | 5 | Tray | done, merged (see log) |
 | 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | done, merged `f9b8f47` |
-| 8 | Remaining features, Flip added (Open in Lightroom last) | done: 8c `1396397`, 8b `4a15d7f`, 8a `ee752ee` merged; follow-ups running |
-| 9 | Validation and release | not started |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | done: 8c `1396397`, 8b `4a15d7f`, 8a `ee752ee`; follow-ups `563cfb5`, `68cfbee` |
+| 9 | Validation and release | running (branch `win-p9-validation`) |
 
 ## 2026-11-19: phase 8a merged, the editor features (`ee752ee`, branch tip `5b369fb`)
 
@@ -196,7 +196,7 @@ decisions made with their reasons, and what was carried over. See
   - Lightroom's cold start with a signed-in account is untested (the Mac's
     dropped files). Since tested: see the addendum below.
 
-### Addendum: the export dialogs, and Lightroom live (merged `f0176be`; branch `win-p8b-open-export`)
+### Addendum: the export dialogs, and Lightroom live (merged `f0176be` and `68cfbee`; branch `win-p8b-open-export`)
 
 - **The export dialogs in Windows' dark mode** (`9958159` to `e7e6440`, merged
   `f0176be`):
