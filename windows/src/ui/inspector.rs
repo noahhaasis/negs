@@ -4049,6 +4049,11 @@ const ASPECT_FORMAT: TextStyle = TextStyle::serif(13.5, 400).italic();
 const ORIENTATION_WORD: TextStyle = TextStyle::serif(14.5, 400);
 const CROP_BUTTON: TextStyle = TextStyle::serif(15.0, 600);
 
+thread_local! {
+    /// The crop panel, and its rules' heights: under the header, over the foot.
+    static CROP_RULES: Cell<(isize, i32, i32)> = const { Cell::new((0, 0, 0)) };
+}
+
 /// `text`'s width in `style`, DIPs.
 fn measure_dips(text: &str, style: &TextStyle) -> f64 {
     super::d2d::measure_text(text, style, 0.0, theme::tokens().plain).width as f64
@@ -4180,6 +4185,8 @@ fn layout_crop(ins: &mut Inspector) {
     );
     if let Some(crop) = ins.crop.as_mut() {
         crop.rules = (header, top_of_foot);
+        // For its paint, which comes while the app may be busy.
+        CROP_RULES.with(|r| r.set((crop.panel.0 as isize, header, top_of_foot)));
     }
     // Once more when the scroll bar comes or goes, which changes the width.
     for _ in 0..2 {
@@ -4450,7 +4457,8 @@ fn draw_crop_item(item: &DRAWITEMSTRUCT, session: Option<&crate::crop::CropSessi
 fn paint_crop_panel(hwnd: HWND) {
     let t = theme::tokens();
     let s = draw::dpi_of(hwnd);
-    let rules = with_app(|app| app.inspector.crop.as_ref().map(|c| c.rules)).flatten().unwrap_or((0, 0));
+    let (_, header, foot) = CROP_RULES.with(Cell::get);
+    let rules = (header, foot);
     unsafe {
         let mut ps = PAINTSTRUCT::default();
         let dc = BeginPaint(hwnd, &mut ps);
@@ -4607,7 +4615,7 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
-                let is_panel = with_app(|app| app.inspector.crop.as_ref().is_some_and(|c| c.panel == hwnd)).unwrap_or(false);
+                let is_panel = CROP_RULES.with(Cell::get).0 == hwnd.0 as isize;
                 if is_panel {
                     paint_crop_panel(hwnd);
                 } else {
