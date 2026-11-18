@@ -472,7 +472,12 @@ pub fn lightroom_items(app: &App, menu: HMENU, before: u16, counted: bool) {
                 continue;
             }
             let title = if counted { menu_title(kind, count) } else { format!("Open in {}", kind.title()) };
-            let text = wide(format!("&{title}"));
+            // Their own letters: O, L and E are Open's, Export LUT's and Export's.
+            let underlined = match kind {
+                Kind::Cloud => title.replacen("Lightroom", "Li&ghtroom", 1),
+                Kind::Classic => title.replacen("Classic", "&Classic", 1),
+            };
+            let text = wide(underlined);
             let flags = if app.model.can_open_in_lightroom(kind) { MF_STRING } else { MF_STRING | MF_GRAYED };
             let _ = InsertMenuW(menu, before as u32, MF_BYCOMMAND | flags, (super::id::LIGHTROOM + i as u16) as usize, windows::core::PCWSTR(text.as_ptr()));
         }
