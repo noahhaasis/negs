@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::crop::{CropAspect, CropSettings, Orientation, Point, Rect};
 use crate::json;
-use crate::state::{EditState, Stock};
+use crate::state::{EditState, Roll, Stock};
 
 /// Upstream's `workflow.route` strings.
 pub const ROUTE: &str = "input > convert-film > print > scan";
@@ -38,6 +38,67 @@ pub const PRESET_KEEPS: [&str; 9] = [
 
 pub const SCAN_ILLUMINANT: &str = "film_render.convert.scan_illuminant";
 
+/// How the scan is read from the file: a RAW's white balance and lens
+/// correction, a TIFF's interpretation. A roll's frames share it.
+pub const SCAN_READING: [&str; 3] = ["io.raw_white_balance", "io.lens_correction", "io.input_interpretation"];
+
+// MARK: Darkroom roll (§9.2)
+
+/// `target` joining `roll`, printed like `reference` (`NegativeScan.joining`):
+/// the read-as film, paper, backlight, how the scan is read and base
+/// tuning are the reference frame's, and the filtration the roll's unless
+/// `target` is a frame of this roll that set its own. Its print exposure,
+/// crop and own base are measured for it afterwards.
+pub fn joining(roll: &Roll, reference: &EditState, target: &EditState) -> EditState {
+    let mut next = target.clone();
+    next.film = reference.film.clone();
+    next.paper = reference.paper.clone();
+    for path in ["workflow", "film_render.base", "film_render.convert", "film_render.development_time", "print_render.development_time"].into_iter().chain(SCAN_READING) {
+        json::set(&mut next.params, path, reference.value(path).clone());
+    }
+    let own = target.roll.as_ref().is_some_and(|r| r.id == roll.id && !r.filtered(target));
+    if !own {
+        json::set(&mut next.params, "enlarger.m_filter_shift", Value::from(roll.magenta));
+        json::set(&mut next.params, "enlarger.y_filter_shift", Value::from(roll.yellow));
+    }
+    json::set(&mut next.params, "io.scan_film", Value::Bool(false));
+    next.brightness_match = None;
+    next.roll = Some(roll.clone());
+    next
+}
+
+/// What a camera recorded of a scan's light: shutter (seconds), aperture
+/// and ISO.
+pub type ScanLight = (Option<f64>, Option<f64>, Option<f64>);
+
+/// How much more light the camera gave `frame`'s scan than `reference`'s,
+/// in stops, from what both recorded (a lens without contacts records no
+/// aperture); None when they share none (a scanner's TIFF: the same light
+/// each time).
+pub fn scan_stops(frame: ScanLight, reference: ScanLight) -> Option<f64> {
+    let mut stops: Option<f64> = None;
+    let mut add = |value: Option<f64>, base: Option<f64>, term: fn(f64, f64) -> f64| {
+        if let (Some(value), Some(base)) = (value, base) {
+            *stops.get_or_insert(0.0) += term(value, base);
+        }
+    };
+    add(frame.0, reference.0, |v, b| (v / b).log2());
+    add(frame.1, reference.1, |v, b| 2.0 * (b / v).log2());
+    add(frame.2, reference.2, |v, b| (v / b).log2());
+    stops
+}
+
+/// The base tuning's exposure for a frame without clear film of its own:
+/// the roll's, less the extra light its scan got.
+pub fn exposure_ev(roll: f64, scan_stops: Option<f64>) -> f64 {
+    roll - scan_stops.unwrap_or(0.0)
+}
+
+/// Use for whole roll's word for the photographs it left alone.
+pub fn skipped(count: usize) -> String {
+    if count == 1 { "1 photograph skipped: it doesn't look like a negative.".into() } else { format!("{count} photographs skipped: they don't look like negatives.") }
+}
+
 pub fn is_negative(state: &EditState) -> bool {
     json::string(state.value(ROUTE_PATH)) == ROUTE
 }
@@ -63,6 +124,7 @@ pub fn leaving(state: &EditState, defaults: &Value) -> EditState {
             json::set(&mut next.params, path, value);
         }
     }
+    next.roll = None;
     next
 }
 
@@ -77,6 +139,7 @@ pub fn keeping_negative(applied: &EditState, current: &EditState) -> EditState {
         json::set(&mut next.params, path, current.value(path).clone());
     }
     json::set(&mut next.params, "io.scan_film", Value::Bool(false));
+    next.roll = current.roll.clone();
     next
 }
 
@@ -197,20 +260,25 @@ pub struct BaseStatus {
     /// A base no detection made while the photograph is open: picked
     /// before, or set in Lab.
     pub by_hand: bool,
+    /// The roll's base, on a frame without clear film of its own.
+    pub from_roll: bool,
 }
 
 impl BaseStatus {
     pub fn of(result: &Value) -> Self {
         let edge = json::string(&result["edge"]);
-        Self { found: json::boolean(&result["found"]), picked: json::boolean(&result["picked"]), edge: (!edge.is_empty()).then(|| edge.to_string()), by_hand: false }
+        Self { found: json::boolean(&result["found"]), picked: json::boolean(&result["picked"]), edge: (!edge.is_empty()).then(|| edge.to_string()), by_hand: false, from_roll: false }
     }
 
     /// The base is a guess from the picture: no clear film was found.
     pub fn guessed(&self) -> bool {
-        !self.found && !self.picked && !self.by_hand
+        !self.found && !self.picked && !self.by_hand && !self.from_roll
     }
 
     pub fn sentence(&self, orientation: Orientation) -> String {
+        if self.from_roll {
+            return "Film base from the roll: this frame shows no clear film of its own.".into();
+        }
         if self.by_hand {
             return "Film base as picked or set in Lab.".into();
         }

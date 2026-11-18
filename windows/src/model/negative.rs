@@ -9,7 +9,10 @@
 //! it asked about; a newer request supersedes it.
 
 use super::*;
+use super::library_map as map;
 use crate::negative::{self as neg, BaseStatus, Pick};
+use negs_library::Item;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// How long a detection or balance that follows an edit waits for the next.
@@ -155,6 +158,73 @@ fn balance_sentence(changes: &[(String, Value)], decimal: char) -> String {
     format!("Magenta {}, yellow {}{exposure}", f(get("enlarger.m_filter_shift").unwrap_or(0.0), 1), f(get("enlarger.y_filter_shift").unwrap_or(0.0), 1))
 }
 
+/// What reading one frame of a roll found for it (`RollFrame`).
+#[derive(Default)]
+struct RollFrame {
+    /// Its own base (from its rebate) or the roll's exposure shifted by its
+    /// EXIF, and its metered print exposure.
+    changes: Vec<(String, Value)>,
+    /// The crop to its picture, for a frame not cropped yet.
+    crop: Option<crate::crop::CropSettings>,
+    /// Read with the roll's settings, it looks like a colour negative; one
+    /// that doesn't is left as it was.
+    looks_negative: bool,
+}
+
+/// One frame of a roll, read with the roll's settings on `helper`
+/// (`readRollFrame`).
+fn read_roll_frame(
+    helper: &EngineClient,
+    photo: &Path,
+    target: &EditState,
+    generation: u64,
+    roll: &state::Roll,
+    reference: &EditState,
+    facts: Option<&crate::photo_facts::PhotoFacts>,
+) -> Result<RollFrame> {
+    let joined = neg::joining(roll, reference, target);
+    let ask = |name: &str, params: &Value, extra: Option<(&str, Value)>| -> Result<Value> {
+        let mut command = json!({"command": name, "input": photo, "source_generation": generation, "film": joined.film, "paper": joined.paper, "params": params});
+        if let Some((key, value)) = extra {
+            command[key] = value;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        helper.request(command, engine::timeout_for(name), move |result| {
+            let _ = tx.send(result);
+        });
+        Ok(rx.recv().map_err(|_| anyhow!("The helper stopped"))??.1)
+    };
+    let found = ask("negative_base", &joined.params, None)?;
+    let mut frame = RollFrame { looks_negative: json::boolean(&found["looks_negative"]), ..RollFrame::default() };
+    if !frame.looks_negative {
+        return Ok(frame);
+    }
+    if json::boolean(&found["found"]) {
+        frame.changes.push(("film_render.base".into(), found["base"].clone()));
+        frame.changes.push(("film_render.convert.exposure_compensation_ev".into(), found["exposure_ev"].clone()));
+    } else {
+        let light = |f: Option<&crate::photo_facts::PhotoFacts>| f.map_or((None, None, None), |f| (f.exposure, f.aperture, f.iso));
+        let own = crate::photo_facts::PhotoFacts::read(photo);
+        let stops = neg::scan_stops(light(own.as_ref()), light(facts));
+        let ev = neg::exposure_ev(json::number(reference.value("film_render.convert.exposure_compensation_ev")), stops);
+        frame.changes.push(("film_render.convert.exposure_compensation_ev".into(), json!(ev)));
+    }
+    let mut metered = joined.params.clone();
+    for (path, value) in &frame.changes {
+        json::set(&mut metered, path, value.clone());
+    }
+    let bounds = neg::bounds(&found["picture"]).map(|b| ("bounds", b));
+    if let Ok(result) = ask("negative_meter", &metered, bounds) {
+        if !result["print_exposure"].is_null() {
+            frame.changes.push(("enlarger.print_exposure".into(), result["print_exposure"].clone()));
+        }
+    }
+    if !target.crop.cropped() {
+        frame.crop = neg::crop(&found["picture"]);
+    }
+    Ok(frame)
+}
+
 impl Model {
     pub fn is_negative(&self) -> bool {
         neg::is_negative(&self.state)
@@ -293,9 +363,12 @@ impl Model {
         }
         let survey = self.negative_survey().filter(|s| !s.base.is_null())?;
         if neg::same_base(&survey.base, base) {
-            return Some(BaseStatus { found: survey.found, picked: false, edge: survey.edge.clone(), by_hand: false });
+            return Some(BaseStatus { found: survey.found, picked: false, edge: survey.edge.clone(), by_hand: false, from_roll: false });
         }
-        Some(BaseStatus { found: false, picked: false, edge: None, by_hand: true })
+        // Not what a detection finds: a frame of a roll without clear film
+        // of its own has the roll's; otherwise it was picked or set by hand.
+        let from_roll = self.state.roll.is_some() && !survey.found;
+        Some(BaseStatus { found: false, picked: false, edge: None, by_hand: !from_roll, from_roll })
     }
 
     /// The scan doesn't look like a colour negative, in Prep's words.
@@ -729,6 +802,179 @@ impl Model {
         let mut next = self.state.clone();
         json::set(&mut next.params, neg::FLAT_FIELD, json!(""));
         self.apply(next, "Flat Field Off");
+    }
+
+    // MARK: Darkroom roll (§9.2, §9.3)
+
+    /// Prep › Roll's filtration: a frame that set its own goes back to the
+    /// roll's magenta and yellow, its exposure metered again.
+    pub fn use_roll_filtration(&mut self) {
+        if !self.is_negative() || self.negative_busy() || self.cropping() {
+            return;
+        }
+        let Some(roll) = self.state.roll.clone().filter(|r| !r.filtered(&self.state)) else { return };
+        let decimal = crate::ui::inspector::decimal_separator();
+        let (m, y) = (roll.magenta, roll.yellow);
+        self.run_negative(
+            "Metering the print…",
+            false,
+            false,
+            move |asker| {
+                let mut changes: Vec<(String, Value)> = vec![("enlarger.m_filter_shift".into(), json!(m)), ("enlarger.y_filter_shift".into(), json!(y))];
+                if let Some(exposure) = asker.meter(&changes) {
+                    changes.push(("enlarger.print_exposure".into(), exposure));
+                }
+                Ok(changes)
+            },
+            move |model, changes| {
+                if model.state.roll.as_ref() != Some(&roll) {
+                    return;
+                }
+                let mut next = model.state.clone();
+                for (path, value) in &changes {
+                    json::set(&mut next.params, path, value.clone());
+                }
+                model.apply(next, "Use Roll\u{2019}s Filtration");
+                model.status = balance_sentence(&changes, decimal);
+            },
+        );
+    }
+
+    /// Prep › Use for whole roll (`useNegativeForRoll`): every photograph in
+    /// view is printed as a frame of this roll (§9.2), as one undo step.
+    /// The film, paper, backlight, base tuning and filtration are this
+    /// frame's; a frame of the roll that set its own filtration keeps it.
+    /// Each other frame is read first, on a helper of its own: its base
+    /// from its own rebate when it shows clear film, else this frame's
+    /// with the exposure shifted by the camera's settings (§9.3); its print
+    /// exposure metered; and, if uncropped, the crop to its picture. One
+    /// that doesn't look like a colour negative read so is skipped. This
+    /// one is checked too; if it doesn't, nothing changes.
+    pub fn use_negative_for_roll(&mut self) {
+        if !self.is_negative() || self.negative_busy() || self.cropping() || self.source.is_none() {
+            return;
+        }
+        let Some(paths) = self.engine_paths().cloned() else { return };
+        let open = self.library_item();
+        let mut items = self.shown_items();
+        if let Some(open) = &open
+            && !items.contains(open)
+        {
+            items.insert(0, open.clone());
+        }
+        let reference = self.state.clone();
+        let id = match (&reference.roll, self.shelf.library.as_mut()) {
+            (Some(roll), _) => roll.id.clone(),
+            (None, Some(library)) => library.new_id(),
+            (None, None) => format!("{:08x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u32)),
+        };
+        let roll = state::Roll {
+            id,
+            magenta: json::number(reference.value("enlarger.m_filter_shift")),
+            yellow: json::number(reference.value("enlarger.y_filter_shift")),
+            paper: Some(reference.paper.clone()),
+        };
+        // Without sidecars only the open photograph changes.
+        let sidecars = self.shelf.library.as_ref().is_some_and(|_| self.prefs.library.sidecars());
+        let limit = self.state.limit_preview;
+        let others: Vec<(Item, Option<EditState>)> = if sidecars {
+            let library = self.shelf.library.as_mut().expect("library");
+            items
+                .iter()
+                .filter(|i| Some(*i) != open.as_ref())
+                .map(|i| (i.clone(), library.opening_state(i).and_then(|s| map::from_library(&s, limit).ok())))
+                .collect()
+        } else {
+            vec![]
+        };
+        let source = self.source.clone().expect("source");
+        let (job_roll, job_reference) = (roll.clone(), reference.clone());
+        self.run_negative(
+            "Reading the roll…",
+            false,
+            false,
+            move |asker| {
+                // This frame is checked like the others, never taken on trust.
+                if !asker.survey()?.looks_negative {
+                    return Ok(None);
+                }
+                let mut frames: HashMap<Item, RollFrame> = HashMap::new();
+                if others.is_empty() {
+                    return Ok(Some(frames));
+                }
+                // A helper of its own, so the open photograph's decode stays.
+                let helper = EngineClient::start(paths)?;
+                let facts = crate::photo_facts::PhotoFacts::read(&source);
+                let count = others.len();
+                for (index, (item, target)) in others.into_iter().enumerate() {
+                    let words = format!("Reading frame {} of {count}…", index + 1);
+                    ui::post(move |app: &mut App| {
+                        if app.model.negative.working.as_deref().is_some_and(|w| w.starts_with("Reading")) {
+                            app.model.negative.working = Some(words);
+                            app.model.mark(dirty::INSPECTOR);
+                        }
+                    });
+                    let Some(target) = target else { continue };
+                    let frame = read_roll_frame(&helper, &item.photo, &target, index as u64 + 1, &job_roll, &job_reference, facts.as_ref())?;
+                    frames.insert(item, frame);
+                }
+                helper.stop();
+                Ok(Some(frames))
+            },
+            move |model, frames: Option<HashMap<Item, RollFrame>>| {
+                let Some(frames) = frames else {
+                    model.status = "The roll wasn't shared: this photograph doesn't look like a negative.".into();
+                    model.show_note(negs_library::Note { text: "Roll Not Shared".into(), detail: Some("this photograph doesn't look like a negative".into()), count: 1 });
+                    return;
+                };
+                if model.library_item() != open {
+                    model.status = "The roll wasn't changed: the photograph changed meanwhile.".into();
+                    return;
+                }
+                let skipped: Vec<Item> = items.iter().filter(|i| frames.get(*i).is_some_and(|f| !f.looks_negative)).cloned().collect();
+                let joining: Vec<Item> = items.iter().filter(|i| !skipped.contains(i)).cloned().collect();
+                if model.shelf.library.is_none() || open.is_none() {
+                    // Not in a library: this photograph alone becomes the roll's first frame.
+                    let mut next = model.state.clone();
+                    next.roll = Some(roll);
+                    model.apply(next, "Use for Whole Roll");
+                } else {
+                    let open = open.clone().expect("open");
+                    let (limit, reference) = (model.state.limit_preview, reference.clone());
+                    model.library_action(
+                        |library| {
+                            library.change_each_edit(&joining, "Use for Whole Roll", "Roll Shared", |item, target| {
+                                let Ok(target) = map::from_library(target, limit) else { return target.clone() };
+                                let next = if *item == open {
+                                    EditState { roll: Some(roll.clone()), ..target }
+                                } else {
+                                    let mut next = neg::joining(&roll, &reference, &target);
+                                    if let Some(frame) = frames.get(item) {
+                                        for (path, value) in &frame.changes {
+                                            json::set(&mut next.params, path, value.clone());
+                                        }
+                                        if let Some(crop) = frame.crop.filter(|_| !next.crop.cropped()) {
+                                            next.crop = crop;
+                                        }
+                                    }
+                                    next
+                                };
+                                map::to_library(&next)
+                            })
+                        },
+                        None,
+                    );
+                }
+                if !skipped.is_empty() {
+                    let words = neg::skipped(skipped.len());
+                    if let Some((note, _)) = model.shelf.note.as_mut() {
+                        let detail = words.trim_end_matches('.').to_string();
+                        note.detail = Some(note.detail.take().map_or(detail.clone(), |d| format!("{d} · {detail}")));
+                    }
+                    model.status = words;
+                }
+            },
+        );
     }
 
     /// A new photograph: nothing read on the last one applies.

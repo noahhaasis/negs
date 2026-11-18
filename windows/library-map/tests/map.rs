@@ -100,7 +100,7 @@ fn a_mac_edited_photograph_shows_its_edits_on_windows() {
     );
     // And back, as stored: the same edits the Mac wrote.
     let t = table(1);
-    let back = to_library(&win, None);
+    let back = to_library(&win);
     assert_eq!(&back, lib);
     assert_eq!(encode_edits(&back, true, &t), encode_edits(lib, true, &t));
 }
@@ -114,12 +114,13 @@ fn a_stale_match_and_a_roll_survive() {
     assert_eq!(win.film, "kodak_trix");
     let found = win.brightness_match.as_ref().unwrap();
     assert_eq!((found.ev, found.highlight_limited, found.inputs.is_none()), (Some(-0.3), true, true), "stale: solved again on opening");
-    assert_eq!(&to_library(&win, None), copy);
-    // A Mac's roll isn't shown on Windows but is kept.
+    assert_eq!(&to_library(&win), copy);
+    // A roll's frame keeps its roll both ways.
     let mut rolled = copy.clone();
-    rolled.roll = Some(Roll { id: "r1".into(), magenta: 10.0, yellow: -5.0, paper: None });
+    rolled.roll = Some(Roll { id: "r1".into(), magenta: 10.0, yellow: -5.0, paper: Some("kodak_portra_endura".into()) });
     let win = from_library(&rolled, false).unwrap();
-    assert_eq!(to_library(&win, rolled.roll.clone()), rolled);
+    assert_eq!(win.roll.as_ref().map(|r| (r.id.as_str(), r.magenta, r.yellow)), Some(("r1", 10.0, -5.0)));
+    assert_eq!(to_library(&win), rolled);
 }
 
 #[test]
@@ -127,12 +128,12 @@ fn every_fixture_maps_there_and_back_unchanged() {
     for name in ["edited.negs", "minimal.negs", "newer-defaults.negs", "newer-schema.negs", "rated-reject.negs", "two-variants.negs", "unknown-keys.negs"] {
         for (lib, _) in restored_edits(name) {
             let win = from_library(&lib, true).unwrap();
-            assert_eq!(to_library(&win, lib.roll.clone()), lib, "{name}");
+            assert_eq!(to_library(&win), lib, "{name}");
         }
     }
     // A new photograph's state too.
     let plain = defaults().plain_state();
-    assert_eq!(to_library(&from_library(&plain, false).unwrap(), None), plain);
+    assert_eq!(to_library(&from_library(&plain, false).unwrap()), plain);
 }
 
 #[test]
@@ -153,22 +154,22 @@ fn windows_state_maps_there_and_back_unchanged() {
         let mut matched = win.clone();
         let inputs = state::match_inputs(&matched);
         matched.brightness_match = Some(BrightnessMatch { ev: Some(0.4), inputs: inputs_current.then_some(inputs), highlight_limited: true });
-        let lib = to_library(&matched, None);
+        let lib = to_library(&matched);
         assert_eq!(lib.brightness_match.as_ref().unwrap().solved, inputs_current);
         let back = from_library(&lib, false).unwrap();
         assert_eq!(back, matched);
-        assert_eq!(to_library(&back, None), lib);
+        assert_eq!(to_library(&back), lib);
     }
     // An edit the match depends on makes it stale, so the sidecar says so.
     let mut moved = win.clone();
     moved.brightness_match = Some(BrightnessMatch { ev: Some(0.4), inputs: Some(state::match_inputs(&moved)), highlight_limited: false });
     moved.film = "kodak_gold_200".into();
-    assert!(!to_library(&moved, None).brightness_match.unwrap().solved);
+    assert!(!to_library(&moved).brightness_match.unwrap().solved);
     // Prep edits are the user's own: the match stays solved.
     let mut prep = win.clone();
     prep.brightness_match = Some(BrightnessMatch { ev: Some(0.4), inputs: Some(state::match_inputs(&prep)), highlight_limited: false });
     negs_windows_library_map::json::set(&mut prep.params, "prep.highlights", json!(10));
-    assert!(to_library(&prep, None).brightness_match.unwrap().solved);
+    assert!(to_library(&prep).brightness_match.unwrap().solved);
 }
 
 #[test]
@@ -265,7 +266,7 @@ fn defaults_read_from_the_catalogs_text_are_the_tables() {
     fresh.params = defaults.params.clone();
     let mut win = from_library(&fresh, false).unwrap();
     negs_windows_library_map::json::set(&mut win.params, "io.rotate_cw", serde_json::json!(1));
-    let stored = encode_edits(&to_library(&win, None), false, &t);
+    let stored = encode_edits(&to_library(&win), false, &t);
     let params = stored.get("params");
     let Json::Object(groups) = params else { panic!("no params: {stored:?}") };
     let changed: Vec<&String> = groups.keys().collect();
@@ -295,8 +296,7 @@ fn opening_and_leaving_writes_nothing() {
     for item in library.items() {
         let opened = library.open(&item);
         let win = from_library(&opened.state, false).unwrap();
-        let roll = library.state().and_then(|s| s.roll.clone());
-        library.edit(to_library(&win, roll));
+        library.edit(to_library(&win));
         assert!(!library.unsaved(), "{}", library.name(&item));
         library.save().unwrap();
     }
@@ -337,7 +337,7 @@ fn a_flip_goes_through_the_sidecar_and_back() {
     let flipped = win.orientation().flipped_as_shown();
     negs_windows_library_map::json::set(&mut win.params, state::FLIP, json!(flipped.flip));
     negs_windows_library_map::json::set(&mut win.params, "io.rotate_cw", json!(flipped.turns));
-    library.edit(to_library(&win, None));
+    library.edit(to_library(&win));
     library.save().unwrap();
     library.close().unwrap();
     let text = String::from_utf8(sidecar::read_bytes(&photo).unwrap().unwrap()).unwrap();
@@ -474,4 +474,55 @@ fn the_flat_field_row_reads_as_the_macs() {
     // An answer about another light frame says nothing yet.
     let other = FlatField::of(light, &json!({"path": "/other.tif", "used": false}));
     assert_eq!((other.used, other.hint()), (None, None));
+}
+
+/// A darkroom roll's rules (`NegativeScan.joining`, `scanStops`,
+/// `NegativeRoll`): a frame joining takes the reference's film, paper,
+/// backlight and base tuning and the roll's filtration, keeping its own
+/// filtration only if it set one in this roll; and a frame without clear
+/// film shifts the roll's exposure by the camera's settings.
+#[test]
+fn a_roll_joins_as_the_macs() {
+    use negs_windows_library_map::negative as neg;
+    use negs_windows_library_map::state::Roll as WinRoll;
+    let mut reference = EditState::default();
+    reference.film = "kodak_portra_400".into();
+    reference.paper = "fuji_crystal_archive".into();
+    reference.params = json!({"workflow": {"route": neg::ROUTE}, "film_render": {"base": {"scale": 1.3}, "convert": {"scan_illuminant": "D50", "exposure_compensation_ev": 0.4}},
+        "enlarger": {"m_filter_shift": 4.0, "y_filter_shift": -2.0, "print_exposure": 0.9}, "io": {"raw_white_balance": {"mode": "daylight"}}});
+    let roll = WinRoll { id: "r".into(), magenta: 4.0, yellow: -2.0, paper: Some(reference.paper.clone()) };
+    let mut target = EditState::default();
+    target.params = json!({"enlarger": {"m_filter_shift": 9.0, "y_filter_shift": 9.0, "print_exposure": 1.4}, "post": {"vibrance": 0.2}});
+    let joined = neg::joining(&roll, &reference, &target);
+    assert_eq!((joined.film.as_str(), joined.paper.as_str()), ("kodak_portra_400", "fuji_crystal_archive"));
+    assert_eq!(joined.value("film_render.convert.scan_illuminant"), &json!("D50"));
+    assert_eq!(joined.value("io.raw_white_balance.mode"), &json!("daylight"));
+    assert_eq!((joined.value("enlarger.m_filter_shift"), joined.value("enlarger.y_filter_shift")), (&json!(4.0), &json!(-2.0)));
+    assert_eq!(joined.value("enlarger.print_exposure"), &json!(1.4), "the exposure is the frame's own");
+    assert_eq!(joined.value("post.vibrance"), &json!(0.2));
+    assert_eq!(joined.roll.as_ref(), Some(&roll));
+    assert!(roll.filtered(&joined));
+    // A frame of this roll that set its own filtration keeps it; of another roll, not.
+    let mut own = joined.clone();
+    negs_windows_library_map::json::set(&mut own.params, "enlarger.m_filter_shift", json!(6.0));
+    assert!(!roll.filtered(&own));
+    assert_eq!(neg::joining(&roll, &reference, &own).value("enlarger.m_filter_shift"), &json!(6.0));
+    own.roll = Some(WinRoll { id: "other".into(), ..roll.clone() });
+    assert_eq!(neg::joining(&roll, &reference, &own).value("enlarger.m_filter_shift"), &json!(4.0));
+    // Why a frame has its own filtration.
+    assert_eq!(roll.own_filtration(&joined), "This frame has its own filtration.");
+    let mut other_paper = joined.clone();
+    other_paper.paper = "kodak_endura".into();
+    assert_eq!(roll.own_filtration(&other_paper), "On another paper than its roll, so it has its own filtration.");
+    // Leaving the negative leaves the roll; a preset keeps it.
+    let defaults = json!({"workflow": {"route": "input > film > print > scan"}});
+    assert_eq!(neg::leaving(&joined, &defaults).roll, None);
+    assert_eq!(neg::keeping_negative(&EditState::default(), &joined).roll.as_ref(), Some(&roll));
+    // A stop more shutter, a stop less aperture and twice the ISO: +1 −1 +1.
+    assert_eq!(neg::scan_stops((Some(1.0 / 60.0), Some(5.6), Some(200.0)), (Some(1.0 / 125.0), Some(4.0), Some(100.0))).map(|s| (s * 100.0).round() / 100.0), Some(1.09));
+    assert_eq!(neg::scan_stops((None, None, Some(100.0)), (Some(0.01), None, None)), None);
+    assert_eq!(neg::exposure_ev(0.4, Some(1.0)), 0.4 - 1.0);
+    assert_eq!(neg::exposure_ev(0.4, None), 0.4);
+    assert_eq!(neg::skipped(1), "1 photograph skipped: it doesn't look like a negative.");
+    assert_eq!(neg::skipped(3), "3 photographs skipped: they don't look like negatives.");
 }

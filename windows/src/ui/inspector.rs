@@ -109,6 +109,8 @@ enum When {
     Negative,
     /// Prep › Backlight, once its "Backlight…" line was clicked.
     Backlight,
+    /// A frame of a roll with a filtration of its own.
+    OwnFiltration,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -172,6 +174,10 @@ enum Note {
     NegativeDaylight,
     /// The light frame isn't used on this frame, and why.
     FlatField,
+    /// A frame of a roll: what's the roll's and what's its own.
+    Roll,
+    /// A frame of a roll with its own filtration: why.
+    OwnFiltration,
 }
 
 /// Prep's buttons on a negative (`NegativePrep`).
@@ -180,6 +186,11 @@ const FIND_BUTTONS: &[(&str, &str)] = &[
     ("Pick from rebate", "Click the clear film between frames or along the edge. Esc cancels."),
 ];
 const CROP_BUTTONS: &[(&str, &str)] = &[("Crop to picture", "Crops to the picture inside the clear film, levelled by the rebate.")];
+const ROLL_BUTTONS: &[(&str, &str)] = &[(
+    "Use for whole roll",
+    "Prints every photograph in view as a frame of this roll: this film, backlight, base and filtration, each frame with its own exposure. Frames that set their own filtration keep it.",
+)];
+const ROLL_FILTRATION_BUTTONS: &[(&str, &str)] = &[("Roll\u{2019}s filtration", "Prints this frame with the roll\u{2019}s magenta and yellow again, and meters its exposure.")];
 const BALANCE_BUTTONS: &[(&str, &str)] = &[
     ("Auto", "Sets the enlarger's magenta, yellow and print exposure so this frame prints as a minilab's auto printer would."),
     ("Pick neutral", "Click something that should be grey. Esc cancels."),
@@ -504,9 +515,13 @@ fn rows() -> Vec<Row> {
     // Behind "Backlight…", as on the Mac: Daylight suits most light pads and scanners.
     add(&mut rows, Kind::Choice("Backlight", crate::negative::SCAN_ILLUMINANT, &["D55", "D50", "D65"]), prep, None, When::Backlight);
     add(&mut rows, Kind::More(More::Backlight), prep, None, When::More(More::Backlight));
+    add(&mut rows, Kind::Note(Note::Roll), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(ROLL_BUTTONS), prep, None, When::Negative);
     add(&mut rows, Kind::Section("Balance"), prep, None, When::Negative);
     add(&mut rows, Kind::Footer("Balance Print ran when the base was found, and the print exposure was metered. Auto prints this frame as a minilab would, and runs again on each new paper; the picker balances on something grey. Both set Lab › Enlarger."), prep, None, When::Negative);
     add(&mut rows, Kind::Actions(BALANCE_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::OwnFiltration), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(ROLL_FILTRATION_BUTTONS), prep, None, When::OwnFiltration);
     add(&mut rows, Kind::Note(Note::NegativeDaylight), prep, None, When::Note);
     let scene = rows.len();
     add(&mut rows, Kind::Section("Brightness"), prep, None, When::Always);
@@ -761,6 +776,7 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
         When::ColorFilter => model.shows_color_filter(),
         When::Negative => model.is_negative(),
         When::Backlight => model.is_negative() && model.negative.backlight_shown,
+        When::OwnFiltration => model.is_negative() && model.state.roll.as_ref().is_some_and(|r| !r.filtered(&model.state)),
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
         When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
         When::Note => matches!(row.kind, Kind::Note(note) if !note_text(model, note).is_empty()),
@@ -837,10 +853,19 @@ fn note_text(model: &Model, note: Note) -> String {
         Note::NegativeBase => model.negative_sentence(),
         Note::NegativeWarning => model.negative_warning().unwrap_or_default().into(),
         Note::NegativeGuess => match model.negative_base() {
+            Some(base) if base.guessed() && model.state.roll.is_some() => "Pick from the rebate if the scan shows clear film; otherwise Use for whole roll on a frame that has it.".into(),
             Some(base) if base.guessed() => "Pick from the rebate if the scan shows clear film; otherwise this guess can tint the print.".into(),
             _ => String::new(),
         },
         Note::FlatField => model.flat_field().hint().unwrap_or_default(),
+        Note::Roll if model.is_negative() && model.state.roll.is_some() => {
+            "A frame of a roll: the film, backlight, base and filtration are the roll\u{2019}s; the print exposure is this frame\u{2019}s own.".into()
+        }
+        Note::OwnFiltration if model.is_negative() => match &model.state.roll {
+            Some(roll) if !roll.filtered(&model.state) => roll.own_filtration(&model.state).into(),
+            _ => String::new(),
+        },
+        Note::Roll | Note::OwnFiltration => String::new(),
         Note::NegativeDaylight => {
             if model.is_raw && json::string(model.value("io.raw_white_balance.mode")) != "daylight" {
                 "Set White balance to Daylight for a negative on a daylight backlight; As shot can tint it.".into()
@@ -2341,6 +2366,8 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
                 Some("Crop to picture") => app.model.crop_to_picture(),
                 Some("Auto") => app.model.auto_print_negative(),
                 Some("Pick neutral") => app.model.begin_negative_pick(Pick::Neutral),
+                Some("Use for whole roll") => app.model.use_negative_for_roll(),
+                Some("Roll\u{2019}s filtration") => app.model.use_roll_filtration(),
                 _ => {}
             }
         }

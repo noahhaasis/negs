@@ -26,6 +26,43 @@ pub struct EditState {
     /// before it read as off and keep their exposure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness_match: Option<BrightnessMatch>,
+    /// A scanned negative printed as a frame of a darkroom roll (§9.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roll: Option<Roll>,
+}
+
+/// A darkroom roll (§9.2, `NegativeRoll`): frames printed alike, as a
+/// printer prints a roll with one filtration and gives each frame its own
+/// exposure. It lives in each frame's own sidecar (`edits.roll`), beside
+/// that frame's full copy of the shared settings; the roll is just the
+/// frames that carry its id. Its filtration is kept too, so a frame knows
+/// whether it set its own and can go back to the roll's.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Roll {
+    pub id: String,
+    /// The roll's enlarger filtration: magenta and yellow shifts.
+    pub magenta: f64,
+    pub yellow: f64,
+    /// The paper the roll's filtration is balanced for; None for a roll
+    /// kept before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paper: Option<String>,
+}
+
+impl Roll {
+    /// `state` prints with the roll's filtration, not one of its own.
+    pub fn filtered(&self, state: &EditState) -> bool {
+        state.value("enlarger.m_filter_shift").as_f64() == Some(self.magenta) && state.value("enlarger.y_filter_shift").as_f64() == Some(self.yellow)
+    }
+
+    /// Prep's word for a frame of this roll with its own filtration: why,
+    /// when it's on another paper.
+    pub fn own_filtration(&self, state: &EditState) -> &'static str {
+        match &self.paper {
+            Some(paper) if *paper != state.paper => "On another paper than its roll, so it has its own filtration.",
+            _ => "This frame has its own filtration.",
+        }
+    }
 }
 
 impl Default for EditState {
@@ -38,6 +75,7 @@ impl Default for EditState {
             border: BorderSettings::default(),
             crop: CropSettings::default(),
             brightness_match: None,
+            roll: None,
         }
     }
 }
@@ -51,6 +89,7 @@ impl PartialEq for EditState {
             && self.border == other.border
             && self.crop == other.crop
             && self.brightness_match == other.brightness_match
+            && self.roll == other.roll
     }
 }
 
