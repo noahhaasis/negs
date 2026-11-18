@@ -712,10 +712,107 @@ pub fn mask_at(band: &Rect, window: &Rect, elapsed: f64) -> Rect {
     Rect::new(r.x.max(window.x), top, r.w.min(window.w), (r.max_y() - top).max(0.0))
 }
 
+// MARK: The grid's scrolling
+
+/// A wheel's notch glides the grid there, quickly, then easing off (the
+/// Mac's scroll view coasts after a flick); notches add up. A precision
+/// touchpad's small steps, which Windows already coasts, go straight.
+pub const WHEEL_STEP: f64 = 100.0;
+pub const WHEEL_TAU_MS: f64 = 55.0;
+
+/// Where a wheel's glide from `at` towards `to` is `dt_ms` later; `to`
+/// once within half a DIP.
+pub fn wheel_glide(at: f64, to: f64, dt_ms: f64) -> f64 {
+    let next = at + (to - at) * (1.0 - (-dt_ms.max(0.0) / WHEEL_TAU_MS).exp());
+    if (to - next).abs() < 0.5 { to } else { next }
+}
+
+/// The overlay scroll bar at the grid's right edge (`.scrollIndicators(
+/// .automatic)`, macOS's overlay scroller): a rounded knob 7 wide, 11
+/// under the pointer, 2 in from the edge, at least 24 long; shown while
+/// scrolling and for a second after, then fading in 0.3 s.
+pub const BAR_WIDTH: f64 = 7.0;
+pub const BAR_WIDE: f64 = 11.0;
+pub const BAR_INSET: f64 = 2.0;
+pub const BAR_MIN: f64 = 24.0;
+/// The strip at the right edge where the pointer finds the bar.
+pub const BAR_REACH: f64 = 16.0;
+pub const BAR_SHOWN_MS: f64 = 1000.0;
+pub const BAR_FADE_MS: f64 = 300.0;
+
+/// The knob's top and length in a track `viewport` long, for a sheet
+/// `content` high scrolled to `scroll`; None when it all fits.
+pub fn bar_knob(scroll: f64, content: f64, viewport: f64) -> Option<(f64, f64)> {
+    let track = viewport - 2.0 * BAR_INSET;
+    if content <= viewport + 0.5 || track <= BAR_MIN {
+        return None;
+    }
+    let length = (track * viewport / content).max(BAR_MIN).min(track);
+    let room = (content - viewport).max(1.0);
+    let top = BAR_INSET + (track - length) * (scroll / room).clamp(0.0, 1.0);
+    Some((top, length))
+}
+
+/// The scroll that puts the knob's top at `top` (dragging it).
+pub fn bar_scroll(top: f64, content: f64, viewport: f64) -> f64 {
+    let Some((_, length)) = bar_knob(0.0, content, viewport) else { return 0.0 };
+    let track = viewport - 2.0 * BAR_INSET - length;
+    let room = (content - viewport).max(0.0);
+    if track <= 0.0 { 0.0 } else { ((top - BAR_INSET) / track).clamp(0.0, 1.0) * room }
+}
+
+/// The bar's opacity `since_ms` after the grid last scrolled.
+pub fn bar_opacity(since_ms: f64) -> f64 {
+    if since_ms <= BAR_SHOWN_MS { 1.0 } else { (1.0 - (since_ms - BAR_SHOWN_MS) / BAR_FADE_MS).clamp(0.0, 1.0) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use negs_library::{EditsFilter, FlagFilter, RatingFilter};
+
+    #[test]
+    fn a_wheel_glides_quickly_then_eases_off() {
+        let first = wheel_glide(0.0, 100.0, 16.0);
+        assert!(first > 20.0 && first < 40.0, "{first}");
+        let second = wheel_glide(first, 100.0, 16.0) - first;
+        assert!(second < first, "it eases off");
+        let mut at = 0.0;
+        let mut frames = 0;
+        while at != 100.0 {
+            at = wheel_glide(at, 100.0, 16.0);
+            frames += 1;
+        }
+        assert!((10..=25).contains(&frames), "lands in about a quarter second: {frames} frames");
+        assert_eq!(wheel_glide(50.0, 50.0, 16.0), 50.0);
+        assert_eq!(wheel_glide(100.0, 0.0, 16.0) < 100.0, true);
+    }
+
+    #[test]
+    fn the_scroll_bar_knob_follows_the_scroll() {
+        assert_eq!(bar_knob(0.0, 500.0, 600.0), None, "nothing to scroll");
+        let (top, length) = bar_knob(0.0, 2400.0, 600.0).unwrap();
+        assert_eq!(top, BAR_INSET);
+        assert_eq!(length, (600.0 - 2.0 * BAR_INSET) / 4.0);
+        let (bottom, _) = bar_knob(1800.0, 2400.0, 600.0).unwrap();
+        assert_eq!(bottom + length, 600.0 - BAR_INSET);
+        let (_, tiny) = bar_knob(0.0, 600_000.0, 600.0).unwrap();
+        assert_eq!(tiny, BAR_MIN);
+        // Dragging the knob back to where it shows a scroll gives that scroll.
+        let (mid, _) = bar_knob(900.0, 2400.0, 600.0).unwrap();
+        assert!((bar_scroll(mid, 2400.0, 600.0) - 900.0).abs() < 1e-9);
+        assert_eq!(bar_scroll(-50.0, 2400.0, 600.0), 0.0);
+        assert_eq!(bar_scroll(5000.0, 2400.0, 600.0), 1800.0);
+    }
+
+    #[test]
+    fn the_scroll_bar_shows_a_second_then_fades() {
+        assert_eq!(bar_opacity(0.0), 1.0);
+        assert_eq!(bar_opacity(BAR_SHOWN_MS), 1.0);
+        assert!((bar_opacity(BAR_SHOWN_MS + BAR_FADE_MS / 2.0) - 0.5).abs() < 1e-9);
+        assert_eq!(bar_opacity(BAR_SHOWN_MS + BAR_FADE_MS), 0.0);
+        assert_eq!(bar_opacity(1e9), 0.0);
+    }
 
     #[test]
     fn strip_band_is_the_trays_height() {

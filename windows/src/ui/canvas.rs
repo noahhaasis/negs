@@ -284,6 +284,9 @@ struct View {
     print: Option<Rect>,
     /// The marks set as masks, by glyph, pixel scale and Plain.
     glyphs: HashMap<(Glyph, u32, bool), GpuImage>,
+    /// The strip's leader over the canvas's bottom right corner, raised or
+    /// not: drawn here too, so its slanted edge is smooth.
+    leader: Option<bool>,
     /// The software canvas's last frame without the Developing tag, so the
     /// tag's line can move without drawing the photograph again.
     software_base: Option<(u32, u32, Vec<u8>)>,
@@ -384,6 +387,7 @@ pub fn init(hwnd: HWND, dpi: u32) {
             pressed: None,
             print: None,
             glyphs: HashMap::new(),
+            leader: None,
             software_base: None,
             tag_rect: None,
             tag_start: None,
@@ -534,6 +538,20 @@ pub fn set_fixed_scale(scale: Option<f64>) {
 /// The developed frame the canvas last drew, for the render benchmark.
 pub fn presented_frame() -> Option<crate::model::FrameTag> {
     with_view(|view| view.presented).flatten()
+}
+
+/// The strip's leader stands over the canvas, raised under the pointer, or
+/// is hidden (None).
+pub fn set_leader(leader: Option<bool>) {
+    let hwnd = with_view(|v| {
+        let changed = v.leader != leader;
+        v.leader = leader;
+        changed.then_some(v.hwnd)
+    })
+    .flatten();
+    if let Some(hwnd) = hwnd {
+        invalidate(hwnd);
+    }
 }
 
 pub fn zoom_by(factor: f64) {
@@ -1179,6 +1197,13 @@ impl View {
                 (4.0 * s) as f32,
                 (1.5 * s) as f32,
             )));
+        }
+        if let Some(raised) = self.leader {
+            // Its right and bottom edges on the canvas's, under the leader's window.
+            let t = super::theme::tokens();
+            let (w, h) = (crate::sheet_rules::LEADER_WIDTH, crate::sheet_rules::LEADER_RAISED);
+            let at = (self.width as f64 - (w * s).round(), self.height as f64 - (h * s).round());
+            items.push(Draw::Glyph(Glyph::Tongue(raised), hex(t.film.film, 1.0), at));
         }
         super::status::set_fitting(self.fitting);
     }
