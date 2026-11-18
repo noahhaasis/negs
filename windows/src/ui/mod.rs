@@ -13,6 +13,7 @@ mod alert;
 pub mod batch;
 pub mod canvas;
 mod d2d;
+mod dialog_look;
 mod dialogs;
 mod draw;
 mod drop;

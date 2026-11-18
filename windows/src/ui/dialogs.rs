@@ -377,6 +377,24 @@ struct SaveEvents {
     extras: String,
     /// A batch: the format is a list, and the naming rows show.
     batch: Option<Rc<BatchRows>>,
+    /// Whether the dialog's own controls were found once it showed
+    /// (`dialog_look::dress`), and the batch's example among them.
+    dressed: Cell<bool>,
+    example: Cell<Option<HWND>>,
+}
+
+/// The controls added through `IFileDialogCustomize` that `dialog_look`
+/// recolours: the edit boxes and texts (combo boxes follow the dialog).
+const DRESSED: [u32; 7] = [PIXELS, PX, MESSAGE, QUALITY, QUALITY_RANGE_TEXT, CUSTOM, EXAMPLE];
+
+/// The pixel field and its "px" show only for a long or short edge, as on
+/// the Mac.
+fn show_pixels(customize: &IFileDialogCustomize, size: ExportSize) {
+    let state = if size.edge == Edge::Full { CDCS_INACTIVE } else { CDCS_ENABLEDVISIBLE };
+    unsafe {
+        let _ = customize.SetControlState(PIXELS, state);
+        let _ = customize.SetControlState(PX, state);
+    }
 }
 
 impl SaveEvents {
@@ -415,12 +433,15 @@ impl SaveEvents {
                 if let Some(text) = edit_text(customize, CUSTOM) {
                     *rows.custom.borrow_mut() = text;
                 }
-                let example = wide(rows.example(self.encoding.format.get()));
-                let _ = customize.SetControlLabel(EXAMPLE, pcwstr(&example));
+                let example = rows.example(self.encoding.format.get());
+                let _ = customize.SetControlLabel(EXAMPLE, pcwstr(&wide(&example)));
+                if let Some(shown) = self.example.get() {
+                    super::dialog_look::set_fitted(shown, &example);
+                }
                 let settings = self.encoding.settings(customize);
                 let text = wide(crate::batch::message(rows.count, engine.unwrap_or(ExportEngine::Fast), size, settings, &self.encoding.preview_space));
                 let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
-                let _ = customize.SetControlState(PIXELS, if size.edge == Edge::Full { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+                show_pixels(customize, size);
                 return;
             }
             let lead = match engine {
@@ -432,7 +453,7 @@ impl SaveEvents {
             let space = self.encoding.settings(customize).summary(self.export, &self.encoding.preview_space).map(|s| format!(" {s}.")).unwrap_or_default();
             let text = wide(format!("{lead}{}{summary}{space}", self.extras));
             let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
-            let _ = customize.SetControlState(PIXELS, if size.edge == Edge::Full { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            show_pixels(customize, size);
         }
     }
 }
@@ -489,7 +510,19 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
     fn OnFolderChanging(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<()> {
         Ok(())
     }
-    fn OnFolderChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+    /// The first is once the dialog is up: its own controls are found and,
+    /// in a dark theme, recoloured, and the example is fitted.
+    fn OnFolderChange(&self, dialog: Option<&IFileDialog>) -> windows::core::Result<()> {
+        let Some(dialog) = dialog else { return Ok(()) };
+        if self.dressed.replace(true) {
+            return Ok(());
+        }
+        let texts = vec!["px".to_string(), format!("({}–{})", QUALITY_RANGE.0, QUALITY_RANGE.1)];
+        let dressed = super::dialog_look::dress(dialog, &DRESSED, &texts, EXAMPLE);
+        self.example.set(dressed.example);
+        if let Ok(customize) = dialog.cast::<IFileDialogCustomize>() {
+            self.message(&customize);
+        }
         Ok(())
     }
     fn OnSelectionChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
@@ -639,6 +672,8 @@ pub fn save(app: &mut App, export: bool) {
         encoding: encoding.clone(),
         extras,
         batch: None,
+        dressed: Cell::new(false),
+        example: Cell::new(None),
     }
     .into();
     let name = model.default_name(format);
@@ -793,6 +828,8 @@ pub fn batch(app: &mut App) {
         encoding: encoding.clone(),
         extras: String::new(),
         batch: Some(rows.clone()),
+        dressed: Cell::new(false),
+        example: Cell::new(None),
     }
     .into();
     let folder = prefs.save_folder().map(|p| p.to_path_buf());

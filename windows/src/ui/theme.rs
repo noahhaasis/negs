@@ -437,6 +437,14 @@ pub fn apply_window(hwnd: HWND) {
     }
 }
 
+/// Lets a window that isn't the app's own, such as a file dialog's
+/// control, take a dark theme.
+pub fn allow_dark(hwnd: HWND) {
+    if let Some(ux) = uxtheme() {
+        let _ = (ux.allow_dark_for_window)(hwnd, TRUE);
+    }
+}
+
 /// A common control's dark or light theme (nothing in light at creation,
 /// so light startup is unchanged).
 pub fn apply_control(hwnd: HWND, created: bool) {
