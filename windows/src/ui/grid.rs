@@ -395,7 +395,14 @@ fn paint(app: &mut App, hwnd: HWND) {
     let mut places = std::mem::take(&mut grid.places);
     places.clear();
     let Grid { cells, layout, scroll, surface, flight, .. } = grid;
+    // A fold's last 180 ms fade the sheet off the strip.
+    let fade = match (&*flight, elapsed) {
+        (Some(f), Some(e)) if !f.opening => (e / rules::FOLD_FADE_MS).clamp(0.0, 1.0) as f32,
+        _ => 1.0,
+    };
     let painted = surface.paint(hwnd, (full.0.max(1) as u32, full.1.max(1) as u32), s as f32, t.plain, |p| {
+      p.fill_rect(RectF::new(-ox as f32, -oy as f32, w as f32 * 2.0, h as f32 * 2.0), Ink::hex(t.film.film));
+      p.faded(fade, |p| {
         let (ox, oy) = (ox as f32, oy as f32);
         p.fill_rect(RectF::new(ox, oy, w as f32, h as f32), Ink::hex(t.hex.grid));
         let top = rules::SENTENCE - *scroll;
@@ -424,6 +431,7 @@ fn paint(app: &mut App, hwnd: HWND) {
         });
         sentence(p, &parts, &t, ox, oy, &mut places);
         foot_line(p, &foot, size, &t, ox, oy + (h - rules::FOOT) as f32, w as f32, &mut places);
+      });
     });
     grid.places = places;
     if painted {
@@ -761,12 +769,5 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
-    }
-}
-
-impl App {
-    /// After any change the grid shows, as the strip follows it.
-    pub fn sync_grid(&mut self) {
-        sync(self);
     }
 }

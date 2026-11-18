@@ -18,7 +18,7 @@
 //!   made from them, uploaded as they arrive, never while painting.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -178,11 +178,6 @@ impl Thumbs {
         self.ratios.get(&want.item.photo).copied()
     }
 
-    /// The photograph was read, or couldn't be.
-    pub fn settled(&self, want: &Want) -> bool {
-        self.ratio(want).is_some() || self.unreadable.contains(&want.item.photo)
-    }
-
     /// Asks for `wants` at `size`, most wanted first (replacing what was
     /// asked before at any size but what's already being read).
     pub fn read(&mut self, wants: &[&Want], size: ThumbSize) {
@@ -245,16 +240,6 @@ impl Thumbs {
             let bytes = image.bytes();
             self.images.insert(pixels.id, image, bytes);
         }
-    }
-
-    /// A photograph changed on disk, or the folder did: what was read of
-    /// it goes (its keys change with it, so developed ones need nothing).
-    pub fn forget(&mut self, path: &Path) {
-        for cache in &mut self.embedded {
-            cache.remove(&path.to_path_buf());
-        }
-        self.ratios.remove(path);
-        self.unreadable.remove(path);
     }
 
     /// The device was lost: bitmaps are made again as they're painted.

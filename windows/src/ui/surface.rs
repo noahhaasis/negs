@@ -314,8 +314,4 @@ impl Surface {
         self.swap = None;
         self.size = (0, 0);
     }
-
-    pub fn has_swap_chain(&self) -> bool {
-        self.swap.is_some()
-    }
 }

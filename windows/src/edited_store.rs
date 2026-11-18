@@ -175,12 +175,6 @@ impl Store {
         }
     }
 
-    /// The bytes it takes, for Settings.
-    pub fn size(&self) -> u64 {
-        std::fs::read_dir(&self.directory)
-            .map(|read| read.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum())
-            .unwrap_or(0)
-    }
 }
 
 /// Identifies the helper and every file of its data, which every thumbnail

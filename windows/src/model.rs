@@ -415,6 +415,40 @@ pub struct RenderRequest {
     pub interactive_scale: Option<f64>,
 }
 
+/// A settled develop's pixels, for `edited_store::renders`.
+struct KeptDevelop {
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    photo: (f64, f64),
+    space: String,
+    revision: u64,
+    generation: u64,
+}
+
+impl KeptDevelop {
+    /// Writes it, 2560 px on its long side at most (off the UI thread).
+    fn save(self, key: &str) {
+        let store = crate::edited_store::renders();
+        if let Some(jpeg) = crate::edited_store::jpeg(&self.pixels, self.width, self.height, crate::sheet_rules::RENDER_LONG_SIDE) {
+            let _ = store.save(&crate::edited_store::render_file(jpeg, self.photo, &self.space), key, None);
+        }
+    }
+
+    /// The kept develop filed as `key`, as the canvas's stand-in.
+    fn load(key: &str) -> Option<(Picture, Size)> {
+        let store = crate::edited_store::renders();
+        let file = std::fs::read(store.path(key)).ok()?;
+        let ((w, h), space) = crate::edited_store::render_trailer(&file)?;
+        let (mut rgba, pw, ph) = crate::edited_store::decode(&file)?;
+        for p in rgba.chunks_exact_mut(4) {
+            p.swap(0, 2);
+        }
+        store.touch(key);
+        Some((Picture::new(rgba, pw, ph).in_display_space(&space), Size::new(w, h)))
+    }
+}
+
 pub struct Model {
     pub state: EditState,
     pub defaults: Value,
@@ -427,6 +461,9 @@ pub struct Model {
     pub image: Option<Picture>,
     /// The unprocessed photograph, shown while the first render develops.
     pub placeholder: Option<Picture>,
+    /// The last settled develop's pixels, kept as the photograph is left
+    /// (`edited_store::renders`), so it opens on them next time.
+    kept: Option<KeptDevelop>,
     /// The undeveloped photograph, shown in place of `image` while held.
     pub original: Option<Picture>,
     pub histogram: Option<Histogram>,
@@ -617,6 +654,7 @@ impl Model {
             source: None,
             image: None,
             placeholder: None,
+            kept: None,
             original: None,
             histogram: None,
             waveform: None,
@@ -1833,9 +1871,17 @@ impl Model {
             self.mark(dirty::ERROR | dirty::CHROME);
             return;
         }
+        // The develop on screen is kept for the photograph being left.
+        let kept = self.kept.take().filter(|k| k.revision == self.revision && k.generation == self.source_generation && self.preview_current);
+        let left = self.library_item();
         // Its folder's library opens it, saving the one before: the edits
         // come from its sidecar, as a restored session's do.
         let (path, session) = self.library_opening(path, session);
+        if let (Some(kept), Some(key)) = (kept, left.and_then(|item| self.kept_key(&item))) {
+            std::thread::spawn(move || kept.save(&key));
+        }
+        // It opens on its own last develop, if one was kept for these edits.
+        let kept_key = self.library_item().and_then(|item| self.kept_key(&item));
         let path = path.as_path();
         self.source = Some(path.to_path_buf());
         self.image = None;
@@ -1947,7 +1993,7 @@ impl Model {
         let fallback = move || {
             #[cfg(test)]
             let _background = background;
-            if let Some((picture, size)) = crate::thumbnail::placeholder(&path) {
+            if let Some((picture, size)) = kept_key.as_deref().and_then(KeptDevelop::load).or_else(|| crate::thumbnail::placeholder(&path)) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
             }
         };
@@ -1980,6 +2026,21 @@ impl Model {
             std::thread::spawn(fallback);
         }
         self.changed_with_cache(!restoring);
+    }
+
+    /// The name `item`'s kept develop is filed under, with its edits as saved.
+    fn kept_key(&self, item: &negs_library::Item) -> Option<String> {
+        let library = self.shelf.library.as_ref()?;
+        let file = library.file(item)?;
+        let unedited;
+        let look = match library.look(item) {
+            Some(look) => look,
+            None => {
+                unedited = negs_library::thumbnail::unedited_look(&library.unedited_state());
+                &unedited
+            }
+        };
+        crate::edited_store::renders().key(file, item, look)
     }
 
     fn show_placeholder(&mut self, picture: Picture, size: Size, generation: u64) {
@@ -2631,6 +2692,15 @@ impl Model {
             self.render_on_gpu = ExportEngine::ran_on_gpu(json::string(&result["backend"]));
             self.showing_cached_preview = false;
             if let Some((key, frame)) = rendered.cached {
+                self.kept = Some(KeptDevelop {
+                    pixels: frame.pixels.clone(),
+                    width: frame.width,
+                    height: frame.height,
+                    photo: (frame.photo_width, frame.photo_height),
+                    space: frame.display_space.clone(),
+                    revision,
+                    generation,
+                });
                 self.preview_cache.save(key, frame);
             }
             self.reconcile_brightness_match();

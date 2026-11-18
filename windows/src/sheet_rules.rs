@@ -91,6 +91,7 @@ impl Rect {
     pub fn mid_x(&self) -> f64 {
         self.x + self.w / 2.0
     }
+    #[cfg(test)]
     pub fn mid_y(&self) -> f64 {
         self.y + self.h / 2.0
     }
@@ -101,10 +102,6 @@ impl Rect {
     pub fn intersects(&self, o: &Rect) -> bool {
         self.x < o.max_x() && o.x < self.max_x() && self.y < o.max_y() && o.y < self.max_y()
     }
-    pub fn inset(&self, by: f64) -> Rect {
-        Rect::new(self.x + by, self.y + by, self.w - 2.0 * by, self.h - 2.0 * by)
-    }
-    /// The rect spanned by two points, as a drag draws it.
     pub fn spanning(a: (f64, f64), b: (f64, f64)) -> Rect {
         Rect::new(a.0.min(b.0), a.1.min(b.1), (a.0 - b.0).abs(), (a.1 - b.1).abs())
     }
@@ -501,10 +498,12 @@ impl<K: Eq + Hash + Clone, V> Lru<K, V> {
         Self { map: HashMap::new(), order: VecDeque::new(), bytes: 0, tick: 0, max_bytes, max_count }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
+    #[cfg(test)]
     pub fn bytes(&self) -> usize {
         self.bytes
     }
@@ -550,6 +549,7 @@ impl<K: Eq + Hash + Clone, V> Lru<K, V> {
         Some(value)
     }
 
+    #[cfg(test)]
     pub fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) {
         let bytes = &mut self.bytes;
         self.map.retain(|k, (v, cost, _)| {
