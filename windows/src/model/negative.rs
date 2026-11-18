@@ -49,6 +49,10 @@ pub struct Memory {
     /// The helper's last word on the flat field (`flat_field` of a render
     /// or a negative request) and the photograph it was about (`input`).
     flat_answer: Value,
+    /// Whether the photograph looks like a colour negative (`negative_check`),
+    /// for its source generation; asked when the film tray opens.
+    looks: Option<(u64, bool)>,
+    checking: Option<u64>,
 }
 
 /// What `negative_base` read along the film's edge for one reading.
@@ -760,6 +764,45 @@ impl Model {
         let mut next = self.state.clone();
         next.crop = crop;
         self.apply(next, "Crop to Picture");
+    }
+
+    /// The helper found the photograph looks like a colour negative: the
+    /// film tray opens on Scan. False while that isn't known yet.
+    pub fn looks_like_a_negative(&self) -> bool {
+        self.negative.looks.is_some_and(|(generation, looks)| generation == self.source_generation && looks)
+    }
+
+    /// Asks whether the photograph looks like a colour negative, read as the
+    /// film it would be read as, from the source its preview decoded
+    /// (`checkLooksNegative`). Once per source generation, and only once a
+    /// develop has decoded the source; an open film tray moves to Scan on a yes.
+    pub(super) fn check_looks_negative(&mut self) {
+        let generation = self.source_generation;
+        if self.negative.looks.is_some_and(|(g, _)| g == generation) || self.negative.checking == Some(generation) || !self.has_developed_frame() {
+            return;
+        }
+        let (Some(engine), Some(source), Some(film)) = (self.engine.clone(), self.source.clone(), self.negative_film(&self.state)) else { return };
+        self.negative.checking = Some(generation);
+        let command = json!({"command": "negative_check", "input": source, "source_generation": generation, "film": film, "params": self.render_state().params});
+        engine.request(command, engine::timeout_for("negative_check"), move |result| {
+            ui::post(move |app: &mut App| {
+                let model = &mut app.model;
+                if model.negative.checking == Some(generation) {
+                    model.negative.checking = None;
+                }
+                let Ok((_, result)) = result else { return };
+                if generation != model.source_generation {
+                    return;
+                }
+                model.negative.looks = Some((generation, json::boolean(&result["looks_negative"])));
+                if model.looks_like_a_negative()
+                    && let Some(tray) = model.previews.tray.as_mut().filter(|t| !t.paper && !t.read_as)
+                {
+                    tray.opens_on_scan = true;
+                    model.mark(dirty::TRAY);
+                }
+            });
+        });
     }
 
     /// Keeps the helper's answer about the flat field for this photograph.

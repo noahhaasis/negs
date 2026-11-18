@@ -40,7 +40,12 @@ impl Model {
             self.end_tray(true);
         }
         let id = self.tray_current(paper, false);
-        self.previews.tray = Some(TrayVisit::new(paper, self.state.clone(), id));
+        let mut visit = TrayVisit::new(paper, self.state.clone(), id);
+        visit.opens_on_scan = !paper && (self.is_negative() || self.looks_like_a_negative());
+        self.previews.tray = Some(visit);
+        if !paper {
+            self.check_looks_negative();
+        }
         self.mark(dirty::TRAY | dirty::LAYOUT | dirty::PREVIEWS | dirty::CANVAS | dirty::INSPECTOR);
     }
 

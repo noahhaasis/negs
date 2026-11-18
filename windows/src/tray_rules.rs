@@ -342,11 +342,14 @@ pub struct Visit<S> {
     /// The film a negative is read as (its "read as" name): the colour
     /// negatives only, the paper and the negative kept.
     pub read_as: bool,
+    /// The film tray of a negative, or of a photograph the helper found
+    /// looks like one: it opens on Scan, at the row's start.
+    pub opens_on_scan: bool,
 }
 
 impl<S> Visit<S> {
     pub fn new(paper: bool, before: S, before_id: impl Into<String>) -> Self {
-        Self { paper, before, before_id: before_id.into(), query: String::new(), in_favourites: true, read_as: false }
+        Self { paper, before, before_id: before_id.into(), query: String::new(), in_favourites: true, read_as: false, opens_on_scan: false }
     }
 
     /// The undo name for keeping a stock.

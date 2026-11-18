@@ -195,10 +195,21 @@ pub fn sync(app: &mut App) {
         let mut shown = shown.borrow_mut();
         let content = rules::content_width(&sections);
         let mut offset = shown.offset;
-        if opened {
+        if opened && visit.opens_on_scan {
+            // A negative's film tray opens on Scan, at the row's start.
+            HOT_TILE.set(None);
+            SHOWN_SCAN.set(true);
+            offset = 0.0;
+        } else if opened {
             // It opens on the current stock, in the middle.
             HOT_TILE.set(None);
+            SHOWN_SCAN.set(false);
             offset = rules::reveal(0.0, &current, visit.in_favourites, true, &sections, visible);
+        } else if visit.opens_on_scan && !SHOWN_SCAN.get() && current == visit.before_id && visit.query.is_empty() {
+            // The check answered after the tray opened: Scan, if nothing else
+            // was tried or searched for.
+            SHOWN_SCAN.set(true);
+            SCAN_GLIDE.set(true);
         } else if shown.query != visit.query {
             // Each search starts at its first match; clearing it goes back to the stock.
             offset = if visit.query.is_empty() { rules::reveal(offset, &current, visit.in_favourites, true, &sections, visible) } else { 0.0 };
@@ -231,6 +242,9 @@ pub fn sync(app: &mut App) {
         (changed, listed, tried)
     });
     let (changed, listed, tried) = changed;
+    if SCAN_GLIDE.replace(false) {
+        glide_to(0.0);
+    }
     sync_search(app, tray, paper, opened);
     if changed || opened {
         super::tray_access::changed(listed || opened, tried || opened);
@@ -1014,6 +1028,13 @@ fn visible_width() -> f64 {
         let _ = GetClientRect(tray, &mut client);
     }
     client.right as f64 / draw::dpi_of(tray) as f64
+}
+
+thread_local! {
+    /// This visit has shown Scan (`TrayScroll.shownScan`).
+    static SHOWN_SCAN: Cell<bool> = const { Cell::new(false) };
+    /// Scan is to be glided to once the row is synced.
+    static SCAN_GLIDE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Scrolls the row at once (a wheel, a resize), ending a glide.
