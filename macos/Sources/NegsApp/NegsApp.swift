@@ -372,14 +372,18 @@ struct CanvasArea: View {
             } else if model.source == nil, model.image == nil, model.standIn == nil, model.placeholder == nil {
                 EmptyCanvas(model: model, dropping: dropping)
             } else {
+                let preview = previewCanvas
                 let failure = model.developFailure
-                if failure == nil, !dropping { lightTable }
+                if failure == nil, !dropping { lightTable(border: preview?.border) }
                 VStack(spacing: 0) {
                     Color.clear.frame(height: Self.captionBand)
                     // Couldn't develop: the last develop, faded and greyed.
-                    photograph
-                        .grayscale(failure == nil ? 0 : 1)
-                        .opacity(dropping ? 0 : failure == nil ? 1 : 0.12)
+                    Group {
+                        // Keep the same scroll view when a stock tile replaces the develop.
+                        if let preview { preview } else { Color.clear }
+                    }
+                    .grayscale(failure == nil ? 0 : 1)
+                    .opacity(dropping ? 0 : failure == nil ? 1 : 0.12)
                     Color.clear.frame(height: Self.labelBand)
                 }
                 .overlay(alignment: .topLeading) {
@@ -414,25 +418,11 @@ struct CanvasArea: View {
         geometry.print.width > 0 ? geometry.print.offsetBy(dx: 0, dy: Self.captionBand) : nil
     }
 
-    /// The border on screen, as `photograph` passes it to the preview.
-    private var shownBorder: BorderSettings? {
-        if model.original == nil, let trial = model.trialImage {
-            return model.border.shown(for: Self.standInSize(trial, photo: model.photoSize))
-        } else if model.image != nil {
-            return model.border.shown(for: model.crop.size(of: model.imageSize))
-        } else if model.standIn != nil {
-            return nil
-        } else if model.placeholder != nil {
-            return model.border.shown(for: model.crop.size(of: model.placeholderSize))
-        }
-        return nil
-    }
-
     /// A light under the print when its border's edge sinks into the sheet
     /// (`LightTable`). Fitted only: zoomed in, the print has no edges on screen.
-    @ViewBuilder private var lightTable: some View {
+    @ViewBuilder private func lightTable(border: BorderSettings?) -> some View {
         if !geometry.zoomed, let print = shownPrint,
-           let light = LightTable.light(sheet: sheet.hex, edge: LightTable.edge(of: shownBorder)) {
+           let light = LightTable.light(sheet: sheet.hex, edge: LightTable.edge(of: border)) {
             LightTableGlow(print: print, color: light)
         }
     }
@@ -459,29 +449,25 @@ struct CanvasArea: View {
         .allowsHitTesting(false)
     }
 
-    @ViewBuilder private var photograph: some View {
+    private var previewCanvas: PreviewCanvas? {
         if model.original == nil, let trial = model.trialImage {
-            // A tried stock's tile, enlarged at once until its develop is in
-            // (§5.1). The helper cuts its crop; the turn and mirror are the
-            // canvas's, as the tray's tile does them (`OrientedTileImage`).
-            let size = Self.standInSize(trial, photo: model.photoSize)
-            PreviewCanvas(image: trial, size: size, rotation: model.imageRotation, flip: model.imageFlip, crop: CropSettings(), border: model.border.shown(for: size),
-                          filmTexture: model.filmTexture, filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage,
-                          scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
-                          doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+            // The tile is already cut and straightened. Lay it out in the
+            // exact crop of the develop, even if the tile's pixels round differently.
+            let size = model.image != nil ? model.imageSize : model.placeholderSize
+            if size != .zero { return canvas(trial, size: size, crop: model.crop, cut: true) }
+            return canvas(trial, size: Self.standInSize(trial, photo: .zero), crop: CropSettings(), cut: true)
         } else if let image = model.image {
-            canvas(model.original ?? image, size: model.imageSize, rotation: model.imageRotation)
+            return canvas(model.original ?? image, size: model.imageSize, crop: model.crop)
         } else if let standIn = model.standIn {
             // Finished already: drawn as it is, the size the photograph will be.
-            PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
-                          border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
-                          scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
-                          doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+            return PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
+                                 border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
+                                 scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
+                                 doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
         } else if let placeholder = model.placeholder {
-            canvas(placeholder, size: model.placeholderSize, rotation: model.imageRotation)
-        } else {
-            Color.clear
+            return canvas(placeholder, size: model.placeholderSize, crop: model.crop)
         }
+        return nil
     }
 
     /// The caption 10 pt over the print and the label under it, kept within
@@ -516,19 +502,18 @@ struct CanvasArea: View {
         return CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
     }
 
-    private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
+    private func canvas(_ image: AnyObject, size: CGSize, crop: CropSettings, cut: Bool = false) -> PreviewCanvas {
         // Picking the base shows the whole frame, unstraightened but still flipped
-        // and turned: the rebate is usually cropped off. Either pick maps the
-        // click back to the photograph (`PhotographView.photographFraction`).
-        let whole = model.negativePick == .base
-        let crop = whole ? CropSettings() : model.crop
-        return PreviewCanvas(image: image, size: size, rotation: rotation, flip: model.imageFlip, crop: crop,
-                      border: whole ? nil : model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
-                      filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale, geometry: geometry,
-                      upsideDown: model.upsideDown, settled: model.original != nil || model.showsSettledFrame,
-                      doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) },
-                      pick: model.negativePick == nil ? nil : { [model] in model.pickedNegativePoint($0) },
-                      split: model.original == nil ? model.splitOriginal.map { ($0, model.splitFraction) } : nil)
+        // and turned: the rebate is usually cropped off.
+        let whole = !cut && model.negativePick == .base
+        return PreviewCanvas(image: image, size: size, rotation: model.imageRotation, flip: model.imageFlip,
+                             crop: whole ? CropSettings() : crop, cut: cut,
+                             border: whole ? nil : model.border.shown(for: crop.size(of: size)), filmTexture: model.filmTexture,
+                             filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale, geometry: geometry,
+                             upsideDown: model.upsideDown, settled: !cut && (model.original != nil || model.showsSettledFrame),
+                             doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) },
+                             pick: cut || model.negativePick == nil ? nil : { [model] in model.pickedNegativePoint($0) },
+                             split: cut || model.original != nil ? nil : model.splitOriginal.map { ($0, model.splitFraction) })
     }
 }
 
