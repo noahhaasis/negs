@@ -258,6 +258,10 @@ pub struct Inspector {
     /// The Output tab's foot: what an export makes, and Export.
     foot_summary: HWND,
     export: HWND,
+    /// Open in Lightroom, Open in Lightroom Classic under Export (ticket
+    /// 48), and how many are laid out: those installed.
+    lightroom: [HWND; 2],
+    lightroom_shown: Vec<crate::lightroom::Kind>,
     /// Whether the foot shows (the Output tab).
     foot_shown: bool,
     crop: Option<CropPanel>,
@@ -362,6 +366,8 @@ impl Inspector {
             rows_panel: HWND::default(),
             foot_summary: HWND::default(),
             export: HWND::default(),
+            lightroom: [HWND::default(); 2],
+            lightroom_shown: vec![],
             foot_shown: false,
             crop: None,
             rect: RECT::default(),
@@ -448,14 +454,29 @@ impl Inspector {
         let tabs_top = y;
         self.place_tabs(&mut positions, tabs_top);
         y += self.px(ink::TAB_ROW);
-        let foot = if self.foot_shown { self.px(91.0) } else { 0 };
+        // Quieter than Export: words under it, only with Lightroom installed.
+        let words = if self.lightroom_shown.is_empty() { 0 } else { self.px(28.0) };
+        let foot = if self.foot_shown { self.px(91.0) + words } else { 0 };
         positions.push((self.rows_panel, 0, y, w, (h - foot - y).max(0)));
         let mut rules = vec![tabs_top, tabs_top + self.px(ink::TAB_ROW) - self.px(1.0).max(1)];
         if self.foot_shown {
             let top = h - foot;
             rules.push(top);
             positions.push((self.foot_summary, gutter, top + self.px(11.0), inner, self.px(20.0)));
-            positions.push((self.export, gutter - margin, h - self.px(16.0 + 36.0) - margin, inner + 2 * margin, self.px(36.0) + 2 * margin));
+            positions.push((self.export, gutter - margin, h - self.px(16.0 + 36.0) - margin - words, inner + 2 * margin, self.px(36.0) + 2 * margin));
+            // Centred, 14 DIPs apart; each control is its word and the margins it draws in.
+            let m = ink::MARGIN;
+            let widths: Vec<i32> = self
+                .lightroom_shown
+                .iter()
+                .map(|k| self.px(super::d2d::measure_text(&format!("Open in {}", k.title()), &ink::WORD, 0.0, true).width as f64 + 2.0 * m))
+                .collect();
+            let total: i32 = widths.iter().sum::<i32>() + self.px(14.0 - 2.0 * m) * (widths.len() as i32 - 1).max(0);
+            let mut x = gutter + (inner - total) / 2;
+            for (kind, width) in self.lightroom_shown.iter().zip(widths) {
+                positions.push((self.lightroom[*kind as usize], x, h - self.px(16.0 + 22.0), width, self.px(22.0)));
+                x += width + self.px(14.0 - 2.0 * m);
+            }
         }
         ink::set_rules(self.panel, rules);
         if let Some(crop) = &self.crop {
@@ -685,6 +706,14 @@ pub fn build(app: &mut App) {
     draw::set_role(ins.export, Role::Export);
     draw::track_hover(ins.export);
     super::dialogs::tooltip(ins.export, "Export photograph (Ctrl+Shift+E)");
+    for (i, kind) in crate::lightroom::Kind::ALL.into_iter().enumerate() {
+        let id = super::id::LIGHTROOM + i as u16;
+        let c = create(w!("BUTTON"), &format!("Open in {}", kind.title()), WS_CHILD | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), ins.panel, id, fonts.ui);
+        draw::set_role(c, Role::WordButton);
+        draw::track_hover(c);
+        super::dialogs::tooltip(c, &format!("Open the photograph in {} as full-size 16-bit TIFFs", kind.title()));
+        ins.lightroom[i] = c;
+    }
     ins.rows = rows();
     ins.built = true;
     ITEM_HEIGHT.with(|h| h.set(ins.px(20.0)));
@@ -969,6 +998,14 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
         for c in [ins.foot_summary, ins.export] {
             let _ = ShowWindow(c, if cropping || !foot { SW_HIDE } else { SW_SHOWNA });
         }
+        let kinds = app.model.lightroom_kinds();
+        for (i, kind) in crate::lightroom::Kind::ALL.into_iter().enumerate() {
+            let _ = ShowWindow(ins.lightroom[i], if cropping || !foot || !kinds.contains(&kind) { SW_HIDE } else { SW_SHOWNA });
+        }
+        if ins.lightroom_shown != kinds {
+            ins.lightroom_shown = kinds;
+            ins.layout_frame();
+        }
     }
     if cropping {
         for c in ins.counts {
@@ -988,6 +1025,9 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
         set_text(ins.foot_summary, &export_summary(&app.model));
         let can = app.model.can_export() && !app.model.cropping();
         enable(ins.export, can);
+        for (i, kind) in crate::lightroom::Kind::ALL.into_iter().enumerate() {
+            enable(ins.lightroom[i], app.model.can_open_in_lightroom(kind));
+        }
     }
     // Each tab's count, and the header's "3 edits" and Reset.
     let counts = EDIT_TABS.map(|t| crate::edits::count(t, &app.model));
@@ -2538,8 +2578,8 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
-                if id == super::id::EXPORT {
-                    // The foot's Export is File › Export.
+                if id == super::id::EXPORT || (super::id::LIGHTROOM..super::id::LIGHTROOM + 2).contains(&id) {
+                    // The foot's Export is File › Export, and its Lightroom words File's.
                     if code == BN_CLICKED {
                         let _ = PostMessageW(GetAncestor(hwnd, GA_ROOT), WM_COMMAND, WPARAM(id as usize), LPARAM(0));
                     }

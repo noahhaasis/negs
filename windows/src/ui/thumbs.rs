@@ -407,12 +407,17 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
         if let Some(offset) = job.solve {
             // As opening solves it: the decoded source, the camera's
             // preview (or the file) as the reference, then the exposure.
+            // The camera preview is read while the helper decodes.
             let mut decode = job.command.clone();
             decode["decode_only"] = json!(true);
-            let decoded = ask(decode)?;
+            let (decoded, preview) = std::thread::scope(|scope| {
+                let preview = job.raw.then(|| scope.spawn(|| crate::brightness::read_camera_preview(&job.source)));
+                let decoded = ask(decode);
+                (decoded, preview.map(|thread| thread.join().unwrap_or_else(|_| Err(anyhow::anyhow!("The camera preview couldn’t be read.")))))
+            });
+            let decoded = decoded?;
             let size = (js::number(&decoded["source_width"]) as u32, js::number(&decoded["source_height"]) as u32);
-            crate::thumbnail::com_thread();
-            let png = if job.raw { crate::brightness::camera_reference(&job.source, size) } else { crate::brightness::file_reference(&job.source, size) };
+            let png = crate::brightness::reference(&job.source, job.raw, preview, size);
             if let Ok(png) = png {
                 let reference = engine.directory().join(format!("thumbnail-reference-{generation}.png"));
                 std::fs::write(&reference, png)?;

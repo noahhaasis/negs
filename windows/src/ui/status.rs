@@ -78,6 +78,10 @@ pub struct Line {
     /// Cancel, while exporting.
     pub cancel: bool,
     pub tools: Option<Tools>,
+    /// A batch's progress, as a 150 DIP rule after the words.
+    pub progress: Option<f64>,
+    /// Show, underlined, after a batch that needs a look: its popover.
+    pub show: bool,
 }
 
 /// The words that act.
@@ -95,10 +99,11 @@ enum Word {
     /// Fit and 100% while comparing: both photographs.
     FitBoth,
     ActualBoth,
+    Show,
 }
 
 impl Word {
-    const ALL: [Word; 11] = [
+    const ALL: [Word; 12] = [
         Word::Original,
         Word::OriginalMenu,
         Word::Fit,
@@ -110,6 +115,7 @@ impl Word {
         Word::Done,
         Word::FitBoth,
         Word::ActualBoth,
+        Word::Show,
     ];
 
     fn tip(self) -> &'static str {
@@ -125,6 +131,7 @@ impl Word {
             Word::Done => "Stop comparing (Esc)",
             Word::FitBoth => "Fit both photographs (Ctrl+0)",
             Word::ActualBoth => "Both at actual size (Ctrl+1)",
+            Word::Show => "Show what was exported",
         }
     }
 }
@@ -295,6 +302,20 @@ fn paint(hwnd: HWND, dc: HDC) {
                 p.text(&span.text, style, x, baseline - m.baseline, Ink::hex(ink(&t, span.tone)));
                 x += m.width + 5.0;
             }
+            // A batch: its rule 14 on, or Show (`ui::batch`).
+            if let Some(fraction) = line.progress {
+                let x = x + 9.0;
+                let y = (h / 2.0).round();
+                p.fill_rect(RectF::new(x, y, 150.0, 1.0), Ink::hex(t.hex.track));
+                p.fill_rect(RectF::new(x, y - 0.5, 150.0 * fraction.clamp(0.0, 1.0) as f32, 2.0), Ink::hex(t.hex.accent));
+            }
+            if line.show {
+                let m = p.measure("Show", &WORDS, 0.0);
+                let lit = hot == Some(Word::Show);
+                p.text("Show", &WORDS, x, baseline - m.baseline, Ink::hex(ink(&t, if lit { Tone::Label } else { Tone::Dim })));
+                p.fill_rect(RectF::new(x, baseline + 2.0, m.width, 1.0), Ink::hex(t.hex.track));
+                places.push((Word::Show, RectF::new(x - 4.0, 0.0, m.width + 8.0, h), true));
+            }
         });
     });
     c.present(dc);
@@ -411,6 +432,20 @@ fn act(word: Word) {
         Word::Slider => return compare_tool(super::compare::Tool::Slider),
         Word::Swap => return compare_tool(super::compare::Tool::Swap),
         Word::Done => return compare_tool(super::compare::Tool::Done),
+        Word::Show => {
+            // The batch's popover, over the word.
+            let place = PLACES.with(|p| p.borrow().iter().find(|(w, ..)| *w == Word::Show).map(|(_, r, _)| *r));
+            let hwnd = hwnd();
+            let Some(r) = place else { return };
+            let s = draw::dpi_of(hwnd);
+            let mut corner = POINT { x: ((r.x + 4.0) * s) as i32, y: 0 };
+            unsafe {
+                let _ = ClientToScreen(hwnd, &mut corner);
+            }
+            let anchor = RECT { left: corner.x, top: corner.y, right: corner.x + (r.w * s) as i32, bottom: corner.y + (r.h * s) as i32 };
+            with_app(|app| super::batch::toggle(app, anchor));
+            return;
+        }
         Word::Original | Word::OriginalMenu => return,
     };
     with_app(|app| app.command(command));

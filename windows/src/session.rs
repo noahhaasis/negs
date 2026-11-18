@@ -212,6 +212,10 @@ pub struct Preferences {
     /// Settings › Use less memory for export: grain channels one at a time.
     /// Only exports read it; previews always develop the channels together.
     pub low_memory_export: bool,
+    /// Where Lightroom and Lightroom Classic were last found (ticket 48), so
+    /// the menus are right before detection runs after launch.
+    pub lightroom_cloud: Option<PathBuf>,
+    pub lightroom_classic: Option<PathBuf>,
     /// View › Show All Controls (once the Lab's Advanced controls). Off, the
     /// Lab shows each module's basics and anything changed from its default.
     pub lab_all_controls: bool,
@@ -256,6 +260,11 @@ pub struct Preferences {
     pub original_reference: String,
     /// The Settings tab last shown (the Mac's `settingsTab`).
     pub settings_tab: String,
+    /// The batch dialog's File Name, its Custom text and If a File Exists,
+    /// under the Mac's keys (`batch::Naming`, `batch::Existing`).
+    pub batch_naming: String,
+    pub batch_custom_name: String,
+    pub batch_existing: String,
 }
 
 /// Starred for new users, as on the web and the Mac; once they change the
@@ -297,6 +306,8 @@ impl Default for Preferences {
             match_new_photos: true,
             limit_preview: None,
             low_memory_export: false,
+            lightroom_cloud: None,
+            lightroom_classic: None,
             lab_all_controls: false,
             more_adjustments: String::new(),
             scope_mode: "Histogram".into(),
@@ -313,6 +324,9 @@ impl Default for Preferences {
             filter_shift_link: "separate".into(),
             original_mode: "hold".into(),
             original_reference: "raw".into(),
+            batch_naming: "nameFilm".into(),
+            batch_custom_name: "{name}_{film}".into(),
+            batch_existing: "number".into(),
             settings_tab: "Photographs".into(),
         }
     }

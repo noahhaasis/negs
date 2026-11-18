@@ -458,6 +458,7 @@ pub fn context_menu(app: &mut App, hwnd: HWND, item: &Item, screen: POINT) {
         super::compare::add_offer(app, menu, item);
         super::library::add_menu(menu);
         super::library::update_menu(app, menu);
+        super::batch::export_items(app, menu);
         let command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, 0, hwnd, None);
         let _ = DestroyMenu(menu);
         if command.0 != 0 {

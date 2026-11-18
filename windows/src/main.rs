@@ -3,6 +3,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod batch;
 mod border;
 mod brightness;
 mod compare;
@@ -10,12 +11,15 @@ mod crop;
 mod edited_store;
 mod edits;
 mod engine;
+mod film_cache_release;
 mod exact_fit;
 mod gpu;
 mod help;
 mod histogram;
 mod icc;
 mod json;
+mod lightroom;
+mod match_cache;
 mod model;
 mod negative;
 mod photo_facts;

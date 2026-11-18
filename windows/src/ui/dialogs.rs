@@ -308,6 +308,44 @@ const GROUP_SIZE: u32 = 11;
 const GROUP_DEPTH: u32 = 12;
 const GROUP_SPACE: u32 = 13;
 const GROUP_QUALITY: u32 = 14;
+// A batch's own rows (`batch`).
+const FORMAT: u32 = 15;
+const NAMING: u32 = 16;
+const CUSTOM: u32 = 17;
+const EXAMPLE: u32 = 18;
+const EXISTING: u32 = 19;
+const GROUP_FORMAT: u32 = 20;
+const GROUP_NAMING: u32 = 21;
+const GROUP_EXISTING: u32 = 22;
+const BATCH_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a007);
+
+/// A batch's File Name and If a File Exists rows (the Mac's `BatchRows`):
+/// the first photograph's name shows what the naming does.
+struct BatchRows {
+    count: usize,
+    /// The first photograph's `{name}` and `{film}`.
+    first: (String, String),
+    naming: Cell<crate::batch::Naming>,
+    custom: RefCell<String>,
+    existing: Cell<crate::batch::Existing>,
+}
+
+impl BatchRows {
+    fn example(&self, format: OutputFormat) -> String {
+        let options = crate::batch::Options { format: format.key().into(), naming: self.naming.get(), custom: self.custom.borrow().clone(), ..Default::default() };
+        format!("For example: {}", options.file_name(&self.first.0, &self.first.1))
+    }
+}
+
+fn edit_text(customize: &IFileDialogCustomize, id: u32) -> Option<String> {
+    unsafe {
+        customize.GetEditBoxText(id).ok().map(|p| {
+            let text = PWSTR(p).to_string().unwrap_or_default();
+            CoTaskMemFree(Some(p as *const _));
+            text
+        })
+    }
+}
 
 /// The dialog's message, from what the model says about this save.
 struct Messages {
@@ -359,6 +397,8 @@ struct SaveEvents {
     messages: Messages,
     encoding: Rc<Encoding>,
     extras: String,
+    /// A batch: the format is a list, and the naming rows show.
+    batch: Option<Rc<BatchRows>>,
 }
 
 impl SaveEvents {
@@ -390,6 +430,21 @@ impl SaveEvents {
                 None
             };
             let size = read_size(customize);
+            if let Some(rows) = &self.batch {
+                // The batch's own words (`batch::message`), and its naming's example.
+                let custom = rows.naming.get() == crate::batch::Naming::Custom;
+                let _ = customize.SetControlState(CUSTOM, if custom { CDCS_ENABLEDVISIBLE } else { CDCS_INACTIVE });
+                if let Some(text) = edit_text(customize, CUSTOM) {
+                    *rows.custom.borrow_mut() = text;
+                }
+                let example = wide(rows.example(self.encoding.format.get()));
+                let _ = customize.SetControlLabel(EXAMPLE, pcwstr(&example));
+                let settings = self.encoding.settings(customize);
+                let text = wide(crate::batch::message(rows.count, engine.unwrap_or(ExportEngine::Fast), size, settings, &self.encoding.preview_space));
+                let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
+                let _ = customize.SetControlState(PIXELS, if size.edge == Edge::Full { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+                return;
+            }
             let lead = match engine {
                 Some(ExportEngine::Reference) => &self.messages.reference,
                 Some(ExportEngine::Fast) => &self.messages.fast,
@@ -443,6 +498,13 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
     fn OnFileOk(&self, dialog: Option<&IFileDialog>) -> windows::core::Result<()> {
         if let Some(customize) = dialog.and_then(|d| d.cast::<IFileDialogCustomize>().ok()) {
             self.encoding.typed.set(Some((read_size(&customize), read_quality(&customize))));
+            if let Some(rows) = &self.batch {
+                if let Some(text) = edit_text(&customize, CUSTOM) {
+                    *rows.custom.borrow_mut() = text;
+                }
+                let existing = unsafe { customize.GetSelectedControlItem(EXISTING) }.unwrap_or(0) as usize;
+                rows.existing.set(crate::batch::Existing::ALL[existing.min(2)]);
+            }
         }
         Ok(())
     }
@@ -507,6 +569,16 @@ impl IFileDialogControlEvents_Impl for SaveEvents_Impl {
             SPACE => {
                 encoding.chosen_space.set(item as usize);
                 self.sync(customize);
+            }
+            FORMAT => {
+                encoding.format.set(OutputFormat::ALL[(item as usize).min(2)]);
+                self.sync(customize);
+            }
+            NAMING => {
+                if let Some(rows) = &self.batch {
+                    rows.naming.set(crate::batch::Naming::ALL[(item as usize).min(2)]);
+                }
+                self.message(customize);
             }
             _ => self.message(customize),
         }
@@ -588,6 +660,7 @@ pub fn save(app: &mut App, export: bool) {
         messages: Messages { reference: lead(Some(ExportEngine::Reference)), fast: lead(Some(ExportEngine::Fast)), preview: lead(None) },
         encoding: encoding.clone(),
         extras,
+        batch: None,
     }
     .into();
     let name = model.default_name(format);
@@ -698,6 +771,160 @@ pub fn save(app: &mut App, export: bool) {
     } else {
         app.model.save_preview(path, size, settings);
     }
+}
+
+/// Export from the grid's selection (the Mac's batch panel): a folder, the
+/// format, engine, size and encoding of a single export, and how the files
+/// are named and what happens when one of that name exists. Each
+/// photograph then develops with its own edits (`Model::export_batch`).
+pub fn batch(app: &mut App) {
+    use crate::batch::{Existing, Naming, Options};
+    let model = &app.model;
+    let targets = model.export_targets();
+    if !model.can_start_batch() || targets.is_empty() {
+        return;
+    }
+    let prefs = &model.prefs;
+    let format = OutputFormat::from_key(&prefs.output_format);
+    let engine = ExportEngine::from_key(&prefs.export_engine);
+    let size = ExportSize { edge: Edge::from_key(&prefs.export_edge), pixels: prefs.export_edge_pixels.clamp(PIXEL_RANGE.0, PIXEL_RANGE.1) };
+    let depth = |d: u32| if d == 16 { 16 } else { 8 };
+    let encoding = Rc::new(Encoding {
+        format: Cell::new(format),
+        chosen_space: Cell::new(COLOR_SPACES.iter().position(|s| *s == prefs.color_space).unwrap_or(0)),
+        preview_space: model.preview_space().to_string(),
+        png_depth: Cell::new(depth(prefs.png_bit_depth)),
+        tiff_depth: Cell::new(depth(prefs.tiff_bit_depth)),
+        updating: Cell::new(false),
+        typed: Cell::new(None),
+    });
+    let quality = prefs.jpeg_quality.clamp(QUALITY_RANGE.0, QUALITY_RANGE.1);
+    // The first photograph's name, to show what the naming does.
+    let first = model.batch_items(&targets[..1], &Options::default()).into_iter().next();
+    let first = first.map(|i| (crate::batch::batch_name(&i.photo, &i.title), i.state.film)).unwrap_or_default();
+    let rows = Rc::new(BatchRows {
+        count: targets.len(),
+        first,
+        naming: Cell::new(Naming::from_key(&prefs.batch_naming)),
+        custom: RefCell::new(if prefs.batch_custom_name.is_empty() { "{name}_{film}".into() } else { prefs.batch_custom_name.clone() }),
+        existing: Cell::new(Existing::from_key(&prefs.batch_existing)),
+    });
+    let events: IFileDialogEvents = SaveEvents {
+        export: true,
+        messages: Messages { reference: String::new(), fast: String::new(), preview: String::new() },
+        encoding: encoding.clone(),
+        extras: String::new(),
+        batch: Some(rows.clone()),
+    }
+    .into();
+    let folder = prefs.save_folder().map(|p| p.to_path_buf());
+    let main = app.main;
+    let count = targets.len();
+    let chosen = unsafe {
+        (|| -> Option<(PathBuf, ExportEngine, ExportSize, SaveSettings)> {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            dialog.SetClientGuid(&BATCH_GUID).ok()?;
+            let _ = dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+            let title = wide(if count == 1 { "Export Photograph".to_string() } else { format!("Export {count} Photographs") });
+            let _ = dialog.SetTitle(pcwstr(&title));
+            let ok = wide("Export");
+            let _ = dialog.SetOkButtonLabel(pcwstr(&ok));
+            if let Some(folder) = folder.as_deref().and_then(shell_item) {
+                let _ = dialog.SetFolder(&folder);
+            }
+            let customize: IFileDialogCustomize = dialog.cast().ok()?;
+            let combo = |group: u32, label: &str, id: u32, items: &[&str], selected: usize| {
+                let label = wide(label);
+                let _ = customize.StartVisualGroup(group, pcwstr(&label));
+                let _ = customize.AddComboBox(id);
+                for (i, title) in items.iter().enumerate() {
+                    let t = wide(title);
+                    let _ = customize.AddControlItem(id, i as u32, pcwstr(&t));
+                }
+                let _ = customize.SetSelectedControlItem(id, selected as u32);
+            };
+            let formats: Vec<&str> = OutputFormat::ALL.iter().map(|f| f.title()).collect();
+            combo(GROUP_FORMAT, "Format:", FORMAT, &formats, OutputFormat::ALL.iter().position(|f| *f == format).unwrap_or(0));
+            let _ = customize.EndVisualGroup();
+            let engines: Vec<&str> = ExportEngine::ALL.iter().map(|e| e.title()).collect();
+            combo(GROUP_ENGINE, "Engine:", ENGINE, &engines, if engine == ExportEngine::Reference { 0 } else { 1 });
+            let _ = customize.EndVisualGroup();
+            let edges: Vec<&str> = Edge::ALL.iter().map(|e| e.title()).collect();
+            combo(GROUP_SIZE, "Size:", SIZE, &edges, Edge::ALL.iter().position(|e| *e == size.edge).unwrap_or(0));
+            let pixels = wide(size.pixels.to_string());
+            let _ = customize.AddEditBox(PIXELS, pcwstr(&pixels));
+            let px = wide("px");
+            let _ = customize.AddText(PX, pcwstr(&px));
+            let _ = customize.EndVisualGroup();
+            combo(GROUP_DEPTH, "Bit depth:", DEPTH, &["8-bit", "16-bit"], 0);
+            let _ = customize.EndVisualGroup();
+            let spaces: Vec<&str> = COLOR_SPACES.iter().enumerate().map(|(i, s)| if i == PROPHOTO { "ProPhoto RGB (16-bit)" } else { s }).collect();
+            combo(GROUP_SPACE, "Colour space:", SPACE, &spaces, encoding.chosen_space.get());
+            let _ = customize.EndVisualGroup();
+            let label = wide("JPEG quality:");
+            let _ = customize.StartVisualGroup(GROUP_QUALITY, pcwstr(&label));
+            let text = wide(quality.to_string());
+            let _ = customize.AddEditBox(QUALITY, pcwstr(&text));
+            let range = wide(format!("({}–{})", QUALITY_RANGE.0, QUALITY_RANGE.1));
+            let _ = customize.AddText(QUALITY_RANGE_TEXT, pcwstr(&range));
+            let _ = customize.EndVisualGroup();
+            let namings: Vec<&str> = Naming::ALL.iter().map(|n| n.title()).collect();
+            combo(GROUP_NAMING, "File name:", NAMING, &namings, Naming::ALL.iter().position(|n| *n == rows.naming.get()).unwrap_or(0));
+            let custom = wide(rows.custom.borrow().as_str());
+            let _ = customize.AddEditBox(CUSTOM, pcwstr(&custom));
+            let _ = customize.EndVisualGroup();
+            let empty = wide("");
+            let _ = customize.AddText(EXAMPLE, pcwstr(&empty));
+            let existing: Vec<&str> = Existing::ALL.iter().map(|e| e.title()).collect();
+            combo(GROUP_EXISTING, "If a file exists:", EXISTING, &existing, Existing::ALL.iter().position(|e| *e == rows.existing.get()).unwrap_or(0));
+            let _ = customize.EndVisualGroup();
+            let _ = customize.AddText(MESSAGE, pcwstr(&empty));
+            let cookie = dialog.Advise(&events).ok();
+            // The encoding controls, the example and the message before it shows.
+            if let Ok(inner) = events.cast::<IFileDialogControlEvents>() {
+                let _ = inner.OnItemSelected(&customize, FORMAT, OutputFormat::ALL.iter().position(|f| *f == format).unwrap_or(0) as u32);
+            }
+            let shown = dialog.Show(main);
+            if let Some(cookie) = cookie {
+                let _ = dialog.Unadvise(cookie);
+            }
+            shown.ok()?;
+            let path = result_path(&dialog.cast().ok()?)?;
+            let chosen_engine = if customize.GetSelectedControlItem(ENGINE).unwrap_or(1) == 0 { ExportEngine::Reference } else { ExportEngine::Fast };
+            Some((path, chosen_engine, encoding.size(&customize), encoding.settings(&customize)))
+        })()
+    };
+    let Some((folder, chosen_engine, size, settings)) = chosen else { return };
+    let format = encoding.format.get();
+    let prefs = &mut app.model.prefs;
+    prefs.output_format = format.key().into();
+    prefs.color_space = COLOR_SPACES[encoding.chosen_space.get()].into();
+    prefs.png_bit_depth = encoding.png_depth.get();
+    prefs.tiff_bit_depth = encoding.tiff_depth.get();
+    prefs.jpeg_quality = settings.jpeg_quality;
+    prefs.export_edge = size.edge.key().into();
+    prefs.export_edge_pixels = size.pixels;
+    prefs.last_save_folder = Some(folder.clone());
+    prefs.export_engine = chosen_engine.key().into();
+    prefs.batch_naming = rows.naming.get().key().into();
+    prefs.batch_custom_name = rows.custom.borrow().clone();
+    prefs.batch_existing = rows.existing.get().key().into();
+    prefs.save();
+    let options = Options {
+        format: format.key().into(),
+        engine: chosen_engine.key().into(),
+        edge: size.edge.key().into(),
+        pixels: size.pixels,
+        bit_depth: settings.bit_depth,
+        color_space: settings.color_space,
+        jpeg_quality: settings.jpeg_quality,
+        naming: rows.naming.get(),
+        custom: rows.custom.borrow().clone(),
+        existing: rows.existing.get(),
+        low_memory: prefs.low_memory_export,
+        lightroom: None,
+    };
+    app.model.export_batch(targets, folder, options, None);
 }
 
 /// Import Presets…: several files, saved by Negs or by spektrafilm.

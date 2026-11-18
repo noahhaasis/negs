@@ -126,6 +126,20 @@ struct Restore {
     problem: Option<String>,
 }
 
+/// A photograph's stored edits as a batch exports them
+/// (`Library::export_edits`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExportEdits {
+    pub state: EditState,
+    /// The match stored with them was solved for them.
+    pub match_solved: bool,
+    /// What this version lacks of them: "the film “x”", "the paper “y”".
+    pub missing: Vec<String>,
+    /// Their look (`thumbnail::look`), which a match solved for them is
+    /// stored with.
+    pub look: String,
+}
+
 /// A sidecar as it was before and after an undoable action.
 #[derive(Clone, Debug, PartialEq)]
 struct FileChange {
@@ -368,6 +382,64 @@ impl Library {
             state.paper = if d.papers.contains(&d.table_paper) { d.table_paper.clone() } else { d.papers.iter().next().cloned().unwrap_or_default() };
         }
         Some((state, saved.match_solved))
+    }
+
+    /// What a batch export develops for `item` (`batchItems`): its stored
+    /// edits restored, as they are in its sidecar now. A film or paper this
+    /// version lacks isn't replaced but named in `missing` (the batch fails
+    /// it). `None` without stored edits, or with a sidecar that can't be
+    /// read: it exports as a new photograph would open.
+    pub fn export_edits(&self, item: &Item) -> Option<ExportEdits> {
+        if !self.sidecars {
+            return None;
+        }
+        let found = sidecar::read(&item.photo).ok()??;
+        let chosen = item.variant.as_deref().and_then(|id| found.variant(id)).or(found.variants.first())?;
+        let edits = chosen.edits.as_ref()?;
+        let table = self.tables.get(found.defaults_version).ok()?;
+        let saved = decode_edits(edits, &table).ok()?;
+        let state = self.defaults.restored(&saved.state);
+        let d = &self.defaults;
+        let mut missing = vec![];
+        if !d.films.is_empty() && !d.films.contains_key(&state.film) {
+            missing.push(format!("the film “{}”", state.film));
+        }
+        if !d.papers.is_empty() && !d.papers.contains(&state.paper) {
+            missing.push(format!("the paper “{}”", state.paper));
+        }
+        let look = crate::thumbnail::look(edits, found.defaults_version);
+        Some(ExportEdits { state, match_solved: saved.match_solved, missing, look })
+    }
+
+    /// Stores a brightness match a batch solved for `item`'s stored edits,
+    /// as opening it would have (`storeSolvedMatch`): only while they are
+    /// still the ones it was solved for (their look is `look`), and never
+    /// for the open photograph, whose own state is saved. No undo step.
+    /// True if the sidecar was written.
+    pub fn store_solved_match(&mut self, item: &Item, look: &str, state: &EditState) -> bool {
+        if !self.sidecars || self.open.as_ref().is_some_and(|o| o.item == *item) || self.read_only_photo(&item.photo) {
+            return false;
+        }
+        let Ok(Some(found)) = sidecar::read(&item.photo) else { return false };
+        let Some(variant) = item.variant.as_deref().and_then(|id| found.variant(id)).or(found.variants.first()) else { return false };
+        if variant.edits.as_ref().map(|e| crate::thumbnail::look(e, found.defaults_version)).as_deref() != Some(look) {
+            return false;
+        }
+        if !state.brightness_match.as_ref().is_some_and(|m| m.ev.is_some() && m.solved) {
+            return false;
+        }
+        let Ok(table) = self.tables.get(found.defaults_version) else { return false };
+        let patch = Patch {
+            primary: item.variant.is_none(),
+            edits: Some(Some(encode_edits(state, true, &table))),
+            known: table.known(Some(&self.defaults.params)),
+            ..Patch::new(variant.id.clone(), found.defaults_version, &self.app)
+        };
+        if self.write(&item.photo, &patch).is_err() {
+            return false;
+        }
+        self.reload(&item.photo);
+        true
     }
 
     /// How a photograph without stored edits develops for its thumbnail:

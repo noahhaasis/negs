@@ -10,6 +10,7 @@
 //! separately (`canvas::VIEW`) so it can paint at any time.
 
 mod alert;
+pub mod batch;
 pub mod canvas;
 mod color_filter;
 pub mod compare;
@@ -127,6 +128,8 @@ pub mod id {
     pub const IMPORT_PRESETS: u16 = 107;
     pub const PRESETS_FOLDER: u16 = 108;
     pub const RECENT: u16 = 110; // ..119
+    /// Open in Lightroom, Open in Lightroom Classic (`lightroom::Kind::ALL`).
+    pub const LIGHTROOM: u16 = 130; // ..131
     pub const UNDO: u16 = 200;
     pub const REDO: u16 = 201;
     pub const CUT: u16 = 202;
@@ -635,6 +638,11 @@ impl App {
                 self.report.stamp("first_image_scene");
                 // The strip's thumbnails waited for it.
                 self.model.dirty |= dirty::STRIP;
+                crate::film_cache_release::watch_memory_pressure();
+                // A batch the last session didn't finish, once launch has settled.
+                batch::offer_resume(self);
+                // Which Lightroom is installed, off the launch path (ticket 48).
+                self.model.refresh_lightroom(std::time::Duration::from_secs(2));
             }
         }
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
@@ -702,9 +710,29 @@ impl App {
         use status::{Span, Tone};
         let model = &self.model;
         let mut left = vec![];
+        let batch = model.batch.as_ref();
+        let batch_running = batch.is_some_and(|b| b.running);
+        let mut progress = None;
+        let mut show = false;
         if let Some(words) = library::status_words(self) {
             // "Edits pasted", "★★★": a library action's note, for a moment.
             left = words;
+        } else if let Some(run) = batch.filter(|b| b.running) {
+            // "Exporting 5 of 12 photographs" and its rule.
+            left.push(Span::new(run.progress_words(), Tone::Label));
+            progress = Some(run.fraction());
+        } else if let Some(words) = &model.lightroom.words {
+            // "Sending 3 photographs to Lightroom…", "Starting Lightroom…".
+            left.push(Span::new(words.clone(), Tone::Label));
+        } else if let Some(run) = batch.filter(|b| b.needs_attention()) {
+            // "Exported 10 of 12 · 2 failed  Show".
+            let (words, failed) = run.outcome_words();
+            left.push(Span::new(words, Tone::Label));
+            if let Some(failed) = failed {
+                left.push(Span::new("·", Tone::Label));
+                left.push(Span::strong(failed, Tone::Paper));
+            }
+            show = true;
         } else if model.exporting {
             let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_default();
             left.push(Span::new(format!("Exporting {name}"), Tone::Label));
@@ -735,14 +763,14 @@ impl App {
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
         }
-        let tools = (model.source.is_some()).then(|| status::Tools {
+        let tools = (model.source.is_some() && !batch_running).then(|| status::Tools {
             original: model.can_show_original() && !model.cropping(),
             holding: model.holding_original,
             cropping: model.cropping(),
             failed: model.render_failed && model.develop_error.is_some(),
             compare: model.comparison().map(|c| c.layout == crate::compare::Layout::Slider),
         });
-        status::set(status::Line { left, cancel: model.exporting, tools });
+        status::set(status::Line { left, cancel: model.exporting || batch_running, tools, progress, show });
         unsafe {
             if model.exporting {
                 SetTimer(self.main, TIMER_EXPORT, 1000, None);
@@ -899,7 +927,17 @@ impl App {
         match command {
             id::OPEN | id::EMPTY_OPEN => dialogs::open(self),
             id::SAVE_PREVIEW => dialogs::save(self, false),
-            id::EXPORT => dialogs::save(self, true),
+            id::EXPORT => {
+                // The grid's selection exports as a batch (`dialogs::batch`).
+                if self.model.exports_single() {
+                    dialogs::save(self, true)
+                } else {
+                    dialogs::batch(self)
+                }
+            }
+            c if (id::LIGHTROOM..id::LIGHTROOM + 2).contains(&c) => {
+                model.open_in_lightroom(crate::lightroom::Kind::ALL[(c - id::LIGHTROOM) as usize]);
+            }
             id::EXPORT_LUT => dialogs::export_lut(self),
             id::SETTINGS => settings::open(self),
             id::EXIT => unsafe {
@@ -973,7 +1011,10 @@ impl App {
             id::CROP_CANCEL => model.end_crop(false),
             id::UPDATES => crate::updates::check(true),
             id::ABOUT => dialogs::about(self.main),
-            id::CANCEL_EXPORT => model.cancel_export(),
+            id::CANCEL_EXPORT => {
+                model.cancel_export();
+                model.cancel_batch();
+            }
             id::COPY_STATUS => copy_text(self.main, &status::text()),
             c if (id::THEME..id::THEME + theme::ThemeName::ALL.len() as u16).contains(&c) => {
                 self.choose_theme(theme::ThemeName::ALL[(c - id::THEME) as usize]);
@@ -1019,7 +1060,10 @@ impl App {
         };
         let editing = focused_class().as_deref() == Some("Edit");
         enable(id::SAVE_PREVIEW, model.can_save());
-        enable(id::EXPORT, model.can_export());
+        enable(id::EXPORT, model.can_export_any());
+        retitle(id::EXPORT, &format!("&{}\tCtrl+Shift+E", model.export_title()));
+        // Ticket 48: after Export, only the Lightroom apps installed.
+        batch::lightroom_items(self, menu, id::EXPORT_LUT, false);
         enable(id::EXPORT_LUT, model.can_export_lut());
         enable(id::UPDATES, crate::updates::configured());
         retitle(id::UNDO, &match model.undo_title() {
@@ -1910,8 +1954,14 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_ACTIVATEAPP if wparam.0 != 0 => {
-                // Back from another app: the folder as it left it (`refresh`).
-                post(|app: &mut App| app.model.library_refresh());
+                // Back from another app: the folder as it left it (`refresh`),
+                // and Lightroom installed meanwhile or photos added there.
+                post(|app: &mut App| {
+                    app.model.library_refresh();
+                    if app.model.lightroom_detected() {
+                        app.model.refresh_lightroom(std::time::Duration::ZERO);
+                    }
+                });
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_MOVE | WM_DISPLAYCHANGE => {
