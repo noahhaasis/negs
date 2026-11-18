@@ -180,6 +180,7 @@ struct Helper {
 /// time, in order; each has a timeout, and a helper that dies or hangs is
 /// replaced by the next request.
 pub struct EngineClient {
+    #[cfg(test)]
     pub paths: EnginePaths,
     pub scratch: Arc<ScratchSpace>,
     sender: Sender<Message>,
@@ -218,6 +219,7 @@ impl EngineClient {
         };
         std::thread::Builder::new().name("engine".into()).spawn(move || worker.run(receiver))?;
         Ok(Self {
+            #[cfg(test)]
             paths,
             scratch,
             sender,

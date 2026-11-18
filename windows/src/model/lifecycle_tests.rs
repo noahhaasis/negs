@@ -1857,14 +1857,14 @@ fn thumbnails_after_the_settled_render(h: &Harness, matches: &[String]) -> usize
     thumbnails.len()
 }
 
-/// Large photo, match on, film tray open and searching: Return in the field
-/// (`Model::tray_submit`) tries the first match. The canvas goes previous →
-/// matched quick → settled. The search is widened while the solve runs, and
-/// the new matches' thumbnails are made only after
-/// the settled frame, at the matched exposure: the solve leaves the helper
-/// free, so this is where `previews_may_render`'s `preview_current`
-/// matters. Keeping the film then is one undo step.
 lifecycle_test! {
+    /// Large photo, match on, film tray open and searching: Return in the field
+    /// (`Model::tray_submit`) tries the first match. The canvas goes previous →
+    /// matched quick → settled. The search is widened while the solve runs, and
+    /// the new matches' thumbnails are made only after
+    /// the settled frame, at the matched exposure: the solve leaves the helper
+    /// free, so this is where `previews_may_render`'s `preview_current`
+    /// matters. Keeping the film then is one undo step.
     fn a_searched_film_chosen_with_the_match_on_shows_the_matched_quick_frame_then_settles() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         open_quick(&mut h, true);
@@ -1904,9 +1904,9 @@ lifecycle_test! {
     }
 }
 
-/// The tray opened with a search while a quick frame shows asks for no
-/// thumbnail until the settled frame, and then only for its matches.
 lifecycle_test! {
+    /// The tray opened with a search while a quick frame shows asks for no
+    /// thumbnail until the settled frame, and then only for its matches.
     fn searching_while_a_quick_frame_shows_waits_for_the_settled_frame() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
@@ -1934,11 +1934,11 @@ lifecycle_test! {
     }
 }
 
-/// Starring a match while searching, during the settled render after a
-/// quick frame: the render isn't disturbed, nothing renders again, and the
-/// matches' thumbnails, the starred one included, are made once each after
-/// the settled frame.
 lifecycle_test! {
+    /// Starring a match while searching, during the settled render after a
+    /// quick frame: the render isn't disturbed, nothing renders again, and the
+    /// matches' thumbnails, the starred one included, are made once each after
+    /// the settled frame.
     fn starring_a_match_during_the_settled_render_leaves_it_alone() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
@@ -1966,11 +1966,11 @@ lifecycle_test! {
     }
 }
 
-/// Clearing a search once idle asks for the other films' thumbnails at the
-/// current state: after an edit the tray reopened searching re-made only
-/// the matches, so without the field's `dirty::PREVIEWS` mark the rest
-/// would keep the old exposure until something unrelated refreshed the tray.
 lifecycle_test! {
+    /// Clearing a search once idle asks for the other films' thumbnails at the
+    /// current state: after an edit the tray reopened searching re-made only
+    /// the matches, so without the field's `dirty::PREVIEWS` mark the rest
+    /// would keep the old exposure until something unrelated refreshed the tray.
     fn clearing_a_search_remakes_the_other_films_thumbnails_at_the_new_state() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);

@@ -222,8 +222,6 @@ impl BorderSettings {
 /// A 35mm strip texture from `data/borders/35mm`, laid out with the strip
 /// horizontal. The exporter draws the same strip at full resolution.
 pub struct FilmStripTexture {
-    pub film: String,
-    pub format: FilmFormat,
     pub image: image::RgbaImage,
 }
 
@@ -236,7 +234,7 @@ impl FilmStripTexture {
             path = dir.join("generic.png");
         }
         let image = image::open(&path).ok()?.to_rgba8();
-        Some(Self { film: film.into(), format, image })
+        Some(Self { image })
     }
 }
 
