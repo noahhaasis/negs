@@ -6,7 +6,8 @@
 #   "steps": [ {"shot": "start"}, {"keys": "{F8}", "wait": 800, "shot": "presets"},
 #              {"click": [x, y], "ctrl": true, "wait": 500}, {"key": "VK name", ...} ] }
 # "drag": [x0, y0, x1, y1, steps, ms] presses at the first point, moves to the
-# second in steps ms apart, and lets go.
+# second in steps ms apart, and lets go. "run": "<PowerShell>" runs a command
+# first (another app writing a file).
 # A step with "front": true clicks in, and shoots, the app's frontmost
 # window (Settings, an alert) instead of the main one.
 # Every PNG is the window's own rectangle only. Windows close at the end.
@@ -102,6 +103,8 @@ function Capture([string]$name, [bool]$front) {
 
 foreach ($s in $job.steps) {
   $target = if ($s.front) { Front } else { $h }
+  # "run": a PowerShell command run mid-job, as another app's file write.
+  if ($s.run) { Invoke-Expression $s.run | Out-Null }
   if ($s.keys) { [NegsWin]::SetForegroundWindow($target) | Out-Null; [System.Windows.Forms.SendKeys]::SendWait($s.keys) }
   if ($s.click) {
     $p = New-Object NegsWin+POINT; $p.X = [int]$s.click[0]; $p.Y = [int]$s.click[1]
