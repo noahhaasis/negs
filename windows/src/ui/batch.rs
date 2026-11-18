@@ -452,3 +452,46 @@ pub fn offer_resume(app: &mut App) {
         app.model.resume_batch(journal, answer == 0);
     });
 }
+
+/// Open in Lightroom, Open in Lightroom Classic (ticket 48): only those
+/// installed, before `before`'s item, the menu's old ones replaced. The
+/// context menu counts the photographs ("Open 3 Photographs in Lightroom"),
+/// as the Mac's does.
+pub fn lightroom_items(app: &App, menu: HMENU, before: u16, counted: bool) {
+    use crate::lightroom::{Kind, menu_title};
+    unsafe {
+        if GetMenuState(menu, before as u32, MF_BYCOMMAND) == u32::MAX {
+            return;
+        }
+        for i in 0..Kind::ALL.len() as u16 {
+            let _ = DeleteMenu(menu, (super::id::LIGHTROOM + i) as u32, MF_BYCOMMAND);
+        }
+        let count = app.model.export_targets().len();
+        for (i, kind) in Kind::ALL.into_iter().enumerate() {
+            if !app.model.lightroom_kinds().contains(&kind) {
+                continue;
+            }
+            let title = if counted { menu_title(kind, count) } else { format!("Open in {}", kind.title()) };
+            let text = wide(format!("&{title}"));
+            let flags = if app.model.can_open_in_lightroom(kind) { MF_STRING } else { MF_STRING | MF_GRAYED };
+            let _ = InsertMenuW(menu, before as u32, MF_BYCOMMAND | flags, (super::id::LIGHTROOM + i as u16) as usize, windows::core::PCWSTR(text.as_ptr()));
+        }
+    }
+}
+
+/// The context menu's Export and Lightroom items (ticket 48), between the
+/// edits and Duplicate as on the Mac: "Export 3 Photographs…", then each
+/// Lightroom installed.
+pub fn export_items(app: &App, menu: HMENU) {
+    let before = super::library::DUPLICATE;
+    let count = app.model.export_targets().len();
+    let title = wide(if count > 1 { format!("&Export {count} Photographs…") } else { "&Export…".into() });
+    let flags = if app.model.can_export_any() { MF_STRING } else { MF_STRING | MF_GRAYED };
+    unsafe {
+        let _ = InsertMenuW(menu, before as u32, MF_BYCOMMAND | flags, super::id::EXPORT as usize, windows::core::PCWSTR(title.as_ptr()));
+    }
+    lightroom_items(app, menu, before, true);
+    unsafe {
+        let _ = InsertMenuW(menu, before as u32, MF_BYCOMMAND | MF_SEPARATOR, 0, windows::core::PCWSTR::null());
+    }
+}

@@ -208,6 +208,10 @@ pub struct Preferences {
     /// Settings › Use less memory for export: grain channels one at a time.
     /// Only exports read it; previews always develop the channels together.
     pub low_memory_export: bool,
+    /// Where Lightroom and Lightroom Classic were last found (ticket 48), so
+    /// the menus are right before detection runs after launch.
+    pub lightroom_cloud: Option<PathBuf>,
+    pub lightroom_classic: Option<PathBuf>,
     /// View › Show All Controls (once the Lab's Advanced controls). Off, the
     /// Lab shows each module's basics and anything changed from its default.
     pub lab_all_controls: bool,
@@ -290,6 +294,8 @@ impl Default for Preferences {
             match_new_photos: true,
             limit_preview: None,
             low_memory_export: false,
+            lightroom_cloud: None,
+            lightroom_classic: None,
             lab_all_controls: false,
             more_adjustments: String::new(),
             scope_mode: "Histogram".into(),

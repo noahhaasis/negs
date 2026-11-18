@@ -436,10 +436,17 @@ fn paint(app: &mut App, hwnd: HWND) {
         });
         sentence(p, &parts, &t, ox, oy, &mut places);
         // A batch started here shows its progress here too, then its outcome.
+        // Lightroom's words (ticket 48) come after a running batch's.
         let batch = model.batch.as_ref().filter(|b| b.running || b.needs_attention());
-        foot_line(p, if batch.is_some() { "" } else { &foot }, size, &t, ox, oy + (h - rules::FOOT) as f32, w as f32, &mut places);
-        if let Some(run) = batch {
-            batch_foot(p, run, &t, ox, oy + (h - rules::FOOT) as f32, &mut places);
+        let words = model.lightroom.words.as_deref().filter(|_| !batch.is_some_and(|b| b.running));
+        let foot_y = oy + (h - rules::FOOT) as f32;
+        foot_line(p, if batch.is_some() || words.is_some() { "" } else { &foot }, size, &t, ox, foot_y, w as f32, &mut places);
+        if let Some(words) = words {
+            let m = p.measure(words, &FOOT, 0.0);
+            let baseline = foot_y + (rules::FOOT as f32 / 2.0 + FOOT.size * 0.36).round();
+            p.text(words, &FOOT, ox + 14.0, baseline - m.baseline, Ink::hex(t.hex.label));
+        } else if let Some(run) = batch {
+            batch_foot(p, run, &t, ox, foot_y, &mut places);
         }
       });
     });

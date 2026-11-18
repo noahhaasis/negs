@@ -2205,3 +2205,62 @@ lifecycle_test! {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+// MARK: Open in Lightroom
+
+lifecycle_test! {
+    /// Ticket 48: with Lightroom installed, the grid's selection develops
+    /// to full-size 16-bit TIFFs named `a-Negs.tif` in the cloud folder,
+    /// and they're handed to Lightroom in one launch (here recorded, not
+    /// launched); the words say so, then go. Nothing is offered without it.
+    fn open_in_lightroom_sends_16_bit_tiffs_in_one_hand_over() {
+        use crate::lightroom::{Apps, Kind};
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-lightroom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(300, 200, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("lra.png"), dir.join("lrb.png"));
+        small.save(&a).unwrap();
+        small.save(&b).unwrap();
+        let folder = Kind::Cloud.folder();
+        for name in ["lra-Negs.tif", "lrb-Negs.tif"] {
+            let _ = std::fs::remove_file(folder.join(name));
+        }
+        h.model().batch_journal = dir.join("journal").join("active-export.json");
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+        h.edit(|m| {
+            m.shelf.in_grid = true;
+            let shown = m.shown_items();
+            m.shelf.selection.select_all(&shown);
+        });
+        h.model().lightroom.apps = Apps::default();
+        assert!(h.model().lightroom_kinds().is_empty() && !h.model().can_open_in_lightroom(Kind::Cloud));
+        let fake = dir.join("Lightroom.exe");
+        h.model().lightroom.apps = Apps { cloud: Some(fake.clone()), classic: None };
+        assert_eq!(h.model().lightroom_kinds(), [Kind::Cloud]);
+        assert!(h.model().can_open_in_lightroom(Kind::Cloud) && !h.model().can_open_in_lightroom(Kind::Classic));
+        h.edit(|m| m.open_in_lightroom(Kind::Cloud));
+        assert_eq!(h.model().batch.as_ref().expect("started").progress_words(), "Sending 1 of 2 photographs to Lightroom");
+        h.run_until("the hand-over", |m| m.lightroom.words.as_deref().is_some_and(|w| w.starts_with("Sent")));
+        h.idle();
+        assert_eq!(h.model().status, "Sent 2 photographs to Lightroom");
+        let handed: Vec<_> = super::lightroom::HANDED.lock().unwrap().iter().filter(|(app, _)| *app == fake).map(|(_, f)| f.clone()).collect();
+        assert_eq!(handed, [vec![folder.join("lra-Negs.tif"), folder.join("lrb-Negs.tif")]], "one hand-over with both");
+        for file in &handed[0] {
+            let image = image::open(file).unwrap();
+            assert_eq!(image.color(), image::ColorType::Rgb16, "{}", file.display());
+            assert_eq!((image.width(), image.height()), (300, 200));
+        }
+        h.fire_timers(std::time::Duration::from_secs(5));
+        assert!(h.model().lightroom.words.is_none(), "the words go after a moment");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        for file in &handed[0] {
+            let _ = std::fs::remove_file(file);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

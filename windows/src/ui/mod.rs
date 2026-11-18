@@ -124,6 +124,8 @@ pub mod id {
     pub const IMPORT_PRESETS: u16 = 107;
     pub const PRESETS_FOLDER: u16 = 108;
     pub const RECENT: u16 = 110; // ..119
+    /// Open in Lightroom, Open in Lightroom Classic (`lightroom::Kind::ALL`).
+    pub const LIGHTROOM: u16 = 130; // ..131
     pub const UNDO: u16 = 200;
     pub const REDO: u16 = 201;
     pub const CUT: u16 = 202;
@@ -644,6 +646,8 @@ impl App {
                 crate::film_cache_release::watch_memory_pressure();
                 // A batch the last session didn't finish, once launch has settled.
                 batch::offer_resume(self);
+                // Which Lightroom is installed, off the launch path (ticket 48).
+                self.model.refresh_lightroom(std::time::Duration::from_secs(2));
             }
         }
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
@@ -718,6 +722,9 @@ impl App {
             // "Exporting 5 of 12 photographs" and its rule.
             left.push(Span::new(run.progress_words(), Tone::Label));
             progress = Some(run.fraction());
+        } else if let Some(words) = &model.lightroom.words {
+            // "Sending 3 photographs to Lightroom…", "Starting Lightroom…".
+            left.push(Span::new(words.clone(), Tone::Label));
         } else if let Some(run) = batch.filter(|b| b.needs_attention()) {
             // "Exported 10 of 12 · 2 failed  Show".
             let (words, failed) = run.outcome_words();
@@ -912,6 +919,9 @@ impl App {
                     dialogs::batch(self)
                 }
             }
+            c if (id::LIGHTROOM..id::LIGHTROOM + 2).contains(&c) => {
+                model.open_in_lightroom(crate::lightroom::Kind::ALL[(c - id::LIGHTROOM) as usize]);
+            }
             id::EXPORT_LUT => dialogs::export_lut(self),
             id::SETTINGS => settings::open(self),
             id::EXIT => unsafe {
@@ -1030,6 +1040,8 @@ impl App {
         enable(id::SAVE_PREVIEW, model.can_save());
         enable(id::EXPORT, model.can_export_any());
         retitle(id::EXPORT, &format!("&{}\tCtrl+Shift+E", model.export_title()));
+        // Ticket 48: after Export, only the Lightroom apps installed.
+        batch::lightroom_items(self, menu, id::EXPORT_LUT, false);
         enable(id::EXPORT_LUT, model.can_export_lut());
         enable(id::UPDATES, crate::updates::configured());
         retitle(id::UNDO, &match model.undo_title() {
@@ -1893,8 +1905,14 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_ACTIVATEAPP if wparam.0 != 0 => {
-                // Back from another app: the folder as it left it (`refresh`).
-                post(|app: &mut App| app.model.library_refresh());
+                // Back from another app: the folder as it left it (`refresh`),
+                // and Lightroom installed meanwhile or photos added there.
+                post(|app: &mut App| {
+                    app.model.library_refresh();
+                    if app.model.lightroom_detected() {
+                        app.model.refresh_lightroom(std::time::Duration::ZERO);
+                    }
+                });
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_MOVE | WM_DISPLAYCHANGE => {

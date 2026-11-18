@@ -30,6 +30,7 @@ use crate::ui::{self, App};
 // The library: sidecars, ratings, flags and per-photograph edits.
 mod batch;
 mod library;
+pub mod lightroom;
 pub mod library_map;
 mod recycle_bin;
 pub use library::Shelf;
@@ -605,6 +606,8 @@ pub struct Model {
     pub batch_journal: PathBuf,
     /// The batch popover shows: it clears a finished batch when it closes.
     pub batch_popover_shown: bool,
+    /// Open in Lightroom (`model/lightroom.rs`).
+    pub lightroom: lightroom::State,
     /// Save or Export waiting for a pending brightness match and its preview,
     /// so they write what the inspector shows: what it is, when it was asked
     /// for, and the action (see `settle_outputs`).
@@ -662,6 +665,7 @@ impl Model {
         // Each launch starts with both editing panels available, even if they
         // were hidden in the previous session. F6/F7 still toggle them in use.
         prefs.filmstrip_visible = true;
+        let lightroom = lightroom::State::remembered(&prefs);
         Self {
             state: EditState::default(),
             defaults: json!({}),
@@ -753,6 +757,7 @@ impl Model {
             batch_control: None,
             batch_journal: crate::batch::Journal::path(),
             batch_popover_shown: false,
+            lightroom,
             waiting_output: None,
             held: None,
             quick_step: None,

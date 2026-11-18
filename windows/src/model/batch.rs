@@ -258,19 +258,18 @@ impl Model {
         let run = self.batch.as_ref().unwrap();
         self.status = run.finished_words();
         crate::trace::event("batch_finished", || json!({"exported": run.exported(), "failed": run.failures().len(), "skipped": run.skipped(), "cancelled": run.cancelled}));
-        let lightroom = run.journal.options.lightroom.clone();
+        let lightroom = run.journal.options.lightroom.as_deref().map(crate::lightroom::Kind::from_key);
+        let written: Vec<PathBuf> = run.journal.items.iter().filter(|i| i.status == Status::Done).filter_map(|i| i.written.clone()).collect();
+        let (failed, cancelled) = (run.failures().len(), run.cancelled);
         if !run.needs_attention() && !self.batch_popover_shown {
             self.batch = None;
         }
         self.mark(dirty::STATUS | dirty::CHROME | dirty::STRIP);
         crate::ui::batch::refresh();
         if let Some(kind) = lightroom {
-            self.lightroom_batch_finished(&kind);
+            self.lightroom_batch_finished(kind, written, failed, cancelled);
         }
     }
-
-    /// Ends a batch of Open in Lightroom (`lightroom.rs`); nothing else yet.
-    pub(super) fn lightroom_batch_finished(&mut self, _kind: &str) {}
 
     pub fn cancel_batch(&mut self) {
         if let (Some(run), Some(control)) = (self.batch.as_mut(), &self.batch_control) {

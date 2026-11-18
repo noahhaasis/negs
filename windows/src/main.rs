@@ -17,6 +17,7 @@ mod help;
 mod histogram;
 mod icc;
 mod json;
+mod lightroom;
 mod match_cache;
 mod model;
 mod photo_facts;
