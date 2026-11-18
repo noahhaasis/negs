@@ -269,6 +269,7 @@ pub fn surfaces_ready(app: &mut App) {
     layout_leader(app, column, edge, shown);
     invalidate(app.strip);
     super::grid::surfaces_ready(app);
+    super::tray::surfaces_ready();
 }
 
 pub fn resized(app: &mut App) {

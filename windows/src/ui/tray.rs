@@ -7,13 +7,16 @@
 //! keeping and going back are the model's (`model/tray.rs`), the rules
 //! `tray_rules.rs`.
 //!
-//! One window, made the first time a tray opens, painted with a GDI back
-//! buffer: the pictures through GDI, the words and marks with Direct2D.
-//! The tiles are drawn by `paint_tiles`, the seam the GPU strip (phase 7)
-//! replaces; the rest (titles, foot) stays here.
+//! One window, made the first time a tray opens, painted with Direct2D on
+//! the GPU as the strip and grid are (`surface.rs`; WARP without a GPU):
+//! the tiles by `paint_tiles`, then the titles and the foot. Until the
+//! device is made it paints through a GDI back buffer. A group clicked in
+//! the foot glides there in 0.25 s. Screen readers see the tiles, their
+//! stars, the group index, Search, the lock and Done (`tray_access.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use std::time::Instant;
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
@@ -25,6 +28,7 @@ use windows::core::w;
 
 use super::d2d::{Ink, Painter, RectF, TextStyle};
 use super::draw::{self, Canvas};
+use super::surface::{self, Surface};
 use super::theme::{self, Tokens};
 use super::{App, post, with_app};
 use crate::platform::{pcwstr, wide};
@@ -100,7 +104,13 @@ thread_local! {
     static PARTS: RefCell<Vec<(Part, RectF)>> = const { RefCell::new(Vec::new()) };
     static HOT_PART: Cell<Option<Part>> = const { Cell::new(None) };
     static HOT_TILE: Cell<Option<Hit>> = const { Cell::new(None) };
+    static SURFACE: RefCell<Surface> = RefCell::new(Surface::default());
+    static PICTURES: RefCell<Vec<Picture>> = const { RefCell::new(Vec::new()) };
+    /// A group clicked in the foot: the row glides from, to, since.
+    static GLIDE: Cell<Option<(f64, f64, Instant)>> = const { Cell::new(None) };
 }
+
+const TIMER_GLIDE: usize = 1;
 
 fn hwnd() -> HWND {
     HWND(HWND_.with(Cell::get) as *mut _)
@@ -144,6 +154,10 @@ pub fn layout(app: &App, rect: RECT, shown: bool) {
         let _ = ShowWindow(tray, if shown { SW_SHOWNA } else { SW_HIDE });
     }
     if !shown {
+        // Closed, it gives back its swap chain and pictures.
+        SURFACE.with(|s| s.borrow_mut().release());
+        PICTURES.with(|p| p.borrow_mut().clear());
+        GLIDE.set(None);
         // Typing in a hidden field would go on searching.
         let field = search_field();
         if !field.is_invalid() && unsafe { GetFocus() } == field {
@@ -204,6 +218,10 @@ pub fn sync(app: &mut App) {
             keep_paper: model.prefs.keep_paper,
             offset: rules::clamp(offset, visible, content),
         };
+        if next.offset != shown.offset {
+            // Stepped or searched elsewhere: that wins over a glide.
+            GLIDE.set(None);
+        }
         let changed = !same(&shown, &next);
         *shown = next;
         changed
@@ -414,45 +432,229 @@ fn star(p: &mut Painter, x: f32, y: f32, favourite: bool, t: &Tokens) {
     }
 }
 
-/// The tiles (the seam phase 7's GPU strip takes over): each picture
-/// filling its place, blank until made and dimmed while out of date,
-/// through GDI; then with Direct2D the pencil ring round the one tried,
-/// the names ("before" after the one the tray opened on) and the stars.
-pub fn paint_tiles(c: &mut Canvas, s: f32, t: &Tokens, looks: &[TileLook]) {
+/// The tiles' pictures on the GPU, made from the thumbnails' pixels (kept
+/// by the previews): the ones shown, made again on a new device.
+struct Picture {
+    thumb: Arc<Bitmap>,
+    image: Option<surface::Image>,
+}
+
+/// Uploads the pictures `looks` show that aren't on the device yet, then
+/// lets go of the least recently shown beyond a few screens' worth.
+fn upload(looks: &[TileLook]) {
+    const KEPT_BYTES: usize = 48 << 20;
+    PICTURES.with(|pictures| {
+        let mut pictures = pictures.borrow_mut();
+        for thumb in looks.iter().filter_map(|l| l.image.as_ref()) {
+            let found = pictures.iter().position(|p| Arc::ptr_eq(&p.thumb, thumb));
+            let fresh = found.is_some_and(|i| pictures[i].image.as_ref().is_some_and(|image| image.current()));
+            let picture = match found {
+                Some(i) if fresh => pictures.remove(i),
+                found => {
+                    if let Some(i) = found {
+                        pictures.remove(i);
+                    }
+                    Picture { thumb: thumb.clone(), image: surface::upload(&thumb.bgra, thumb.width, thumb.height) }
+                }
+            };
+            // The most recently shown last.
+            pictures.push(picture);
+        }
+        let mut bytes: usize = pictures.iter().filter_map(|p| p.image.as_ref()).map(|i| i.bytes()).sum();
+        while bytes > KEPT_BYTES && pictures.len() > looks.len() {
+            let gone = pictures.remove(0);
+            bytes -= gone.image.as_ref().map_or(0, |i| i.bytes());
+        }
+    });
+}
+
+/// The tiles: each picture filling its place, blank until made and dimmed
+/// while out of date; the pencil ring round the one tried, the names
+/// ("before" after the one the tray opened on) and the stars. On the GPU
+/// (`surface.rs`), as the strip and grid are, after `upload`.
+pub fn paint_tiles(p: &mut Painter, t: &Tokens, looks: &[TileLook]) {
+    PICTURES.with(|pictures| {
+        let pictures = pictures.borrow();
+        for look in looks {
+            let r = look.picture;
+            p.fill_rect(r, Ink::hex(t.film.blank));
+            let image = look.image.as_ref().and_then(|thumb| pictures.iter().find(|p| Arc::ptr_eq(&p.thumb, thumb))?.image.as_ref());
+            if let Some(image) = image.filter(|i| i.current()) {
+                p.picture(image.bitmap(), (image.width, image.height), r, 1.0);
+                if look.dimmed {
+                    p.fill_rect(r, Ink::hex(t.film.blank).alpha(0.45));
+                }
+            }
+        }
+    });
+    tile_marks(p, t, looks);
+}
+
+/// The tiles' pictures through GDI, while the GPU device isn't made (or
+/// can't paint).
+fn paint_tiles_gdi(c: &mut Canvas, s: f32, t: &Tokens, looks: &[TileLook]) {
     let blank = theme::gdi(t.film.blank);
     for look in looks {
         let r = look.picture;
         let frame = RECT { left: (r.x * s).round() as i32, top: (r.y * s).round() as i32, right: ((r.x + r.w) * s).round() as i32, bottom: ((r.y + r.h) * s).round() as i32 };
         super::inspector::draw_thumbnail(c, frame, 0.0, look.image.as_deref(), look.dimmed, blank, blank);
     }
-    c.d2d(s, t.plain, |p| {
-        for look in looks {
-            let r = look.picture;
-            if look.selected {
-                // `PencilRing`, 7 out at the sides, 6 above, 1 below, tilted −1°.
-                p.ring(RectF::new(r.x - 7.0, r.y - 6.0, r.w + 14.0, r.h + 7.0), negs_marks::Radii::BOX, -1.0, Ink::hex(t.film.accent));
-            }
-            let style = if look.selected { NAME_SELECTED } else { NAME };
-            let ink = if look.selected { t.film.paper } else if look.before || look.hot { t.film.label } else { t.film.dim };
-            let before = if look.before { p.measure("before", &BEFORE, 0.0).width + 6.0 } else { 0.0 };
-            let name = fitted(p, &look.name, &style, (r.w - before).max(0.0));
-            let top = r.y + r.h + rules::NAME_GAP as f32;
-            let m = p.measure(if name.is_empty() { "Ag" } else { &name }, &style, 0.0);
-            let y = (top + (rules::NAME_LINE as f32 - m.height) / 2.0).round();
-            let drawn = p.text(&name, &style, r.x, y, Ink::hex(ink));
-            if look.before {
-                let b = p.measure("before", &BEFORE, 0.0);
-                p.text("before", &BEFORE, r.x + drawn.width + 6.0, y + m.baseline - b.baseline, Ink::hex(t.film.dim));
-            }
-            if look.favourite || look.hot {
-                let (sx, sy, _, _) = rules::star_rect(0.0);
-                p.clipped(r, |p| star(p, r.x + sx as f32, r.y + (sy - rules::TOP) as f32, look.favourite, t));
-            }
-        }
-    });
 }
 
-fn paint(hwnd: HWND, dc: HDC) {
+/// What's drawn over the tiles' pictures: the ring, the names, the stars.
+fn tile_marks(p: &mut Painter, t: &Tokens, looks: &[TileLook]) {
+    for look in looks {
+        let r = look.picture;
+        if look.selected {
+            // `PencilRing`, 7 out at the sides, 6 above, 1 below, tilted −1°.
+            p.ring(RectF::new(r.x - 7.0, r.y - 6.0, r.w + 14.0, r.h + 7.0), negs_marks::Radii::BOX, -1.0, Ink::hex(t.film.accent));
+        }
+        let style = if look.selected { NAME_SELECTED } else { NAME };
+        let ink = if look.selected { t.film.paper } else if look.before || look.hot { t.film.label } else { t.film.dim };
+        let before = if look.before { p.measure("before", &BEFORE, 0.0).width + 6.0 } else { 0.0 };
+        let name = fitted(p, &look.name, &style, (r.w - before).max(0.0));
+        let top = r.y + r.h + rules::NAME_GAP as f32;
+        let m = p.measure(if name.is_empty() { "Ag" } else { &name }, &style, 0.0);
+        let y = (top + (rules::NAME_LINE as f32 - m.height) / 2.0).round();
+        let drawn = p.text(&name, &style, r.x, y, Ink::hex(ink));
+        if look.before {
+            let b = p.measure("before", &BEFORE, 0.0);
+            p.text("before", &BEFORE, r.x + drawn.width + 6.0, y + m.baseline - b.baseline, Ink::hex(t.film.dim));
+        }
+        if look.favourite || look.hot {
+            let (sx, sy, _, _) = rules::star_rect(0.0);
+            p.clipped(r, |p| star(p, r.x + sx as f32, r.y + (sy - rules::TOP) as f32, look.favourite, t));
+        }
+    }
+}
+
+/// The tiles on screen, as drawn.
+fn looks(v: &Shown, w: f32, hot_tile: Option<Hit>) -> Vec<TileLook> {
+    let offset = v.offset as f32;
+    let starts = rules::starts(&v.sections);
+    let visit = rules::Visit::new(v.paper, (), v.before_id.clone());
+    let mut looks = vec![];
+    for (si, (section, start)) in v.sections.iter().zip(&starts).enumerate() {
+        for (i, entry) in section.stocks.iter().enumerate() {
+            let x = rules::tile_left(*start, i) as f32 - offset;
+            if x + rules::TILE as f32 + 8.0 < 0.0 || x - 8.0 > w {
+                continue;
+            }
+            let (image, dimmed) = v.thumbs.get(si).and_then(|t| t.get(i)).cloned().unwrap_or((None, false));
+            let hot = matches!(hot_tile, Some(Hit::Tile(a, b) | Hit::Star(a, b)) if (a, b) == (si, i));
+            looks.push(TileLook {
+                picture: RectF::new(x, rules::TOP as f32, rules::TILE as f32, rules::PICTURE as f32),
+                name: entry.name.clone(),
+                image,
+                dimmed,
+                // Both copies of a favourite, as on the Mac.
+                selected: entry.id == v.current,
+                before: visit.shows_before(&entry.id, &v.current),
+                favourite: v.favourites.contains(&entry.id),
+                hot,
+            });
+        }
+    }
+    looks
+}
+
+/// Where the foot's parts and Search went, as painted.
+#[derive(Default)]
+struct Painted {
+    parts: Vec<(Part, RectF)>,
+    search: Option<RectF>,
+}
+
+/// The groups' names up their sides, and the foot.
+fn titles_and_foot(p: &mut Painter, t: &Tokens, v: &Shown, w: f32, h: f32, hot_part: Option<Part>, typing: bool) -> Painted {
+    let mut painted = Painted::default();
+    let offset = v.offset as f32;
+    let starts = rules::starts(&v.sections);
+    let group = rules::current(v.offset, &starts);
+    // Each group's name written up its left side, centred on the pictures.
+    for (section, start) in v.sections.iter().zip(&starts) {
+        let x = *start as f32 - offset;
+        if x + (rules::TITLE as f32) < 0.0 || x > w {
+            continue;
+        }
+        let m = p.measure(&section.title, &TITLE_STYLE, 0.0);
+        let y = rules::TOP as f32 + (rules::PICTURE as f32 + m.width) / 2.0;
+        p.text_up(&section.title, &TITLE_STYLE, x + ((rules::TITLE as f32 - m.height) / 2.0).round(), y.round(), Ink::hex(t.film.label));
+    }
+    if v.sections.is_empty() {
+        p.text(&rules::no_match(&v.query, v.paper), &NO_MATCH, 30.0, 46.0, Ink::hex(t.film.dim));
+    }
+    // The foot, from the right: Done, the lock's switch or Search, then the hint.
+    let foot = rules::ROW as f32;
+    let middle = foot + (rules::FOOT as f32 - 2.0) / 2.0;
+    let line = p.measure("Ag", &FOOT_WORDS, 0.0);
+    let baseline = (middle - line.height / 2.0 + line.baseline).round();
+    let mut right = w - FOOT_PADDING;
+    let done = p.measure("Done", &DONE, 0.0);
+    let x = right - done.width;
+    p.text("Done", &DONE, x, baseline - done.baseline, Ink::hex(t.film.paper));
+    painted.parts.push((Part::Done, RectF::new(x - 6.0, foot, done.width + 12.0, h - foot)));
+    right = x - 10.0 - FOOT_SPACING;
+    if v.paper {
+        let words = rules::keep_paper_words(v.keep_paper);
+        let lit = hot_part == Some(Part::Keep);
+        let m = p.measure(words, &FOOT_WORDS, 0.0);
+        let width = 10.0 + 5.0 + m.width;
+        let x = right - width;
+        let (lock, ink) = if v.keep_paper { (t.film.accent, t.film.paper) } else if lit { (t.film.label, t.film.label) } else { (t.film.dim, t.film.dim) };
+        super::canvas::draw_lock(p, v.keep_paper, x, baseline - 11.0, Ink::hex(lock));
+        p.text(words, &FOOT_WORDS, x + 15.0, baseline - m.baseline, Ink::hex(ink));
+        painted.parts.push((Part::Keep, RectF::new(x - 4.0, foot, width + 8.0, h - foot)));
+        right = x - 6.0 - FOOT_SPACING;
+    } else {
+        let (sw, sh) = SEARCH;
+        let x = right - sw;
+        let top = (middle - sh / 2.0).round();
+        painted.search = Some(RectF::new(x, top, sw, sh));
+        if typing {
+            p.underline(RectF::new(x, top + sh - 2.0, sw, 5.0), t, true);
+        } else {
+            p.fill_rect(RectF::new(x, top + sh, sw, 1.0), Ink::hex(t.film.line));
+        }
+        right = x - 6.0 - FOOT_SPACING;
+    }
+    // The index, or the count while searching, from the left.
+    let mut left = FOOT_PADDING;
+    if rules::searching(&v.query) {
+        let count = v.sections.iter().map(|s| s.stocks.len()).sum();
+        let words = rules::matches(count);
+        let shown = fitted(p, &words, &FOOT_WORDS, (right - left).max(0.0));
+        left += p.text(&shown, &FOOT_WORDS, left, baseline - line.baseline, Ink::hex(t.film.label)).width;
+    } else {
+        for (i, section) in v.sections.iter().enumerate() {
+            let m = p.measure(&section.title, &FOOT_WORDS, 0.0);
+            if left + m.width > right {
+                break;
+            }
+            let selected = i == group;
+            if selected {
+                p.underline(RectF::new(left, baseline + 1.0, m.width, 5.0), t, true);
+            }
+            let ink = if selected { t.film.paper } else if hot_part == Some(Part::Index(i)) { t.film.label } else { t.film.dim };
+            p.text(&section.title, &FOOT_WORDS, left, baseline - m.baseline, Ink::hex(ink));
+            painted.parts.push((Part::Index(i), RectF::new(left - 4.0, foot, m.width + 8.0, h - foot)));
+            left += m.width + INDEX_SPACING;
+        }
+    }
+    // The hint, against Search or the switch; only whole (a stub
+    // like "clic…" said nothing at a 1440 px window).
+    let room = right - (left + FOOT_SPACING);
+    let hint = rules::hint(v.before_name.as_deref());
+    let m = p.measure(&hint, &FOOT_WORDS, 0.0);
+    if m.width <= room {
+        p.text(&hint, &FOOT_WORDS, right - m.width, baseline - line.baseline, Ink::hex(t.film.dim));
+    }
+    painted
+}
+
+/// Paints the tray on the GPU, as the strip and grid are (WARP without a
+/// GPU); with GDI until the device is made, or if it can't paint.
+fn paint(hwnd: HWND) {
     let t = theme::tokens();
     let s = draw::dpi_of(hwnd);
     let mut client = RECT::default();
@@ -460,130 +662,58 @@ fn paint(hwnd: HWND, dc: HDC) {
         let _ = GetClientRect(hwnd, &mut client);
     }
     let (w, h) = (client.right as f32 / s, client.bottom as f32 / s);
-    let hot_tile = HOT_TILE.get();
     let hot_part = HOT_PART.get();
     let search = search_field();
     let typing = !search.is_invalid() && unsafe { GetFocus() } == search;
-    let mut parts = vec![];
-    let mut search_place = None;
-    let mut c = Canvas::new(dc, client);
-    c.clear(theme::gdi(t.hex.film));
-    SHOWN.with(|shown| {
-        let Ok(v) = shown.try_borrow() else { return };
-        let offset = v.offset as f32;
-        let starts = rules::starts(&v.sections);
-        let visit = rules::Visit::new(v.paper, (), v.before_id.clone());
-        // The tiles on screen.
-        let mut looks = vec![];
-        for (si, (section, start)) in v.sections.iter().zip(&starts).enumerate() {
-            for (i, entry) in section.stocks.iter().enumerate() {
-                let x = rules::tile_left(*start, i) as f32 - offset;
-                if x + rules::TILE as f32 + 8.0 < 0.0 || x - 8.0 > w {
-                    continue;
+    let painted = SHOWN.with(|shown| {
+        let Ok(v) = shown.try_borrow() else { return None };
+        let looks = looks(&v, w, HOT_TILE.get());
+        let mut painted = None;
+        if surface::ready() {
+            upload(&looks);
+            let buffer = (client.right.max(1) as u32, client.bottom.max(1) as u32);
+            let on_gpu = SURFACE.with(|surface| {
+                let Ok(mut surface) = surface.try_borrow_mut() else { return false };
+                surface.paint(hwnd, buffer, s, t.plain, |p| {
+                    p.fill_rect(RectF::new(0.0, 0.0, w, h), Ink::hex(t.hex.film));
+                    paint_tiles(p, &t, &looks);
+                    painted = Some(titles_and_foot(p, &t, &v, w, h, hot_part, typing));
+                })
+            });
+            if on_gpu {
+                unsafe {
+                    let _ = ValidateRect(hwnd, None);
                 }
-                let (image, dimmed) = v.thumbs.get(si).and_then(|t| t.get(i)).cloned().unwrap_or((None, false));
-                let hot = matches!(hot_tile, Some(Hit::Tile(a, b) | Hit::Star(a, b)) if (a, b) == (si, i));
-                looks.push(TileLook {
-                    picture: RectF::new(x, rules::TOP as f32, rules::TILE as f32, rules::PICTURE as f32),
-                    name: entry.name.clone(),
-                    image,
-                    dimmed,
-                    // Both copies of a favourite, as on the Mac.
-                    selected: entry.id == v.current,
-                    before: visit.shows_before(&entry.id, &v.current),
-                    favourite: v.favourites.contains(&entry.id),
-                    hot,
-                });
+                return painted;
             }
         }
-        paint_tiles(&mut c, s, &t, &looks);
-        let group = rules::current(v.offset, &starts);
-        c.d2d(s, t.plain, |p| {
-            // Each group's name written up its left side, centred on the pictures.
-            for (section, start) in v.sections.iter().zip(&starts) {
-                let x = *start as f32 - offset;
-                if x + (rules::TITLE as f32) < 0.0 || x > w {
-                    continue;
-                }
-                let m = p.measure(&section.title, &TITLE_STYLE, 0.0);
-                let y = rules::TOP as f32 + (rules::PICTURE as f32 + m.width) / 2.0;
-                p.text_up(&section.title, &TITLE_STYLE, x + ((rules::TITLE as f32 - m.height) / 2.0).round(), y.round(), Ink::hex(t.film.label));
-            }
-            if v.sections.is_empty() {
-                p.text(&rules::no_match(&v.query, v.paper), &NO_MATCH, 30.0, 46.0, Ink::hex(t.film.dim));
-            }
-            // The foot, from the right: Done, the lock's switch or Search, then the hint.
-            let foot = rules::ROW as f32;
-            let middle = foot + (rules::FOOT as f32 - 2.0) / 2.0;
-            let line = p.measure("Ag", &FOOT_WORDS, 0.0);
-            let baseline = (middle - line.height / 2.0 + line.baseline).round();
-            let mut right = w - FOOT_PADDING;
-            let done = p.measure("Done", &DONE, 0.0);
-            let x = right - done.width;
-            p.text("Done", &DONE, x, baseline - done.baseline, Ink::hex(t.film.paper));
-            parts.push((Part::Done, RectF::new(x - 6.0, foot, done.width + 12.0, h - foot)));
-            right = x - 10.0 - FOOT_SPACING;
-            if v.paper {
-                let words = rules::keep_paper_words(v.keep_paper);
-                let lit = hot_part == Some(Part::Keep);
-                let m = p.measure(words, &FOOT_WORDS, 0.0);
-                let width = 10.0 + 5.0 + m.width;
-                let x = right - width;
-                let (lock, ink) = if v.keep_paper { (t.film.accent, t.film.paper) } else if lit { (t.film.label, t.film.label) } else { (t.film.dim, t.film.dim) };
-                super::canvas::draw_lock(p, v.keep_paper, x, baseline - 11.0, Ink::hex(lock));
-                p.text(words, &FOOT_WORDS, x + 15.0, baseline - m.baseline, Ink::hex(ink));
-                parts.push((Part::Keep, RectF::new(x - 4.0, foot, width + 8.0, h - foot)));
-                right = x - 6.0 - FOOT_SPACING;
-            } else {
-                let (sw, sh) = SEARCH;
-                let x = right - sw;
-                let top = (middle - sh / 2.0).round();
-                search_place = Some(RectF::new(x, top, sw, sh));
-                if typing {
-                    p.underline(RectF::new(x, top + sh - 2.0, sw, 5.0), &t, true);
-                } else {
-                    p.fill_rect(RectF::new(x, top + sh, sw, 1.0), Ink::hex(t.film.line));
-                }
-                right = x - 6.0 - FOOT_SPACING;
-            }
-            // The index, or the count while searching, from the left.
-            let mut left = FOOT_PADDING;
-            if rules::searching(&v.query) {
-                let count = v.sections.iter().map(|s| s.stocks.len()).sum();
-                let words = rules::matches(count);
-                let shown = fitted(p, &words, &FOOT_WORDS, (right - left).max(0.0));
-                left += p.text(&shown, &FOOT_WORDS, left, baseline - line.baseline, Ink::hex(t.film.label)).width;
-            } else {
-                for (i, section) in v.sections.iter().enumerate() {
-                    let m = p.measure(&section.title, &FOOT_WORDS, 0.0);
-                    if left + m.width > right {
-                        break;
-                    }
-                    let selected = i == group;
-                    if selected {
-                        p.underline(RectF::new(left, baseline + 1.0, m.width, 5.0), &t, true);
-                    }
-                    let ink = if selected { t.film.paper } else if hot_part == Some(Part::Index(i)) { t.film.label } else { t.film.dim };
-                    p.text(&section.title, &FOOT_WORDS, left, baseline - m.baseline, Ink::hex(ink));
-                    parts.push((Part::Index(i), RectF::new(left - 4.0, foot, m.width + 8.0, h - foot)));
-                    left += m.width + INDEX_SPACING;
-                }
-            }
-            // The hint, against Search or the switch; only whole (a stub
-            // like "clic…" said nothing at a 1440 px window).
-            let room = right - (left + FOOT_SPACING);
-            let hint = rules::hint(v.before_name.as_deref());
-            let m = p.measure(&hint, &FOOT_WORDS, 0.0);
-            if m.width <= room {
-                p.text(&hint, &FOOT_WORDS, right - m.width, baseline - line.baseline, Ink::hex(t.film.dim));
-            }
-        });
+        unsafe {
+            let mut ps = PAINTSTRUCT::default();
+            let dc = BeginPaint(hwnd, &mut ps);
+            let mut c = Canvas::new(dc, client);
+            c.clear(theme::gdi(t.hex.film));
+            paint_tiles_gdi(&mut c, s, &t, &looks);
+            c.d2d(s, t.plain, |p| {
+                tile_marks(p, &t, &looks);
+                painted = Some(titles_and_foot(p, &t, &v, w, h, hot_part, typing));
+            });
+            c.present(dc);
+            let _ = EndPaint(hwnd, &ps);
+        }
+        painted
     });
-    c.present(dc);
-    if let Some(r) = search_place {
+    let Some(painted) = painted else {
+        unsafe {
+            let mut ps = PAINTSTRUCT::default();
+            BeginPaint(hwnd, &mut ps);
+            let _ = EndPaint(hwnd, &ps);
+        }
+        return;
+    };
+    if let Some(r) = painted.search {
         place_search(r, s);
     }
-    PARTS.with(|p| *p.borrow_mut() = parts);
+    PARTS.with(|p| *p.borrow_mut() = painted.parts);
     place_tips(hwnd, s);
 }
 
@@ -675,10 +805,10 @@ fn click(x: f32, y: f32) {
                 });
             }
             Part::Index(i) => {
-                // Jumps to the group, 30 in from the left.
+                // Glides to the group, 30 in from the left.
                 let visible = visible_width();
                 if let Some(start) = starts.get(i) {
-                    scroll_to(rules::jump(*start, visible, content));
+                    glide_to(rules::jump(*start, visible, content));
                 }
             }
         }
@@ -715,7 +845,54 @@ fn visible_width() -> f64 {
     client.right as f64 / draw::dpi_of(tray) as f64
 }
 
+/// Scrolls the row at once (a wheel, a resize), ending a glide.
 fn scroll_to(offset: f64) {
+    GLIDE.set(None);
+    set_offset(offset);
+}
+
+/// Glides the row to `offset` over 0.25 s (`TrayScroll.scroll(animated:)`);
+/// at once when Windows' animations are off.
+fn glide_to(offset: f64) {
+    let from = SHOWN.with(|v| v.borrow().offset);
+    if !super::motion::enabled() || (offset - from).abs() < 0.5 {
+        return scroll_to(offset);
+    }
+    GLIDE.set(Some((from, offset, Instant::now())));
+    unsafe {
+        SetTimer(hwnd(), TIMER_GLIDE, 8, None);
+    }
+}
+
+fn glide_step(hwnd: HWND) {
+    let Some((from, to, since)) = GLIDE.get() else {
+        unsafe {
+            let _ = KillTimer(hwnd, TIMER_GLIDE);
+        }
+        return;
+    };
+    let elapsed = since.elapsed().as_secs_f64() * 1000.0;
+    set_offset(rules::glide(from, to, elapsed));
+    if elapsed >= rules::GLIDE_MS {
+        GLIDE.set(None);
+        unsafe {
+            let _ = KillTimer(hwnd, TIMER_GLIDE);
+        }
+    }
+}
+
+/// The device is made, or made again: the tray repaints through it.
+pub fn surfaces_ready() {
+    let tray = hwnd();
+    if !tray.is_invalid() {
+        PICTURES.with(|p| p.borrow_mut().clear());
+        unsafe {
+            let _ = InvalidateRect(tray, None, false);
+        }
+    }
+}
+
+fn set_offset(offset: f64) {
     let changed = SHOWN.with(|v| {
         let mut v = v.borrow_mut();
         let offset = rules::clamp(offset, visible_width(), rules::content_width(&v.sections));
@@ -762,13 +939,18 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
     unsafe {
         match msg {
             WM_PAINT => {
-                let mut ps = PAINTSTRUCT::default();
-                let dc = BeginPaint(hwnd, &mut ps);
-                paint(hwnd, dc);
-                let _ = EndPaint(hwnd, &ps);
+                paint(hwnd);
+                LRESULT(0)
+            }
+            WM_DESTROY => {
+                SURFACE.with(|s| s.borrow_mut().release());
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
+            WM_TIMER if wparam.0 == TIMER_GLIDE => {
+                glide_step(hwnd);
+                LRESULT(0)
+            }
             WM_SIZE => {
                 // The row keeps its place, held within the new width.
                 let offset = SHOWN.with(|v| v.borrow().offset);
