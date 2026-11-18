@@ -35,6 +35,8 @@ pub struct Shelf {
     legacy: Option<crate::state::EditState>,
     /// The open item whose edits the editor couldn't show: never synced.
     blocked: Option<Item>,
+    /// The newest defaults table's film and paper, read once.
+    table_stocks: std::cell::OnceCell<(String, String)>,
     save_due: Option<Instant>,
     save_timer: bool,
     /// The note in the status line ("★★★", "Edits Pasted"), and its serial.
@@ -55,6 +57,7 @@ impl Default for Shelf {
             pending: false,
             legacy: None,
             blocked: None,
+            table_stocks: std::cell::OnceCell::new(),
             save_due: None,
             save_timer: false,
             note: None,
@@ -739,6 +742,85 @@ impl Model {
     pub fn toggle_advance_after_rating(&mut self) {
         self.prefs.library.advance_after_rating = !self.prefs.library.advance_after_rating;
         self.prefs.save();
+    }
+
+    // MARK: Settings › New photographs
+
+    /// The film and paper a photograph without edits opens with.
+    pub fn new_photo_stocks(&self) -> (String, String) {
+        if let Some(library) = &self.shelf.library {
+            let d = library.defaults();
+            return (d.new_photo_film.clone(), d.new_photo_paper.clone());
+        }
+        // The newest defaults table's, read once.
+        if self.shelf.table_stocks.get().is_none() {
+            let table = self.paths.as_ref().and_then(|p| negs_library::DefaultsTable::load(&p.data, negs_library::sidecar::LATEST_DEFAULTS).ok());
+            if let Some(table) = table {
+                let d = negs_library::EditDefaults::for_table(&table);
+                let _ = self.shelf.table_stocks.set((d.table_film, d.table_paper));
+            }
+        }
+        let tabled = self.shelf.table_stocks.get().map_or(("", ""), |(f, p)| (f.as_str(), p.as_str()));
+        let chosen = &self.prefs.library;
+        map::new_photo_stocks((chosen.new_photo_film.as_deref(), chosen.new_photo_paper.as_deref()), tabled, &self.stocks)
+    }
+
+    /// Settings' Film list: the films listed (Settings › Fotufilm films), in
+    /// the film menu's groups, the chosen one always among them.
+    pub fn new_photo_film_choices(&self) -> Vec<(String, String)> {
+        let (film, _) = self.new_photo_stocks();
+        let shown = self.fotufilm_films();
+        let films: Vec<&crate::state::Stock> = self.stocks.iter().filter(|s| !s.paper && (shown.lists(s) || s.id == film)).collect();
+        let papers = self.papers();
+        crate::state::film_groups(&films, &papers).into_iter().flat_map(|g| g.stocks).map(|s| (s.id.clone(), s.name.clone())).collect()
+    }
+
+    /// Settings' Paper list, in the paper menu's groups.
+    pub fn new_photo_paper_choices(&self) -> Vec<(String, String)> {
+        crate::state::paper_groups(&self.papers()).into_iter().flat_map(|g| g.stocks).map(|s| (s.id.clone(), s.name.clone())).collect()
+    }
+
+    /// Whether the new photographs' film is a slide, scanned without a paper.
+    pub fn new_photo_film_is_slide(&self) -> bool {
+        let (film, _) = self.new_photo_stocks();
+        self.stocks.iter().any(|s| !s.paper && s.id == film && s.positive)
+    }
+
+    /// Chooses the film new photographs open with; its own paper comes with
+    /// it unless the paper is kept, as when choosing a photograph's film.
+    pub fn set_new_photo_film(&mut self, film: &str) {
+        let (old_film, old_paper) = self.new_photo_stocks();
+        let choice = crate::state::EditState { film: old_film, paper: old_paper, ..Default::default() };
+        let chosen = crate::state::choosing(&choice, film, false, self.prefs.keep_paper, &self.stocks);
+        self.set_new_photo_stocks(chosen.film, chosen.paper);
+    }
+
+    pub fn set_new_photo_paper(&mut self, paper: &str) {
+        let (film, _) = self.new_photo_stocks();
+        self.set_new_photo_stocks(film, paper.to_string());
+    }
+
+    /// Keeps the choice under the Mac's keys. The library measures from it,
+    /// and an open photograph without edits of its own follows it, without
+    /// an undo step and without writing anything (`followNewPhotoStocks`).
+    fn set_new_photo_stocks(&mut self, film: String, paper: String) {
+        if self.new_photo_stocks() == (film.clone(), paper.clone()) && self.prefs.library.new_photo_film.is_some() {
+            return;
+        }
+        self.prefs.library.new_photo_film = Some(film);
+        self.prefs.library.new_photo_paper = Some(paper);
+        self.prefs.save();
+        if self.shelf.library.is_none() {
+            return;
+        }
+        self.library_sync();
+        let library = self.shelf.library.as_ref().expect("library");
+        let defaults = self.library_defaults(library);
+        let outcome = self.shelf.library.as_mut().expect("library").set_defaults(defaults);
+        if outcome.open_changed {
+            self.show_library_state();
+        }
+        self.mark(dirty::STRIP | dirty::INSPECTOR);
     }
 
     /// The rating an export carries (`xmp:Rating`), from the open photograph.

@@ -1166,14 +1166,6 @@ impl Model {
         }
     }
 
-    /// Settings › New photographs: Start fresh, or keep the previous edits.
-    pub fn set_fresh_edits(&mut self, fresh: bool) {
-        if self.prefs.fresh_edits != fresh {
-            self.prefs.fresh_edits = fresh;
-            self.prefs.save();
-        }
-    }
-
     /// Settings › Match new photographs to camera brightness.
     pub fn set_match_new_photos(&mut self, on: bool) {
         if self.prefs.match_new_photos != on {

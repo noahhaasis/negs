@@ -189,9 +189,10 @@ pub struct Preferences {
     pub keep_paper: bool,
     /// The tone graph's channel: "rgb", "r", "g" or "b".
     pub tone_graph_channel: String,
-    /// Settings › New photographs: Start fresh (true, the default) or keep
-    /// the previous photograph's edits (false, as earlier versions did). A
-    /// restored session keeps its own edits either way.
+    /// Start fresh (true, the default) or keep the previous photograph's
+    /// edits (false, as earlier versions did), for a photograph opened
+    /// without a library. No longer in Settings: in a library the Mac's New
+    /// photographs film and paper decide. Kept so old settings files parse.
     #[serde(rename = "freshEditsForNewPhotos")]
     pub fresh_edits: bool,
     /// Settings › Match new photographs to camera brightness: whether a new

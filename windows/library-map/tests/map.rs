@@ -4,7 +4,7 @@
 
 use negs_library::edits::{decode_edits, encode_edits};
 use negs_library::sidecar::{self, DefaultsTable, Sidecar, LATEST_DEFAULTS};
-use negs_library::{Config, EditDefaults, EditGroup, Filter, FolderBin, Item, Json, Library, Roll};
+use negs_library::{Config, EditDefaults, EditGroup, Filter, FolderBin, Json, Library, Roll};
 use negs_windows_library_map::crop::{CropAspect, Rect, Size};
 use negs_windows_library_map::library_map::*;
 use negs_windows_library_map::state::{self, BrightnessMatch, EditState, Stock};
@@ -182,6 +182,11 @@ fn new_photographs_take_the_settings_stocks_or_the_tables() {
     assert_eq!(plain.params.at("io.scan_film"), &Json::Bool(true), "a slide film scans directly");
     let none = edit_defaults(&base, &catalog_defaults(), &[], &[], (None, None), true);
     assert_eq!(none.new_photo_film, base.table_film);
+    // Neither the choice nor the table's in the catalog: its first, by id.
+    let first_film = stocks().iter().filter(|s| !s.paper).map(|s| s.id.clone()).min().unwrap();
+    let first_paper = stocks().iter().filter(|s| s.paper).map(|s| s.id.clone()).min().unwrap();
+    assert_eq!(new_photo_stocks((Some("gone"), None), ("gone_too", "gone_paper"), &stocks()), (first_film, first_paper));
+    assert_eq!(new_photo_stocks((None, Some("p")), ("f", "q"), &[]), ("f".to_string(), "p".to_string()));
 }
 
 #[test]

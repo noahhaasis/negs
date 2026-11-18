@@ -84,14 +84,16 @@ enum Tick {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Choice {
-    NewPhotos,
+    /// Settings › New photographs › Film and Paper (`newPhotoFilm`).
+    NewFilm,
+    NewPaper,
     Fotufilm,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Hint {
     Text(&'static str),
-    /// What the new photographs' choice does.
+    /// What the new photographs' film and paper do, and a slide's lack of paper.
     NewPhotos,
     /// The chosen theme's line.
     Theme,
@@ -112,18 +114,18 @@ enum Item {
     Themes,
 }
 
-/// Settings › New photographs' choice and what each does.
-const NEW_PHOTOS: [(&str, &str); 2] = [
-    ("Keep the previous edits", "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections."),
-    ("Start fresh", "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay."),
-];
+/// Under Settings › New photographs' film and paper (`Settings.swift`).
+const NEW_PHOTOS: &str = "A photo you haven’t edited opens with this film and paper, and its thumbnail shows them. Photos you’ve edited keep their own.";
+/// A slide film is scanned, without a paper (the Mac strikes the paper through).
+const NEW_PHOTOS_SLIDE: &str = "Not printed: scanning the film. A photo you haven’t edited opens with this film, and its thumbnail shows it. Photos you’ve edited keep their own.";
 
 /// Each page's rows, as the Mac's sections (`SettingsView`).
 fn items(tab: Tab) -> Vec<Item> {
     match tab {
         Tab::Photographs => vec![
             Item::Section("New photographs"),
-            Item::Choice("Edits", Choice::NewPhotos),
+            Item::Choice("Film", Choice::NewFilm),
+            Item::Choice("Paper", Choice::NewPaper),
             Item::Hint(Hint::NewPhotos),
             Item::Tick("Match to camera brightness", Tick::MatchNew),
             Item::Hint(Hint::Text("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.")),
@@ -294,7 +296,8 @@ fn create_row(page: HWND, font: HFONT, item: Item, first: u16) -> Vec<HWND> {
             let label = ink_static(title, Role::Label, 0, true);
             let combo = create(w!("COMBOBOX"), "", hidden | WS_TABSTOP | WINDOW_STYLE(CBS_DROPDOWNLIST as u32 | WS_VSCROLL.0), WINDOW_EX_STYLE(0), page, first + 1, font);
             let options: Vec<&str> = match choice {
-                Choice::NewPhotos => NEW_PHOTOS.iter().map(|(t, _)| *t).collect(),
+                // Filled by `sync` from the catalog's stocks.
+                Choice::NewFilm | Choice::NewPaper => vec![],
                 Choice::Fotufilm => FotufilmFilms::ALL.iter().map(|f| f.title()).collect(),
             };
             for option in options {
@@ -352,7 +355,8 @@ fn create_row(page: HWND, font: HFONT, item: Item, first: u16) -> Vec<HWND> {
 fn hint_text(model: &Model, hint: Hint) -> &'static str {
     match hint {
         Hint::Text(text) => text,
-        Hint::NewPhotos => NEW_PHOTOS[model.prefs.fresh_edits as usize].1,
+        Hint::NewPhotos if model.new_photo_film_is_slide() => NEW_PHOTOS_SLIDE,
+        Hint::NewPhotos => NEW_PHOTOS,
         Hint::Theme => theme::chosen().hint(),
     }
 }
@@ -393,6 +397,45 @@ fn set_check(hwnd: HWND, on: bool) {
     }
 }
 
+thread_local! {
+    /// What New photographs' Film and Paper lists were last filled with.
+    static STOCK_LISTS: std::cell::RefCell<[Vec<(String, String)>; 2]> = const { std::cell::RefCell::new([Vec::new(), Vec::new()]) };
+}
+
+/// New photographs' Film or Paper list: the catalog's stocks (refilled when
+/// they change), the chosen one selected; a slide's paper can't be chosen.
+fn sync_stocks(model: &Model, paper: bool, combo: HWND) {
+    let choices = if paper { model.new_photo_paper_choices() } else { model.new_photo_film_choices() };
+    let (film, chosen_paper) = model.new_photo_stocks();
+    let chosen = if paper { chosen_paper } else { film };
+    unsafe {
+        let refill = STOCK_LISTS.with(|lists| {
+            let mut lists = lists.borrow_mut();
+            let last = &mut lists[paper as usize];
+            let changed = *last != choices || SendMessageW(combo, CB_GETCOUNT, WPARAM(0), LPARAM(0)).0 != choices.len() as isize;
+            if changed {
+                *last = choices.clone();
+            }
+            changed
+        });
+        if refill {
+            SendMessageW(combo, CB_RESETCONTENT, WPARAM(0), LPARAM(0));
+            for (_, name) in &choices {
+                let text = wide(name);
+                SendMessageW(combo, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+            }
+        }
+        let index = choices.iter().position(|(id, _)| *id == chosen).map_or(-1, |i| i as isize);
+        if SendMessageW(combo, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
+            SendMessageW(combo, CB_SETCURSEL, WPARAM(index as usize), LPARAM(0));
+        }
+        let enabled = !choices.is_empty() && !(paper && model.new_photo_film_is_slide());
+        if IsWindowEnabled(combo).as_bool() != enabled {
+            let _ = EnableWindow(combo, enabled);
+        }
+    }
+}
+
 /// Brings the open window up to date with the app's settings. Called on
 /// every refresh; it does nothing while Settings has never opened.
 pub fn sync(app: &mut App) {
@@ -407,9 +450,12 @@ pub fn sync(app: &mut App) {
         let c = &row.controls;
         match row.item {
             Item::Tick(_, tick) => set_check(c[0], ticked(model, tick)),
+            // Only while its page shows: the lists are long.
+            Item::Choice(_, choice @ (Choice::NewFilm | Choice::NewPaper)) if row.tab == s.tab => sync_stocks(model, choice == Choice::NewPaper, c[1]),
+            Item::Choice(_, Choice::NewFilm | Choice::NewPaper) => {}
             Item::Choice(_, choice) => {
                 let index = match choice {
-                    Choice::NewPhotos => model.prefs.fresh_edits as usize,
+                    Choice::NewFilm | Choice::NewPaper => 0,
                     Choice::Fotufilm => FotufilmFilms::ALL.iter().position(|&f| f == model.fotufilm_films()).unwrap_or(0),
                 };
                 unsafe {
@@ -695,7 +741,16 @@ fn command(app: &mut App, id: u16, code: u32) {
                 return;
             }
             match choice {
-                Choice::NewPhotos => app.model.set_fresh_edits(index == 1),
+                Choice::NewFilm => {
+                    if let Some((id, _)) = app.model.new_photo_film_choices().get(index as usize) {
+                        app.model.set_new_photo_film(&id.clone());
+                    }
+                }
+                Choice::NewPaper => {
+                    if let Some((id, _)) = app.model.new_photo_paper_choices().get(index as usize) {
+                        app.model.set_new_photo_paper(&id.clone());
+                    }
+                }
                 Choice::Fotufilm => app.model.set_fotufilm_films(FotufilmFilms::ALL[index as usize]),
             }
         }
@@ -951,6 +1006,12 @@ mod tests {
     fn pages_follow_the_macs_sections() {
         let sections = |tab| items(tab).into_iter().filter_map(|i| if let Item::Section(t) = i { Some(t) } else { None }).collect::<Vec<_>>();
         assert_eq!(sections(Tab::Photographs), ["New photographs", "Films"]);
+        // New photographs: the Mac's Film, Paper and brightness match, not the old Edits choice.
+        let photographs = items(Tab::Photographs);
+        let choices: Vec<_> = photographs.iter().filter_map(|i| if let Item::Choice(t, _) = i { Some(*t) } else { None }).collect();
+        assert_eq!(choices, ["Film", "Paper", "Fotufilm films"]);
+        assert_eq!(photographs[1..4], [Item::Choice("Film", Choice::NewFilm), Item::Choice("Paper", Choice::NewPaper), Item::Hint(Hint::NewPhotos)]);
+        assert!(photographs.contains(&Item::Tick("Match to camera brightness", Tick::MatchNew)));
         assert_eq!(sections(Tab::Speed), ["Previews", "Export"]);
         assert_eq!(sections(Tab::Upkeep), ["Updates"]);
         assert_eq!(sections(Tab::Look), ["Theme", "Viewer"]);

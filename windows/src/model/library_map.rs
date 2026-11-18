@@ -100,22 +100,7 @@ pub fn edit_defaults(
 ) -> EditDefaults {
     let films: BTreeMap<String, bool> = stocks.iter().filter(|s| !s.paper).map(|s| (s.id.clone(), s.positive)).collect();
     let papers: BTreeSet<String> = stocks.iter().filter(|s| s.paper).map(|s| s.id.clone()).collect();
-    // The chosen stock, else the table's, else the catalog's first (`newPhotoStock`).
-    let pick = |chosen: Option<&str>, tabled: &str, known: &dyn Fn(&str) -> bool, first: Option<&String>| -> String {
-        if !stocks.is_empty() {
-            for id in [chosen, Some(tabled)].into_iter().flatten() {
-                if known(id) {
-                    return id.to_string();
-                }
-            }
-            if let Some(first) = first {
-                return first.clone();
-            }
-        }
-        chosen.unwrap_or(tabled).to_string()
-    };
-    let film = pick(new_photo.0, &table.table_film, &|id| films.contains_key(id), films.keys().next());
-    let paper = pick(new_photo.1, &table.table_paper, &|id| papers.contains(id), papers.iter().next());
+    let (film, paper) = new_photo_stocks(new_photo, (&table.table_film, &table.table_paper), stocks);
     EditDefaults {
         params: to_json(defaults),
         nullable: nullable.to_vec(),
@@ -129,6 +114,26 @@ pub fn edit_defaults(
         new_photo_paper: paper,
         match_new_photos,
     }
+}
+
+/// Settings › New photographs' film and paper (`newPhotoFilm`): the chosen
+/// stock, else the newest defaults table's, else the catalog's first. Before
+/// the catalog nothing can be checked, and the choice or the table's stands.
+pub fn new_photo_stocks(chosen: (Option<&str>, Option<&str>), table: (&str, &str), stocks: &[Stock]) -> (String, String) {
+    let pick = |chosen: Option<&str>, tabled: &str, paper: bool| -> String {
+        let known = |id: &str| stocks.iter().any(|s| s.paper == paper && s.id == id);
+        if !stocks.is_empty() {
+            if let Some(id) = [chosen, Some(tabled)].into_iter().flatten().find(|id| known(id)) {
+                return id.to_string();
+            }
+            // The first by id, as the library's sorted tables have it.
+            if let Some(first) = stocks.iter().filter(|s| s.paper == paper).map(|s| &s.id).min() {
+                return first.clone();
+            }
+        }
+        chosen.unwrap_or(tabled).to_string()
+    };
+    (pick(chosen.0, table.0, false), pick(chosen.1, table.1, true))
 }
 
 /// The library's settings, kept with the app's preferences under the Mac's
