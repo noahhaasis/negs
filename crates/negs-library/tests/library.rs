@@ -379,3 +379,51 @@ fn with_sidecars_off_nothing_is_written() {
     assert_eq!(library.duplicate(&[a.clone()]).note.unwrap().text, "Not Duplicated");
     assert_eq!(folder.sidecar("a.jpg"), None);
 }
+
+/// A batch reads each photograph's stored edits as opening it would, names
+/// a film this version lacks instead of replacing it, and stores a match it
+/// solved only while the edits are still the ones it was solved for.
+#[test]
+fn a_batch_reads_stored_edits_and_stores_the_match_it_solved() {
+    let folder = Folder::new("batch", &["a.jpg", "b.jpg"]);
+    let mut library = folder.library();
+    let (a, b) = (Item::photo(folder.photo("a.jpg")), Item::photo(folder.photo("b.jpg")));
+    assert_eq!(library.export_edits(&a), None, "no sidecar: it exports as a new photograph");
+    library.open(&a);
+    let mut state = with_contrast(&library.state().unwrap().clone(), 0.25);
+    state.brightness_match = Some(negs_library::BrightnessMatch::default());
+    library.edit(state.clone());
+    library.save().unwrap();
+    library.open(&b);
+    let stored = library.export_edits(&a).unwrap();
+    assert_eq!(stored.state, state);
+    assert!(!stored.match_solved && stored.missing.is_empty());
+    assert_eq!(Some(stored.look.as_str()), library.look(&a));
+
+    let mut solved = stored.state.clone();
+    solved.brightness_match = Some(negs_library::BrightnessMatch { ev: Some(0.7), highlight_limited: false, solved: true });
+    assert!(!library.store_solved_match(&a, "another look", &solved), "edited since: not stored");
+    assert!(library.store_solved_match(&a, &stored.look, &solved));
+    let again = library.export_edits(&a).unwrap();
+    assert!(again.match_solved);
+    assert_eq!(again.state.brightness_match.as_ref().and_then(|m| m.ev), Some(0.7));
+    assert_eq!(again.state.params.at("prep.contrast").as_f64(), Some(0.25));
+    assert_eq!(Some(again.look.as_str()), library.look(&a), "the library shows the new look");
+    // The open photograph's own state is saved, never this.
+    library.open(&a);
+    assert!(!library.store_solved_match(&a, &again.look, &solved));
+    library.open(&b);
+
+    // With the catalog known: a film it lacks is named.
+    let mut defaults = library.defaults().clone();
+    defaults.films.insert(state.film.clone(), false);
+    defaults.papers.insert(state.paper.clone());
+    library.set_defaults(defaults);
+    assert!(library.export_edits(&a).unwrap().missing.is_empty());
+    let mut raw = folder.raw("a.jpg").unwrap();
+    raw.set_at("variants.0.edits.film", Json::string("no_such_film"));
+    sidecar::write_raw(&folder.photo("a.jpg"), Some(&raw)).unwrap();
+    let missing = library.export_edits(&a).unwrap();
+    assert_eq!(missing.missing, ["the film “no_such_film”"]);
+    assert_eq!(missing.state.film, "no_such_film", "not replaced");
+}
