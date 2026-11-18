@@ -581,22 +581,25 @@ pub fn update_scene(app: &mut App) {
         (_, None, Some(placeholder)) => (Some(placeholder.clone()), model.placeholder_size, false),
         _ => (None, Size::ZERO, false),
     };
-    let cropped = model.state.crop.size_of(size);
+    // Picking the base shows the whole frame, without its border.
+    let whole = model.negative_pick() == Some(crate::negative::Pick::Base);
+    let shown_crop = model.shown_crop();
+    let cropped = shown_crop.size_of(size);
     // A stock just tried in the tray: its tile until its develop is in
     // (`EditorModel.trialImage`). The tile is cropped already, so it's shown
     // uncropped at the cropped photograph's size, turned as the photograph is;
     // while zoomed into a cropped photograph that would move the view, so not then.
     let fitting = with_view(|v| v.fitting).unwrap_or(true);
-    let trial = model.shown_trial().filter(|_| fitting || !model.state.crop.cropped()).map(|trial| {
+    let trial = model.shown_trial().filter(|_| fitting || !shown_crop.cropped()).map(|trial| {
         let tile = (trial.picture.width, trial.picture.height);
         let (w, h) = crate::tray_rules::stand_in_size(tile, (cropped.width, cropped.height));
         (trial.picture.clone(), Size::new(w, h))
     });
     let (picture, size, developed, crop) = match trial {
         Some((picture, size)) => (Some(picture), size, false, CropSettings::default()),
-        None => (picture, size, developed, model.state.crop),
+        None => (picture, size, developed, shown_crop),
     };
-    let border = model.state.border.shown(cropped.width as u32, cropped.height as u32);
+    let border = if whole { None } else { model.state.border.shown(cropped.width as u32, cropped.height as u32) };
     let cropping = model.crop_session.as_ref().map(|s| CropScene {
         photo: s.photo,
         rotation: s.rotation,

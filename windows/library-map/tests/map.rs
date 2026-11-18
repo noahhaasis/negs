@@ -5,7 +5,7 @@
 use negs_library::edits::{decode_edits, encode_edits};
 use negs_library::sidecar::{self, DefaultsTable, Sidecar, LATEST_DEFAULTS};
 use negs_library::{Config, EditDefaults, EditGroup, Filter, FolderBin, Json, Library, Roll};
-use negs_windows_library_map::crop::{CropAspect, Rect, Size};
+use negs_windows_library_map::crop::{CropAspect, CropSettings, Rect, Size};
 use negs_windows_library_map::library_map::*;
 use negs_windows_library_map::state::{self, BrightnessMatch, EditState, Stock};
 use serde_json::{json, Value};
@@ -525,4 +525,36 @@ fn a_roll_joins_as_the_macs() {
     assert_eq!(neg::exposure_ev(0.4, None), 0.4);
     assert_eq!(neg::skipped(1), "1 photograph skipped: it doesn't look like a negative.");
     assert_eq!(neg::skipped(3), "3 photographs skipped: they don't look like negatives.");
+}
+
+/// A pick's click goes back through the crop, its straightening, the turns
+/// and the flip to the whole photograph (`PhotographView.photographFraction`).
+#[test]
+fn a_pick_reads_where_the_straightened_crop_shows() {
+    use negs_windows_library_map::crop::{unshown_point, Orientation};
+    let close = |p: Option<negs_windows_library_map::crop::Point>, x: f64, y: f64| {
+        let p = p.expect("inside");
+        assert!((p.x - x).abs() < 1e-9 && (p.y - y).abs() < 1e-9, "{p:?} != ({x}, {y})");
+    };
+    let size = Size { width: 300.0, height: 200.0 };
+    let whole = CropSettings::default();
+    close(unshown_point(Orientation::default(), &whole, size, [0.25, 0.5]), 0.25, 0.5);
+    assert!(unshown_point(Orientation::default(), &whole, size, [1.2, 0.5]).is_none());
+    // A crop of the right half: its centre is three quarters across.
+    let mut half = CropSettings::default();
+    half.rect = Rect { x: 0.5, y: 0.0, width: 0.5, height: 1.0 };
+    close(unshown_point(Orientation::default(), &half, size, [0.5, 0.5]), 0.75, 0.5);
+    // Mirrored, the right half shows on the left: its shown left edge is the photograph's right.
+    close(unshown_point(Orientation::new(0, true), &half, size, [0.0, 0.5]), 1.0, 0.5);
+    // A quarter turn: shown top left is the photograph's bottom left.
+    close(unshown_point(Orientation::new(1, false), &whole, Size { width: 200.0, height: 300.0 }, [0.0, 0.0]), 0.0, 1.0);
+    // Straightened: the centre stays; a point off it turns back about it.
+    let mut level = CropSettings::default();
+    level.rect = Rect { x: 0.25, y: 0.25, width: 0.5, height: 0.5 };
+    level.angle = 90.0;
+    close(unshown_point(Orientation::default(), &level, Size { width: 200.0, height: 200.0 }, [0.5, 0.5]), 0.5, 0.5);
+    // 50 px right of the centre, read 50 px above it (y down, clockwise positive).
+    close(unshown_point(Orientation::default(), &level, Size { width: 200.0, height: 200.0 }, [1.0, 0.5]), 0.5, 0.25);
+    // Mirrored, the angle turns the other way as shown, so the same photograph point is read.
+    close(unshown_point(Orientation::new(0, true), &level, Size { width: 200.0, height: 200.0 }, [0.0, 0.5]), 0.5, 0.25);
 }

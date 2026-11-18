@@ -28,11 +28,13 @@ impl Shown {
         self.width as f64 / self.height.max(1) as f64
     }
 
-    /// `rgba` (width × height) cropped to `pixels`, mirrored, then turned.
-    fn of(rgba: &[u8], width: u32, height: u32, pixels: Option<crate::crop::Rect>, orientation: crate::crop::Orientation, wide: bool) -> Option<Shown> {
+    /// `rgba` (width × height) cropped to `pixels` and straightened by the
+    /// crop's angle (degrees, as the canvas turns it), mirrored, then turned.
+    fn of(rgba: &[u8], width: u32, height: u32, pixels: Option<(crate::crop::Rect, f64)>, orientation: crate::crop::Orientation, wide: bool) -> Option<Shown> {
         let image = image::RgbaImage::from_raw(width, height, rgba.to_vec())?;
         let image = match pixels {
-            Some(r) => {
+            Some((r, angle)) if angle != 0.0 => straightened(&image, r, angle),
+            Some((r, _)) => {
                 let x = (r.x.round().max(0.0) as u32).min(width.saturating_sub(1));
                 let y = (r.y.round().max(0.0) as u32).min(height.saturating_sub(1));
                 let w = (r.width.round() as u32).clamp(1, width - x);
@@ -59,6 +61,22 @@ impl Shown {
         let (width, height) = image.dimensions();
         Some(Shown { rgba: Arc::new(image.into_raw()), width, height, wide })
     }
+}
+
+/// The crop `r` (pixels) of `image` straightened by `angle` degrees about
+/// the photograph's centre, as the canvas's shader samples it: each pixel
+/// of the crop reads the photograph turned back by the angle.
+fn straightened(image: &image::RgbaImage, r: crate::crop::Rect, angle: f64) -> image::RgbaImage {
+    let (width, height) = image.dimensions();
+    let (w, h) = ((r.width.round() as u32).max(1), (r.height.round() as u32).max(1));
+    let (s, k) = angle.to_radians().sin_cos();
+    let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
+    let (max_x, max_y) = ((width.max(1) - 1) as f64, (height.max(1) - 1) as f64);
+    image::RgbaImage::from_fn(w, h, |x, y| {
+        let (dx, dy) = (r.x + x as f64 + 0.5 - cx, r.y + y as f64 + 0.5 - cy);
+        let (gx, gy) = (cx + dx * k + dy * s - 0.5, cy - dx * s + dy * k - 0.5);
+        image::imageops::interpolate_bilinear(image, gx.clamp(0.0, max_x) as f32, gy.clamp(0.0, max_y) as f32).unwrap_or(image::Rgba([0, 0, 0, 255]))
+    })
 }
 
 #[derive(Default)]
@@ -318,7 +336,7 @@ impl Model {
         if self.compare.shown_key.as_ref() == Some(&key) {
             return self.compare.shown.clone();
         }
-        let pixels = (!cropped_render && crop.cropped()).then(|| crop.pixels(Size::new(kept.width as f64, kept.height as f64)));
+        let pixels = (!cropped_render && crop.cropped()).then(|| (crop.pixels(Size::new(kept.width as f64, kept.height as f64)), crop.angle));
         let shown = Shown::of(&kept.pixels, kept.width, kept.height, pixels, orientation, crate::picture::is_wide(&kept.space));
         if shown.is_some() {
             self.compare.shown_key = Some(key);
@@ -331,7 +349,7 @@ impl Model {
     pub fn compared_original(&self) -> Option<Shown> {
         let (_, picture) = self.original_cache.as_ref()?;
         let crop = self.state.crop;
-        let pixels = crop.cropped().then(|| crop.pixels(Size::new(picture.width as f64, picture.height as f64)));
+        let pixels = crop.cropped().then(|| (crop.pixels(Size::new(picture.width as f64, picture.height as f64)), crop.angle));
         picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, pixels, self.state.orientation(), picture.wide)).flatten()
     }
 
@@ -489,4 +507,25 @@ pub fn over_frame(rgba: &[u8], width: u32, height: u32, frame: (u32, u32)) -> Op
     let mut canvas = image::RgbaImage::from_pixel(out.0.max(1), out.1.max(1), image::Rgba([0, 0, 0, 255]));
     image::imageops::overlay(&mut canvas, &resized, ((out.0 - w.min(out.0)) / 2) as i64, ((out.1 - h.min(out.1)) / 2) as i64);
     Some((canvas.into_raw(), out.0, out.1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The open side's crop is straightened as the canvas shows it: a half
+    /// turn about the photograph's centre reads the opposite corner.
+    #[test]
+    fn compare_straightens_the_crop() {
+        let (w, h) = (4u32, 2u32);
+        let rgba: Vec<u8> = (0..w * h).flat_map(|i| [i as u8 * 10, 0, 0, 255]).collect();
+        let rect = crate::crop::Rect { x: 0.0, y: 0.0, width: 2.0, height: 1.0 };
+        let plain = Shown::of(&rgba, w, h, Some((rect, 0.0)), Default::default(), false).unwrap();
+        assert_eq!((plain.width, plain.height, plain.rgba[0], plain.rgba[4]), (2, 1, 0, 10));
+        let turned = Shown::of(&rgba, w, h, Some((rect, 180.0)), Default::default(), false).unwrap();
+        // The top left 2 × 1 read through a half turn: the bottom right, backwards.
+        assert_eq!((turned.width, turned.height), (2, 1));
+        let near = |v: u8, want: u8| (v as i32 - want as i32).abs() <= 1;
+        assert!(near(turned.rgba[0], 70) && near(turned.rgba[4], 60), "{:?}", &turned.rgba[..8]);
+    }
 }

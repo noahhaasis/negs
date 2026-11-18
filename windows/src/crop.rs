@@ -311,6 +311,30 @@ impl Orientation {
     }
 }
 
+/// A point at `shown` (fractions of the photograph as the canvas shows it
+/// through `crop`) back to a fraction of the whole, uncropped photograph:
+/// through the crop, its straightening (turned back about the photograph's
+/// centre, as the canvas's shader samples it), the turns and the flip.
+/// `turned` is the whole photograph's size as shown, after the turns. None
+/// outside the photograph.
+pub fn unshown_point(orientation: Orientation, crop: &CropSettings, turned: Size, shown: [f64; 2]) -> Option<Point> {
+    if !(0.0..=1.0).contains(&shown[0]) || !(0.0..=1.0).contains(&shown[1]) || turned.width <= 0.0 || turned.height <= 0.0 {
+        return None;
+    }
+    let r = crop.rect;
+    let (a, b) = (orientation.shown(Point { x: r.x, y: r.y }), orientation.shown(Point { x: r.x + r.width, y: r.y + r.height }));
+    let (x0, y0, x1, y1) = (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y));
+    // In the turned photograph's pixels, about its centre.
+    let (cx, cy) = (turned.width / 2.0, turned.height / 2.0);
+    let (dx, dy) = ((x0 + shown[0] * (x1 - x0)) * turned.width - cx, (y0 + shown[1] * (y1 - y0)) * turned.height - cy);
+    // Straightened in the unflipped photograph: the other way round as shown.
+    let angle = if orientation.flip { -crop.angle } else { crop.angle };
+    let (s, k) = angle.to_radians().sin_cos();
+    let g = Point { x: (cx + dx * k + dy * s) / turned.width, y: (cy - dx * s + dy * k) / turned.height };
+    let p = orientation.unshown(g);
+    ((0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y)).then_some(p)
+}
+
 /// An edge or corner: -1 is the left or top edge, 1 the right or bottom,
 /// 0 neither. Both zero moves the rectangle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

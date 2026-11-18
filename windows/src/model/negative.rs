@@ -419,15 +419,19 @@ impl Model {
         picking
     }
 
+    /// The crop the canvas shows: picking the base shows the whole frame,
+    /// unstraightened but still flipped and turned, since the rebate is
+    /// usually cropped off (`NegsApp.canvas`).
+    pub fn shown_crop(&self) -> crate::crop::CropSettings {
+        if self.negative.pick == Some(Pick::Base) { crate::crop::CropSettings::default() } else { self.state.crop }
+    }
+
     /// A click on the canvas while picking, at `shown` (fractions of the
-    /// photograph as shown): back through the flip, turns and crop to the
-    /// whole photograph. The crop's straightening isn't undone: it moves a
-    /// point a few pixels at most, inside the area the reading averages.
+    /// photograph as shown): back through the crop, its straightening, the
+    /// turns and the flip to the whole photograph
+    /// (`PhotographView.photographFraction`).
     pub fn picked_shown_point(&mut self, shown: [f64; 2]) {
-        let p = self.state.orientation().unshown(crate::crop::Point { x: shown[0], y: shown[1] });
-        let inside = (0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y);
-        let r = self.state.crop.rect;
-        let point = if inside { [r.x + p.x * r.width, r.y + p.y * r.height] } else { [-1.0, -1.0] };
+        let point = crate::crop::unshown_point(self.state.orientation(), &self.shown_crop(), self.shown_image_size(), shown).map_or([-1.0, -1.0], |p| [p.x, p.y]);
         self.picked_negative_point(point);
     }
 
