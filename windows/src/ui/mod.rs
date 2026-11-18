@@ -801,7 +801,9 @@ impl App {
             // step aside in Image Only and while a file is dragged in.
             let chrome = photo && !image_only && !self.drop_target_active && !shows_tray;
             let status_height = if chrome { self.px(status::HEIGHT) } else { 0 };
-            let show_strip = self.model.prefs.filmstrip_visible && chrome;
+            // Compare has no strip: its height goes to the photographs.
+            let comparing = photo && self.model.comparison().is_some();
+            let show_strip = self.model.prefs.filmstrip_visible && chrome && !comparing;
             // 158 + 28: the tray's 186, so the canvas keeps its size when it opens.
             let strip_height = if show_strip { self.px(crate::sheet_rules::BAND) - status_height } else { 0 };
             let canvas_bottom = (bottom - status_height - strip_height - tray_height).max(top);
@@ -809,14 +811,13 @@ impl App {
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
             let _ = MoveWindow(self.empty, 0, top, column, bottom - top, true);
             // Compare takes the canvas's place.
-            let comparing = photo && self.model.comparison().is_some();
             compare::layout(self, RECT { left: 0, top, right: column, bottom: canvas_bottom }, comparing);
             let _ = ShowWindow(self.canvas, if photo && !comparing { SW_SHOWNA } else { SW_HIDE });
             let _ = ShowWindow(self.empty, if photo { SW_HIDE } else { SW_SHOWNA });
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
             // The leader stands on the strip's top edge, or the status line's.
-            strip::layout_leader(self, column, canvas_bottom, chrome && !self.model.cropping());
+            strip::layout_leader(self, column, canvas_bottom, chrome && !self.model.cropping() && !comparing);
             grid::layout(self, RECT { left: 0, top, right: client.right, bottom });
             let _ = MoveWindow(self.status, 0, bottom - status_height, column, status_height, true);
             let _ = ShowWindow(self.status, if chrome { SW_SHOWNA } else { SW_HIDE });
