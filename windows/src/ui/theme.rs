@@ -419,9 +419,10 @@ fn set_app_mode(theme: Theme) {
     }
 }
 
-/// Whether the file dialogs come up dark: a dark theme forces them dark
-/// and a light one, once switched to, light; a light theme at launch asks
-/// nothing (`init`), so they follow Windows' own app mode.
+/// Whether the file dialogs come up dark: the theme forces them dark or
+/// light from launch (`init`), as the Mac's theme sets its panels'
+/// appearance; high contrast, or a Windows without the export, leaves them
+/// following Windows' own app mode.
 pub fn dialogs_dark() -> bool {
     if current().high_contrast {
         return false;
@@ -433,12 +434,11 @@ pub fn dialogs_dark() -> bool {
     }
 }
 
-/// Before the first window: menus follow the theme from the start.
+/// Before the first window: menus and the file dialogs follow the theme
+/// from the start. A light theme forces light too, or on a dark Windows
+/// the file dialogs came up dark under it.
 pub fn init() {
-    let theme = current();
-    if theme.dark {
-        set_app_mode(theme);
-    }
+    set_app_mode(current());
 }
 
 /// A top-level window's title bar and frame follow the theme.
