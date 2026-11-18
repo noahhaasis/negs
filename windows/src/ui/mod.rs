@@ -758,7 +758,7 @@ impl App {
             left.push(Span::new(if differences.is_empty() { summary } else { format!("{summary} · differ in {differences}") }, Tone::Label));
             if !c.against_original() && model.shown_items().len() > 2 {
                 let place = if compare::stacked(self) { "bottom" } else { "right" };
-                left.push(Span::new(format!("    ← → steps the {place} one"), Tone::Dim));
+                left.push(Span::hint(format!("    ← → steps the {place} one"), Tone::Dim));
             }
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
