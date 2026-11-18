@@ -1972,6 +1972,8 @@ impl Model {
         let thumbnail = self.open_thumbnail();
         let kept = self.kept.take().filter(|k| k.revision == self.revision && k.generation == self.source_generation && self.preview_current);
         let left = self.library_item();
+        // A session restored at launch, rather than the library's edits.
+        let at_launch = session.is_some();
         // Its folder's library opens it, saving the one before: the edits
         // come from its sidecar, as a restored session's do.
         let (path, session) = self.library_opening(path, session);
@@ -2020,7 +2022,7 @@ impl Model {
         let restoring = session.is_some();
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
         let stand_in_key = match stand_in_key {
-            Some((key, loose)) if !restoring => {
+            Some((key, loose)) if !at_launch => {
                 self.stand_in = stand_in(&key, loose.as_deref());
                 crate::trace::event("stand_in", || json!({"shown": self.stand_in.is_some()}));
                 None
