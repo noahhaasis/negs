@@ -32,6 +32,7 @@ use super::{App, create, ink, titlebar, with_app};
 use crate::model::Model;
 use crate::platform::wide;
 use crate::state::FotufilmFilms;
+use super::sheet::ViewerSheet;
 
 /// The window's width in DIPs (`SettingsWindowController.width`).
 const WIDTH: f64 = 440.0;
@@ -74,18 +75,18 @@ impl Tab {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tick {
     MatchNew,
-    KeepPaper,
     Previews,
     LimitPreview,
     LowMemory,
     AutoUpdates,
-    CustomBackground,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Choice {
     NewPhotos,
     Fotufilm,
+    /// The viewer's sheet (`ViewerSheet`).
+    Sheet,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -107,8 +108,6 @@ enum Item {
     Readout(&'static str),
     /// "Last checked …" and Check for Updates….
     CheckUpdates,
-    /// The custom viewer background's colour.
-    Well,
     Themes,
 }
 
@@ -130,8 +129,6 @@ fn items(tab: Tab) -> Vec<Item> {
             Item::Section("Films"),
             Item::Choice("Fotufilm films", Choice::Fotufilm),
             Item::Hint(Hint::Text("Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.")),
-            Item::Tick("Keep paper when changing film", Tick::KeepPaper),
-            Item::Hint(Hint::Text("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")),
         ],
         Tab::Speed => vec![
             Item::Section("Previews"),
@@ -158,11 +155,9 @@ fn items(tab: Tab) -> Vec<Item> {
             Item::Section("Theme"),
             Item::Themes,
             Item::Hint(Hint::Theme),
-            // Phase 4 puts the viewer sheet here (`ViewerSheet`): Sheet ⌄ and its hint.
             Item::Section("Viewer"),
-            Item::Tick("Custom viewer background", Tick::CustomBackground),
-            Item::Well,
-            Item::Hint(Hint::Text("The colour behind the photograph. Off, it follows the theme.")),
+            Item::Choice("Sheet", Choice::Sheet),
+            Item::Hint(Hint::Text("The colour behind the photograph. Theme’s own follows the theme; a grey is fairer for judging a photograph. The caption and the label under it change their ink to suit.")),
         ],
     }
 }
@@ -296,6 +291,7 @@ fn create_row(page: HWND, font: HFONT, item: Item, first: u16) -> Vec<HWND> {
             let options: Vec<&str> = match choice {
                 Choice::NewPhotos => NEW_PHOTOS.iter().map(|(t, _)| *t).collect(),
                 Choice::Fotufilm => FotufilmFilms::ALL.iter().map(|f| f.title()).collect(),
+                Choice::Sheet => ViewerSheet::ALL.iter().map(|s| s.title()).collect(),
             };
             for option in options {
                 let text = wide(option);
@@ -328,13 +324,6 @@ fn create_row(page: HWND, font: HFONT, item: Item, first: u16) -> Vec<HWND> {
             draw::track_hover(button);
             vec![lead, button]
         }
-        Item::Well => {
-            let label = ink_static("Colour", Role::Label, 0, true);
-            let well = create(w!("BUTTON"), "Viewer background colour", hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), page, first + 1, font);
-            draw::set_role(well, Role::Well);
-            draw::track_hover(well);
-            vec![label, well]
-        }
         Item::Themes => ThemeName::ALL
             .iter()
             .enumerate()
@@ -361,17 +350,11 @@ fn ticked(model: &Model, tick: Tick) -> bool {
     let prefs = &model.prefs;
     match tick {
         Tick::MatchNew => prefs.match_new_photos,
-        Tick::KeepPaper => prefs.keep_paper,
         Tick::Previews => prefs.previews,
         Tick::LimitPreview => prefs.limits_preview(),
         Tick::LowMemory => prefs.low_memory_export,
         Tick::AutoUpdates => crate::updates::automatic(),
-        Tick::CustomBackground => prefs.viewer_background_custom,
     }
-}
-
-fn background(model: &Model) -> crate::border::BorderColor {
-    crate::border::BorderColor::from_hex(&model.prefs.viewer_background).unwrap_or(crate::border::BorderColor([0x24; 3]))
 }
 
 fn set_text(hwnd: HWND, text: &str) {
@@ -411,6 +394,7 @@ pub fn sync(app: &mut App) {
                 let index = match choice {
                     Choice::NewPhotos => model.prefs.fresh_edits as usize,
                     Choice::Fotufilm => FotufilmFilms::ALL.iter().position(|&f| f == model.fotufilm_films()).unwrap_or(0),
+                    Choice::Sheet => ViewerSheet::ALL.iter().position(|&s| s == super::sheet::chosen()).unwrap_or(0),
                 };
                 unsafe {
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index as isize {
@@ -425,19 +409,6 @@ pub fn sync(app: &mut App) {
             }
             Item::CheckUpdates => {
                 set_text(c[0], &crate::updates::last_check().unwrap_or_default());
-            }
-            Item::Well => {
-                let on = model.prefs.viewer_background_custom;
-                let color = background(model);
-                let [r, g, b] = color.0;
-                ink::set_look(c[1], ink::Look { color: (r as u32) << 16 | (g as u32) << 8 | b as u32, summary: color.hex(), ..Default::default() });
-                unsafe {
-                    for &control in c {
-                        if IsWindowEnabled(control).as_bool() != on {
-                            let _ = EnableWindow(control, on);
-                        }
-                    }
-                }
             }
             Item::Themes => {
                 for (i, &swatch) in c.iter().enumerate() {
@@ -517,12 +488,6 @@ pub fn layout(app: &mut App) {
                 positions.push((c[0], gutter, y, right - gutter - button, px(35.0)));
                 positions.push((c[1], right - button + margin, y, button, px(35.0)));
                 px(35.0)
-            }
-            Item::Well => {
-                positions.push((c[0], gutter, y, px(ink::SLIDER_LABEL), row_h));
-                let column = gutter + px(ink::SLIDER_LABEL);
-                positions.push((c[1], column, y, right - column + margin, row_h));
-                row_h
             }
             Item::Themes => {
                 // Three to a row; a name too wide for its column takes two lines.
@@ -666,14 +631,12 @@ fn command(app: &mut App, id: u16, code: u32) {
     let Some(s) = &app.settings else { return };
     let Some(row) = s.rows.get(index) else { return };
     let (item, controls) = (row.item, row.controls.clone());
-    let window = s.window;
     match item {
         Item::Tick(_, tick) if code == BN_CLICKED => {
             let on = unsafe { SendMessageW(controls[0], BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1 };
             let model = &mut app.model;
             match tick {
                 Tick::MatchNew => model.set_match_new_photos(on),
-                Tick::KeepPaper => model.set_keep_paper(on),
                 Tick::Previews => model.set_previews(on),
                 Tick::LimitPreview => model.set_limit_preview(on),
                 Tick::LowMemory => model.set_low_memory_export(on),
@@ -681,11 +644,6 @@ fn command(app: &mut App, id: u16, code: u32) {
                     crate::updates::set_automatic(on);
                     model.prefs.check_for_updates = on;
                     model.prefs.save();
-                }
-                Tick::CustomBackground => {
-                    model.prefs.viewer_background_custom = on;
-                    model.prefs.save();
-                    super::canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
                 }
             }
         }
@@ -697,16 +655,17 @@ fn command(app: &mut App, id: u16, code: u32) {
             match choice {
                 Choice::NewPhotos => app.model.set_fresh_edits(index == 1),
                 Choice::Fotufilm => app.model.set_fotufilm_films(FotufilmFilms::ALL[index as usize]),
+                Choice::Sheet => {
+                    let sheet = ViewerSheet::ALL[index as usize];
+                    super::sheet::set_chosen(sheet);
+                    app.model.prefs.viewer_sheet = sheet.key().into();
+                    app.model.prefs.save();
+                    super::canvas::sheet_changed(app.canvas);
+                    super::empty::sheet_changed(app);
+                }
             }
         }
         Item::CheckUpdates if code == BN_CLICKED && part == 1 => crate::updates::check(true),
-        Item::Well if code == BN_CLICKED => {
-            if let Some(chosen) = super::inspector::choose_color(window, background(&app.model)) {
-                app.model.prefs.viewer_background = chosen.hex();
-                app.model.prefs.save();
-                super::canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
-            }
-        }
         Item::Themes if code == BN_CLICKED => {
             let theme = ThemeName::ALL[part as usize];
             if theme::chosen() != theme {

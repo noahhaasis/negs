@@ -283,7 +283,7 @@ fn high_contrast_tokens(p: &Palette) -> Tokens {
 }
 
 /// The relative luminance of 0xRRGGBB (WCAG).
-fn luminance(rgb: u32) -> f64 {
+pub fn luminance(rgb: u32) -> f64 {
     let channel = |shift: u32| {
         let c = ((rgb >> shift) & 0xff) as f64 / 255.0;
         if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
@@ -291,7 +291,7 @@ fn luminance(rgb: u32) -> f64 {
     0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
 }
 
-fn contrast(a: u32, b: u32) -> f64 {
+pub fn contrast(a: u32, b: u32) -> f64 {
     let (x, y) = (luminance(a), luminance(b));
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }

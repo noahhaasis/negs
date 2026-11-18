@@ -21,7 +21,8 @@ use windows::core::w;
 
 use super::d2d::{Align, Ink, Painter, RectF, TextStyle};
 use super::draw::{self, Canvas};
-use super::theme::{self, Tokens};
+use super::sheet::SheetInk;
+use super::theme;
 use super::{App, id, with_app};
 use crate::platform::{pcwstr, wide};
 
@@ -108,6 +109,11 @@ pub fn layout(app: &mut App) {
     }
 }
 
+/// The viewer sheet changed: the empty canvas lies on it too.
+pub fn sheet_changed(app: &mut App) {
+    layout(app);
+}
+
 pub fn highlight(app: &mut App, on: bool) {
     app.empty_view.highlighted = on;
     DROPPING.with(|d| d.set(on));
@@ -132,7 +138,7 @@ pub fn trim_marks(print: RectF) -> [RectF; 4] {
 }
 
 fn paint(hwnd: HWND, dc: HDC) {
-    let t = theme::tokens();
+    let t = super::sheet::ink();
     let s = draw::dpi_of(hwnd);
     let mut client = RECT::default();
     unsafe {
@@ -143,22 +149,22 @@ fn paint(hwnd: HWND, dc: HDC) {
     let hot = HOT.with(Cell::get);
     let mut places = vec![];
     let mut c = Canvas::new(dc, client);
-    c.clear(theme::gdi(t.hex.bg));
-    c.d2d(s, t.plain, |p| {
+    c.clear(theme::gdi(t.sheet));
+    c.d2d(s, theme::tokens().plain, |p| {
         places.clear();
         let (w, h) = (client.right as f32 / s, client.bottom as f32 / s);
         let print = print_place(w, h);
         if dropping {
             let o = 12.0;
-            p.stroke_round_rect(RectF::new(print.x - o, print.y - o, print.w + 2.0 * o, print.h + 2.0 * o), 4.0, 1.5, Ink::hex(t.hex.accent));
+            p.stroke_round_rect(RectF::new(print.x - o, print.y - o, print.w + 2.0 * o, print.h + 2.0 * o), 4.0, 1.5, Ink::hex(t.accent));
             let m = p.measure("drop to open it", &DROP, 0.0);
-            p.text("drop to open it", &DROP, ((w - m.width) / 2.0).round(), ((h - m.height) / 2.0).round(), Ink::hex(t.hex.paper));
+            p.text("drop to open it", &DROP, ((w - m.width) / 2.0).round(), ((h - m.height) / 2.0).round(), Ink::hex(t.paper));
             return;
         }
         for mark in trim_marks(print) {
-            p.fill_rect(mark, Ink::hex(t.hex.track));
+            p.fill_rect(mark, Ink::hex(t.track));
         }
-        words(p, &t, w, h, hot, &mut places);
+        words(p, &t, w, print, hot, &mut places);
         recent_row(p, &t, &recent, print, w, hot, &mut places);
     });
     c.present(dc);
@@ -166,7 +172,7 @@ fn paint(hwnd: HWND, dc: HDC) {
 }
 
 /// "Open a photograph", the line about the app and the drop hint, centred.
-fn words(p: &mut Painter, t: &Tokens, w: f32, h: f32, hot: Option<Target>, places: &mut Vec<(Target, RectF)>) {
+fn words(p: &mut Painter, t: &SheetInk, w: f32, print: RectF, hot: Option<Target>, places: &mut Vec<(Target, RectF)>) {
     let open = p.measure("Open", &HEADING, 0.0);
     let rest = p.measure(" a photograph", &HEADING, 0.0);
     let tagline = "Explore film stocks, shape the print, and make it your own.";
@@ -175,23 +181,24 @@ fn words(p: &mut Painter, t: &Tokens, w: f32, h: f32, hot: Option<Target>, place
     let tag = p.measure_in(tagline, &TAGLINE.line_height(1.3), room, Align::Center);
     let hint_m = p.measure_in(hint, &HINT.line_height(1.3), room, Align::Center);
     let total = open.height + 10.0 + tag.height + 6.0 + 10.0 + hint_m.height;
-    let mut y = ((h - total) / 2.0).round();
+    // On the print's place, not the window: the bands round it differ.
+    let mut y = (print.y + (print.h - total) / 2.0).round();
     let x = ((w - open.width - rest.width) / 2.0).round();
-    p.text("Open", &HEADING, x, y, Ink::hex(t.hex.paper));
+    p.text("Open", &HEADING, x, y, Ink::hex(t.paper));
     // Open's underline: `track`, `dim` under the pointer.
     let lit = hot == Some(Target::Open);
-    p.fill_rect(RectF::new(x, y + open.baseline + 2.5, open.width, 1.5), Ink::hex(if lit { t.hex.dim } else { t.hex.track }));
+    p.fill_rect(RectF::new(x, y + open.baseline + 2.5, open.width, 1.5), Ink::hex(if lit { t.dim } else { t.track }));
     places.push((Target::Open, RectF::new(x - 2.0, y, open.width + 4.0, open.height)));
-    p.text(" a photograph", &HEADING, x + open.width, y, Ink::hex(t.hex.paper));
+    p.text(" a photograph", &HEADING, x + open.width, y, Ink::hex(t.paper));
     y += open.height + 10.0;
-    p.text_in(tagline, &TAGLINE.line_height(1.3), RectF::new(24.0, y, room, 0.0), Align::Center, Ink::hex(t.hex.label));
+    p.text_in(tagline, &TAGLINE.line_height(1.3), RectF::new(24.0, y, room, 0.0), Align::Center, Ink::hex(t.label));
     y += tag.height + 16.0;
-    p.text_in(hint, &HINT.line_height(1.3), RectF::new(24.0, y, room, 0.0), Align::Center, Ink::hex(t.hex.dim));
+    p.text_in(hint, &HINT.line_height(1.3), RectF::new(24.0, y, room, 0.0), Align::Center, Ink::hex(t.dim));
 }
 
 /// "*Recent* DSC_2650.NEF IMG_0412.CR3 …" under the print's place, as many
 /// as fit.
-fn recent_row(p: &mut Painter, t: &Tokens, recent: &[PathBuf], print: RectF, w: f32, hot: Option<Target>, places: &mut Vec<(Target, RectF)>) {
+fn recent_row(p: &mut Painter, t: &SheetInk, recent: &[PathBuf], print: RectF, w: f32, hot: Option<Target>, places: &mut Vec<(Target, RectF)>) {
     if recent.is_empty() {
         return;
     }
@@ -211,13 +218,13 @@ fn recent_row(p: &mut Painter, t: &Tokens, recent: &[PathBuf], print: RectF, w: 
     let file = p.measure(&names[0], &RECENT_FILE, 0.0);
     // On one baseline: the names' line sets it.
     let baseline = top + file.baseline;
-    p.text("Recent", &RECENT, print.x, baseline - label.baseline, Ink::hex(t.hex.dim));
+    p.text("Recent", &RECENT, print.x, baseline - label.baseline, Ink::hex(t.dim));
     let mut x = print.x + label.width + 18.0;
     for (i, name) in names[..count].iter().enumerate() {
         let lit = hot == Some(Target::Recent(i));
-        p.text(name, &RECENT_FILE, x, top, Ink::hex(if lit { t.hex.paper } else { t.hex.label }));
+        p.text(name, &RECENT_FILE, x, top, Ink::hex(if lit { t.paper } else { t.label }));
         if lit {
-            p.fill_rect(RectF::new(x, baseline + 2.0, widths[i], 1.0), Ink::hex(t.hex.track));
+            p.fill_rect(RectF::new(x, baseline + 2.0, widths[i], 1.0), Ink::hex(t.track));
         }
         places.push((Target::Recent(i), RectF::new(x, top, widths[i], file.height)));
         x += widths[i] + 18.0;

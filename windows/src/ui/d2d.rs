@@ -651,6 +651,50 @@ pub struct Mask {
     pub height: u32,
 }
 
+/// Marks drawn in white by `draw` (in DIPs) on a `w` × `h` DIP mask, as a
+/// coverage mask: the canvas colours them on the GPU, as it does words.
+pub fn shape_mask(w: f32, h: f32, scale: f32, plain: bool, mut draw: impl FnMut(&mut Painter)) -> Option<Mask> {
+    use windows::Win32::Graphics::Gdi::*;
+    let (pw, ph) = (((w * scale).ceil() as i32).max(1), ((h * scale).ceil() as i32).max(1));
+    unsafe {
+        let screen = GetDC(None);
+        let dc = CreateCompatibleDC(screen);
+        ReleaseDC(None, screen);
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: pw,
+                biHeight: -ph,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits = std::ptr::null_mut();
+        let mut result = None;
+        if let Ok(bitmap) = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) {
+            let old = SelectObject(dc, bitmap);
+            let drawn = paint(dc, pw, ph, scale, plain, |p| {
+                p.grayscale_text();
+                p.fill_rect(RectF::new(0.0, 0.0, pw as f32 / scale, ph as f32 / scale), Ink::hex(0));
+                draw(p);
+            });
+            let _ = GdiFlush();
+            if drawn && !bits.is_null() {
+                let pixels = std::slice::from_raw_parts(bits as *const u8, (pw * ph * 4) as usize);
+                let coverage = pixels.chunks_exact(4).map(|p| p[1]).collect();
+                result = Some(Mask { coverage, width: pw as u32, height: ph as u32 });
+            }
+            SelectObject(dc, old);
+            let _ = DeleteObject(bitmap);
+        }
+        let _ = DeleteDC(dc);
+        result
+    }
+}
+
 pub fn mask(text: &str, style: &TextStyle, width: f32, align: Align, scale: f32, plain: bool) -> Option<Mask> {
     use windows::Win32::Graphics::Gdi::*;
     if text.is_empty() {
