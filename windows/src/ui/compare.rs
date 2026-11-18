@@ -562,7 +562,7 @@ pub fn toggle(app: &mut App) {
     let origin = if in_grid { rules::Origin::Grid } else { rules::Origin::Photo };
     app.model.toggle_compare(origin);
     if in_grid && app.model.comparison().is_some() {
-        super::grid::close(app, false);
+        super::grid::close_for_compare(app);
     }
 }
 
@@ -586,7 +586,7 @@ fn grid_shown(app: &App) -> bool {
 pub fn take_offer(app: &mut App) {
     let in_grid = grid_shown(app);
     if app.model.take_compare_offer(if in_grid { rules::Origin::Grid } else { rules::Origin::Photo }) && in_grid {
-        super::grid::close(app, false);
+        super::grid::close_for_compare(app);
     }
 }
 
