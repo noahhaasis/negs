@@ -243,6 +243,9 @@ pub struct Preferences {
     /// Settings › Fotufilm films, as the Mac stores it: "all",
     /// "datasheets" or "off".
     pub fotufilm_films: String,
+    /// Enlarger › Shifts move, as the Mac stores it: "separate",
+    /// "together" or "opposite".
+    pub filter_shift_link: String,
     /// The Settings tab last shown (the Mac's `settingsTab`).
     pub settings_tab: String,
 }
@@ -298,6 +301,7 @@ impl Default for Preferences {
             app_theme: "darkroom".into(),
             library: Default::default(),
             fotufilm_films: "all".into(),
+            filter_shift_link: "separate".into(),
             settings_tab: "Photographs".into(),
         }
     }

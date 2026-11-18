@@ -204,6 +204,76 @@ pub struct Stock {
     pub manufacturer_data: bool,
 }
 
+/// Enlarger › Shifts move (`FilterLink` in `Parameters.swift`): how the
+/// magenta and yellow shift sliders move each other. Together is the
+/// red↔cyan axis. Linked, they also reset together. A preference of the app,
+/// not of the edit: the edit still holds just the two shifts, so presets
+/// are unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilterLink {
+    Separate,
+    Together,
+    Opposite,
+}
+
+impl FilterLink {
+    pub const ALL: [FilterLink; 3] = [FilterLink::Separate, FilterLink::Together, FilterLink::Opposite];
+    pub const MAGENTA: &'static str = "enlarger.m_filter_shift";
+    pub const YELLOW: &'static str = "enlarger.y_filter_shift";
+    pub const RANGE: (f64, f64) = (-50.0, 50.0);
+
+    /// As the Mac stores it (`filterShiftLink`); anything else is Separately.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "together" => Self::Together,
+            "opposite" => Self::Opposite,
+            _ => Self::Separate,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Separate => "separate",
+            Self::Together => "together",
+            Self::Opposite => "opposite",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Separate => "Separately",
+            Self::Together => "Together",
+            Self::Opposite => "Opposite ways",
+        }
+    }
+
+    pub fn links(path: &str) -> bool {
+        path == Self::MAGENTA || path == Self::YELLOW
+    }
+
+    /// The two shifts after moving `path` to `value` (already snapped). The
+    /// other moves by the same change, so their gap (Together) or sum
+    /// (Opposite) holds, with no jump on switching; at either end of the
+    /// range both stop.
+    pub fn shifts(self, path: &str, value: f64, magenta: f64, yellow: f64) -> (f64, f64) {
+        let moving_magenta = path == Self::MAGENTA;
+        let (current, other) = if moving_magenta { (magenta, yellow) } else { (yellow, magenta) };
+        if self == Self::Separate {
+            return if moving_magenta { (value, yellow) } else { (magenta, value) };
+        }
+        let sign = if self == Self::Together { 1.0 } else { -1.0 };
+        // The other's room to move, in the moving slider's direction.
+        let (low, high) = if sign > 0.0 {
+            (Self::RANGE.0 - other, Self::RANGE.1 - other)
+        } else {
+            (other - Self::RANGE.1, other - Self::RANGE.0)
+        };
+        let delta = (value - current).max(low.min(0.0)).min(high.max(0.0));
+        let (moved, followed) = (current + delta, other + sign * delta);
+        if moving_magenta { (moved, followed) } else { (followed, moved) }
+    }
+}
+
 /// Settings › Fotufilm films (`FotufilmFilms` in `Parameters.swift`): which
 /// of the films ported from Fotufilm the film menu and grid list. Only the
 /// lists: an edit or a preset with a hidden film keeps it.
@@ -498,6 +568,8 @@ pub enum Adjustment {
     Choice { title: &'static str, path: &'static str, options: &'static [&'static str] },
     /// Solves the enlarger's M/Y filter shifts so a mid-grey prints neutral.
     BalancePrint { title: &'static str, help: &'static str },
+    /// Enlarger › Shifts move: a preference, not an edit (`FilterLink`).
+    FilterLink { help: &'static str },
 }
 
 impl Adjustment {
@@ -505,7 +577,7 @@ impl Adjustment {
     pub fn path(&self) -> &'static str {
         match *self {
             Adjustment::Slider { path, .. } | Adjustment::Toggle { path, .. } | Adjustment::Choice { path, .. } => path,
-            Adjustment::BalancePrint { .. } => "",
+            Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. } => "",
         }
     }
 }
@@ -641,11 +713,14 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Enlarger",
         section: Section::Print,
         enable: None,
-        basic: 4,
+        basic: 5,
         controls: &[
             slider("Print exposure", "enlarger.print_exposure", 0.1, 5.0, 0.01),
             slider("Magenta shift", "enlarger.m_filter_shift", -50.0, 50.0, 0.1),
             slider("Yellow shift", "enlarger.y_filter_shift", -50.0, 50.0, 0.1),
+            Adjustment::FilterLink {
+                help: "How the magenta and yellow shifts move. Together moves both the same way: more of both makes the print more cyan, less of both redder. Opposite ways moves one up as the other goes down. Linked, resetting either resets both. Each keeps its own value, so presets are unchanged.",
+            },
             Adjustment::BalancePrint {
                 title: "Balance Print",
                 help: "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.",

@@ -779,6 +779,43 @@ impl Model {
         self.prefs.save();
         self.mark(dirty::INSPECTOR | dirty::PREVIEWS);
     }
+    pub fn filter_link(&self) -> state::FilterLink {
+        state::FilterLink::from_key(&self.prefs.filter_shift_link)
+    }
+    /// Enlarger › Shifts move.
+    pub fn set_filter_link(&mut self, link: state::FilterLink) {
+        if self.filter_link() == link {
+            return;
+        }
+        self.prefs.filter_shift_link = link.key().into();
+        self.prefs.save();
+        self.mark(dirty::INSPECTOR);
+    }
+    /// The enlarger's magenta or yellow shift, moving the other as Shifts
+    /// move says; both change in one step.
+    pub fn set_filter_shift(&mut self, path: &str, value: f64) {
+        let link = self.filter_link();
+        if link == state::FilterLink::Separate {
+            return self.set(path, json::num(value));
+        }
+        let (m, y) = link.shifts(path, value, json::number(self.value(state::FilterLink::MAGENTA)), json::number(self.value(state::FilterLink::YELLOW)));
+        let mut next = self.state.clone();
+        json::set(&mut next.params, state::FilterLink::MAGENTA, json::num(m));
+        json::set(&mut next.params, state::FilterLink::YELLOW, json::num(y));
+        self.apply(next, "Change Adjustment");
+    }
+    /// Resets a shift; linked (Together, Opposite ways), both reset, as
+    /// they move, in one step.
+    pub fn reset_filter_shift(&mut self, path: &str) {
+        if self.filter_link() == state::FilterLink::Separate {
+            return self.reset_value(path);
+        }
+        let mut next = self.state.clone();
+        for shift in [state::FilterLink::MAGENTA, state::FilterLink::YELLOW] {
+            json::set(&mut next.params, shift, self.default_value(shift).clone());
+        }
+        self.apply(next, "Change Adjustment");
+    }
     pub fn papers(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| s.paper).collect()
     }

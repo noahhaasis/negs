@@ -138,6 +138,8 @@ enum Kind {
     Color(bool),
     /// The Balance Print button: title, tooltip.
     BalancePrint(&'static str, &'static str),
+    /// Enlarger › Shifts move (a preference): its tooltip.
+    FilterLink(&'static str),
     /// The tone graph atop Print Curves, with its label and channel buttons.
     ToneGraph,
 }
@@ -486,6 +488,7 @@ fn rows() -> Vec<Row> {
                     Adjustment::Toggle { title, path } => Kind::Toggle(title, path),
                     Adjustment::Choice { title, path, options } => Kind::Choice(title, path, options),
                     Adjustment::BalancePrint { title, help } => Kind::BalancePrint(title, help),
+                    Adjustment::FilterLink { help } => Kind::FilterLink(help),
                     slider => Kind::Slider(slider),
                 };
                 let when = if state::color_only(control.path()) { When::ColorFilm } else { When::Always };
@@ -1168,6 +1171,18 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             controls.push(value);
         }
         Kind::Note(_) => controls.push(ink_static("", Role::Hint, LABEL, false)),
+        Kind::FilterLink(help) => {
+            controls.push(label("Shifts move", fonts.ui));
+            let c = combo(false);
+            for link in state::FilterLink::ALL {
+                let text = wide(link.title());
+                unsafe {
+                    SendMessageW(c, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+                }
+            }
+            super::dialogs::tooltip(c, help);
+            controls.push(c);
+        }
         Kind::Choice(title, path, options) => {
             controls.push(label(title, fonts.ui));
             let c = combo(false);
@@ -1364,7 +1379,7 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
                 positions.push((c[0], right - button + margin, y, button, ins.px(35.0)));
                 ins.px(35.0)
             }
-            Kind::Choice(..) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
+            Kind::Choice(..) | Kind::FilterLink(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
                 // The label, and the value at the row's end; the box takes
                 // the rest of the line, so a click anywhere after the label opens it.
                 let label = (column - gutter).min(ins.px(ink::width(&window_text(c[0]), &ink::LABEL) as f64 + 12.0)).max(ins.px(60.0));
@@ -1872,6 +1887,15 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 set_check(c[0], [b.enabled, b.instagram, b.export][which as usize]);
                 enable(c[0], catalog && (which == 0 || b.enabled));
             }
+            Kind::FilterLink(_) => {
+                let index = state::FilterLink::ALL.iter().position(|&l| l == model.filter_link()).unwrap_or(0) as isize;
+                unsafe {
+                    if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
+                        SendMessageW(c[1], CB_SETCURSEL, WPARAM(index as usize), LPARAM(0));
+                    }
+                }
+                enable_all(c, on);
+            }
             Kind::Choice(_, path, options) => {
                 ink::set_changed(c[1], model.is_modified(path));
                 let index = options.iter().position(|o| *o == json::string(model.value(path))).map_or(-1, |i| i as isize);
@@ -1967,6 +1991,9 @@ pub fn parse_number(text: &str) -> Option<f64> {
 fn set_slider(app: &mut App, index: usize, value: f64) {
     let kind = app.inspector.rows[index].kind;
     match kind {
+        Kind::Slider(Adjustment::Slider { path, low, high, step, .. }) if state::FilterLink::links(path) => {
+            app.model.set_filter_shift(path, state::snap(value, low, high, step));
+        }
         Kind::Slider(Adjustment::Slider { path, low, high, step, .. }) => {
             app.model.set(path, json::num(state::snap(value, low, high, step)));
         }
@@ -1978,6 +2005,7 @@ fn set_slider(app: &mut App, index: usize, value: f64) {
 
 fn reset_row(app: &mut App, index: usize) {
     match app.inspector.rows[index].kind {
+        Kind::Slider(adjustment) if state::FilterLink::links(adjustment.path()) => app.model.reset_filter_shift(adjustment.path()),
         Kind::Slider(adjustment) => app.model.reset_value(adjustment.path()),
         Kind::Toggle(_, path) | Kind::Choice(_, path, _) => app.model.reset_value(path),
         Kind::BorderSlider(_, field) => {
@@ -2083,6 +2111,11 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         }
         (Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset, RESET) if code == BN_CLICKED => reset_row(app, index),
         (_, LABEL) if code == STN_DBLCLK && !draw::is_dimmed(hwnd) => reset_row(app, index),
+        (Kind::FilterLink(_), COMBO) if code == CBN_SELCHANGE => {
+            if let Some(&link) = state::FilterLink::ALL.get(selection() as usize) {
+                app.model.set_filter_link(link);
+            }
+        }
         (Kind::Choice(_, path, options), COMBO) if code == CBN_SELCHANGE => {
             if let Some(option) = options.get(selection() as usize) {
                 app.model.set(path, Value::String(option.to_string()));
@@ -3805,7 +3838,8 @@ mod tests {
         let title = |name: &'static str| move |k: &Kind| matches!(k, Kind::Group { title, .. } if *title == name);
         let rows = shown(&model);
         assert!(rows.iter().any(slider("enlarger.print_exposure")));
-        assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fourth basic");
+        assert!(rows.iter().any(|k| matches!(k, Kind::FilterLink(..))), "Shifts move is the Enlarger's fourth basic");
+        assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fifth basic");
         assert!(!rows.iter().any(slider("enlarger.preflash_exposure")));
         assert!(!rows.iter().any(slider("camera.lens_blur_um")));
         // Scan & Color always heads its "N more" line, as on the Mac.

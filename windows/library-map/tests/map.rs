@@ -352,3 +352,29 @@ fn a_flip_goes_through_the_sidecar_and_back() {
     library.close().unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Enlarger › Shifts move (`FilterLinkTests` on the Mac): the other shift
+/// follows by the same change, so nothing jumps on switching, and both stop
+/// at either end. The preference uses the Mac's key and words.
+#[test]
+fn linked_shifts_move_as_the_macs() {
+    use state::FilterLink;
+    let (m, y) = (FilterLink::MAGENTA, FilterLink::YELLOW);
+    assert_eq!(FilterLink::Separate.shifts(m, 15.0, 10.0, -5.0), (15.0, -5.0));
+    assert_eq!(FilterLink::Together.shifts(m, 15.0, 10.0, -5.0), (15.0, 0.0));
+    assert_eq!(FilterLink::Together.shifts(y, -8.0, 10.0, -5.0), (7.0, -8.0));
+    assert_eq!(FilterLink::Opposite.shifts(m, 15.0, 10.0, -5.0), (15.0, -10.0));
+    // Yellow reaches 50 after 10 of the 30 asked.
+    assert_eq!(FilterLink::Together.shifts(m, 30.0, 0.0, 40.0), (10.0, 50.0));
+    assert_eq!(FilterLink::Opposite.shifts(y, 30.0, -45.0, 0.0), (-50.0, 5.0));
+    // Moving the other way is never held back.
+    assert_eq!(FilterLink::Together.shifts(m, -10.0, 0.0, 50.0), (-10.0, 40.0));
+    // Balance Print writes unrounded shifts; the follower isn't snapped.
+    let (a, b) = FilterLink::Together.shifts(m, 4.0, 3.4567, -1.2345);
+    assert!((a - b - (3.4567 + 1.2345)).abs() < 1e-9);
+    for link in FilterLink::ALL {
+        assert_eq!(FilterLink::from_key(link.key()), link);
+    }
+    assert_eq!(FilterLink::ALL.map(FilterLink::title), ["Separately", "Together", "Opposite ways"]);
+    assert_eq!(FilterLink::from_key(""), FilterLink::Separate);
+}

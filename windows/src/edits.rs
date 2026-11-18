@@ -61,7 +61,7 @@ pub const PRINT_DEVELOPMENT: &str = "print_render.development_time";
 const CAMERA_LOOSE: [&str; 3] = ["camera.exposure_compensation_ev", "camera.film_format_mm", "camera.lens_blur_um"];
 
 fn control_modified(control: &Adjustment, model: &Model) -> bool {
-    !matches!(control, Adjustment::BalancePrint { .. }) && model.is_modified(control.path())
+    !matches!(control, Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. }) && model.is_modified(control.path())
 }
 
 /// A module's count: its switch, then its controls.
@@ -221,7 +221,7 @@ fn append(out: &mut Vec<Edit>, control: &Adjustment, group: Option<&str>, model:
         }
         Adjustment::Toggle { title, path } => out.push(Edit { title: titled(title), value: on_off(json::boolean(model.value(path))), target: Target::Param(path) }),
         Adjustment::Choice { title, path, .. } => out.push(Edit { title: titled(title), value: state::option_title(&json::string(model.value(path))), target: Target::Param(path) }),
-        Adjustment::BalancePrint { .. } => {}
+        Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. } => {}
     }
 }
 
