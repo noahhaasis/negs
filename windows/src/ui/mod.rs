@@ -394,7 +394,7 @@ pub mod testing {
                 original_key: None,
                 drop_target_active: false,
                 view: Default::default(),
-                    quitting: false,
+                quitting: false,
                 preview_monitor: 0,
             }
         }
