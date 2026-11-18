@@ -89,6 +89,9 @@ pub enum Glyph {
     Strike(u32),
     /// Light table's highlighter under a name, this many tenths of a DIP wide.
     Highlight(u32),
+    /// The film strip's leader, raised under the pointer: its slanted edge
+    /// anti-aliased, under the leader's window (`strip::shape_leader`).
+    Tongue(bool),
 }
 
 impl Glyph {
@@ -99,6 +102,7 @@ impl Glyph {
             Glyph::Turn(_) => (24.0, 24.0),
             Glyph::Strike(w) => (w as f64 / 10.0, 6.0),
             Glyph::Highlight(w) => (w as f64 / 10.0, 6.0 + negs_marks::HIGHLIGHTER_WIDTH),
+            Glyph::Tongue(_) => (crate::sheet_rules::LEADER_WIDTH, crate::sheet_rules::LEADER_RAISED),
         }
     }
 
@@ -151,6 +155,16 @@ impl Glyph {
             Glyph::Highlight(w) => {
                 let inset = negs_marks::HIGHLIGHTER_WIDTH as f32 / 2.0;
                 p.pencil_width(RectF::new(inset, inset, w as f32 / 10.0 - 2.0 * inset, 6.0), negs_marks::HIGHLIGHTER_WIDTH as f32, white);
+            }
+            Glyph::Tongue(raised) => {
+                use crate::sheet_rules::{LEADER_HEIGHT, LEADER_RAISED, LEADER_SLANT, LEADER_WIDTH};
+                // `polygon(0 100%, 28px 0, 100% 0, 100% 100%)`.
+                let shape = move || {
+                    let (w, h) = (LEADER_WIDTH, LEADER_RAISED);
+                    let top = h - if raised { LEADER_RAISED } else { LEADER_HEIGHT };
+                    Path::polygon(&[Pt { x: 0.0, y: h }, Pt { x: LEADER_SLANT, y: top }, Pt { x: w, y: top }, Pt { x: w, y: h }])
+                };
+                p.path(0x7a60 + raised as u64, shape, 0.0, 0.0, None, white);
             }
         }
     }

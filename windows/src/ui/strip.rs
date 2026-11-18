@@ -607,6 +607,14 @@ pub fn layout_leader(app: &mut App, column: i32, edge: i32, shown: bool) {
         let _ = SetWindowPos(leader, HWND_TOP, column - w, edge - h, w, h, SWP_NOACTIVATE | if shown { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW });
     }
     shape_leader(app);
+    leader_on_canvas(app);
+}
+
+/// The canvas draws the tongue under the leader's window, whose shape is
+/// aliased: its smooth slanted edge shows just outside the window's.
+fn leader_on_canvas(app: &App) {
+    let shown = !app.strip_view.leader.is_invalid() && app.strip_view.leader_shown && !app.model.cropping() && !super::grid::shown(app);
+    super::canvas::set_leader(shown.then_some(app.strip_view.leader_hover));
 }
 
 fn sync_leader(app: &mut App) {
@@ -618,6 +626,7 @@ fn sync_leader(app: &mut App) {
         }
         invalidate(leader);
     }
+    leader_on_canvas(app);
 }
 
 fn ensure_leader(app: &mut App) -> HWND {
@@ -632,14 +641,16 @@ fn ensure_leader(app: &mut App) -> HWND {
 }
 
 /// The tongue as the window's shape: `polygon(0 100%, 28px 0, 100% 0,
-/// 100% 100%)`, 24 DIP tall, 30 under the pointer.
+/// 100% 100%)`, 24 DIP tall, 30 under the pointer. The slanted edge is 2 px
+/// inside the canvas's, whose anti-aliased edge shows round it.
 fn shape_leader(app: &App) {
     let leader = app.strip_view.leader;
     let s = app.scale();
     let (w, h) = ((rules::LEADER_WIDTH * s).round() as i32, (rules::LEADER_RAISED * s).round() as i32);
     let tall = ((if app.strip_view.leader_hover { rules::LEADER_RAISED } else { rules::LEADER_HEIGHT }) * s).round() as i32;
     let slant = (rules::LEADER_SLANT * s).round() as i32;
-    let points = [POINT { x: 0, y: h }, POINT { x: slant, y: h - tall }, POINT { x: w, y: h - tall }, POINT { x: w, y: h }];
+    let inset = 2;
+    let points = [POINT { x: inset, y: h }, POINT { x: slant + inset, y: h - tall }, POINT { x: w, y: h - tall }, POINT { x: w, y: h }];
     unsafe {
         let region = CreatePolygonRgn(&points, WINDING);
         SetWindowRgn(leader, region, true);
@@ -692,6 +703,7 @@ extern "system" fn leader_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
                     if !app.strip_view.leader_hover {
                         app.strip_view.leader_hover = true;
                         shape_leader(app);
+                        leader_on_canvas(app);
                         invalidate(hwnd);
                     }
                 });
@@ -701,6 +713,7 @@ extern "system" fn leader_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
                 with_app(|app| {
                     app.strip_view.leader_hover = false;
                     shape_leader(app);
+                    leader_on_canvas(app);
                     invalidate(hwnd);
                 });
                 LRESULT(0)
