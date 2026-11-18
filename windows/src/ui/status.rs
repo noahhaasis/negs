@@ -29,6 +29,7 @@ pub const HEIGHT: f64 = 28.0;
 const PADDING: f32 = 18.0;
 pub const WORDS: TextStyle = TextStyle::ui(11.0, 400);
 const STRONG: TextStyle = TextStyle::ui(11.0, 600);
+const CAP: TextStyle = TextStyle::ui(9.5, 400);
 
 /// A word's ink.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -66,6 +67,8 @@ pub struct Tools {
     pub cropping: bool,
     /// Couldn't develop: nothing to compare or zoom.
     pub failed: bool,
+    /// Comparing, and whether as a slider: Compare's tools instead.
+    pub compare: Option<bool>,
 }
 
 /// What the line shows.
@@ -85,10 +88,14 @@ enum Word {
     Fit,
     Actual,
     Cancel,
+    SideBySide,
+    Slider,
+    Swap,
+    Done,
 }
 
 impl Word {
-    const ALL: [Word; 5] = [Word::Original, Word::OriginalMenu, Word::Fit, Word::Actual, Word::Cancel];
+    const ALL: [Word; 9] = [Word::Original, Word::OriginalMenu, Word::Fit, Word::Actual, Word::Cancel, Word::SideBySide, Word::Slider, Word::Swap, Word::Done];
 
     fn tip(self) -> &'static str {
         match self {
@@ -97,6 +104,10 @@ impl Word {
             Word::Fit => "Fit photograph (Ctrl+0)",
             Word::Actual => "Actual size (Ctrl+1)",
             Word::Cancel => "Stop exporting",
+            Word::SideBySide => "Show the two side by side (S)",
+            Word::Slider => "Show the two in one frame with a line between them (S)",
+            Word::Swap => "Swap the two photographs' places",
+            Word::Done => "Stop comparing (Esc)",
         }
     }
 }
@@ -215,7 +226,29 @@ fn paint(hwnd: HWND, dc: HDC) {
             *right = x - gap;
             r
         };
-        if let Some(tools) = line.tools {
+        // A key in a box after a word, as the Mac's `KeyCap`.
+        let cap = |p: &mut Painter, key: &str, right: &mut f32| {
+            let m = p.measure(key, &CAP, 0.0);
+            let r = RectF::new(*right - m.width - 8.0, (h / 2.0 - 8.0).round(), m.width + 8.0, 16.0);
+            p.stroke_round_rect(RectF::new(r.x + 0.5, r.y + 0.5, r.w - 1.0, r.h - 1.0), 3.0, 1.0, Ink::hex(t.hex.track));
+            p.text(key, &CAP, r.x + 4.0, baseline - m.baseline, Ink::hex(t.hex.dim));
+            *right = r.x - 6.0;
+        };
+        let rule = |p: &mut Painter, right: &mut f32| {
+            p.fill_rect(RectF::new(*right, (h / 2.0 - 5.0).round(), 1.0, 10.0), Ink::hex(t.hex.track));
+            *right -= 14.0;
+        };
+        if let Some(slider) = line.tools.and_then(|t| t.compare) {
+            // Side by side  Slider [S] | Swap | Done [Esc] (`CompareTools`).
+            cap(p, "Esc", &mut right);
+            word(p, "Done", Some(Word::Done), Tone::Dim, true, &mut right, 14.0);
+            rule(p, &mut right);
+            word(p, "Swap", Some(Word::Swap), Tone::Dim, true, &mut right, 14.0);
+            rule(p, &mut right);
+            cap(p, "S", &mut right);
+            word(p, "Slider", Some(Word::Slider), if slider { Tone::Paper } else { Tone::Dim }, true, &mut right, 12.0);
+            word(p, "Side by side", Some(Word::SideBySide), if slider { Tone::Dim } else { Tone::Paper }, true, &mut right, 16.0);
+        } else if let Some(tools) = line.tools {
             let zoom = !tools.cropping && !tools.failed;
             word(p, "100%", Some(Word::Actual), if fitting { Tone::Dim } else { Tone::Paper }, zoom, &mut right, 14.0);
             word(p, "Fit", Some(Word::Fit), if fitting { Tone::Paper } else { Tone::Dim }, zoom, &mut right, 14.0);
@@ -354,9 +387,17 @@ fn act(word: Word) {
         Word::Fit => id::FIT,
         Word::Actual => id::ACTUAL,
         Word::Cancel => id::CANCEL_EXPORT,
+        Word::SideBySide => return compare_tool(super::compare::Tool::SideBySide),
+        Word::Slider => return compare_tool(super::compare::Tool::Slider),
+        Word::Swap => return compare_tool(super::compare::Tool::Swap),
+        Word::Done => return compare_tool(super::compare::Tool::Done),
         Word::Original | Word::OriginalMenu => return,
     };
     with_app(|app| app.command(command));
+}
+
+fn compare_tool(tool: super::compare::Tool) {
+    with_app(|app| super::compare::act(app, tool));
 }
 
 fn set_hot(hwnd: HWND, hot: Option<Word>) {

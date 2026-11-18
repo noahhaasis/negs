@@ -1,14 +1,18 @@
 //! Compare's view (ticket 46, `CompareCanvas.swift`): it takes the
 //! canvas's place while comparing. Side by side, each photograph in its own
-//! frame with its number and stocks under it, the edited one's number
-//! ringed in pencil; as a slider, one frame with the first left of a line
-//! that drags. A click on the other photograph edits it; along the top,
-//! Side by side · Slider, Swap and Done. Keys: S, ← →, Esc, C.
+//! frame: over it its number in a ring (the edited one's in pencil) and what
+//! the camera wrote down, the facts that differ underlined; under it its
+//! film, printed on its paper. As a slider, one frame with the first left
+//! of a line that drags, the first's words on the left and the second's on
+//! the right. A click on the other photograph edits it. The tools (Side by
+//! side · Slider, Swap, Done) are in the status line; keys S, ← →, Esc, C.
 //!
 //! The pictures are drawn through the monitor's profile as the tray's
 //! tiles are (`previews::Bitmap`), with GDI's halftone stretch.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use windows::Win32::Foundation::*;
@@ -17,54 +21,78 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
-use super::d2d::{Ink, RectF, TextStyle};
+use super::d2d::{Ink, Painter, RectF, TextStyle};
 use super::draw::{self, Canvas};
-use super::{App, theme, with_app};
+use super::sheet::SheetInk;
+use super::{App, post, theme, with_app};
 use crate::compare::{self as rules, Layout, Side};
 use crate::previews::Bitmap;
 
-const NUMBER: TextStyle = TextStyle::serif(24.0, 600);
-const STOCKS: TextStyle = TextStyle::serif(15.0, 400).italic();
-const TOOL: TextStyle = TextStyle::serif(15.0, 400).italic();
-const TOOL_ON: TextStyle = TextStyle::serif(15.0, 600).italic();
+/// The print's caption and label styles (`canvas/print.rs`).
+const NUMBER: TextStyle = TextStyle::serif(15.0, 600);
+const FACT: TextStyle = TextStyle::serif(15.0, 400).italic();
+const FILM: TextStyle = TextStyle::serif(24.0, 600).tracking(-0.01);
+const KIND: TextStyle = TextStyle::serif(14.0, 400).italic();
+const PAPER: TextStyle = TextStyle::serif(17.5, 400);
+/// The number's ring, in DIPs.
+const RING: f32 = 26.0;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Tool {
-    SideBySide,
-    Slider,
-    Swap,
-    Done,
+/// What's written round one photograph.
+#[derive(Clone, Default, PartialEq)]
+struct Words {
+    number: String,
+    /// The camera's facts, once read.
+    facts: Option<crate::photo_facts::PhotoFacts>,
+    film: String,
+    paper: Option<String>,
 }
-
-const TOOLS: [(Tool, &str, &str); 4] = [
-    (Tool::SideBySide, "Side by side", "Show the two side by side (S)"),
-    (Tool::Slider, "Slider", "Show the two in one frame, a line between them (S)"),
-    (Tool::Swap, "Swap", "Swap the two photographs' places"),
-    (Tool::Done, "Done", "Stop comparing (Esc)"),
-];
 
 struct View {
     hwnd: HWND,
     /// Each side's picture, by the pixels it was made from.
     bitmaps: [Option<(usize, Arc<Bitmap>)>; 2],
     aspects: [f64; 2],
-    words: [(String, String); 2],
+    words: [Words; 2],
     comparison: Option<rules::Comparison>,
-    /// Where things were last drawn, in DIPs: the photographs and the tools.
+    /// Where the photographs were last drawn, in DIPs.
     frames: [RectF; 2],
-    tools: Vec<(Tool, RectF)>,
     dragging: bool,
 }
 
 impl Default for View {
     fn default() -> Self {
         let none = RectF::new(0.0, 0.0, 0.0, 0.0);
-        Self { hwnd: HWND::default(), bitmaps: [None, None], aspects: [1.5; 2], words: Default::default(), comparison: None, frames: [none, none], tools: vec![], dragging: false }
+        Self { hwnd: HWND::default(), bitmaps: [None, None], aspects: [1.5; 2], words: Default::default(), comparison: None, frames: [none, none], dragging: false }
     }
 }
 
 thread_local! {
     static VIEW: RefCell<View> = RefCell::new(View::default());
+    /// The camera's facts by file, read on a thread the first time.
+    static FACTS: RefCell<HashMap<PathBuf, Option<crate::photo_facts::PhotoFacts>>> = RefCell::new(HashMap::new());
+}
+
+/// A file's facts, asking for them the first time.
+fn facts(path: &std::path::Path) -> Option<crate::photo_facts::PhotoFacts> {
+    let known = FACTS.with(|f| f.borrow().get(path).cloned());
+    match known {
+        Some(facts) => facts,
+        None => {
+            FACTS.with(|f| f.borrow_mut().insert(path.to_path_buf(), None));
+            let path = path.to_path_buf();
+            std::thread::Builder::new()
+                .name("compare-facts".into())
+                .spawn(move || {
+                    let facts = crate::photo_facts::PhotoFacts::read(&path).unwrap_or_default();
+                    post(move |app: &mut App| {
+                        FACTS.with(|f| f.borrow_mut().insert(path, Some(facts)));
+                        app.model.dirty |= crate::model::dirty::COMPARE;
+                    });
+                })
+                .ok();
+            None
+        }
+    }
 }
 
 fn hwnd() -> HWND {
@@ -121,7 +149,7 @@ pub fn sync(app: &mut App) {
     let color = app.model.previews.color.clone();
     let mut bitmaps: [Option<(usize, Arc<Bitmap>)>; 2] = VIEW.with(|v| v.borrow().bitmaps.clone());
     let mut aspects = [1.5; 2];
-    let mut words: [(String, String); 2] = Default::default();
+    let mut words: [Words; 2] = Default::default();
     for (i, side) in [&comparison.first, &comparison.second].into_iter().enumerate() {
         let shown = app.model.compared_side(side);
         if let Some(shown) = &shown {
@@ -134,10 +162,10 @@ pub fn sync(app: &mut App) {
             bitmaps[i] = None;
         }
         words[i] = match side {
-            Side::Original(_) => (app.model.original_word().to_string(), String::new()),
+            Side::Original(item) => Words { number: String::new(), facts: facts(&item.photo), film: app.model.original_word().to_string(), paper: None },
             Side::Photo(item) => {
-                let stocks = app.model.compared_stocks(item);
-                (app.model.frame_number(item), stocks)
+                let (film, paper) = app.model.compared_stocks(item);
+                Words { number: app.model.frame_number(item), facts: facts(&item.photo), film, paper }
             }
         };
     }
@@ -154,6 +182,77 @@ pub fn sync(app: &mut App) {
             let _ = InvalidateRect(hwnd, None, false);
         }
     }
+}
+
+/// The caption's facts; the slider's leave out the camera.
+fn items(words: &Words, camera: bool) -> Vec<String> {
+    let Some(facts) = &words.facts else { return vec![] };
+    let facts = if camera { facts.clone() } else { crate::photo_facts::PhotoFacts { camera: None, ..facts.clone() } };
+    facts.items(super::inspector::decimal_separator())
+}
+
+/// Over a photograph: its number in a ring, then its facts, those the
+/// other's differ in underlined. `right` lays it out leftwards from `edge`.
+#[allow(clippy::too_many_arguments)]
+fn caption(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, other: &Words, edge: f32, middle: f32, right: bool, edited: bool, camera: bool) {
+    let facts = items(words, camera);
+    let others = items(other, camera);
+    let dot = "·";
+    let dot_width = p.measure(dot, &FACT, 0.0).width;
+    let widths: Vec<f32> = facts.iter().map(|f| p.measure(f, &FACT, 0.0).width).collect();
+    const DOT_GAP: f32 = 9.0;
+    let facts_width: f32 = widths.iter().sum::<f32>() + (facts.len().saturating_sub(1)) as f32 * (dot_width + 2.0 * DOT_GAP);
+    let has_number = !words.number.is_empty();
+    let number_width = if has_number { RING + 12.0 } else { 0.0 };
+    let total = number_width + facts_width;
+    let x0 = if right { edge - total } else { edge };
+    // The ring, first on the left or last on the right.
+    if has_number {
+        let rx = if right { edge - RING } else { x0 };
+        let r = RectF::new(rx, middle - RING / 2.0, RING, RING);
+        if edited {
+            p.ring(r, negs_marks::Radii::NUMBER, -6.0, Ink::hex(ink.accent));
+        } else {
+            p.stroke_round_rect(RectF::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0), RING / 2.0 - 1.0, 1.2, Ink::hex(ink.dim));
+        }
+        let m = p.measure(&words.number, &NUMBER, 0.0);
+        p.text(&words.number, &NUMBER, rx + (RING - m.width) / 2.0, middle - m.height / 2.0, Ink::hex(ink.paper));
+    }
+    let mut x = if right { x0 } else { x0 + number_width };
+    for (i, (fact, w)) in facts.iter().zip(&widths).enumerate() {
+        if i > 0 {
+            let m = p.measure(dot, &FACT, 0.0);
+            p.text(dot, &FACT, x + DOT_GAP, middle - m.height / 2.0, Ink::hex(ink.dim));
+            x += dot_width + 2.0 * DOT_GAP;
+        }
+        let m = p.measure(fact, &FACT, 0.0);
+        let y = middle - m.height / 2.0;
+        p.text(fact, &FACT, x, y, Ink::hex(ink.label));
+        // Only what differs, and only once the other's facts are known.
+        if i > 0 || !camera {
+            if !others.is_empty() && !others.contains(fact) {
+                p.underline(RectF::new(x, y + m.baseline + 2.0, *w, 5.0), t, false);
+            }
+        } else if !others.is_empty() && others.first() != Some(fact) {
+            p.underline(RectF::new(x, y + m.baseline + 2.0, *w, 5.0), t, false);
+        }
+        x += w;
+    }
+}
+
+/// Under a photograph: its film, and on the next line (or after it, `inline`)
+/// "printed on" its paper.
+fn label(p: &mut Painter, ink: &SheetInk, words: &Words, edge: f32, top: f32, right: bool, inline: bool, with_paper: bool) {
+    let fm = p.measure(&words.film, &FILM, 0.0);
+    let fx = if right { edge - fm.width } else { edge };
+    p.text(&words.film, &FILM, fx, top, Ink::hex(ink.paper));
+    let Some(paper) = words.paper.as_ref().filter(|_| with_paper) else { return };
+    let km = p.measure("printed on", &KIND, 0.0);
+    let pm = p.measure(paper, &PAPER, 0.0);
+    let (x, baseline) = if inline { (fx + fm.width + 14.0, top + fm.baseline) } else { (edge, top + fm.height + 4.0 + pm.baseline) };
+    let x = if right && !inline { edge - km.width - 8.0 - pm.width } else { x };
+    p.text("printed on", &KIND, x, baseline - km.baseline, Ink::hex(ink.dim));
+    p.text(paper, &PAPER, x + km.width + 8.0, baseline - pm.baseline, Ink::hex(ink.paper));
 }
 
 fn paint(hwnd: HWND, dc: HDC) {
@@ -173,12 +272,14 @@ fn paint(hwnd: HWND, dc: HDC) {
         let px = |r: RectF| RECT { left: (r.x * s).round() as i32, top: (r.y * s).round() as i32, right: ((r.x + r.w) * s).round() as i32, bottom: ((r.y + r.h) * s).round() as i32 };
         let blank = theme::gdi(t.film.blank);
         let slider = comparison.layout == Layout::Slider;
+        let mut column = false;
         let frames: [RectF; 2] = if slider {
             let f = rules::slider_frame((w, h), v.aspects[0]);
             let r = RectF::new(f[0] as f32, f[1] as f32, f[2] as f32, f[3] as f32);
             [r, r]
         } else {
-            let (_, f) = rules::layout((w, h), (v.aspects[0], v.aspects[1]));
+            let (arrangement, f) = rules::layout((w, h), (v.aspects[0], v.aspects[1]));
+            column = arrangement == rules::Arrangement::Column;
             f.map(|f| RectF::new(f[0] as f32, f[1] as f32, f[2] as f32, f[3] as f32))
         };
         v.frames = frames;
@@ -199,52 +300,47 @@ fn paint(hwnd: HWND, dc: HDC) {
             }
         }
         let words = v.words.clone();
-        let mut tools = vec![];
+        let edited = |i: usize| comparison.active_first == (i == 0) && !matches!(if i == 0 { &comparison.first } else { &comparison.second }, Side::Original(_));
         c.d2d(s, t.plain, |p| {
-            // Under each photograph: its number, ringed when it's the one
-            // edited, and its film and paper.
-            let places: Vec<(RectF, usize)> = if slider {
-                let f = frames[0];
-                vec![(RectF::new(f.x, f.y, f.w / 2.0, f.h), 0), (RectF::new(f.x + f.w / 2.0, f.y, f.w / 2.0, f.h), 1)]
-            } else {
-                vec![(frames[0], 0), (frames[1], 1)]
-            };
-            for (r, i) in places {
-                let (number, stocks) = &words[i];
-                let m = p.measure(number, &NUMBER, 0.0);
-                let x = if slider && i == 1 { r.x + r.w - m.width } else { r.x };
-                let y = r.y + r.h + 10.0;
-                p.text(number, &NUMBER, x, y, Ink::hex(ink.paper));
-                if comparison.active_first == (i == 0) && !(slider && comparison.against_original()) {
-                    p.ring(RectF::new(x - 8.0, y - 4.0, m.width + 16.0, m.height + 8.0), negs_marks::Radii::NUMBER, -6.0, Ink::hex(ink.accent));
-                }
-                if !stocks.is_empty() {
-                    let sm = p.measure(stocks, &STOCKS, 0.0);
-                    let sx = if slider && i == 1 { x - 14.0 - sm.width } else { x + m.width + 14.0 };
-                    p.text(stocks, &STOCKS, sx, y + m.baseline - sm.baseline, Ink::hex(ink.dim));
-                }
-            }
             if slider {
-                // The line, with a grip in its middle.
                 let f = frames[0];
+                let middle = f.y - 20.0;
+                caption(p, &t, &ink, &words[0], &words[1], f.x, middle, false, edited(0), false);
+                caption(p, &t, &ink, &words[1], &words[0], f.x + f.w, middle, true, edited(1), false);
+                label(p, &ink, &words[0], f.x, f.y + f.h + 8.0, false, true, true);
+                label(p, &ink, &words[1], f.x + f.w, f.y + f.h + 8.0, true, true, false);
+                // The line, with a grip in its middle.
                 let x = f.x + f.w * comparison.split as f32;
-                p.line((x, f.y), (x, f.y + f.h), 1.5, Ink::hex(0xffffff).alpha(0.9));
-                p.fill_rect(RectF::new(x - 3.0, f.y + f.h / 2.0 - 16.0, 6.0, 32.0), Ink::hex(0xffffff).alpha(0.9));
-            }
-            // The tools along the top, from the right.
-            let mut x = (w as f32) - 24.0;
-            for (tool, title, _) in TOOLS.iter().rev() {
-                let on = matches!((tool, comparison.layout), (Tool::SideBySide, Layout::SideBySide) | (Tool::Slider, Layout::Slider));
-                let style = if on { TOOL_ON } else { TOOL };
-                let m = p.measure(title, &style, 0.0);
-                x -= m.width;
-                let y = ((rules::CAPTION as f32) - m.height) / 2.0;
-                p.text(title, &style, x, y, Ink::hex(if on { ink.paper } else { ink.label }));
-                tools.push((*tool, RectF::new(x - 6.0, y - 4.0, m.width + 12.0, m.height + 8.0)));
-                x -= if matches!(tool, Tool::Slider) { 10.0 } else { 26.0 };
+                let cy = f.y + f.h / 2.0;
+                let white = Ink::hex(0xffffff).alpha(0.92);
+                p.line((x, f.y), (x, f.y + f.h), 1.5, white);
+                p.fill_ellipse(x, cy, 13.0, 13.0, Ink::hex(0x111111).alpha(0.85));
+                p.stroke_round_rect(RectF::new(x - 13.0, cy - 13.0, 26.0, 26.0), 13.0, 1.5, white);
+                for (a, b, c2) in [((x - 3.0, cy - 4.0), (x - 6.5, cy), (x - 3.0, cy + 4.0)), ((x + 3.0, cy - 4.0), (x + 6.5, cy), (x + 3.0, cy + 4.0))] {
+                    p.line(a, b, 1.4, white);
+                    p.line(b, c2, 1.4, white);
+                }
+            } else if column {
+                // Stacked: one line over each, the film on its right.
+                for i in 0..2 {
+                    let f = frames[i];
+                    let middle = f.y - rules::STACKED_CAPTION as f32 / 2.0;
+                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, middle, false, edited(i), true);
+                    let film = match &words[i].paper {
+                        Some(paper) => format!("{} printed on {}", words[i].film, paper),
+                        None => words[i].film.clone(),
+                    };
+                    let m = p.measure(&film, &FACT, 0.0);
+                    p.text(&film, &FACT, f.x + f.w - m.width, middle - m.height / 2.0, Ink::hex(ink.paper));
+                }
+            } else {
+                for i in 0..2 {
+                    let f = frames[i];
+                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, f.y - 20.0, false, edited(i), true);
+                    label(p, &ink, &words[i], f.x, f.y + f.h + 8.0, false, false, true);
+                }
             }
         });
-        v.tools = tools;
     });
 }
 
@@ -258,13 +354,22 @@ fn contains(r: &RectF, (x, y): (f32, f32)) -> bool {
     x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h
 }
 
-fn act(tool: Tool) {
-    with_app(|app| match tool {
+/// The status line's tools while comparing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tool {
+    SideBySide,
+    Slider,
+    Swap,
+    Done,
+}
+
+pub fn act(app: &mut App, tool: Tool) {
+    match tool {
         Tool::SideBySide => app.model.set_compare_layout(Layout::SideBySide),
         Tool::Slider => app.model.set_compare_layout(Layout::Slider),
         Tool::Swap => app.model.swap_compared(),
         Tool::Done => leave(app),
-    });
+    }
 }
 
 /// Leaves compare for where it was entered.
@@ -346,14 +451,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_LBUTTONDOWN => {
                 let p = at(lparam, hwnd);
-                let (tool, frames, comparison) = VIEW.with(|v| {
+                let (frames, comparison) = VIEW.with(|v| {
                     let v = v.borrow();
-                    (v.tools.iter().find(|(_, r)| contains(r, p)).map(|(t, _)| *t), v.frames, v.comparison.clone())
+                    (v.frames, v.comparison.clone())
                 });
-                if let Some(tool) = tool {
-                    act(tool);
-                    return LRESULT(0);
-                }
                 let Some(comparison) = comparison else { return LRESULT(0) };
                 if comparison.layout == Layout::Slider {
                     if contains(&frames[0], p) {
@@ -389,21 +490,15 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 let _ = ScreenToClient(hwnd, &mut p);
                 let s = draw::dpi_of(hwnd);
                 let point = (p.x as f32 / s, p.y as f32 / s);
-                let (over_tool, over_frame, slider) = VIEW.with(|v| {
+                let (over_frame, slider) = VIEW.with(|v| {
                     let v = v.borrow();
-                    (v.tools.iter().any(|(_, r)| contains(r, point)), v.frames.iter().any(|r| contains(r, point)), v.comparison.as_ref().is_some_and(|c| c.layout == Layout::Slider))
+                    (v.frames.iter().any(|r| contains(r, point)), v.comparison.as_ref().is_some_and(|c| c.layout == Layout::Slider))
                 });
-                let cursor = if over_tool || (over_frame && !slider) { IDC_HAND } else if over_frame { IDC_SIZEWE } else { IDC_ARROW };
+                let cursor = if over_frame && !slider { IDC_HAND } else if over_frame { IDC_SIZEWE } else { IDC_ARROW };
                 let _ = SetCursor(LoadCursorW(None, cursor).unwrap_or_default());
                 LRESULT(1)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
-}
-
-/// The tools' tooltips, by tool.
-#[allow(dead_code)]
-fn tool_help(tool: Tool) -> &'static str {
-    TOOLS.iter().find(|(t, _, _)| *t == tool).map_or("", |(_, _, help)| help)
 }

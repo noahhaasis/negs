@@ -735,8 +735,11 @@ impl App {
                 format!("Cropping · {} · {} × {} px", session.aspect.title(), size.0.round() as i64, size.1.round() as i64),
                 Tone::Dim,
             ));
-        } else if model.comparison().is_some() {
-            left.push(Span::new(model.compare_summary(), Tone::Dim));
+        } else if let Some(c) = model.comparison() {
+            left.push(Span::new(model.compare_summary(), Tone::Label));
+            if !c.against_original() {
+                left.push(Span::new("    ← → steps the right one", Tone::Dim));
+            }
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
         }
@@ -745,6 +748,7 @@ impl App {
             holding: model.holding_original,
             cropping: model.cropping(),
             failed: model.render_failed && model.develop_error.is_some(),
+            compare: model.comparison().map(|c| c.layout == crate::compare::Layout::Slider),
         });
         status::set(status::Line { left, cancel: model.exporting, tools });
         unsafe {

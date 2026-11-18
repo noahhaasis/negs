@@ -400,20 +400,21 @@ impl Model {
         self.compare_with_original(layout);
     }
 
-    /// "Portra 400 on Endura": a photograph's film and paper, from its sidecar
-    /// unless it's open.
-    pub fn compared_stocks(&self, item: &Item) -> String {
+    /// A photograph's film and paper ("Kodak Gold 200", "Kodak Professional
+    /// Portra Endura"), from its sidecar unless it's open; no paper when the
+    /// film is scanned.
+    pub fn compared_stocks(&self, item: &Item) -> (String, Option<String>) {
         let name = |id: &str, paper: bool| self.stocks.iter().find(|s| s.paper == paper && s.id == id).map_or_else(|| id.to_string(), |s| s.name.clone());
         let (film, paper, scanning) = if self.library_item().as_ref() == Some(item) {
             (self.state.film.clone(), self.state.paper.clone(), json::boolean(self.value("io.scan_film")))
         } else {
-            let Some(library) = &self.shelf.library else { return String::new() };
+            let Some(library) = &self.shelf.library else { return Default::default() };
             let (stored, _) = library.thumbnail_state(item).unwrap_or_else(|| (library.unedited_state(), false));
-            let Ok(state) = library_map::from_library(&stored, false) else { return String::new() };
+            let Ok(state) = library_map::from_library(&stored, false) else { return Default::default() };
             let scanning = json::boolean(state.value("io.scan_film"));
             (state.film, state.paper, scanning)
         };
-        if scanning { name(&film, false) } else { format!("{} on {}", name(&film, false), name(&paper, true)) }
+        (name(&film, false), (!scanning).then(|| name(&paper, true)))
     }
 
     /// The context menu's Compare for a right-click on `item`: the selection
