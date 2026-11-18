@@ -406,6 +406,21 @@ pub fn clean_up(folder: &Path, libraries: Option<&[PathBuf]>, now: SystemTime) -
     result
 }
 
+/// The bytes the files in `folder` take; None if it's missing.
+pub fn size_of(folder: &Path) -> Option<u64> {
+    let files = std::fs::read_dir(folder).ok()?;
+    Some(files.flatten().filter(|e| !e.file_name().to_string_lossy().starts_with('.')).filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum())
+}
+
+/// Deletes the TIFFs in `folder` (only those Negs makes), keeping the folder.
+pub fn delete_sent(folder: &Path) {
+    for file in std::fs::read_dir(folder).into_iter().flatten().flatten().map(|e| e.path()) {
+        if file.extension().is_some_and(|e| e.eq_ignore_ascii_case("tif") || e.eq_ignore_ascii_case("tiff")) {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+}
+
 // MARK: Opening
 
 /// Hands `files` to Lightroom at `app` in one launch, so it asks once. A
@@ -522,6 +537,13 @@ mod tests {
         assert_eq!(cleanup, Cleanup { copied: 1, expired: 0, waiting: 2 });
         let week = SystemTime::now() + KEEP + Duration::from_secs(60);
         assert_eq!(clean_up(&folder, Some(&[]), week), Cleanup { copied: 0, expired: 2, waiting: 0 });
+        // Settings › Lightroom: what's left, and Delete Sent Copies (TIFFs only).
+        std::fs::write(folder.join("d-Negs.tif"), b"dddddd").unwrap();
+        std::fs::write(folder.join("notes.txt"), b"nn").unwrap();
+        assert_eq!(size_of(&folder), Some(8));
+        delete_sent(&folder);
+        assert_eq!(size_of(&folder), Some(2));
+        assert_eq!(size_of(&dir.join("missing")), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -31,6 +31,7 @@ use super::theme::{self, ThemeName};
 use super::{App, create, ink, titlebar, with_app};
 use crate::model::Model;
 use crate::platform::wide;
+use crate::lightroom::Kind;
 use crate::state::FotufilmFilms;
 use super::sheet::ViewerSheet;
 
@@ -104,6 +105,8 @@ enum Hint {
     Pairing,
     /// What Save ratings and edits next to photos does, on or off.
     Sidecars,
+    /// What happens to the copies sent to a Lightroom (ticket 48).
+    Lightroom(Kind),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -117,6 +120,73 @@ enum Item {
     /// "Last checked …" and Check for Updates….
     CheckUpdates,
     Themes,
+    /// "1.2 GB sent" and Delete Sent Copies (ticket 48).
+    Lightroom(Kind),
+}
+
+/// Under Settings › Lightroom (`Settings.swift`).
+const LIGHTROOM_CLOUD: &str = "Open in Lightroom sends full-size 16-bit TIFFs. Each is deleted once Lightroom has copied it into its library, or after a week.";
+const LIGHTROOM_CLASSIC: &str = "Lightroom Classic adds the TIFFs in “Negs for Lightroom” in Pictures where they are, so Negs never deletes them. Delete them only once Classic no longer needs them.";
+
+/// Settings › Lightroom's rows, after Updates.
+fn lightroom_items() -> Vec<Item> {
+    let mut items = vec![Item::Section("Lightroom")];
+    for kind in Kind::ALL {
+        items.push(Item::Lightroom(kind));
+        items.push(Item::Hint(Hint::Lightroom(kind)));
+    }
+    items
+}
+
+thread_local! {
+    /// The bytes each Lightroom's sent copies take (`Kind::ALL`'s order),
+    /// measured off the UI thread when Settings opens; None until then or
+    /// without the folder.
+    static SENT: Cell<[Option<u64>; 2]> = const { Cell::new([None, None]) };
+    static DELETING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether Settings › Lightroom shows `kind`: installed, or copies left.
+fn lightroom_shown(model: &Model, kind: Kind) -> bool {
+    model.lightroom_kinds().contains(&kind) || SENT.with(Cell::get)[kind as usize].is_some_and(|b| b > 0)
+}
+
+/// Whether a row shows: Settings › Lightroom only with a Lightroom to name.
+fn row_shown(model: &Model, item: Item) -> bool {
+    match item {
+        Item::Section("Lightroom") => Kind::ALL.into_iter().any(|k| lightroom_shown(model, k)),
+        Item::Lightroom(kind) | Item::Hint(Hint::Lightroom(kind)) => lightroom_shown(model, kind),
+        _ => true,
+    }
+}
+
+/// "4.9 MB", as the Mac's `ByteCountFormatter` in its file style.
+fn byte_count(bytes: u64) -> String {
+    let units = ["bytes", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1000.0 && unit < units.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    match unit {
+        0 if bytes == 0 => "Zero KB".into(),
+        0 => format!("{bytes} bytes"),
+        1 => format!("{} KB", value.round()),
+        _ => format!("{value:.1} {}", units[unit]),
+    }
+}
+
+/// Measures the sent copies, then shows them.
+fn measure_sent() {
+    std::thread::spawn(|| {
+        let sizes = Kind::ALL.map(|k| crate::lightroom::size_of(&k.folder()));
+        super::post(move |app: &mut App| {
+            SENT.with(|s| s.set(sizes));
+            sync(app);
+            layout(app);
+        });
+    });
 }
 
 /// Under Settings › New photographs' film and paper (`Settings.swift`).
@@ -161,17 +231,23 @@ fn items(tab: Tab) -> Vec<Item> {
             Item::Tick("Use less memory for export", Tick::LowMemory),
             Item::Hint(Hint::Text("Develops the grain one colour at a time. Same result, less memory, longer export.")),
         ],
-        Tab::Upkeep if crate::updates::configured() => vec![
+        Tab::Upkeep if crate::updates::configured() => [
             Item::Section("Updates"),
             Item::Tick("Automatically check for updates", Tick::AutoUpdates),
             Item::Hint(Hint::Text("Updates are installed only when you choose to restart Negs.")),
             Item::CheckUpdates,
-        ],
-        Tab::Upkeep => vec![
+        ]
+        .into_iter()
+        .chain(lightroom_items())
+        .collect(),
+        Tab::Upkeep => [
             Item::Section("Updates"),
             Item::Readout("Updates are not configured for this build."),
             Item::Hint(Hint::Text("Install a release build to receive updates.")),
-        ],
+        ]
+        .into_iter()
+        .chain(lightroom_items())
+        .collect(),
         Tab::Look => vec![
             Item::Section("Theme"),
             Item::Themes,
@@ -234,6 +310,7 @@ pub fn open(app: &mut App) {
     }
     let Some(s) = &app.settings else { return };
     let window = s.window;
+    measure_sent();
     sync(app);
     layout(app);
     unsafe {
@@ -337,6 +414,16 @@ fn create_row(page: HWND, font: HFONT, item: Item, first: u16) -> Vec<HWND> {
             vec![ink_static(text, Role::Hint, 0, false)]
         }
         Item::Readout(text) => vec![ink_static(text, Role::Label, 0, false)],
+        Item::Lightroom(kind) => {
+            // Painted here as "Lightroom 1.2 GB sent", the figure in `paper`.
+            let lead = create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), page, first, font);
+            super::accessible_role(lead, 0x29);
+            let title = if kind == Kind::Cloud { "Delete Sent Copies" } else { "Delete Copies…" };
+            let button = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), page, first + 1, font);
+            draw::set_role(button, Role::Outlined);
+            draw::track_hover(button);
+            vec![lead, button]
+        }
         Item::CheckUpdates => {
             // Painted here: "Last checked" in italic `dim`, the time in `paper`.
             let lead = create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), page, first, font);
@@ -370,6 +457,8 @@ fn hint_text(model: &Model, hint: Hint) -> &'static str {
         Hint::Pairing => PAIRED_JPEGS,
         Hint::Sidecars if model.prefs.library.sidecars() => SIDECARS_ON,
         Hint::Sidecars => SIDECARS_OFF,
+        Hint::Lightroom(Kind::Cloud) => LIGHTROOM_CLOUD,
+        Hint::Lightroom(Kind::Classic) => LIGHTROOM_CLASSIC,
     }
 }
 
@@ -474,12 +563,27 @@ pub fn sync(app: &mut App) {
                 }
             }
             Item::Hint(hint) => {
+                if hint == Hint::Lightroom(Kind::Classic) {
+                    // Classic's copies go missing there once deleted: a warning.
+                    ink::set_look(c[0], ink::Look { warn: true, ..Default::default() });
+                }
                 let text = hint_text(model, hint);
                 hints_changed |= draw::window_text(c[0]) != text;
                 set_text(c[0], text);
             }
             Item::CheckUpdates => {
                 set_text(c[0], &crate::updates::last_check().unwrap_or_default());
+            }
+            Item::Lightroom(kind) => {
+                // "Lightroom\t1.2 GB": the lead only with both shown, as the Mac's.
+                let both = Kind::ALL.into_iter().filter(|k| lightroom_shown(model, *k)).count() > 1;
+                let bytes = SENT.with(Cell::get)[kind as usize];
+                let figure = bytes.map_or("…".to_string(), byte_count);
+                set_text(c[0], &format!("{}\t{figure}", if both { kind.title() } else { "" }));
+                let running = model.batch.as_ref().is_some_and(|b| b.running);
+                unsafe {
+                    let _ = EnableWindow(c[1], !DELETING.with(Cell::get) && bytes.unwrap_or(0) > 0 && !running);
+                }
             }
             Item::Themes => {
                 for (i, &swatch) in c.iter().enumerate() {
@@ -522,7 +626,7 @@ pub fn layout(app: &mut App) {
     rules.push(y - rule);
     let mut in_section = false;
     let hint_height = |hwnd: HWND| (ink::hint_height(&draw::window_text(hwnd), (right - gutter) as f32 / scale) * scale).ceil() as i32;
-    for row in s.rows.iter().filter(|r| r.tab == s.tab) {
+    for row in s.rows.iter().filter(|r| r.tab == s.tab && row_shown(&app.model, r.item)) {
         let c = &row.controls;
         let height = match row.item {
             Item::Section(_) => {
@@ -556,6 +660,13 @@ pub fn layout(app: &mut App) {
             }
             Item::CheckUpdates => {
                 let button = px(ink::width("Check for Updates…", &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                positions.push((c[0], gutter, y, right - gutter - button, px(35.0)));
+                positions.push((c[1], right - button + margin, y, button, px(35.0)));
+                px(35.0)
+            }
+            Item::Lightroom(kind) => {
+                let title = if kind == Kind::Cloud { "Delete Sent Copies" } else { "Delete Copies…" };
+                let button = px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
                 positions.push((c[0], gutter, y, right - gutter - button, px(35.0)));
                 positions.push((c[1], right - button + margin, y, button, px(35.0)));
                 px(35.0)
@@ -748,6 +859,7 @@ fn command(app: &mut App, id: u16, code: u32) {
             }
         }
         Item::CheckUpdates if code == BN_CLICKED && part == 1 => crate::updates::check(true),
+        Item::Lightroom(kind) if code == BN_CLICKED && part == 1 => return delete_sent(app, kind),
         Item::Themes if code == BN_CLICKED => {
             let theme = ThemeName::ALL[part as usize];
             if theme::chosen() != theme {
@@ -757,6 +869,34 @@ fn command(app: &mut App, id: u16, code: u32) {
         _ => return,
     }
     sync(app);
+}
+
+/// Delete Sent Copies; Classic's after asking, as it may still use them.
+fn delete_sent(app: &mut App, kind: Kind) {
+    if DELETING.with(Cell::get) || app.model.batch.as_ref().is_some_and(|b| b.running) {
+        return;
+    }
+    if kind == Kind::Classic {
+        let alert = super::alert::Alert::new(
+            "Delete the TIFFs sent to Lightroom Classic?",
+            Some("Lightroom Classic may still use them: photos it added from “Negs for Lightroom” go missing there.".into()),
+        )
+        .buttons(&["Delete", "Cancel"], Some(1));
+        let owner = app.settings.as_ref().map_or(app.main, |s| s.window);
+        if super::alert::ask(owner, alert) != 0 {
+            return;
+        }
+    }
+    DELETING.with(|d| d.set(true));
+    sync(app);
+    std::thread::spawn(move || {
+        crate::lightroom::delete_sent(&kind.folder());
+        super::post(|app: &mut App| {
+            DELETING.with(|d| d.set(false));
+            measure_sent();
+            sync(app);
+        });
+    });
 }
 
 // MARK: Painting
@@ -854,6 +994,25 @@ fn paint_last_check(item: &DRAWITEMSTRUCT) {
     c.clear(theme::gdi(t.hex.panel));
     let h = (item.rcItem.bottom - item.rcItem.top) as f32 / s;
     let when = draw::window_text(hwnd);
+    // Settings › Lightroom's "Lightroom 1.2 GB sent".
+    if let Some((lead, figure)) = when.split_once('\t') {
+        c.d2d(s, t.plain, |p| {
+            const WORDS: super::d2d::TextStyle = super::d2d::TextStyle::serif(14.5, 400).italic();
+            let fig = p.measure(figure, &ink::VALUE, 0.0);
+            let y = ((h - ink::VALUE.size) / 2.0 - (fig.baseline - ink::VALUE.size * 0.75)).round();
+            let mut x = 0.0;
+            if !lead.is_empty() {
+                let m = p.measure(lead, &WORDS, 0.0);
+                p.text(lead, &WORDS, 0.0, y + fig.baseline - m.baseline, Ink::hex(t.hex.dim));
+                x = m.width + 5.0;
+            }
+            p.text(figure, &ink::VALUE, x, y, Ink::hex(t.hex.paper));
+            let sent = p.measure("sent", &WORDS, 0.0);
+            p.text("sent", &WORDS, x + fig.width + 5.0, y + fig.baseline - sent.baseline, Ink::hex(t.hex.dim));
+        });
+        c.present(item.hDC);
+        return;
+    }
     if !when.is_empty() {
         c.d2d(s, t.plain, |p| {
             const LEAD: super::d2d::TextStyle = super::d2d::TextStyle::serif(14.5, 400).italic();
@@ -1002,7 +1161,10 @@ mod tests {
         assert!(photographs.contains(&Item::Tick("Show camera JPEGs separately", Tick::SeparateJpegs)));
         assert!(photographs.contains(&Item::Tick("Save ratings and edits next to photos", Tick::Sidecars)));
         assert_eq!(sections(Tab::Speed), ["Previews", "Export"]);
-        assert_eq!(sections(Tab::Upkeep), ["Updates"]);
+        assert_eq!(sections(Tab::Upkeep), ["Updates", "Lightroom"]);
+        assert_eq!(byte_count(4_900_000), "4.9 MB");
+        assert_eq!(byte_count(1_234_000_000), "1.2 GB");
+        assert_eq!(byte_count(0), "Zero KB");
         assert_eq!(sections(Tab::Look), ["Theme", "Viewer"]);
         assert_eq!(Tab::parse("Look"), Tab::Look);
         assert_eq!(Tab::parse("nonsense"), Tab::Photographs);
