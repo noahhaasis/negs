@@ -16,10 +16,10 @@ decisions made with their reasons, and what was carried over. See
 | 5 | Tray | done, merged (see log) |
 | 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | done, merged `f9b8f47` |
-| 8 | Remaining features, Flip added (Open in Lightroom last) | in progress |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | 8c merged `1396397`; 8a, 8b in progress |
 | 9 | Validation and release | not started |
 
-## 2026-11-19: phase 8c, polish on the strip, grid and tray (branch `win-p8c-polish`)
+## 2026-11-19: phase 8c merged, polish on the strip, grid and tray (`1396397`, branch tip `b5a0fd0`)
 
 - **What users see:**
   - **The tray** paints on the GPU, through the strip's Direct2D swap chain (WARP
