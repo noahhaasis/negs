@@ -370,12 +370,12 @@ fn about_fonts(plain: bool) -> String {
     };
     let c = shared.cost;
     format!(
-        "{serif} · {}{} · Direct2D {:.1} ms, DirectWrite {:.1} ms, fonts {:.1} ms{}",
+        "{serif} · {}{} · Direct2D {:.2} ms, DirectWrite {:.2} ms, fonts {:.2} ms{}",
         shared.ui_family(),
         if plain { " for the serif too" } else { "" },
-        if c.thread { " (own thread)" } else { "" },
         c.d2d.as_secs_f64() * 1e3,
         c.dwrite.as_secs_f64() * 1e3,
-        c.fonts.as_secs_f64() * 1e3
+        c.fonts.as_secs_f64() * 1e3,
+        if c.thread { " (own thread)" } else { "" },
     )
 }

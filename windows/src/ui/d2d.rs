@@ -306,6 +306,7 @@ pub enum Align {
 /// A laid-out line's size, in DIPs.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextMetrics {
+    /// The advance, trailing spaces included, so words can follow on.
     pub width: f32,
     pub height: f32,
     /// From the top of the layout to the first line's baseline.
@@ -847,6 +848,6 @@ fn metrics(layout: &IDWriteTextLayout) -> TextMetrics {
         let mut lines = [DWRITE_LINE_METRICS::default(); 4];
         let mut count = 0u32;
         let baseline = if layout.GetLineMetrics(Some(&mut lines), &mut count).is_ok() && count > 0 { lines[0].baseline } else { m.height * 0.8 };
-        TextMetrics { width: m.width, height: m.height, baseline }
+        TextMetrics { width: m.widthIncludingTrailingWhitespace, height: m.height, baseline }
     }
 }
