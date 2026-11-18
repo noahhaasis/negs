@@ -379,8 +379,18 @@ struct CanvasArea: View {
                     Color.clear.frame(height: Self.captionBand)
                     // Couldn't develop: the last develop, faded and greyed.
                     Group {
-                        // Keep the same scroll view when a stock tile replaces the develop.
-                        if let preview { preview } else { Color.clear }
+                        if let preview {
+                            // Keep the same scroll view when a stock tile replaces the develop.
+                            preview
+                        } else if let standIn = model.standIn {
+                            // Already cut and turned. The develop starts with its own zoom command.
+                            PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
+                                          border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
+                                          scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
+                                          doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+                        } else {
+                            Color.clear
+                        }
                     }
                     .grayscale(failure == nil ? 0 : 1)
                     .opacity(dropping ? 0 : failure == nil ? 1 : 0.12)
@@ -458,13 +468,7 @@ struct CanvasArea: View {
             return canvas(trial, size: Self.standInSize(trial, photo: .zero), crop: CropSettings(), cut: true)
         } else if let image = model.image {
             return canvas(model.original ?? image, size: model.imageSize, crop: model.crop)
-        } else if let standIn = model.standIn {
-            // Finished already: drawn as it is, the size the photograph will be.
-            return PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
-                                 border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
-                                 scale: model.canvasScale, geometry: geometry, upsideDown: model.upsideDown,
-                                 doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
-        } else if let placeholder = model.placeholder {
+        } else if model.standIn == nil, let placeholder = model.placeholder {
             return canvas(placeholder, size: model.placeholderSize, crop: model.crop)
         }
         return nil
