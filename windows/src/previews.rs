@@ -181,22 +181,39 @@ impl Bitmap {
     /// The helper's RGBA buffer (sRGB curve; Rec. 2020 primaries when
     /// `wide`) for the screen: through the monitor profile like the canvas,
     /// and turned `rotation` quarter turns clockwise.
-    pub fn from_rgba(rgba: &[u8], width: u32, height: u32, wide: bool, cm: Option<&Transform>, rotation: i32) -> Result<Bitmap> {
+    /// Mirrored left to right (`flip`) and then turned as the canvas shows
+    /// the photograph (`OrientedTileImage`): the helper develops tiles
+    /// unturned, as it does the preview.
+    pub fn from_rgba(rgba: &[u8], width: u32, height: u32, wide: bool, cm: Option<&Transform>, rotation: i32, flip: bool) -> Result<Bitmap> {
         ensure!(width > 0 && height > 0 && width <= 4096 && height <= 4096, "Invalid thumbnail dimensions");
         ensure!(rgba.len() == width as usize * height as usize * 4, "The image engine returned an invalid thumbnail buffer.");
         let decode: Vec<f32> = (0..256).map(|i| srgb_decode(i as f32 / 255.0)).collect();
         let m = crate::gpu::REC2020_TO_SRGB;
-        let shown: Vec<[u8; 3]> = rgba
-            .chunks_exact(4)
-            .map(|p| {
-                let mut rgb = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
-                if wide {
-                    let c = rgb;
-                    rgb = std::array::from_fn(|i| m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2]);
-                }
-                present(rgb, cm).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        let convert = |pixels: &[u8]| -> Vec<[u8; 3]> {
+            pixels
+                .chunks_exact(4)
+                .map(|p| {
+                    let mut rgb = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
+                    if wide {
+                        let c = rgb;
+                        rgb = std::array::from_fn(|i| m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2]);
+                    }
+                    present(rgb, cm).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+                })
+                .collect()
+        };
+        // A large picture (Compare's) across the cores; each pixel as alone.
+        let pixels = rgba.len() / 4;
+        let threads = if pixels >= 1 << 20 { std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8) } else { 1 };
+        let shown: Vec<[u8; 3]> = if threads == 1 {
+            convert(rgba)
+        } else {
+            let chunk = pixels.div_ceil(threads) * 4;
+            std::thread::scope(|scope| {
+                let parts: Vec<_> = rgba.chunks(chunk).map(|part| scope.spawn(|| convert(part))).collect();
+                parts.into_iter().flat_map(|part| part.join().expect("converted")).collect()
             })
-            .collect();
+        };
         let turns = rotation.rem_euclid(4);
         let (w, h) = (width as usize, height as usize);
         let (out_w, out_h) = if turns % 2 == 1 { (h, w) } else { (w, h) };
@@ -210,6 +227,7 @@ impl Bitmap {
                     3 => (w - 1 - y, x),
                     _ => (x, y),
                 };
+                let sx = if flip { w - 1 - sx } else { sx };
                 let [r, g, b] = shown[sy * w + sx];
                 bgra[(y * out_w + x) * 4..][..4].copy_from_slice(&[b, g, r, 255]);
             }
@@ -544,13 +562,19 @@ mod tests {
     fn thumbnails_turn_with_the_photograph() {
         // Two pixels side by side, red then blue.
         let rgba = [255, 0, 0, 255, 0, 0, 255, 255];
-        let bitmap = Bitmap::from_rgba(&rgba, 2, 1, false, None, 1).unwrap();
+        let bitmap = Bitmap::from_rgba(&rgba, 2, 1, false, None, 1, false).unwrap();
         assert_eq!((bitmap.width, bitmap.height), (1, 2));
         // A clockwise turn puts the left (red) pixel on top.
         assert_eq!(&bitmap.bgra[..4], &[0, 0, 255, 255]);
         assert_eq!(&bitmap.bgra[4..], &[255, 0, 0, 255]);
-        let plain = Bitmap::from_rgba(&rgba, 2, 1, false, None, 0).unwrap();
+        let plain = Bitmap::from_rgba(&rgba, 2, 1, false, None, 0, false).unwrap();
         assert_eq!(&plain.bgra[..4], &[0, 0, 255, 255]);
-        assert!(Bitmap::from_rgba(&rgba, 3, 1, false, None, 0).is_err());
+        assert!(Bitmap::from_rgba(&rgba, 3, 1, false, None, 0, false).is_err());
+        // Mirrored, as the canvas shows a flipped photograph: blue on the left.
+        let mirrored = Bitmap::from_rgba(&rgba, 2, 1, false, None, 0, true).unwrap();
+        assert_eq!(&mirrored.bgra[..4], &[255, 0, 0, 255]);
+        // Mirrored before the turn: blue on top.
+        let both = Bitmap::from_rgba(&rgba, 2, 1, false, None, 1, true).unwrap();
+        assert_eq!(&both.bgra[..4], &[255, 0, 0, 255]);
     }
 }

@@ -2048,6 +2048,139 @@ lifecycle_test! {
     }
 }
 
+lifecycle_test! {
+    /// Your negative from the film's menu: read as Portra 400 (the photograph's
+    /// film isn't a colour negative), its base found and the print balanced
+    /// and metered as part of the same undo step; Auto is a step of its own;
+    /// another film prints it as a scene again, and Undo brings the negative
+    /// back with its base, without asking again.
+    fn your_negative_reads_the_scan_and_undo_brings_it_back() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let photo = h.photo.clone();
+        h.open(&photo);
+        let slide = h.model().stocks.iter().find(|s| !s.paper && s.positive).map(|s| s.id.clone()).expect("a slide film");
+        h.edit(|m| m.choose_film(&slide));
+        h.idle();
+        let default_base = crate::json::get(&h.model().defaults, "film_render.base").clone();
+        h.edit(|m| m.choose_negative());
+        h.idle();
+        let m = h.model();
+        assert!(m.is_negative());
+        assert_eq!(m.state.film, crate::negative::DEFAULT_FILM);
+        assert_eq!(m.value("io.scan_film"), &serde_json::json!(false));
+        assert_eq!(m.undo_title(), Some("Read as Negative"), "the base is part of the step");
+        assert!(!crate::negative::same_base(m.value("film_render.base"), &default_base), "the base was found");
+        assert!(m.negative_base().is_some() && !m.negative_busy());
+        let found = m.state.clone();
+        let names = h.command_names();
+        assert!(names.iter().any(|c| c == "negative_base") && names.iter().any(|c| c == "negative_meter"), "{names:?}");
+
+        h.edit(|m| m.auto_print_negative());
+        h.idle();
+        assert_eq!(h.model().undo_title(), Some("Auto Print"));
+        h.edit(|m| m.perform_undo());
+        h.idle();
+        assert_eq!(h.model().state, found);
+
+        h.edit(|m| m.choose_film(&slide));
+        h.idle();
+        assert!(!h.model().is_negative(), "another film prints a scene again");
+        h.clear_logs();
+        h.edit(|m| m.perform_undo());
+        h.idle();
+        assert_eq!(h.model().state, found, "Undo brings the negative back as it was");
+        assert!(h.command_names().iter().all(|c| c != "negative_base"), "{:?}", h.command_names());
+    }
+}
+
+lifecycle_test! {
+    /// Flip (`io.flip`) starts cropping like a turn: Cancel takes it back,
+    /// Done keeps it with the crop as one undo step. It never develops again
+    /// (the canvas mirrors the preview), and Save Preview mirrors the file
+    /// as the exporter does from the same edit, a quarter turn included.
+    fn a_flip_mirrors_without_a_develop_and_saves_as_the_exporter() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
+        let photo = h.photo.clone();
+        h.open(&photo);
+        h.clear_logs();
+        h.edit(|m| m.flip());
+        assert!(h.model().cropping() && h.model().state.flip());
+        h.edit(|m| m.end_crop(false));
+        assert!(!h.model().cropping() && !h.model().state.flip(), "Cancel takes the flip back");
+        assert!(h.model().undo_title().is_none());
+        h.edit(|m| m.begin_crop());
+        h.edit(|m| m.rotate());
+        h.edit(|m| m.flip());
+        let o = h.model().state.orientation();
+        assert_eq!((o.turns, o.flip), (3, true), "flipped as shown: the quarter turn conjugated");
+        h.edit(|m| m.end_crop(true));
+        h.idle();
+        assert_eq!(h.model().undo_title(), Some("Crop"));
+        assert!(h.command_names().iter().all(|c| c != "render"), "{:?}", h.command_names());
+        let dir = std::env::temp_dir().join(format!("negs-flip-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save = super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 };
+        let saved = dir.join("flipped.tif");
+        h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
+        h.idle();
+        let flipped_state = h.model().state.clone();
+        let saved_bytes = std::fs::read(&saved).unwrap();
+        assert_eq!(saved_bytes, fast_render(&h, &flipped_state, &dir.join("flipped-fast.tif"), save), "the exporter flips from io.flip");
+        let mut unflipped = flipped_state.clone();
+        crate::json::set(&mut unflipped.params, state::FLIP, serde_json::Value::Bool(false));
+        assert_ne!(saved_bytes, fast_render(&h, &unflipped, &dir.join("unflipped-fast.tif"), save));
+        h.edit(|m| m.perform_undo());
+        assert!(!h.model().state.flip() && h.model().rotation() == 0);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// MARK: Compare
+
+lifecycle_test! {
+    /// The Mac's `develop(_ other:)`: the other photograph develops in
+    /// Compare's own helper once the open one has settled, its match solved
+    /// first as opening it would, then a full preview `render`. Opening it
+    /// afterwards finds that match in the cache and solves nothing.
+    fn compare_develops_the_other_as_opening_it_would() {
+        use crate::compare::Origin;
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+        assert!(h.model().shelf.library.is_some());
+        let items = h.model().shown_items();
+        assert_eq!(items.len(), 2);
+        h.clear_logs();
+        h.edit(|m| m.compare(items[0].clone(), items[1].clone(), Origin::Photo));
+        h.idle();
+        let m = h.model();
+        assert_eq!(m.compare_commands(), ["thumbnail", "place_exposure", "render"], "decode, solve, develop");
+        let other = m.compared_other().expect("developed");
+        assert_eq!((other.width, other.height), (480, 320));
+        assert!(h.command_names().iter().all(|c| c != "render" && c != "place_exposure"), "the open helper isn't used: {:?}", h.command_names());
+        h.edit(|m| m.leave_compare());
+        h.clear_logs();
+        h.open(&b);
+        h.idle();
+        assert!(h.command_names().iter().all(|c| c != "place_exposure"), "the match was kept: {:?}", h.command_names());
+        assert!(h.model().state.brightness_match.as_ref().is_some_and(|m| m.ev.is_some()));
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 // MARK: The film side's release (ticket 41)
 
 lifecycle_test! {

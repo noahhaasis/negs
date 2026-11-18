@@ -196,8 +196,7 @@ impl Model {
             legacy.limit_preview = state.limit_preview;
             let library = self.shelf.library.as_mut().expect("library");
             if !library.open_edited() && legacy != state {
-                let roll = library.state().and_then(|s| s.roll.clone());
-                library.edit(map::to_library(&legacy, roll));
+                library.edit(map::to_library(&legacy));
                 state = legacy;
                 self.library_edited();
             }
@@ -316,8 +315,7 @@ impl Model {
         if let Some(legacy) = self.shelf.legacy.take().filter(|_| opened.problem.is_none()) {
             let library = self.shelf.library.as_mut().expect("library");
             if !library.open_edited() && map::from_library(&opened.state, legacy.limit_preview).ok() != Some(legacy.clone()) {
-                let roll = library.state().and_then(|s| s.roll.clone());
-                library.edit(map::to_library(&legacy, roll));
+                library.edit(map::to_library(&legacy));
             }
         }
         if !self.shelf.selection.contains(&item) {
@@ -363,8 +361,7 @@ impl Model {
         if let Some(session) = &self.crop_session {
             state.crop = session.settings();
         }
-        let roll = library.state().and_then(|s| s.roll.clone());
-        library.edit(map::to_library(&state, roll));
+        library.edit(map::to_library(&state));
     }
 
     /// An edit: saved a second after the last one.
@@ -523,7 +520,7 @@ impl Model {
         self.mark(dirty::STRIP | dirty::CHROME);
     }
 
-    fn show_note(&mut self, note: Note) {
+    pub(super) fn show_note(&mut self, note: Note) {
         self.shelf.serial += 1;
         let serial = self.shelf.serial;
         let shown = map::note_duration(&note);
@@ -567,7 +564,7 @@ impl Model {
 
     /// Runs `action` on the library and keeps its undo step in the editor's
     /// stack, with the photograph open before and after it.
-    fn library_action(&mut self, action: impl FnOnce(&mut Library) -> Outcome, next: Option<Item>) -> bool {
+    pub(super) fn library_action(&mut self, action: impl FnOnce(&mut Library) -> Outcome, next: Option<Item>) -> bool {
         if !self.can_change_library() {
             return false;
         }

@@ -62,6 +62,12 @@ pub struct PrintWords {
     pub keep_paper: bool,
     /// The film's (false) or the paper's (true) tray is open: the pencil under its name.
     pub tray: Option<bool>,
+    /// Read as a negative: "Your negative read as <film>" on a row of its own.
+    pub negative: bool,
+    /// The tray of films the negative is read as is open.
+    pub read_as_open: bool,
+    /// Prep's picker waits for a click: its prompt takes the paper's row.
+    pub prompt: Option<&'static str>,
 }
 
 /// What a click on the canvas can reach, outside cropping's frame.
@@ -70,6 +76,8 @@ pub enum Target {
     Film,
     Paper,
     Lock,
+    /// The film a negative is read as.
+    ReadAs,
     /// A trim mark, by the corner it's beside.
     Mark(Handle),
     TurnLeft,
@@ -361,7 +369,8 @@ impl View {
         let widest_kind = if lockable { "always printed on" } else { kind };
         let lock_width = if lockable { LOCK.0 + LOCK_SPACING } else { 0.0 };
         let paper_width = |kind: &str, name: f64| lock_width + measure(kind, &KIND).width as f64 + INNER + name + INNER + caret;
-        let one_row = film_width + GAP + paper_width(widest_kind, paper_m.width as f64) <= width;
+        // A negative always takes two rows: "Your negative, read as <film>", then the paper.
+        let one_row = !words.negative && film_width + GAP + paper_width(widest_kind, paper_m.width as f64) <= width;
         let hot = self.hot;
         let top = print.max_y() / s;
         let (film_baseline, paper_baseline, paper_x) = if one_row {
@@ -375,7 +384,7 @@ impl View {
         // The film.
         let film_color = if original { ink.dim } else { ink.paper };
         let film_room = if one_row { width } else { canvas_width } - INNER - caret;
-        let film = fitted(&words.film, &FILM, film_room);
+        let film = if words.negative { crate::negative::NAME.to_string() } else { fitted(&words.film, &FILM, film_room) };
         let fm = self.word(items, &film, FILM, film_color, left, film_baseline);
         let film_rect = Rect::new(left * s, (film_baseline - fm.baseline as f64) * s, (fm.width as f64 + INNER + caret) * s, (fm.height as f64 + 5.0) * s);
         if opens {
@@ -389,6 +398,33 @@ impl View {
         }
         if original {
             self.strike(items, left, film_baseline - fm.baseline as f64, fm.width as f64, fm.height as f64, 0.34, 1.0, ink);
+        }
+        if words.negative {
+            // "read as" and the film, which opens the colour negatives.
+            let x = left + fm.width as f64 + INNER + caret + INNER;
+            let km = self.word(items, "read as", KIND, ink.dim, x, film_baseline);
+            let x = x + km.width as f64 + INNER;
+            let room = (w - MARGIN - x - INNER - caret).max(20.0);
+            let name = fitted(&words.film, &PAPER, room);
+            let nm = self.word(items, &name, PAPER, film_color, x, film_baseline);
+            let top = film_baseline - nm.baseline as f64;
+            if opens {
+                self.glyph(items, Glyph::Caret, ink.dim, 1.0, x + nm.width as f64 + INNER + 1.0, film_baseline - 6.0);
+                self.targets.push((Target::ReadAs, Rect::new(x * s, top * s, (nm.width as f64 + INNER + caret) * s, (nm.height as f64 + 5.0) * s)));
+                if words.read_as_open {
+                    self.open_mark(items, x, top + nm.height as f64, nm.width as f64, ink);
+                } else if hot == Some(Target::ReadAs) {
+                    items.push(Draw::Fill(QuadInstance::fill(rect(x * s, (top + nm.height as f64 + 4.0) * s, nm.width as f64 * s, 1.5 * s), hex(ink.track, 1.0))));
+                }
+            }
+            if original {
+                self.strike(items, x, top, nm.width as f64, nm.height as f64, 0.34, 1.0, ink);
+            }
+        }
+        // The canvas waits for a click (Prep's pickers): the prompt takes the paper's row.
+        if let Some(prompt) = words.prompt.filter(|_| !one_row) {
+            self.word(items, prompt, KIND, ink.accent, left, paper_baseline);
+            return;
         }
         // The lock and "printed on".
         let mut x = paper_x;
@@ -560,7 +596,14 @@ pub(super) fn act(app: &mut App, hwnd: HWND, target: Target, at: Option<Rect>) {
             if model.can_open_tray(paper) {
                 model.toggle_tray(paper);
             } else {
-                choose_from_menu(app, hwnd, paper, at);
+                choose_from_menu(app, hwnd, paper, false, at);
+            }
+        }
+        Target::ReadAs => {
+            if model.can_open_tray(false) {
+                model.toggle_read_as_tray();
+            } else {
+                choose_from_menu(app, hwnd, false, true, at);
             }
         }
         Target::Lock => {
@@ -575,8 +618,13 @@ pub(super) fn act(app: &mut App, hwnd: HWND, target: Target, at: Option<Rect>) {
 }
 
 /// The film or paper as a menu under its name, with the tiles off.
-fn choose_from_menu(app: &mut App, hwnd: HWND, paper: bool, at: Option<Rect>) {
-    let entries = crate::ui::inspector::stock_entries(&app.model, paper);
+fn choose_from_menu(app: &mut App, hwnd: HWND, paper: bool, read_as: bool, at: Option<Rect>) {
+    let mut entries = crate::ui::inspector::stock_entries(&app.model, paper);
+    if read_as {
+        // The colour negatives only.
+        let readable = |id: &str| app.model.stocks.iter().any(|s| s.id == id && crate::negative::readable(s));
+        entries.retain(|(_, e)| e.as_ref().is_none_or(|(id, _)| readable(id)));
+    }
     let current = if paper { app.model.state.paper.clone() } else { app.model.state.film.clone() };
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
@@ -589,6 +637,14 @@ fn choose_from_menu(app: &mut App, hwnd: HWND, paper: bool, at: Option<Rect>) {
             };
             let _ = AppendMenuW(menu, flags, 1 + i, crate::platform::pcwstr(&w));
         }
+        // The film's menu ends with Your negative, ticked while read as one.
+        let negative = 1 + entries.len();
+        if !paper && !read_as {
+            let w = crate::platform::wide(crate::negative::NAME);
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+            let flags = if app.model.is_negative() { MF_STRING | MF_CHECKED } else { MF_STRING };
+            let _ = AppendMenuW(menu, flags, negative, crate::platform::pcwstr(&w));
+        }
         let mut p = at.map_or(POINT::default(), |r| POINT { x: r.x as i32, y: r.max_y() as i32 });
         if at.is_none() {
             let _ = GetCursorPos(&mut p);
@@ -597,8 +653,17 @@ fn choose_from_menu(app: &mut App, hwnd: HWND, paper: bool, at: Option<Rect>) {
         }
         let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, p.x, p.y, 0, hwnd, None).0 as usize;
         let _ = DestroyMenu(menu);
+        if chosen == negative && !paper && !read_as {
+            return app.model.choose_negative();
+        }
         if let Some(Some((id, _))) = chosen.checked_sub(1).and_then(|i| entries.get(i)).map(|(_, e)| e.clone()) {
-            if paper { app.model.choose_paper(&id) } else { app.model.choose_film(&id) }
+            if paper {
+                app.model.choose_paper(&id)
+            } else if read_as {
+                app.model.choose_negative_film(&id)
+            } else {
+                app.model.choose_film(&id)
+            }
         }
     }
 }

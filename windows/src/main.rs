@@ -6,6 +6,7 @@
 mod batch;
 mod border;
 mod brightness;
+mod compare;
 mod crop;
 mod edited_store;
 mod edits;
@@ -20,6 +21,7 @@ mod json;
 mod lightroom;
 mod match_cache;
 mod model;
+mod negative;
 mod photo_facts;
 mod picture;
 mod platform;

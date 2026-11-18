@@ -55,6 +55,8 @@ pub mod dirty {
     pub const TONE_GRAPH: u32 = 1 << 13;
     /// The tray opened, closed, or what it shows changed.
     pub const TRAY: u32 = 1 << 14;
+    /// What Compare shows changed.
+    pub const COMPARE: u32 = 1 << 15;
     pub const ALL: u32 = u32::MAX;
 }
 
@@ -481,6 +483,13 @@ impl KeptDevelop {
     /// The kept develop filed as `key`, else the last one kept for the same
     /// edits under an older engine (`previousKey`), as the canvas's stand-in.
     fn load(key: &str, loose: Option<&str>) -> Option<(Picture, Size)> {
+        let (rgba, pw, ph, space, size) = Self::pixels(key, loose)?;
+        Some((Picture::new(rgba, pw, ph).in_display_space(&space), size))
+    }
+
+    /// `load`'s RGBA pixels, kept on the CPU, with their display space and
+    /// the photograph's size (Compare's stand-in).
+    fn pixels(key: &str, loose: Option<&str>) -> Option<(Vec<u8>, u32, u32, String, Size)> {
         let store = crate::edited_store::renders();
         let key = if store.contains(key) { key.to_string() } else { store.previous(loose?)? };
         let key = key.as_str();
@@ -491,13 +500,19 @@ impl KeptDevelop {
             p.swap(0, 2);
         }
         store.touch(key);
-        Some((Picture::new(rgba, pw, ph).in_display_space(&space), Size::new(w, h)))
+        Some((rgba, pw, ph, space, Size::new(w, h)))
     }
 }
 
 /// The developed thumbnail filed as `key`, else the last one filed for the
 /// same edits under an older engine, as the canvas's stand-in.
 fn stand_in(key: &str, loose: Option<&str>) -> Option<Picture> {
+    let (rgba, w, h) = stand_in_pixels(key, loose)?;
+    Some(Picture::new(rgba, w, h))
+}
+
+/// `stand_in`'s RGBA pixels, kept on the CPU (Compare's stand-in).
+fn stand_in_pixels(key: &str, loose: Option<&str>) -> Option<(Vec<u8>, u32, u32)> {
     let store = crate::edited_store::thumbnails();
     let key = if store.contains(key) { key.to_string() } else { store.previous(loose?)? };
     let file = std::fs::read(store.path(&key)).ok()?;
@@ -505,7 +520,7 @@ fn stand_in(key: &str, loose: Option<&str>) -> Option<Picture> {
     for p in rgba.chunks_exact_mut(4) {
         p.swap(0, 2);
     }
-    Some(Picture::new(rgba, w, h))
+    Some((rgba, w, h))
 }
 
 pub struct Model {
@@ -515,6 +530,10 @@ pub struct Model {
     nullable_paths: Vec<String>,
     catalog: Value,
     pub stocks: Vec<Stock>,
+    /// The catalog's camera colour filters, in its order.
+    pub color_filters: Vec<state::ColorFilter>,
+    /// The filter the Color Filter switch puts back once it took it off.
+    pub last_color_filter: String,
     pub source: Option<PathBuf>,
     /// The developed preview. None until the first render of `source` completes.
     pub image: Option<Picture>,
@@ -604,6 +623,9 @@ pub struct Model {
     pending_render: bool,
     activity_timer: bool,
     interaction_start: Option<EditState>,
+    /// What the last drag or click that changed the edit left, so a
+    /// double-click's reset can undo its first click exactly.
+    last_interaction: Option<EditState>,
     closing: bool,
     explicit_open_requested: bool,
     /// The catalog arrived; the session restoration is still loading.
@@ -638,6 +660,10 @@ pub struct Model {
     visible_presets: Option<std::ops::Range<usize>>,
     /// The film, paper and preset thumbnails.
     pub previews: Previews,
+    /// Your negative's requests and what they found (`model/negative.rs`).
+    pub negative: negative::Memory,
+    /// Compare's two photographs (`model/compare.rs`).
+    pub compare: compare::Memory,
     /// Lab › Film format › Custom picked while the value is still a format's,
     /// so the slider stays. Start fresh and Reset Adjustments clear it, as
     /// they do the edits.
@@ -733,6 +759,8 @@ impl Model {
             nullable_paths: vec![],
             catalog: Value::Null,
             stocks: vec![],
+            color_filters: vec![],
+            last_color_filter: "hoya_y2".into(),
             source: None,
             image: None,
             placeholder: None,
@@ -788,6 +816,7 @@ impl Model {
             pending_render: false,
             activity_timer: false,
             interaction_start: None,
+            last_interaction: None,
             closing: false,
             explicit_open_requested: false,
             awaiting_restoration: false,
@@ -808,6 +837,8 @@ impl Model {
             applied_presets: HashMap::new(),
             visible_presets: None,
             previews: Previews::default(),
+            negative: Default::default(),
+            compare: Default::default(),
             custom_film_format: false,
             matching_brightness: false,
             match_request: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -869,6 +900,98 @@ impl Model {
         self.prefs.fotufilm_films = films.key().into();
         self.prefs.save();
         self.mark(dirty::INSPECTOR | dirty::PREVIEWS);
+    }
+    /// The camera colour filter in front of the lens, or `ColorFilter::NONE`.
+    pub fn color_filter(&self) -> &str {
+        match self.value(state::ColorFilter::PATH).as_str() {
+            Some(key) if !key.is_empty() => key,
+            _ => state::ColorFilter::NONE,
+        }
+    }
+    /// The catalog's filter in front of the lens; None for none.
+    pub fn chosen_color_filter(&self) -> Option<&state::ColorFilter> {
+        let key = self.color_filter();
+        self.color_filters.iter().find(|f| f.key == key)
+    }
+    /// Lab › Camera › Color Filter: puts the glass `key` in front of the lens
+    /// (or takes it off), one undo step.
+    pub fn set_color_filter(&mut self, key: &str) {
+        if key != state::ColorFilter::NONE {
+            self.last_color_filter = key.to_string();
+        }
+        let mut next = self.state.clone();
+        json::set(&mut next.params, state::ColorFilter::PATH, Value::String(key.to_string()));
+        self.apply(next, if key == state::ColorFilter::NONE { "Remove Color Filter" } else { "Change Color Filter" });
+    }
+    /// The module's switch: off takes the glass off, on puts the last one back.
+    pub fn switch_color_filter(&mut self, on: bool) {
+        let key = if on { self.last_color_filter.clone() } else { state::ColorFilter::NONE.to_string() };
+        self.set_color_filter(&key);
+    }
+    /// How many stops the filter takes on the current film; None for colour
+    /// films and for a film the glass leaves blind.
+    pub fn color_filter_stops(&self, key: &str) -> Option<f64> {
+        let film = &self.state.film;
+        let profile = self.catalog["profiles"].as_array()?.iter().find(|p| p["id"].as_str() == Some(film.as_str()))?;
+        profile["color_filter_stops"][key].as_f64()
+    }
+    /// The module shows for B&W films, or while a filter is set (by a
+    /// preset, or kept from a B&W film), with a warning on colour film.
+    pub fn shows_color_filter(&self) -> bool {
+        !self.color_filters.is_empty() && (self.film_is_bw() || self.color_filter() != state::ColorFilter::NONE)
+    }
+    pub fn filter_link(&self) -> state::FilterLink {
+        state::FilterLink::from_key(&self.prefs.filter_shift_link)
+    }
+    /// Enlarger › Shifts move.
+    pub fn set_filter_link(&mut self, link: state::FilterLink) {
+        if self.filter_link() == link {
+            return;
+        }
+        self.prefs.filter_shift_link = link.key().into();
+        self.prefs.save();
+        self.mark(dirty::INSPECTOR);
+    }
+    /// The enlarger's magenta or yellow shift, moving the other as Shifts
+    /// move says; both change in one step.
+    pub fn set_filter_shift(&mut self, path: &str, value: f64) {
+        let link = self.filter_link();
+        if link == state::FilterLink::Separate {
+            return self.set(path, json::num(value));
+        }
+        let (m, y) = link.shifts(path, value, json::number(self.value(state::FilterLink::MAGENTA)), json::number(self.value(state::FilterLink::YELLOW)));
+        let mut next = self.state.clone();
+        json::set(&mut next.params, state::FilterLink::MAGENTA, json::num(m));
+        json::set(&mut next.params, state::FilterLink::YELLOW, json::num(y));
+        let before = self.state.clone();
+        self.apply(next, "Change Adjustment");
+        // A click on the track: its own step, which a double-click's reset undoes.
+        if !self.interacting() && self.state != before {
+            self.last_interaction = Some(self.state.clone());
+        }
+    }
+    /// A double-click on a shift's track. Its first click moved the shift to
+    /// the pointer, and a linked one with it: that click is undone first,
+    /// exactly, so the reset is one step from before it
+    /// (`resetFilterShiftAfterClick`).
+    pub fn reset_filter_shift_after_click(&mut self, path: &str) {
+        let last = self.last_interaction.take();
+        if last.as_ref() == Some(&self.state) && matches!(self.undo.undo.last(), Some((Step::Edit(_), _))) {
+            self.perform_undo();
+        }
+        self.reset_filter_shift(path);
+    }
+    /// Resets a shift; linked (Together, Opposite ways), both reset, as
+    /// they move, in one step.
+    pub fn reset_filter_shift(&mut self, path: &str) {
+        if self.filter_link() == state::FilterLink::Separate {
+            return self.reset_value(path);
+        }
+        let mut next = self.state.clone();
+        for shift in [state::FilterLink::MAGENTA, state::FilterLink::YELLOW] {
+            json::set(&mut next.params, shift, self.default_value(shift).clone());
+        }
+        self.apply(next, "Change Adjustment");
     }
     pub fn papers(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| s.paper).collect()
@@ -1032,6 +1155,7 @@ impl Model {
         // Edits made meanwhile reach the library before the state below resets them.
         self.library_sync();
         self.stocks = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
+        self.color_filters = catalog["color_filters"].as_array().map(|a| a.iter().map(state::ColorFilter::new).collect()).unwrap_or_default();
         self.defaults = catalog["defaults"].clone();
         // The engine leaves lens corrections off for params from before them,
         // so their crops keep their place; the app corrects every new edit.
@@ -1043,10 +1167,14 @@ impl Model {
         self.catalog = catalog;
         // Keep anything already applied to the photograph, such as its rotation.
         let rotation = self.state.value("io.rotate_cw").clone();
+        let flip = self.state.value(state::FLIP).clone();
         let mut next = self.state.clone();
         next.params = self.defaults.clone();
         if !rotation.is_null() {
             json::set(&mut next.params, "io.rotate_cw", rotation);
+        }
+        if !flip.is_null() {
+            json::set(&mut next.params, state::FLIP, flip);
         }
         if !self.stocks.iter().any(|s| !s.paper && s.id == next.film) {
             if let Some(first) = self.stocks.iter().find(|s| !s.paper) {
@@ -1186,11 +1314,15 @@ impl Model {
         if space {
             self.choose_preview_space(COLOR_SPACES[0]);
         }
+        // A negative's base and balance are this frame's measurements: found again.
+        let paths: Vec<&str> = targets.iter().filter_map(|t| if let Target::Param(p) = t { Some(*p) } else { None }).collect();
+        self.refind_negative(Some(&paths));
         self.mark(dirty::INSPECTOR | dirty::STRUCTURE);
     }
     pub fn reset_value(&mut self, path: &str) {
         let value = self.default_value(path).clone();
         self.set(path, value);
+        self.refind_negative(Some(&[path]));
     }
 
     pub fn begin_interaction(&mut self) {
@@ -1202,6 +1334,7 @@ impl Model {
 
     pub fn end_interaction(&mut self, action: &'static str) {
         let Some(start) = self.interaction_start.take() else { return };
+        self.last_interaction = (start != self.state).then(|| self.state.clone());
         if start != self.state {
             self.register_undo(start, action);
         }
@@ -1225,12 +1358,12 @@ impl Model {
     }
 
     pub fn choose_film(&mut self, stock: &str) {
-        let next = state::choosing(&self.state, stock, false, self.prefs.keep_paper, &self.stocks);
+        let next = self.choosing_stock(&self.state, stock, false, false);
         self.apply(next, "Change Film");
     }
 
     pub fn choose_paper(&mut self, stock: &str) {
-        let next = state::choosing(&self.state, stock, true, self.prefs.keep_paper, &self.stocks);
+        let next = self.choosing_stock(&self.state, stock, true, false);
         self.apply(next, "Change Paper");
     }
 
@@ -1315,6 +1448,25 @@ impl Model {
     }
 
     /// The state with the app's preferences that travel in it.
+    /// A restored edit's parameters under this engine's defaults, as a
+    /// photograph opens with them.
+    fn restored_session_params(&self, params: &Value) -> Value {
+        let mut restored = state::restored_params(&self.defaults, params, &self.nullable_paths);
+        // Sessions from before Image Size may carry the old working-resolution factor.
+        let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
+        if !factor.is_null() {
+            json::set(&mut restored, state::SIZE_FACTOR, factor);
+        }
+        // The inspector no longer edits Post tone or colour; an older
+        // session's Post edits would otherwise stay applied with no
+        // control to undo them.
+        let post = json::get(&self.defaults, "post").clone();
+        if !post.is_null() {
+            json::set(&mut restored, "post", post);
+        }
+        restored
+    }
+
     fn with_preferences(&self, mut state: EditState) -> EditState {
         state.limit_preview = self.prefs.limits_preview();
         state
@@ -1386,12 +1538,21 @@ impl Model {
         next.params = self.defaults.clone();
         next.brightness_match = self.new_match();
         json::set(&mut next.params, "io.rotate_cw", self.state.value("io.rotate_cw").clone());
+        json::set(&mut next.params, state::FLIP, self.state.value(state::FLIP).clone());
         json::set(&mut next.params, state::SIZE_TARGET, self.state.value(state::SIZE_TARGET).clone());
         let positive = self.stocks.iter().find(|s| !s.paper && s.id == next.film).is_some_and(|s| s.positive);
         json::set(&mut next.params, "io.scan_film", Value::Bool(positive));
+        // Like the film, reading a negative stays; its base and balance are found again.
+        let negative = self.is_negative();
+        if negative {
+            next = self.negative_state(&next);
+        }
         self.custom_film_format = false;
         self.mark(dirty::STRUCTURE);
         self.apply(next, "Reset Adjustments");
+        if negative {
+            self.refind_negative(None);
+        }
     }
 
     fn apply(&mut self, next: EditState, action: impl Into<Cow<'static, str>>) {
@@ -1415,12 +1576,12 @@ impl Model {
         let render = next.rendered() != self.state.rendered();
         let structure = self.structure_key(&next) != self.structure_key(&self.state);
         let crop_changed = next.crop != self.state.crop;
-        let rotation_changed = next.rotation() != self.state.rotation();
-        self.state = next;
+        let rotation_changed = next.orientation() != self.state.orientation();
+        let old = std::mem::replace(&mut self.state, next);
         if rotation_changed {
-            let (shown, rotation) = (self.shown_image_size(), self.rotation());
+            let (shown, rotation, flip) = (self.shown_image_size(), self.rotation(), self.state.flip());
             if let Some(session) = &mut self.crop_session {
-                session.update(shown, rotation);
+                session.update(shown, rotation, flip);
             }
         }
         if crop_changed || rotation_changed {
@@ -1435,6 +1596,10 @@ impl Model {
         self.settle_outputs();
         // Saved to the photograph's sidecar a second after the last change.
         self.library_edited();
+        if crate::negative::is_negative(&self.state) || crate::negative::is_negative(&old) {
+            let undoing = std::mem::take(&mut self.negative.undoing);
+            self.follow_negative(&old, undoing);
+        }
     }
 
     /// What decides which inspector rows exist.
@@ -1468,6 +1633,7 @@ impl Model {
         let previous = self.with_preferences(previous);
         if previous != self.state {
             self.undo.redo.push((Step::Edit(self.state.clone()), action));
+            self.negative.undoing = true;
             self.replace_state(previous);
         }
         self.mark(dirty::CHROME | dirty::ZOOM);
@@ -1486,6 +1652,7 @@ impl Model {
         let next = self.with_preferences(next);
         if next != self.state {
             self.undo.undo.push((Step::Edit(self.state.clone()), action));
+            self.negative.undoing = true;
             self.replace_state(next);
         }
         self.mark(dirty::CHROME);
@@ -1499,6 +1666,23 @@ impl Model {
 
     pub fn rotate(&mut self) {
         self.turn(true);
+    }
+
+    /// Flip: mirrors the photograph left to right as shown, as a negative
+    /// photographed from its base side needs. Like a quarter turn it
+    /// happens while cropping; Done keeps it, Cancel takes it back.
+    pub fn flip(&mut self) {
+        if !self.cropping() {
+            self.begin_crop();
+        }
+        if !self.cropping() {
+            return;
+        }
+        let flipped = self.state.orientation().flipped_as_shown();
+        let mut next = self.state.clone();
+        json::set(&mut next.params, "io.rotate_cw", json::num(flipped.turns as f64));
+        json::set(&mut next.params, state::FLIP, Value::Bool(flipped.flip));
+        self.replace_state(next);
     }
 
     /// A quarter turn, as cropping's arrows and View › Rotate turn: while
@@ -1712,6 +1896,8 @@ impl Model {
         next.film = film;
         next.paper = paper;
         next.params = result["params"].clone();
+        // On a negative a preset brings the look and the paper, never how it's read.
+        let next = crate::negative::keeping_negative(&next, &self.state);
         self.apply(next, format!("Apply Preset “{name}”"));
         if let Some(source) = self.source.clone() {
             self.applied_presets.insert(source, preset);
@@ -1907,7 +2093,7 @@ impl Model {
         self.hold_original(false);
         // The straighten dial takes the label's place: a stock being tried is kept.
         self.end_tray(true);
-        self.crop_session = Some(CropSession::new(self.state.clone(), self.shown_image_size(), self.rotation()));
+        self.crop_session = Some(CropSession::new(self.state.clone(), self.shown_image_size(), self.rotation(), self.state.flip()));
         self.mark(dirty::CROP | dirty::CANVAS | dirty::CHROME | dirty::LAYOUT | dirty::STRIP);
     }
 
@@ -1921,19 +2107,22 @@ impl Model {
         }
         let Some(session) = self.crop_session.take() else { return };
         let rotation = session.start.value("io.rotate_cw").clone();
+        let flip = session.start.value(state::FLIP).clone();
         if apply {
             let mut previous = self.state.clone();
             previous.crop = session.start.crop;
             json::set(&mut previous.params, "io.rotate_cw", rotation);
+            json::set(&mut previous.params, state::FLIP, flip);
             let mut next = self.state.clone();
             next.crop = session.settings();
             if next != previous {
                 self.register_undo(previous, "Crop");
             }
             self.replace_state(next);
-        } else if !json::same(self.state.value("io.rotate_cw"), &rotation) {
+        } else if !json::same(self.state.value("io.rotate_cw"), &rotation) || !json::same(self.state.value(state::FLIP), &flip) {
             let mut next = self.state.clone();
             json::set(&mut next.params, "io.rotate_cw", rotation);
+            json::set(&mut next.params, state::FLIP, flip);
             self.replace_state(next);
         }
         // Cropping kept a held frame's solve or a pending match's from
@@ -2018,6 +2207,7 @@ impl Model {
         self.drop_held("open");
         self.brightness_failure = None;
         self.source_generation += 1;
+        self.forget_negative();
         let generation = self.source_generation;
         let restoring = session.is_some();
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
@@ -2034,19 +2224,7 @@ impl Model {
         }
         if let Some(session) = session {
             let mut restored = session.state;
-            restored.params = state::restored_params(&self.defaults, &restored.params, &self.nullable_paths);
-            // Sessions from before Image Size may carry the old working-resolution factor.
-            let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
-            if !factor.is_null() {
-                json::set(&mut restored.params, state::SIZE_FACTOR, factor);
-            }
-            // The inspector no longer edits Post tone or colour; an older
-            // session's Post edits would otherwise stay applied with no
-            // control to undo them.
-            let post = json::get(&self.defaults, "post").clone();
-            if !post.is_null() {
-                json::set(&mut restored.params, "post", post);
-            }
+            restored.params = self.restored_session_params(&restored.params);
             // Sessions from before it was a preference carried it per photograph.
             if self.prefs.limit_preview.is_none() && restored.limit_preview {
                 self.prefs.limit_preview = Some(true);
@@ -2075,6 +2253,7 @@ impl Model {
                 self.state.border = BorderSettings::default();
             }
             json::set(&mut self.state.params, "io.rotate_cw", json::num(0.0));
+            json::set(&mut self.state.params, state::FLIP, Value::Bool(false));
             // How one file's colours are read never carries over to the next.
             let interpretation = json::get(&self.defaults, "io.input_interpretation").clone();
             if !interpretation.is_null() {
@@ -2272,7 +2451,7 @@ impl Model {
         let params = self.render_state().params;
         let io = &params["io"];
         json!([io["raw_white_balance"], io["lens_correction"], io["input_interpretation"], io["input_color_space"],
-            io["input_cctf_decoding"], io["output_color_space"], io["output_cctf_encoding"], self.state.limit_preview])
+            io["input_cctf_decoding"], io["output_color_space"], io["output_cctf_encoding"], self.state.limit_preview, self.shows_camera_jpeg()])
     }
 
     fn drop_stale_original(&mut self) {
@@ -2304,6 +2483,7 @@ impl Model {
             match picture {
                 Ok(picture) => {
                     model.original_cache = Some((key, picture.clone()));
+                    model.mark(dirty::COMPARE);
                     if model.holding_original {
                         model.original = Some(picture);
                         model.mark(dirty::CANVAS | dirty::STATUS);
@@ -2318,7 +2498,17 @@ impl Model {
                 }
             }
         };
-        if self.is_raw {
+        if let Some(jpeg) = self.camera_jpeg().filter(|_| self.shows_camera_jpeg()) {
+            // The camera's JPEG, laid over the RAW's frame (`loadCameraPicture`).
+            let frame = (image.width, image.height);
+            std::thread::spawn(move || {
+                let picture = crate::thumbnail::original(&jpeg, max_pixels).and_then(|p| {
+                    let placed = p.with_pixels(|rgba| compare::over_frame(rgba, p.width, p.height, frame)).flatten();
+                    placed.map(|(rgba, w, h)| Picture::new(rgba, w, h)).ok_or_else(|| anyhow!("The camera JPEG couldn’t be read"))
+                });
+                ui::post(move |app: &mut App| finish(app, picture));
+            });
+        } else if self.is_raw {
             // RAW: the helper decodes it with no film, framed like the engine.
             let Some(engine) = self.engine.clone() else { return };
             let buffer = engine.directory().join("original.rgba");
@@ -2413,7 +2603,7 @@ impl Model {
                     continue;
                 }
                 let Some(stock) = self.stocks.iter().find(|s| s.paper == paper && s.id == entry.id) else { continue };
-                let command = previews::stock_command(&state, stock, &self.stocks, self.prefs.keep_paper, source, generation);
+                let command = self.tile_command(&state, stock, source, generation);
                 wanted.push((Target::Stock { id: stock.id.clone(), paper }, previews::Key::new(generation, &command), command));
                 listed.push(entry.id);
             }
@@ -2466,7 +2656,7 @@ impl Model {
         self.previews.requests += 1;
         let buffer = engine.directory().join(format!("thumbnail-{}.rgba", self.previews.requests));
         command["preview_path"] = json!(buffer);
-        let (color, rotation) = (self.previews.color.clone(), self.rotation());
+        let (color, rotation, flip) = (self.previews.color.clone(), self.rotation(), self.state.flip());
         // A stock's tile can stand in for its develop when tried (`try_stock`).
         let stand_in = matches!(target, Target::Stock { .. });
         engine.request(command, engine::timeout_for("thumbnail"), move |result| {
@@ -2474,7 +2664,7 @@ impl Model {
                 let rgba = std::fs::read(&buffer)?;
                 let wide = crate::picture::is_wide(json::string(&r["display_color_space"]));
                 let (width, height) = (json::number(&r["width"]) as u32, json::number(&r["height"]) as u32);
-                let bitmap = previews::Bitmap::from_rgba(&rgba, width, height, wide, color.as_deref(), rotation)?;
+                let bitmap = previews::Bitmap::from_rgba(&rgba, width, height, wide, color.as_deref(), rotation, flip)?;
                 Ok(if stand_in { bitmap.keeping(rgba, width, height, wide) } else { bitmap })
             });
             let _ = std::fs::remove_file(&buffer);
@@ -2871,11 +3061,12 @@ impl Model {
             self.film_histogram = film;
             self.mark(dirty::TONE_GRAPH);
         }
-        let (shown, rotation) = (self.shown_image_size(), self.rotation());
+        let (shown, rotation, flip) = (self.shown_image_size(), self.rotation(), self.state.flip());
         if let Some(session) = &mut self.crop_session {
-            session.update(shown, rotation);
+            session.update(shown, rotation, flip);
         }
         self.lens_supported = json::boolean(&result["lens_correction_supported"]);
+        self.note_flat_field(&result["flat_field"]);
         self.rendered_space = json::string(&result["output_color_space"]).to_string();
         if self.input_colour != result["input_colour"] {
             self.input_colour = result["input_colour"].clone();
@@ -2900,6 +3091,8 @@ impl Model {
                 self.preview_cache.save(key, frame);
             }
             self.reconcile_brightness_match();
+            // Compare's other photograph develops once this one has settled.
+            self.pump_compared();
         }
         let seconds = json::number(&result["elapsed_ms"]) / 1000.0;
         let time = format!("developed in {seconds:.*} s", if seconds < 10.0 { 2 } else { 1 });
@@ -2980,7 +3173,7 @@ impl Model {
             self.mark(dirty::HISTOGRAM);
             return;
         };
-        let (request, crop, rotation) = (self.histogram_request, self.state.crop, self.rotation());
+        let (request, crop, rotation) = (self.histogram_request, self.state.crop, self.state.orientation());
         #[cfg(test)]
         let background = ui::testing::background();
         std::thread::spawn(move || {
@@ -3160,7 +3353,7 @@ impl Model {
     /// Saves the current preview with the crop, rotation, border, and size.
     fn save_command(&self, output: &Path, size: ExportSize, save: SaveSettings) -> Value {
         let mut command = json!({"command": "save", "render_id": self.render_id, "output": output, "rotate_cw": self.rotation(),
-            "save_options": save.json()});
+            "flip": self.state.flip(), "save_options": save.json()});
         if self.state.crop.cropped() {
             let r = self.state.crop.rect;
             command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": self.state.crop.angle});
@@ -4069,6 +4262,26 @@ mod tests {
         assert_eq!((model.state.clone(), model.undo_title().map(str::to_owned)), (edit, undo));
     }
 
+    /// Linked shifts: a double-click on the track is one step, its first
+    /// click undone before the reset (`resetFilterShiftAfterClick`).
+    #[test]
+    fn a_double_click_on_a_linked_shift_is_one_undo_step() {
+        let mut model = catalog_model(Preferences { previews: true, ..Preferences::default() });
+        model.source = Some(PathBuf::from("photo.png"));
+        model.prefs.filter_shift_link = "together".into();
+        model.set_filter_shift(state::FilterLink::MAGENTA, 10.0);
+        let (steps, before) = (model.undo.undo.len(), model.state.clone());
+        // The first click moves both; the second resets both.
+        model.set_filter_shift(state::FilterLink::MAGENTA, 30.0);
+        assert_eq!(json::number(model.value(state::FilterLink::YELLOW)), json::number(before.value(state::FilterLink::YELLOW)) + 20.0, "linked");
+        model.reset_filter_shift_after_click(state::FilterLink::MAGENTA);
+        assert_eq!(json::number(model.value(state::FilterLink::MAGENTA)), json::number(model.default_value(state::FilterLink::MAGENTA)));
+        assert_eq!(json::number(model.value(state::FilterLink::YELLOW)), json::number(model.default_value(state::FilterLink::YELLOW)));
+        assert_eq!(model.undo.undo.len(), steps + 1, "the click and the reset are one step");
+        model.perform_undo();
+        assert_eq!(model.state, before, "undo goes back to before the double-click");
+    }
+
     /// A visit to the tray is one undo step however many stocks were tried;
     /// Esc puts back the stock from before; another edit keeps the stock
     /// being tried first, as its own step after the visit's.
@@ -4086,8 +4299,14 @@ mod tests {
         // Not a film in the paper's place, nor a paper as a film.
         model.try_stock("endura");
         assert_eq!(model.state.film, "portra");
+        // Back to Scan's Your negative, the first group (as the Mac's
+        // `StockTrayRules.step`), held there, and on again.
         model.step_tray(-1);
-        assert_eq!(model.state.film, "portra", "held at the favourites' start");
+        assert!(model.is_negative(), "back from the favourites to Your negative");
+        model.step_tray(-1);
+        assert!(model.is_negative(), "held at the row's start");
+        model.step_tray(1);
+        assert_eq!((model.state.film.as_str(), model.is_negative()), ("portra", false));
         model.step_tray(1);
         assert_eq!(model.state.film, "gold", "on from the favourites into the group");
         model.step_tray(1);
@@ -4630,6 +4849,12 @@ mod tests {
 
 // The film and paper tray: trying, keeping and going back.
 mod tray;
+
+// Your negative: the base, the balance, the pickers.
+pub mod negative;
+
+// Compare and Original ⌄.
+pub mod compare;
 
 #[cfg(test)]
 pub mod harness;

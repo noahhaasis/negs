@@ -39,14 +39,47 @@ impl Model {
             }
             self.end_tray(true);
         }
-        let id = if paper { self.state.paper.clone() } else { self.state.film.clone() };
-        self.previews.tray = Some(TrayVisit::new(paper, self.state.clone(), id));
+        let id = self.tray_current(paper, false);
+        let mut visit = TrayVisit::new(paper, self.state.clone(), id);
+        visit.opens_on_scan = !paper && (self.is_negative() || self.looks_like_a_negative());
+        self.previews.tray = Some(visit);
+        if !paper {
+            self.check_looks_negative();
+        }
+        self.mark(dirty::TRAY | dirty::LAYOUT | dirty::PREVIEWS | dirty::CANVAS | dirty::INSPECTOR);
+    }
+
+    /// The tile the tray rings: the paper, Your negative while the
+    /// photograph is read as one, else the film (or the film it's read as).
+    pub fn tray_current(&self, paper: bool, read_as: bool) -> String {
+        if paper {
+            self.state.paper.clone()
+        } else if self.is_negative() && !read_as {
+            crate::negative::STOCK_ID.into()
+        } else {
+            self.state.film.clone()
+        }
+    }
+
+    /// The negative's "read as" name: the colour negatives it can be read
+    /// as, in the film tray; a second click keeps the one tried.
+    pub fn toggle_read_as_tray(&mut self) {
+        if self.tray().is_some_and(|t| !t.paper && t.read_as) {
+            return self.end_tray(true);
+        }
+        if !self.is_negative() || !self.can_open_tray(false) {
+            return;
+        }
+        self.end_tray(true);
+        let mut visit = TrayVisit::new(false, self.state.clone(), self.state.film.clone());
+        visit.read_as = true;
+        self.previews.tray = Some(visit);
         self.mark(dirty::TRAY | dirty::LAYOUT | dirty::PREVIEWS | dirty::CANVAS | dirty::INSPECTOR);
     }
 
     /// A click on a name: opens its tray, or closes it keeping the stock.
     pub fn toggle_tray(&mut self, paper: bool) {
-        if self.previews.open(paper) {
+        if self.previews.open(paper) && !self.tray().is_some_and(|t| t.read_as) {
             self.end_tray(true);
         } else {
             self.open_tray(paper);
@@ -58,18 +91,24 @@ impl Model {
     /// shows exactly the edit tried, stands in on the canvas until that
     /// edit's develop is in.
     pub fn try_stock(&mut self, id: &str) {
-        let Some(paper) = self.tray().map(|t| t.paper) else { return };
+        let Some((paper, read_as)) = self.tray().map(|t| (t.paper, t.read_as)) else { return };
         let Some(source) = self.source.clone() else { return };
+        if id == crate::negative::STOCK_ID && !paper && !read_as {
+            return self.try_negative();
+        }
         // Only the tray's own kind: a film is never printed on as a paper.
         let Some(stock) = self.stocks.iter().find(|s| s.paper == paper && s.id == id) else { return };
-        let next = state::choosing(&self.state, id, paper, self.prefs.keep_paper, &self.stocks);
+        if read_as && !crate::negative::readable(stock) {
+            return;
+        }
+        let next = self.choosing_stock(&self.state, id, paper, read_as);
         if next == self.state {
             return;
         }
         // The tile shows this edit if it was made from the request it would
         // be made from before the change.
         let generation = self.source_generation;
-        let key = previews::Key::new(generation, &previews::stock_command(&self.render_state(), stock, &self.stocks, self.prefs.keep_paper, &source, generation));
+        let key = previews::Key::new(generation, &self.tile_command(&self.render_state(), stock, &source, generation));
         self.replace_state(next);
         self.mark(dirty::TRAY);
         if self.preview_current {
@@ -100,9 +139,9 @@ impl Model {
     /// favourites and on into the groups; among the matches while searching.
     pub fn step_tray(&mut self, offset: i32) {
         let Some(tray) = self.tray() else { return };
-        let current = if tray.paper { &self.state.paper } else { &self.state.film };
+        let current = self.tray_current(tray.paper, tray.read_as);
         let places = rules::places(&self.tray_sections());
-        let Some(place) = rules::step(current, tray.in_favourites, offset, &places) else { return };
+        let Some(place) = rules::step(&current, tray.in_favourites, offset, &places) else { return };
         if let Some(tray) = &mut self.previews.tray {
             tray.in_favourites = place.favourite;
         }
@@ -134,6 +173,7 @@ impl Model {
             }
             Ending::Restore(before) => self.replace_state(before),
         }
+        self.negative_tray_ended();
         self.mark(dirty::TRAY | dirty::LAYOUT | dirty::PREVIEWS | dirty::CANVAS | dirty::INSPECTOR | dirty::CHROME);
     }
 
@@ -141,21 +181,28 @@ impl Model {
     /// first, then each group; while searching only the matches.
     pub fn tray_sections(&self) -> Vec<Section> {
         let Some(tray) = self.tray() else { return vec![] };
-        let paper = tray.paper;
-        let (films, papers) = (self.listed_films(), self.papers());
+        let (paper, read_as) = (tray.paper, tray.read_as);
+        let (mut films, papers) = (self.listed_films(), self.papers());
+        // Reading a negative: the colour negatives only.
+        if read_as {
+            films.retain(|s| crate::negative::readable(s));
+        }
         let groups = if paper { state::paper_groups(&papers) } else { state::matching(&tray.query, state::film_groups(&films, &papers)) };
         let entry = |s: &Stock| Entry::new(s.id.clone(), s.name.clone());
         let matched = groups.into_iter().map(|g| Section::group(g.title, g.stocks.into_iter().map(entry).collect())).collect();
         // Films listed only (Settings › Fotufilm films).
         let favourites = self.favorite_stocks(paper).into_iter().filter(|s| paper || films.iter().any(|f| f.id == s.id)).map(entry).collect();
-        rules::sections(matched, favourites, &tray.query)
+        rules::with_scan(rules::sections(matched, favourites, &tray.query), paper, read_as, &tray.query, crate::negative::NAME)
     }
 
     /// The name of the stock the tray opened on, once another is tried.
     pub fn tray_before_name(&self) -> Option<String> {
         let tray = self.tray()?;
-        let current = if tray.paper { &self.state.paper } else { &self.state.film };
-        tray.tried(current).then(|| self.stocks.iter().find(|s| s.paper == tray.paper && s.id == tray.before_id).map_or_else(|| tray.before_id.clone(), |s| s.name.clone()))
+        let current = self.tray_current(tray.paper, tray.read_as);
+        if tray.before_id == crate::negative::STOCK_ID {
+            return tray.tried(&current).then(|| crate::negative::NAME.into());
+        }
+        tray.tried(&current).then(|| self.stocks.iter().find(|s| s.paper == tray.paper && s.id == tray.before_id).map_or_else(|| tray.before_id.clone(), |s| s.name.clone()))
     }
 
     /// Typing in Search filters the film tray at once, and never edits the photograph.

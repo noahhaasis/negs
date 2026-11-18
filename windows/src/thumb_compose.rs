@@ -21,6 +21,8 @@ use crate::crop::CropSettings;
 #[derive(Clone, Debug)]
 pub struct Finish {
     pub rotation: i32,
+    /// Mirrored left to right before the turns (`io.flip`).
+    pub flip: bool,
     pub border: Option<BorderSettings>,
     pub film: String,
     pub data: Option<PathBuf>,
@@ -28,13 +30,14 @@ pub struct Finish {
 
 impl Finish {
     pub fn of(state: &crate::state::EditState, data: Option<PathBuf>) -> Finish {
-        Finish { rotation: state.rotation(), border: state.border.enabled.then_some(state.border), film: state.film.clone(), data }
+        Finish { rotation: state.rotation(), flip: state.flip(), border: state.border.enabled.then_some(state.border), film: state.film.clone(), data }
     }
 }
 
 /// `image`, cropped and unturned in sRGB, turned and put inside its border
 /// (when the border fits it, as the canvas shows it).
 pub fn finish(image: RgbaImage, finish: &Finish) -> RgbaImage {
+    let image = if finish.flip { imageops::flip_horizontal(&image) } else { image };
     let image = match finish.rotation.rem_euclid(4) {
         1 => imageops::rotate90(&image),
         2 => imageops::rotate180(&image),
@@ -118,14 +121,14 @@ mod tests {
 
     #[test]
     fn a_thumbnail_turns_as_the_photograph_does() {
-        let finished = finish(grey(30, 20), &Finish { rotation: 1, border: None, film: String::new(), data: None });
+        let finished = finish(grey(30, 20), &Finish { rotation: 1, flip: false, border: None, film: String::new(), data: None });
         assert_eq!(finished.dimensions(), (20, 30));
     }
 
     #[test]
     fn a_solid_border_goes_round_the_thumbnail_in_its_colour() {
         let border = BorderSettings { enabled: true, style: BorderStyle::Solid, color: crate::border::BorderColor([255, 0, 0]), ..Default::default() };
-        let finished = finish(grey(300, 200), &Finish { rotation: 0, border: Some(border), film: String::new(), data: Some(PathBuf::from(".")) });
+        let finished = finish(grey(300, 200), &Finish { rotation: 0, flip: false, border: Some(border), film: String::new(), data: Some(PathBuf::from(".")) });
         // 3 % of the long edge on every side.
         assert_eq!(finished.dimensions(), (318, 218));
         assert_eq!(finished.get_pixel(0, 0).0, [255, 0, 0, 255]);
@@ -141,7 +144,7 @@ mod tests {
             }
         }
         let crop = CropSettings { rect: crate::crop::Rect::new(0.0, 0.0, 0.5, 1.0), ..Default::default() };
-        let plain = Finish { rotation: 0, border: None, film: String::new(), data: None };
+        let plain = Finish { rotation: 0, flip: false, border: None, film: String::new(), data: None };
         let thumbnail = from_preview(image.as_raw(), 400, 200, false, &crop, &plain, 512).unwrap();
         assert_eq!(thumbnail.dimensions(), (200, 200));
         assert_eq!(thumbnail.get_pixel(100, 100).0, [10, 20, 30, 255]);
@@ -150,7 +153,7 @@ mod tests {
     #[test]
     fn a_wide_preview_is_brought_to_srgb() {
         let white = RgbaImage::from_pixel(4, 4, image::Rgba([255, 255, 255, 255]));
-        let plain = Finish { rotation: 0, border: None, film: String::new(), data: None };
+        let plain = Finish { rotation: 0, flip: false, border: None, film: String::new(), data: None };
         let thumbnail = from_preview(white.as_raw(), 4, 4, true, &CropSettings::default(), &plain, 512).unwrap();
         // White stays white; a saturated Rec. 2020 green clips in sRGB.
         assert_eq!(thumbnail.get_pixel(0, 0).0, [255, 255, 255, 255]);

@@ -1,5 +1,9 @@
 # Negs (unreleased)
 
+## Mac
+
+- The photo keeps its zoom and position when you change the film or paper.
+
 ## Windows
 
 - **The Mac's look.** The window is drawn in the Mac app's themes, chosen
@@ -13,7 +17,7 @@
   before.
 - **No toolbar.** Open, Export, the panel and the photograph's tools
   (fit, 100 %, rotate, crop, before and after, the film strip) are in
-  the menus, with Ctrl shortcuts. Crop is Ctrl+K or C; Settings is
+  the menus, with Ctrl shortcuts. Crop is Ctrl+K; Settings is
   Ctrl+,; Reset Edits is in the new Photo menu.
 - **A status line in words** under the photograph: its size and how long
   it took to develop, or the export under way with Cancel. Original ⌄
@@ -121,6 +125,45 @@
   the camera's preview, while it develops again, even after an update.
 - While cropping, the status line says the aspect and the size of the
   crop.
+- **Compare.** Select two photographs in the strip or grid and press C
+  (View › Compare) to see them side by side, or in one frame with a line
+  you drag (S switches). Right-click offers "Compare 3 and 7", "Compare
+  with 3" or "Compare with Original". Click the other photograph to edit
+  it; ← → step through the roll; Swap, Fit, 100% and Done are along the
+  top, and a double click zooms both to actual size together. The status
+  line says what differs ("differ in shutter and aperture") and the note
+  under the photographs which one you're editing. The strip makes way for
+  them. View › Grid (G) is in the menu too.
+- **Grid · Photo · Compare** in the title bar, at the right, switch
+  between the views, as the View menu does.
+- **Original ⌄** chooses what Original does: hold to see the whole, a
+  split line, or side by side. For a RAW shot as RAW+JPEG it also chooses
+  between the RAW and the camera's JPEG.
+- **Your negative.** The film tray starts with "Your negative": it reads
+  the photograph as a scan of a colour negative, finds the film base,
+  balances and meters the print, and crops to the picture. The label says
+  "Your negative read as Portra 400", and the film it's read as can be
+  changed there. Prep then has Film base (Find again, Pick from rebate,
+  Flat field, Crop to picture, and Backlight behind "Backlight…") and
+  Balance (Auto, Pick neutral). A negative's film tray opens on Scan.
+- **Flat field.** Prep › Flat field › Choose… takes a frame of the bare
+  light, shot with the roll's camera, lens and aperture; each scan is
+  divided by it so the light's falloff doesn't print.
+- **Darkroom rolls.** Prep › Use for whole roll prints every photograph in
+  view as a frame of this negative's roll: its film, backlight, base and
+  filtration, each frame with its own base where it shows clear film, its
+  own exposure and its crop to the picture, as one step to undo. A frame
+  that sets its own filtration can go back with "Roll's filtration".
+- Pick from rebate shows the whole frame, and picks land where you click
+  on a straightened crop.
+- **B&W colour filters** in Lab › Camera: a coloured glass in front of
+  the lens for black-and-white film, with how many stops it takes.
+- **Enlarger › Shifts move** links the magenta and yellow shifts:
+  separately, together or opposite.
+- **Flip.** The crop panel's "Flip left to right" (and View › Flip
+  Horizontal) mirrors the photograph, as a negative scanned from its base
+  side needs. Exports are mirrored too, and so are the tray's and the
+  presets' tiles.
 - **Photographs open faster.** A RAW is read once and its brightness
   match solved before anything develops, so the first develop you see is
   the right one, with no darker or lighter frame first. A photograph you

@@ -16,8 +16,71 @@ decisions made with their reasons, and what was carried over. See
 | 5 | Tray | done, merged (see log) |
 | 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | done, merged `f9b8f47` |
-| 8 | Remaining features, Flip added (Open in Lightroom last) | 8c merged `1396397`, 8b merged `4a15d7f`; 8a in progress |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | done: 8c `1396397`, 8b `4a15d7f`, 8a `ee752ee` merged; follow-ups running |
 | 9 | Validation and release | not started |
+
+## 2026-11-19: phase 8a merged, the editor features (`ee752ee`, branch tip `5b369fb`)
+
+- **What users see:**
+  - **Flip:** "Flip left to right" in the crop panel's Flip section, and View › Flip
+    Horizontal. The preview, exports, thumbnails, and the tray and preset tiles are
+    mirrored. `io.flip` is mapped in the library glue and passed to the engine, with
+    no engine change.
+  - **Enlarger › Shifts move:** separately, together or opposite. A double-click on
+    a linked shift is one undo step.
+  - **B&W colour filters** in Lab › Camera.
+  - **Your negative:**
+    - The tray has a Scan group, and opens on it for a negative, or when
+      `negative_check` says the photograph looks like one.
+    - The label reads "Your negative ⌄ read as … / printed on …".
+    - Prep has Film base (Find again, Pick from rebate, Crop to picture,
+      Backlight… behind More), Flat field (Choose…/Off, with why it isn't used),
+      Balance (Auto, Pick neutral), and the darkroom rolls (Use for whole roll,
+      Roll's filtration, "A frame of a roll…").
+    - Picks follow the crop's straightening.
+  - **Compare:**
+    - C, View › Compare, the title bar's new Grid · Photo · Compare switch, or the
+      context menu's "Compare 3 and 7 / with 3 / with Original".
+    - Side by side or slider (S), Swap, Fit/100%, and Done (Esc). Each photograph
+      has a numbered ring and its facts, with the ones that differ underlined; the
+      status line says what differs; the inspector says "Editing ① the left one".
+    - No strip while comparing, as on the Mac.
+    - The other photograph develops as opening it would: a full preview render with
+      its match solved first (8b's solve and `BrightnessMatches.json`). Until then a
+      stand-in shows: the kept develop, else the developed thumbnail, else the
+      embedded preview.
+    - The open side shows 208 ms after C, and a stand-in 43 ms. Picture making is
+      off the UI thread; it used to freeze the window for 1.7 s.
+  - **Original ⌄:** hold, split (as Compare's slider against the original), or side by
+    side. For RAW+JPEG it adds Show the RAW / Show the camera JPEG.
+  - Plain C compares, as on the Mac; Ctrl+K still crops.
+- **Gates:**
+  - The full Windows suite on the PC, at `5b369fb`: 276 passed.
+  - Mac checks: the cross-check is clean; library-map 7 + 18, tray-rules 19 and
+    negs-library all pass.
+  - Flipped exports, grain and glare off: on both the PC and the Mac, the flipped
+    export is the exact mirror of the unflipped one. The two machines differ by the
+    same amount with flip on or off, so flip adds no difference.
+  - Shots in `~/.negs/windows-parity/phase8a/{darkroom,daylight,roll}/`. The Mac
+    Compare references are in `phase8a/ref/darkroom/`. Side by side and slider match
+    the Mac's layout.
+  - No ABBA: launch code wasn't touched.
+- **Decisions:**
+  - Compare has its own helper, so the open photograph's decode stays loaded.
+  - Compare's pictures are capped at 3072 px, because the view draws through GDI.
+  - `negs-library`'s `change_edits` transform now receives the item. `change_each_edit`,
+    `opening_state` and `new_id` are new, for the rolls.
+- **Different from the Mac:**
+  - Compare's differences wait until both photographs' facts are known.
+  - 100% follows the open photograph's scale, at most 3072 px.
+  - Backlight's shown state resets for each photograph.
+  - The inspector isn't dimmed while the original is active.
+  - A flip re-develops the tiles.
+  - Not tried: a RAW+JPEG pair in Original ⌄ (the test roll has none).
+- **Follow-up (running):**
+  - Compare's captions leave out the camera ("Nikon D750").
+  - The edited side's film and paper lack their ⌄ menus and lock.
+  - The status line's "← → steps the right one" is cut off at 1440 px.
 
 ## 2026-11-19: phase 8b merged, faster open, batch export and Open in Lightroom (`4a15d7f`, branch tip `fbb7a11`)
 

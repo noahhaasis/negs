@@ -87,7 +87,8 @@ struct Photo {
     clip: vec4f,
     // the quad drawn, on screen
     quad: vec4f,
-    // x: the shade's opacity outside the crop while cropping, y: 1 for a Rec. 2020 proxy
+    // x: the shade's opacity outside the crop while cropping, y: 1 for a Rec. 2020 proxy,
+    // z: 1 when mirrored left to right before the quarter turns (io.flip)
     extra: vec4f,
 };
 @group(2) @binding(0) var<uniform> photo: Photo;
@@ -130,6 +131,9 @@ fn photo_fs(in: PhotoOut) -> @location(0) vec4f {
     let turns = u32(photo.shown.z + 0.5);
     for (var i = 0u; i < turns; i++) {
         f = vec2f(f.y, 1.0 - f.x);
+    }
+    if (photo.extra.z > 0.5) {
+        f.x = 1.0 - f.x;
     }
     var rgb = textureSample(image, image_sampler, f).rgb;
     if (photo.extra.y > 0.5) {

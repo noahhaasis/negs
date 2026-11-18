@@ -64,6 +64,8 @@ pub struct TileLook {
     pub favourite: bool,
     /// Under the pointer: its name lit and its star shown.
     pub hot: bool,
+    /// Words on the blank instead of a picture (Your negative); no star.
+    pub words: Option<&'static str>,
 }
 
 /// What a click in the foot reaches.
@@ -182,7 +184,7 @@ pub fn sync(app: &mut App) {
     let opened = OPEN.replace(Some(paper)) != Some(paper);
     let sections = model.tray_sections();
     let thumbs = thumbs(model, paper, &sections);
-    let current = if paper { model.state.paper.clone() } else { model.state.film.clone() };
+    let current = model.tray_current(paper, visit.read_as);
     let favourites = sections.iter().flat_map(|s| &s.stocks).filter(|e| model.prefs.is_favorite(&e.id, paper)).map(|e| e.id.clone()).collect();
     let mut client = RECT::default();
     unsafe {
@@ -193,10 +195,21 @@ pub fn sync(app: &mut App) {
         let mut shown = shown.borrow_mut();
         let content = rules::content_width(&sections);
         let mut offset = shown.offset;
-        if opened {
+        if opened && visit.opens_on_scan {
+            // A negative's film tray opens on Scan, at the row's start.
+            HOT_TILE.set(None);
+            SHOWN_SCAN.set(true);
+            offset = 0.0;
+        } else if opened {
             // It opens on the current stock, in the middle.
             HOT_TILE.set(None);
+            SHOWN_SCAN.set(false);
             offset = rules::reveal(0.0, &current, visit.in_favourites, true, &sections, visible);
+        } else if visit.opens_on_scan && !SHOWN_SCAN.get() && current == visit.before_id && visit.query.is_empty() {
+            // The check answered after the tray opened: Scan, if nothing else
+            // was tried or searched for.
+            SHOWN_SCAN.set(true);
+            SCAN_GLIDE.set(true);
         } else if shown.query != visit.query {
             // Each search starts at its first match; clearing it goes back to the stock.
             offset = if visit.query.is_empty() { rules::reveal(offset, &current, visit.in_favourites, true, &sections, visible) } else { 0.0 };
@@ -229,6 +242,9 @@ pub fn sync(app: &mut App) {
         (changed, listed, tried)
     });
     let (changed, listed, tried) = changed;
+    if SCAN_GLIDE.replace(false) {
+        glide_to(0.0);
+    }
     sync_search(app, tray, paper, opened);
     if changed || opened {
         super::tray_access::changed(listed || opened, tried || opened);
@@ -524,7 +540,14 @@ fn tile_marks(p: &mut Painter, t: &Tokens, looks: &[TileLook]) {
             let b = p.measure("before", &BEFORE, 0.0);
             p.text("before", &BEFORE, r.x + drawn.width + 6.0, y + m.baseline - b.baseline, Ink::hex(t.film.dim));
         }
-        if look.favourite || look.hot {
+        if let Some(words) = look.words {
+            // `NegativeTile`: serif 15 italic, centred, 18 in from the sides.
+            let style = TextStyle::serif(15.0, 400).italic().line_height(1.25);
+            let width = r.w - 36.0;
+            let m = p.measure_in(words, &style, width, super::d2d::Align::Center);
+            p.text_in(words, &style, RectF::new(r.x + 18.0, r.y + (r.h - m.height) / 2.0, width, m.height + 4.0), super::d2d::Align::Center, Ink::hex(t.film.label));
+        }
+        if (look.favourite || look.hot) && look.words.is_none() {
             let (sx, sy, _, _) = rules::star_rect(0.0);
             p.clipped(r, |p| star(p, r.x + sx as f32, r.y + (sy - rules::TOP) as f32, look.favourite, t));
         }
@@ -555,6 +578,7 @@ fn looks(v: &Shown, w: f32, hot_tile: Option<Hit>) -> Vec<TileLook> {
                 before: visit.shows_before(&entry.id, &v.current),
                 favourite: v.favourites.contains(&entry.id),
                 hot,
+                words: (entry.id == rules::YOUR_NEGATIVE).then_some(crate::negative::TILE_TEXT),
             });
         }
     }
@@ -837,13 +861,13 @@ fn press_tile(hit: Hit) {
         return;
     };
     match hit {
-        Hit::Star(..) => {
+        Hit::Star(..) if id != rules::YOUR_NEGATIVE => {
             with_app(|app| {
                 app.model.toggle_favorite(&id, paper);
                 app.model.dirty |= crate::model::dirty::TRAY;
             });
         }
-        Hit::Tile(..) => {
+        Hit::Tile(..) | Hit::Star(..) => {
             with_app(|app| app.model.choose_tile(&id, favourites));
         }
     }
@@ -911,15 +935,20 @@ pub(super) fn spoken() -> Option<(String, Vec<Spoken>)> {
                 let selected = entry.id == v.current;
                 let before = visit.shows_before(&entry.id, &v.current);
                 let state = shown(tile) | STATE_SELECTABLE | if selected { STATE_SELECTED } else { 0 };
+                // Your negative says what it does, and has no star.
+                let negative = entry.id == rules::YOUR_NEGATIVE;
                 all.push(Spoken {
                     name: entry.name.clone(),
                     value: rules::tile_value(selected, before).into(),
-                    help: String::new(),
+                    help: if negative { crate::negative::TILE_TEXT.into() } else { String::new() },
                     role: ROLE_PUSHBUTTON,
                     state,
                     place: tile,
                     press: Press::Tile(Hit::Tile(si, i)),
                 });
+                if negative {
+                    continue;
+                }
                 let favourite = v.favourites.contains(&entry.id);
                 let (sx, sy, sw, sh) = rules::star_rect(left);
                 let star = RectF::new(sx as f32, sy as f32, sw as f32, sh as f32);
@@ -999,6 +1028,13 @@ fn visible_width() -> f64 {
         let _ = GetClientRect(tray, &mut client);
     }
     client.right as f64 / draw::dpi_of(tray) as f64
+}
+
+thread_local! {
+    /// This visit has shown Scan (`TrayScroll.shownScan`).
+    static SHOWN_SCAN: Cell<bool> = const { Cell::new(false) };
+    /// Scan is to be glided to once the row is synced.
+    static SCAN_GLIDE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Scrolls the row at once (a wheel, a resize), ending a glide.

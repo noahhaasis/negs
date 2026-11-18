@@ -234,6 +234,28 @@ fn result_path(dialog: &IFileDialog) -> Option<PathBuf> {
     }
 }
 
+/// Prep › Flat field › Choose…: the light frame, from the photograph's folder.
+pub fn choose_light_frame(owner: HWND, photo: Option<&std::path::Path>) -> Option<PathBuf> {
+    let photos: String = RAW_EXTENSIONS.iter().chain(IMAGE_EXTENSIONS).map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
+    let filters = [("Photographs", photos), ("All files", "*.*".into())];
+    let wide_filters: Vec<(Vec<u16>, Vec<u16>)> = filters.iter().map(|(n, p)| (wide(n), wide(p))).collect();
+    let specs: Vec<COMDLG_FILTERSPEC> = wide_filters.iter().map(|(n, p)| COMDLG_FILTERSPEC { pszName: pcwstr(n), pszSpec: pcwstr(p) }).collect();
+    unsafe {
+        (|| -> Option<PathBuf> {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            dialog.SetFileTypes(&specs).ok()?;
+            let title = wide("Choose Light Frame");
+            let _ = dialog.SetTitle(pcwstr(&title));
+            let _ = dialog.SetOptions(FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+            if let Some(folder) = photo.and_then(|p| p.parent()).and_then(shell_item) {
+                let _ = dialog.SetFolder(&folder);
+            }
+            dialog.Show(owner).ok()?;
+            result_path(&dialog.cast().ok()?)
+        })()
+    }
+}
+
 /// Starts in the current photograph's folder with it selected.
 pub fn open(app: &mut App) {
     let photos: String = RAW_EXTENSIONS.iter().chain(IMAGE_EXTENSIONS).map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
