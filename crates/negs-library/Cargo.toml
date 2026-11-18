@@ -1,0 +1,11 @@
+[package]
+name = "negs-library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Negs library without a UI: .negs sidecars, ratings, flags, per-photograph edits, undo, the folder listing"
+
+# No dependencies: its own JSON (to write sidecars byte for byte as the macOS
+# app does) and SHA-256 (for thumbnail looks), so the engine's feature
+# unification and Cargo.lock stay as they are.
+[dependencies]
