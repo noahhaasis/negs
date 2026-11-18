@@ -408,7 +408,7 @@ mod tests {
         assert_eq!(bytes[3], 255);
     }
     #[test]
-    fn crop_shade_is_applied_in_linear_light() {
+    fn crop_shade_blends_encoded_as_core_animation_does() {
         let mut out = Raster {
             w: 2,
             h: 1,
@@ -426,8 +426,8 @@ mod tests {
         };
         out.photo(&[255; 8], 2, 1, &p);
         assert_eq!(out.pixels[0], 255);
-        // rgba(8, 7, 6, .6) over white, mixed in linear light.
-        assert!((out.pixels[4] as i32 - 170).abs() <= 1, "{}", out.pixels[4]);
+        // rgba(8, 7, 6, .6) over white, mixed encoded: 255 × .4 + 8 × .6.
+        assert!((out.pixels[4] as i32 - 107).abs() <= 1, "{}", out.pixels[4]);
     }
     #[test]
     fn quarter_turn_follows_photo_uniforms() {
