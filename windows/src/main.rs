@@ -3,6 +3,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod batch;
 mod border;
 mod brightness;
 mod crop;

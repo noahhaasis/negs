@@ -245,6 +245,11 @@ pub struct Preferences {
     pub fotufilm_films: String,
     /// The Settings tab last shown (the Mac's `settingsTab`).
     pub settings_tab: String,
+    /// The batch dialog's File Name, its Custom text and If a File Exists,
+    /// under the Mac's keys (`batch::Naming`, `batch::Existing`).
+    pub batch_naming: String,
+    pub batch_custom_name: String,
+    pub batch_existing: String,
 }
 
 /// Starred for new users, as on the web and the Mac; once they change the
@@ -298,6 +303,9 @@ impl Default for Preferences {
             app_theme: "darkroom".into(),
             library: Default::default(),
             fotufilm_films: "all".into(),
+            batch_naming: "nameFilm".into(),
+            batch_custom_name: "{name}_{film}".into(),
+            batch_existing: "number".into(),
             settings_tab: "Photographs".into(),
         }
     }

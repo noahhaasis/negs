@@ -2093,3 +2093,115 @@ lifecycle_test! {
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
+
+// MARK: Batch export
+
+lifecycle_test! {
+    /// The Mac's `testBatchExportsEachPhotographWithItsOwnEdits`: the grid's
+    /// three photographs export with their own edits, names and ratings; an
+    /// edited one whose match isn't solved for its edits is solved and the
+    /// match stored with them; a never-edited one exports as opening it
+    /// would, without a sidecar. Each, exported alone after opening it,
+    /// gives the same bytes. Again into the folder: Add a Number, then Skip.
+    fn a_batch_exports_each_photograph_with_its_own_edits() {
+        use crate::batch::{Existing, Options, Status};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-batch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (photos, out, alone) = (dir.join("photos"), dir.join("out"), dir.join("alone"));
+        for folder in [&photos, &out, &alone] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        // Small, so three Reference exports stay quick.
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b, c) = (photos.join("a.png"), photos.join("b.png"), photos.join("c.png"));
+        for photo in [&a, &b, &c] {
+            small.save(photo).unwrap();
+        }
+        // b edited and rated, its match on but not solved for these edits; c never edited.
+        let sidecar = r#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 4, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "brightnessMatch": {"highlightLimited": false}}}]}"#;
+        std::fs::write(negs_library::sidecar::sidecar_path(&b), sidecar).unwrap();
+        h.model().batch_journal = dir.join("journal").join("active-export.json");
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+        assert!(h.model().shelf.library.is_some());
+        // a: another film than the default, and 3 stars.
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        h.idle();
+        h.edit(|m| m.library_key(super::library_map::LibraryKey::Rate(3)));
+        h.idle();
+
+        h.edit(|m| {
+            m.shelf.in_grid = true;
+            let shown = m.shown_items();
+            m.shelf.selection.select_all(&shown);
+        });
+        assert_eq!(h.model().export_title(), "Export 3 Photographs…");
+        assert!(h.model().can_export_any() && !h.model().exports_single());
+        let targets = h.model().export_targets();
+        let mut options = Options { format: "png".into(), ..Options::default() };
+        h.edit(|m| m.export_batch(targets.clone(), out.clone(), options.clone(), None));
+        let (names, needs, running) = {
+            let run = h.model().batch.as_ref().expect("started");
+            (run.journal.items.iter().map(|i| i.file_name.clone()).collect::<Vec<_>>(), run.journal.items.iter().map(|i| i.needs_match).collect::<Vec<_>>(), run.running)
+        };
+        let new_film = names[2].trim_start_matches("c_").trim_end_matches(".png").to_string();
+        assert_ne!(new_film, film, "c has the default film, not the open photograph's");
+        assert_eq!(names, [format!("a_{film}.png"), "b_kodak_portra_400.png".into(), format!("c_{new_film}.png")]);
+        assert_eq!(needs, [false, true, true]);
+        assert!(running && !h.model().can_export_any(), "one batch at a time");
+        assert!(h.model().batch_journal.exists(), "journalled");
+        h.run_until("the batch", |m| !m.batch_running());
+        h.idle();
+        assert!(!h.model().batch_journal.exists(), "the journal goes when the batch ends");
+        assert!(h.model().batch.is_none(), "a batch without failures is forgotten: {}", h.model().status);
+        assert_eq!(h.model().status, format!("Exported 3 photographs to “out”"));
+
+        let files: Vec<_> = names.iter().map(|n| out.join(n)).collect();
+        let ratings: Vec<_> = files.iter().map(|f| negs_library::xmp::read_rating(&std::fs::read(f).unwrap())).collect();
+        assert_eq!(ratings, [Some(3), Some(4), None]);
+        // b's match solved and stored with its edits; c gets no sidecar.
+        let stored = std::fs::read_to_string(negs_library::sidecar::sidecar_path(&b)).unwrap();
+        let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        let edits = &stored["variants"][0]["edits"];
+        assert!(edits["brightnessMatch"]["ev"].as_f64().is_some_and(f64::is_finite), "solved: {edits}");
+        assert_eq!(edits["params"]["prep"]["lift"], 5);
+        assert!(!negs_library::sidecar::sidecar_path(&c).exists());
+
+        // Each exported alone, as today, gives the same bytes: a open as it
+        // was, and c opened after it, with the default film and its match
+        // solved; b, its stored match now solved.
+        let save = super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 };
+        for (photo, file) in [(&a, &files[0]), (&c, &files[2]), (&b, &files[1])] {
+            h.edit(|m| m.shelf.in_grid = false);
+            h.open(photo);
+            h.idle();
+            let single = alone.join(file.file_name().unwrap());
+            let target = single.clone();
+            h.edit(|m| m.export(target, crate::engine::ExportEngine::Reference, super::ExportSize::FULL, save));
+            h.run_until("the export", |m| !m.exporting && m.waiting_output.is_none() && single.exists());
+            h.idle();
+            assert_eq!(std::fs::read(&single).unwrap(), std::fs::read(file).unwrap(), "{}", file.display());
+        }
+
+        // Again into the same folder: Add a Number, then Skip.
+        let b_item = targets[1].clone();
+        h.edit(|m| m.shelf.in_grid = true);
+        h.edit(|m| m.export_batch(vec![b_item.clone()], out.clone(), options.clone(), None));
+        h.run_until("the second batch", |m| !m.batch_running());
+        h.idle();
+        assert!(out.join("b_kodak_portra_400 2.png").exists());
+        options.existing = Existing::Skip;
+        h.edit(|m| m.export_batch(vec![b_item], out.clone(), options, None));
+        h.run_until("the third batch", |m| !m.batch_running());
+        h.idle();
+        assert_eq!(h.model().status, "Exported 0 photographs to “out”; 1 skipped");
+        assert!(!out.join("b_kodak_portra_400 3.png").exists());
+        let _ = Status::Skipped;
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -28,6 +28,7 @@ use spektrafilm_io::image_size::PHOTO_LONG_SIDE_RANGE;
 use crate::ui::{self, App};
 
 // The library: sidecars, ratings, flags and per-photograph edits.
+mod batch;
 mod library;
 pub mod library_map;
 mod recycle_bin;
@@ -596,6 +597,14 @@ pub struct Model {
     match_reference: Option<(u64, (u32, u32), Arc<Vec<u8>>)>,
     /// The match cache's engine stamp for a helper and data folder.
     match_engine: Option<(PathBuf, PathBuf, String)>,
+    /// The batch export running or last run (`model/batch.rs`), and its
+    /// worker's controls while it runs.
+    pub batch: Option<crate::batch::Run>,
+    batch_control: Option<std::sync::Arc<batch::Control>>,
+    /// Where an unfinished batch is journalled (`batch::Journal::path`).
+    pub batch_journal: PathBuf,
+    /// The batch popover shows: it clears a finished batch when it closes.
+    pub batch_popover_shown: bool,
     /// Save or Export waiting for a pending brightness match and its preview,
     /// so they write what the inspector shows: what it is, when it was asked
     /// for, and the action (see `settle_outputs`).
@@ -740,6 +749,10 @@ impl Model {
             match_decode_failed: None,
             match_reference: None,
             match_engine: None,
+            batch: None,
+            batch_control: None,
+            batch_journal: crate::batch::Journal::path(),
+            batch_popover_shown: false,
             waiting_output: None,
             held: None,
             quick_step: None,
@@ -3396,21 +3409,11 @@ impl Model {
     /// Moves the total with the match, keeping the user's exposure above it.
     /// A change under 0.05 EV keeps the values and only marks them current.
     fn apply_brightness_match(&mut self, ev: f64, limited: bool, inputs: Value) {
-        let Some(mut matched) = self.state.brightness_match.clone() else { return };
         if !json::same(&state::match_inputs(&self.state), &inputs) {
             return;
         }
-        let mut next = self.state.clone();
-        let offset = json::number(next.value(state::PREP_EXPOSURE)) - matched.ev.unwrap_or(0.0);
-        if matched.ev.is_none_or(|old| (ev - old).abs() >= 0.05) {
-            matched.ev = Some(ev);
-            let (low, high) = state::PREP_EXPOSURE_RANGE;
-            let total = if offset.abs() < 1e-9 { ev } else { ev + offset };
-            json::set(&mut next.params, state::PREP_EXPOSURE, json::num(total.clamp(low, high)));
-        }
-        matched.inputs = Some(inputs);
-        matched.highlight_limited = limited;
-        next.brightness_match = Some(matched);
+        // As a batch applies it to a photograph it exports.
+        let Some(next) = crate::batch::matched(&self.state, ev, limited, inputs) else { return };
         self.replace_state(next);
     }
 
@@ -3718,6 +3721,7 @@ impl Model {
         self.drop_held("close");
         self.waiting_output = None;
         self.cancel_export();
+        self.stop_batch_for_quit();
         if let Some(engine) = &self.engine {
             engine.stop();
         }
