@@ -45,7 +45,7 @@ const MENU_INSET: f64 = 6.0;
 const NAME_GAP: f64 = 14.0;
 const MENU_FIRST: u16 = 800;
 /// The file name (§2.2: Newsreader 15, 600, `paper`).
-const NAME: TextStyle = TextStyle::serif(15.0, 600);
+pub const NAME: TextStyle = TextStyle::serif(15.0, 600);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Caption {

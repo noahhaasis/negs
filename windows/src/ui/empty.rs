@@ -35,9 +35,9 @@ const MARK_LENGTH: f32 = 18.0;
 const MARK_REACH: f32 = 26.0;
 const MARK_WEIGHT: f32 = 1.5;
 
-const HEADING: TextStyle = TextStyle::serif(26.0, 600);
-const TAGLINE: TextStyle = TextStyle::serif(16.0, 400).italic();
-const HINT: TextStyle = TextStyle::serif(14.0, 400).italic();
+pub const HEADING: TextStyle = TextStyle::serif(26.0, 600);
+pub const TAGLINE: TextStyle = TextStyle::serif(16.0, 400).italic();
+pub const HINT: TextStyle = TextStyle::serif(14.0, 400).italic();
 const RECENT: TextStyle = TextStyle::serif(14.0, 400).italic();
 const RECENT_FILE: TextStyle = TextStyle::serif(17.5, 400);
 const DROP: TextStyle = TextStyle::serif(22.0, 400).italic();

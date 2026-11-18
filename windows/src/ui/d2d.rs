@@ -96,9 +96,18 @@ pub fn shared() -> Option<&'static Shared> {
     SHARED.get_or_init(|| Shared::new(false).ok()).as_ref()
 }
 
+/// Sets each sample once in a scratch bitmap on this thread, so DirectWrite
+/// has the faces, sizes and shaping the first frame asks for (the title
+/// band's name, the empty window's words) before the window paints them.
+pub fn warm(samples: &[(&str, TextStyle)]) {
+    for (text, style) in samples {
+        let _ = mask(text, style, 0.0, Align::Leading, 1.0, false);
+    }
+}
+
 /// Starts making the factories and reading the fonts on a thread of their
-/// own, then calls `done` there. Startup calls this after the inspector is
-/// shown, so neither the first window nor the inspector waits for it.
+/// own, then calls `done` there. Startup calls this first thing, so the
+/// title bar's first paint finds them made.
 pub fn prepare(done: impl FnOnce(&Shared) + Send + 'static) {
     if SHARED.get().is_some() {
         return;

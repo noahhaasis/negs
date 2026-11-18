@@ -27,7 +27,7 @@ use crate::platform::{pcwstr, wide};
 /// Its height, in DIPs (`Theme.Size.statusLine`).
 pub const HEIGHT: f64 = 28.0;
 const PADDING: f32 = 18.0;
-const WORDS: TextStyle = TextStyle::ui(11.0, 400);
+pub const WORDS: TextStyle = TextStyle::ui(11.0, 400);
 const STRONG: TextStyle = TextStyle::ui(11.0, 600);
 
 /// A word's ink.

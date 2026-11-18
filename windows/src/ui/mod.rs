@@ -1258,6 +1258,13 @@ pub fn run() {
     let drawing_started = platform::qpc();
     d2d::prepare(move |shared| {
         let cost = shared.cost;
+        d2d::warm(&[
+            ("Negs DSC_0001.NEF", titlebar::NAME),
+            ("Open a photograph", empty::HEADING),
+            ("Explore film stocks, shape the print", empty::TAGLINE),
+            ("or drop a RAW, TIFF, PNG or JPEG file here", empty::HINT),
+            ("6016 × 4016 · developed in 1.2 s Original Fit 100%", status::WORDS),
+        ]);
         let at = platform::qpc();
         post(move |app: &mut App| {
             app.report.line(&format!("drawing_started {drawing_started}"));
