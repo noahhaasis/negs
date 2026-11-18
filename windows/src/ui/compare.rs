@@ -263,13 +263,63 @@ fn label(p: &mut Painter, ink: &SheetInk, words: &Words, edge: f32, top: f32, ri
     let Some(paper) = words.paper.as_ref() else { return };
     let km = p.measure("printed on", &KIND, 0.0);
     let pm = p.measure(paper, &PAPER, 0.0);
-    if inline && fx + fm.width + 14.0 + km.width + 8.0 + pm.width > limit {
+    let end = if inline { fx + fm.width + 14.0 } else { edge } + km.width + 8.0 + pm.width;
+    if end > limit {
         return;
     }
     let (x, baseline) = if inline { (fx + fm.width + 14.0, top + fm.baseline) } else { (edge, top + fm.height + 4.0 + pm.baseline) };
     let x = if right && !inline { edge - km.width - 8.0 - pm.width } else { x };
     p.text("printed on", &KIND, x, baseline - km.baseline, Ink::hex(ink.dim));
     p.text(paper, &PAPER, x + km.width + 8.0, baseline - pm.baseline, Ink::hex(ink.paper));
+}
+
+/// The columns `x0..x1` of `image` covering `frame` (its largest centred
+/// part with the frame's shape), as `draw_thumbnail` draws all of it.
+fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap) {
+    let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
+    if fw <= 0 || fh <= 0 || x1 <= x0 {
+        return;
+    }
+    let (iw, ih) = (image.width as f64, image.height as f64);
+    let scale = (fw as f64 / iw).max(fh as f64 / ih);
+    let (sw, sh) = ((fw as f64 / scale).min(iw), (fh as f64 / scale).min(ih));
+    let (sx, sy) = ((iw - sw) / 2.0, (ih - sh) / 2.0);
+    // The source columns under x0..x1.
+    let u0 = sx + (x0 - frame.left) as f64 / fw as f64 * sw;
+    let u1 = sx + (x1 - frame.left) as f64 / fw as f64 * sw;
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: image.width as i32,
+            biHeight: -(image.height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    unsafe {
+        let dc = c.hdc();
+        let previous = SetStretchBltMode(dc, HALFTONE);
+        let _ = SetBrushOrgEx(dc, 0, 0, None);
+        StretchDIBits(
+            dc,
+            x0,
+            frame.top,
+            x1 - x0,
+            fh,
+            u0.round() as i32,
+            sy.round() as i32,
+            ((u1 - u0).round() as i32).max(1),
+            sh.round() as i32,
+            Some(image.bgra.as_ptr() as *const _),
+            &info,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+        SetStretchBltMode(dc, STRETCH_BLT_MODE(previous));
+    }
 }
 
 fn paint(hwnd: HWND, dc: HDC) {
@@ -303,12 +353,10 @@ fn paint(hwnd: HWND, dc: HDC) {
         if slider {
             let frame = px(frames[0]);
             let split = frame.left + ((frame.right - frame.left) as f64 * comparison.split).round() as i32;
-            for (i, clip) in [(0, RECT { right: split, ..frame }), (1, RECT { left: split, ..frame })] {
-                unsafe {
-                    let saved = SaveDC(c.hdc());
-                    IntersectClipRect(c.hdc(), clip.left, clip.top, clip.right, clip.bottom);
-                    super::inspector::draw_thumbnail(&mut c, frame, 0.0, v.bitmaps[i].as_ref().map(|(_, b)| b.as_ref()), false, blank, blank);
-                    let _ = RestoreDC(c.hdc(), saved);
+            c.round_rect(draw::RectF::of(frame), 0.0, blank);
+            for (i, (x0, x1)) in [(0, (frame.left, split)), (1, (split, frame.right))] {
+                if let Some((_, image)) = &v.bitmaps[i] {
+                    draw_part(&mut c, frame, x0, x1, image);
                 }
             }
         } else {
@@ -358,7 +406,7 @@ fn paint(hwnd: HWND, dc: HDC) {
                     // As wide as its frame, or the room up to the other's.
                     let room = if i == 0 { (frames[1].x - f.x - 24.0).max(f.w) } else { w as f32 - f.x - 16.0 };
                     caption(p, &t, &ink, &words[i], &words[1 - i], f.x, f.y - 20.0, false, edited(i), true, room);
-                    label(p, &ink, &words[i], f.x, f.y + f.h + 8.0, false, false, f32::INFINITY);
+                    label(p, &ink, &words[i], f.x, f.y + f.h + 8.0, false, false, w as f32 - 12.0);
                 }
             }
         });
