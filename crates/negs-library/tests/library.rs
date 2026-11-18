@@ -126,6 +126,34 @@ fn undo_merges_with_another_apps_write() {
 }
 
 #[test]
+fn thumbnails_read_stored_edits_without_opening() {
+    let folder = Folder::new("thumbs", &["a.jpg", "b.jpg"]);
+    let mut library = folder.library();
+    let (a, b) = (Item::photo(folder.photo("a.jpg")), Item::photo(folder.photo("b.jpg")));
+    assert_eq!(library.thumbnail_state(&a), None, "no sidecar: it develops unedited");
+    library.open(&a);
+    let state = library.state().unwrap().clone();
+    library.edit(with_contrast(&state, 0.25));
+    library.save().unwrap();
+    library.open(&b);
+    let before = folder.sidecar("a.jpg");
+    let (stored, solved) = library.thumbnail_state(&a).unwrap();
+    assert_eq!(stored.params.at("prep.contrast").as_f64(), Some(0.25));
+    assert_eq!(stored, with_contrast(&state, 0.25), "as opening it shows it");
+    assert!(!solved);
+    assert_eq!(library.open_item(), Some(&b), "the open photograph stays");
+    assert_eq!(folder.sidecar("a.jpg"), before, "nothing is written");
+    // The unedited look ignores what follows the photograph before.
+    let plain = library.unedited_state();
+    let mut sized = plain.clone();
+    sized.params.set_at("io.photo_long_side_px", Json::from(1200i64));
+    let look = negs_library::thumbnail::unedited_look(&plain);
+    assert_eq!(look, negs_library::thumbnail::unedited_look(&sized));
+    assert_ne!(look, negs_library::thumbnail::unedited_look(&with_contrast(&plain, 0.25)));
+    assert_eq!(look.len(), 32);
+}
+
+#[test]
 fn the_open_photograph_saves_only_what_changed() {
     let folder = Folder::new("open", &["a.jpg", "b.jpg"]);
     let mut library = folder.library();

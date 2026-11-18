@@ -342,6 +342,40 @@ impl Library {
         self.looks.get(item).map(String::as_str)
     }
 
+    /// What `item`'s developed thumbnail is made from, read from its sidecar
+    /// now, as opening it would show it (`developThumbnail`): its stored
+    /// edits restored, a film or paper this version lacks replaced as
+    /// opening replaces it, and whether the brightness match stored with
+    /// them was solved for them. `None` without stored edits (it develops
+    /// as `unedited_state`), or when its sidecar can't be read. Opens and
+    /// writes nothing.
+    pub fn thumbnail_state(&self, item: &Item) -> Option<(EditState, bool)> {
+        if !self.sidecars {
+            return None;
+        }
+        let found = sidecar::read(&item.photo).ok()??;
+        let chosen = item.variant.as_deref().and_then(|id| found.variant(id)).or(found.variants.first())?;
+        let table = self.tables.get(found.defaults_version).ok()?;
+        let saved = decode_edits(chosen.edits.as_ref()?, &table).ok()?;
+        let mut state = self.defaults.restored(&saved.state);
+        let d = &self.defaults;
+        if !d.films.is_empty() && !d.films.contains_key(&state.film) {
+            let shown = if d.films.contains_key(&d.table_film) { d.table_film.clone() } else { d.films.keys().next().cloned().unwrap_or_default() };
+            state.params.set_at("io.scan_film", Json::Bool(d.films.get(&shown).copied().unwrap_or(false)));
+            state.film = shown;
+        }
+        if !d.papers.is_empty() && !d.papers.contains(&state.paper) {
+            state.paper = if d.papers.contains(&d.table_paper) { d.table_paper.clone() } else { d.papers.iter().next().cloned().unwrap_or_default() };
+        }
+        Some((state, saved.match_solved))
+    }
+
+    /// How a photograph without stored edits develops for its thumbnail:
+    /// as a new photograph opens, after nothing (`plainState`).
+    pub fn unedited_state(&self) -> EditState {
+        self.defaults.new_photo_state(&EditState::empty())
+    }
+
     /// A RAW's camera JPEG, which goes with it.
     pub fn companion(&self, photo: &Path) -> Option<&Path> {
         self.companions.get(photo).map(PathBuf::as_path)
