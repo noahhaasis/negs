@@ -53,6 +53,8 @@ pub mod dirty {
     pub const TONE_GRAPH: u32 = 1 << 13;
     /// The tray opened, closed, or what it shows changed.
     pub const TRAY: u32 = 1 << 14;
+    /// What Compare shows changed.
+    pub const COMPARE: u32 = 1 << 15;
     pub const ALL: u32 = u32::MAX;
 }
 
@@ -581,6 +583,8 @@ pub struct Model {
     pub previews: Previews,
     /// Your negative's requests and what they found (`model/negative.rs`).
     pub negative: negative::Memory,
+    /// Compare's two photographs (`model/compare.rs`).
+    pub compare: compare::Memory,
     /// Lab › Film format › Custom picked while the value is still a format's,
     /// so the slider stays. Start fresh and Reset Adjustments clear it, as
     /// they do the edits.
@@ -734,6 +738,7 @@ impl Model {
             visible_presets: None,
             previews: Previews::default(),
             negative: Default::default(),
+            compare: Default::default(),
             custom_film_format: false,
             matching_brightness: false,
             match_request: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -2227,7 +2232,7 @@ impl Model {
         let params = self.render_state().params;
         let io = &params["io"];
         json!([io["raw_white_balance"], io["lens_correction"], io["input_interpretation"], io["input_color_space"],
-            io["input_cctf_decoding"], io["output_color_space"], io["output_cctf_encoding"], self.state.limit_preview])
+            io["input_cctf_decoding"], io["output_color_space"], io["output_cctf_encoding"], self.state.limit_preview, self.shows_camera_jpeg()])
     }
 
     fn drop_stale_original(&mut self) {
@@ -2259,6 +2264,7 @@ impl Model {
             match picture {
                 Ok(picture) => {
                     model.original_cache = Some((key, picture.clone()));
+                    model.mark(dirty::COMPARE);
                     if model.holding_original {
                         model.original = Some(picture);
                         model.mark(dirty::CANVAS | dirty::STATUS);
@@ -2273,7 +2279,17 @@ impl Model {
                 }
             }
         };
-        if self.is_raw {
+        if let Some(jpeg) = self.camera_jpeg().filter(|_| self.shows_camera_jpeg()) {
+            // The camera's JPEG, laid over the RAW's frame (`loadCameraPicture`).
+            let frame = (image.width, image.height);
+            std::thread::spawn(move || {
+                let picture = crate::thumbnail::original(&jpeg, max_pixels).and_then(|p| {
+                    let placed = p.with_pixels(|rgba| compare::over_frame(rgba, p.width, p.height, frame)).flatten();
+                    placed.map(|(rgba, w, h)| Picture::new(rgba, w, h)).ok_or_else(|| anyhow!("The camera JPEG couldn’t be read"))
+                });
+                ui::post(move |app: &mut App| finish(app, picture));
+            });
+        } else if self.is_raw {
             // RAW: the helper decodes it with no film, framed like the engine.
             let Some(engine) = self.engine.clone() else { return };
             let buffer = engine.directory().join("original.rgba");
@@ -4431,6 +4447,9 @@ mod tray;
 
 // Your negative: the base, the balance, the pickers.
 pub mod negative;
+
+// Compare and Original ⌄.
+pub mod compare;
 
 #[cfg(test)]
 pub mod harness;

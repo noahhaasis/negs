@@ -4,6 +4,8 @@
 
 #[path = "../../src/border.rs"]
 pub mod border;
+#[path = "../../src/compare.rs"]
+pub mod compare;
 #[path = "../../src/crop.rs"]
 pub mod crop;
 #[path = "../../src/json.rs"]

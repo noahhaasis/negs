@@ -5,6 +5,7 @@
 
 mod border;
 mod brightness;
+mod compare;
 mod crop;
 mod edited_store;
 mod edits;

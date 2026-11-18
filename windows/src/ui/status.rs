@@ -93,7 +93,7 @@ impl Word {
     fn tip(self) -> &'static str {
         match self {
             Word::Original => "Hold to show the original (\\ or O)",
-            Word::OriginalMenu => "Choose Original or Edited",
+            Word::OriginalMenu => "Choose what Original does",
             Word::Fit => "Fit photograph (Ctrl+0)",
             Word::Actual => "Actual size (Ctrl+1)",
             Word::Cancel => "Stop exporting",
@@ -308,17 +308,25 @@ fn word_at(hwnd: HWND, x: i32, y: i32) -> Option<Word> {
     PLACES.with(|p| p.borrow().iter().find(|(_, r, on)| *on && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h).map(|(w, _, _)| *w))
 }
 
-/// Original ⌄: Original or Edited, the one showing ticked, above the word.
+/// Original ⌄: what pressing Original does, ticked (`OriginalMenu`);
+/// for a RAW shot as RAW+JPEG, which of the two it shows.
 fn original_menu(hwnd: HWND) {
-    const ORIGINAL: usize = 1;
-    const EDITED: usize = 2;
-    let holding = LINE.with(|l| l.borrow().tools.is_some_and(|t| t.holding));
+    use crate::compare::{OriginalMode, OriginalReference};
+    const REFERENCE: usize = 10;
+    let Some((mode, reference, jpeg)) = with_app(|app| (app.model.original_mode(), app.model.original_reference(), app.model.camera_jpeg().is_some())) else { return };
     let place = PLACES.with(|p| p.borrow().iter().find(|(w, _, _)| *w == Word::Original).map(|(_, r, _)| *r));
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
-        for (command, title, on) in [(ORIGINAL, "&Original", holding), (EDITED, "&Edited", !holding)] {
-            let text = wide(title);
-            let _ = AppendMenuW(menu, MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED }, command, pcwstr(&text));
+        for (i, m) in OriginalMode::ALL.into_iter().enumerate() {
+            let text = wide(m.title());
+            let _ = AppendMenuW(menu, MF_STRING | if m == mode { MF_CHECKED } else { MF_UNCHECKED }, 1 + i, pcwstr(&text));
+        }
+        if jpeg {
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+            for (i, r) in OriginalReference::ALL.into_iter().enumerate() {
+                let text = wide(r.title());
+                let _ = AppendMenuW(menu, MF_STRING | if r == reference { MF_CHECKED } else { MF_UNCHECKED }, REFERENCE + i, pcwstr(&text));
+            }
         }
         let s = draw::dpi_of(hwnd);
         let mut at = POINT { x: place.map_or(0, |r| (r.x * s) as i32), y: 0 };
@@ -326,13 +334,17 @@ fn original_menu(hwnd: HWND) {
         let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_LEFTALIGN | TPM_NONOTIFY, at.x, at.y, 0, hwnd, None);
         let _ = DestroyMenu(menu);
         match chosen.0 as usize {
-            ORIGINAL => {
-                with_app(|app| app.model.hold_original(true));
+            0 => {}
+            i if i >= REFERENCE => {
+                if let Some(r) = OriginalReference::ALL.get(i - REFERENCE) {
+                    with_app(|app| app.model.set_original_reference(*r));
+                }
             }
-            EDITED => {
-                with_app(|app| app.model.hold_original(false));
+            i => {
+                if let Some(m) = OriginalMode::ALL.get(i - 1) {
+                    with_app(|app| app.model.set_original_mode(*m));
+                }
             }
-            _ => {}
         }
     }
 }
@@ -389,6 +401,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
                 let (x, y) = point();
                 match word_at(hwnd, x, y) {
+                    // Split line and Side by side: a click compares with the original.
+                    Some(Word::Original) if with_app(|app| app.model.original_mode() != crate::compare::OriginalMode::Hold).unwrap_or(false) => {
+                        with_app(|app| app.model.toggle_original_compare());
+                    }
                     Some(Word::Original) => {
                         HOLDING.with(|h| h.set(true));
                         SetCapture(hwnd);

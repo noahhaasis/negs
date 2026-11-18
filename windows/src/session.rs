@@ -246,6 +246,10 @@ pub struct Preferences {
     /// Enlarger › Shifts move, as the Mac stores it: "separate",
     /// "together" or "opposite".
     pub filter_shift_link: String,
+    /// Original ⌄, as the Mac stores them: "hold", "split" or
+    /// "sideBySide"; "raw" or "cameraJPEG".
+    pub original_mode: String,
+    pub original_reference: String,
     /// The Settings tab last shown (the Mac's `settingsTab`).
     pub settings_tab: String,
 }
@@ -302,6 +306,8 @@ impl Default for Preferences {
             library: Default::default(),
             fotufilm_films: "all".into(),
             filter_shift_link: "separate".into(),
+            original_mode: "hold".into(),
+            original_reference: "raw".into(),
             settings_tab: "Photographs".into(),
         }
     }

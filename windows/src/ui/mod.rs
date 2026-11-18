@@ -12,6 +12,7 @@
 mod alert;
 pub mod canvas;
 mod color_filter;
+pub mod compare;
 mod d2d;
 mod dialogs;
 mod draw;
@@ -152,6 +153,9 @@ pub mod id {
     pub const CROP_CANCEL: u16 = 403;
     /// View › Flip Horizontal: mirrors as shown, while cropping (`io.flip`).
     pub const FLIP: u16 = 404;
+    pub const COMPARE: u16 = 405;
+    pub const GRID: u16 = 406;
+    pub const COMPARE_OFFER: u16 = 407;
     pub const UPDATES: u16 = 500;
     pub const ABOUT: u16 = 501;
     pub const CANCEL_EXPORT: u16 = 600;
@@ -649,6 +653,9 @@ impl App {
             strip::sync(self);
             grid::sync(self);
         }
+        if flags & (dirty::COMPARE | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME) != 0 {
+            compare::sync(self);
+        }
         if flags & (dirty::TRAY | dirty::PREVIEWS | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME | dirty::STRUCTURE) != 0 {
             tray::sync(self);
         }
@@ -728,6 +735,8 @@ impl App {
                 format!("Cropping · {} · {} × {} px", session.aspect.title(), size.0.round() as i64, size.1.round() as i64),
                 Tone::Dim,
             ));
+        } else if model.comparison().is_some() {
+            left.push(Span::new(model.compare_summary(), Tone::Dim));
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
         }
@@ -812,7 +821,10 @@ impl App {
             tray::layout(self, RECT { left: 0, top: bottom - tray_height, right: column, bottom }, shows_tray);
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
             let _ = MoveWindow(self.empty, 0, top, column, bottom - top, true);
-            let _ = ShowWindow(self.canvas, if photo { SW_SHOWNA } else { SW_HIDE });
+            // Compare takes the canvas's place.
+            let comparing = photo && self.model.comparison().is_some();
+            compare::layout(self, RECT { left: 0, top, right: column, bottom: canvas_bottom }, comparing);
+            let _ = ShowWindow(self.canvas, if photo && !comparing { SW_SHOWNA } else { SW_HIDE });
             let _ = ShowWindow(self.empty, if photo { SW_HIDE } else { SW_SHOWNA });
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
@@ -944,6 +956,9 @@ impl App {
             }
             // Like a turn, a flip starts cropping, where Cancel undoes it.
             id::FLIP if model.source.is_some() => model.flip(),
+            id::COMPARE => compare::toggle(self),
+            id::COMPARE_OFFER => compare::take_offer(self),
+            id::GRID => grid::toggle(self),
             id::IMAGE_ONLY => view_modes::toggle_image_only(self),
             id::CROP => {
                 if model.cropping() {
@@ -1035,6 +1050,9 @@ impl App {
         }
         enable(id::ROTATE, photo);
         enable(id::FLIP, photo);
+        enable(id::COMPARE, model.can_toggle_compare());
+        retitle(id::COMPARE, crate::compare::menu_title(model.comparison().is_some()));
+        enable(id::GRID, model.shelf.library.is_some() && !model.cropping());
         retitle(id::CROP, if model.cropping() { "Done &Cropping\tCtrl+K" } else { "&Crop\tCtrl+K" });
         enable(id::CROP, model.cropping() || model.image.is_some());
         // View › Theme: the one chosen ticked, as a radio choice (an
@@ -1304,6 +1322,9 @@ fn build_menu() -> (HMENU, HMENU) {
         add(view, id::PRESETS, "&Presets\tF8");
         add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
         add(view, id::IMAGE_ONLY, "&Image Only\tF");
+        // Grid · Photo · Compare, as the Mac's title bar switch (ticket 46).
+        add(view, id::GRID, "&Grid\tG");
+        add(view, id::COMPARE, crate::compare::menu_title(false));
         // Every control in every module, as the Lab's Advanced controls switch did.
         add(view, id::ALL_CONTROLS, "Show A&ll Controls");
         separator(view);
@@ -1358,7 +1379,8 @@ fn accelerators() -> HACCEL {
         (ctrl, VK_SUBTRACT.0, id::ZOOM_OUT),
         (ctrl, 'R' as u16, id::ROTATE),
         (ctrl, 'K' as u16, id::CROP),
-        (FVIRTKEY, 'C' as u16, id::CROP),
+        // C compares, as on the Mac; Ctrl+K crops.
+        (FVIRTKEY, 'C' as u16, id::COMPARE),
         (FVIRTKEY, 'F' as u16, id::IMAGE_ONLY),
         (ctrl, VK_OEM_COMMA.0, id::SETTINGS),
     ];
@@ -1658,6 +1680,10 @@ fn pre_translate(msg: &MSG) -> bool {
                 app.model.end_crop(false);
                 return true;
             }
+        }
+        // Compare's keys: S, the arrows, Esc.
+        if !text_focus() && compare::key(app, msg) {
+            return true;
         }
         // A picker waiting for a click on the negative.
         if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && app.model.cancel_negative_pick() {
