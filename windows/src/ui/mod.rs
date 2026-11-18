@@ -149,6 +149,8 @@ pub mod id {
     pub const CROP: u16 = 401;
     pub const CROP_DONE: u16 = 402;
     pub const CROP_CANCEL: u16 = 403;
+    /// View › Flip Horizontal: mirrors as shown, while cropping (`io.flip`).
+    pub const FLIP: u16 = 404;
     pub const UPDATES: u16 = 500;
     pub const ABOUT: u16 = 501;
     pub const CANCEL_EXPORT: u16 = 600;
@@ -939,6 +941,8 @@ impl App {
                 model.begin_crop();
                 model.rotate()
             }
+            // Like a turn, a flip starts cropping, where Cancel undoes it.
+            id::FLIP if model.source.is_some() => model.flip(),
             id::IMAGE_ONLY => view_modes::toggle_image_only(self),
             id::CROP => {
                 if model.cropping() {
@@ -1029,6 +1033,7 @@ impl App {
             enable(c, photo && !model.cropping());
         }
         enable(id::ROTATE, photo);
+        enable(id::FLIP, photo);
         retitle(id::CROP, if model.cropping() { "Done &Cropping\tCtrl+K" } else { "&Crop\tCtrl+K" });
         enable(id::CROP, model.cropping() || model.image.is_some());
         // View › Theme: the one chosen ticked, as a radio choice (an
@@ -1307,6 +1312,7 @@ fn build_menu() -> (HMENU, HMENU) {
         add(view, id::ZOOM_OUT, "Zoom &Out\tCtrl+-");
         separator(view);
         add(view, id::ROTATE, "&Rotate Clockwise\tCtrl+R");
+        add(view, id::FLIP, "Flip &Horizontal");
         add(view, id::CROP, "&Crop\tCtrl+K");
         separator(view);
         let themes = CreatePopupMenu().unwrap();

@@ -114,7 +114,7 @@ impl View {
                 shown: [turned.0 as f32, turned.1 as f32, scene.rotation.rem_euclid(4) as f32, 0.0],
                 clip: [c.x as f32, c.y as f32, c.width as f32, c.height as f32],
                 quad: [x0 as f32, y0 as f32, c.width as f32, c.height as f32],
-                extra: [1.0, picture.wide as u8 as f32, 0.0, 0.0],
+                extra: [1.0, picture.wide as u8 as f32, scene.flip as u8 as f32, 0.0],
             },
         ))
     }
@@ -186,6 +186,9 @@ pub enum Grid {
 pub struct CropScene {
     pub photo: Size,
     pub rotation: i32,
+    /// Mirrored left to right before the quarter turns (`io.flip`).
+    pub flip: bool,
+    /// Degrees clockwise as shown.
     pub angle: f64,
     pub shown: Rect,
     pub grid: Option<Grid>,
@@ -200,6 +203,8 @@ pub struct Scene {
     /// The photograph's layout size in pixels, before cropping and rotation.
     pub size: Size,
     pub rotation: i32,
+    /// Mirrored left to right after the crop, before the turns (`io.flip`).
+    pub flip: bool,
     pub crop: CropSettings,
     pub border: Option<BorderSettings>,
     pub film: String,
@@ -577,6 +582,7 @@ pub fn update_scene(app: &mut App) {
     let cropping = model.crop_session.as_ref().map(|s| CropScene {
         photo: s.photo,
         rotation: s.rotation,
+        flip: s.flip,
         angle: s.angle,
         shown: s.shown(),
         grid: if s.straightening { Some(Grid::Fine) } else if s.adjusting { Some(Grid::Thirds) } else { None },
@@ -586,6 +592,7 @@ pub fn update_scene(app: &mut App) {
         developed,
         size,
         rotation: model.rotation(),
+        flip: model.state.flip(),
         crop,
         border,
         film: model.state.film.clone(),
@@ -1011,9 +1018,13 @@ fn rect(x: f64, y: f64, w: f64, h: f64) -> [f32; 4] {
 }
 
 /// The crop rectangle in the turned frame of the photograph as shown, from
-/// the exporter's pixel rectangle in the unrotated photograph.
-fn shown_pixels(crop: &CropSettings, size: Size, rotation: i32) -> (Rect, Size) {
+/// the exporter's pixel rectangle in the unrotated photograph: mirrored if
+/// `flip`, then turned.
+fn shown_pixels(crop: &CropSettings, size: Size, rotation: i32, flip: bool) -> (Rect, Size) {
     let mut r = crop.pixels(size);
+    if flip {
+        r = Rect::new(size.width - r.x - r.width, r.y, r.width, r.height);
+    }
     let mut s = size;
     for _ in 0..rotation.rem_euclid(4) {
         r = Rect::new(s.height - r.y - r.height, r.x, r.height, r.width);
@@ -1374,14 +1385,16 @@ impl View {
             }
         }
         // The photograph through its crop.
-        let (clip, shown) = shown_pixels(&scene.crop, scene.size, scene.rotation);
+        let (clip, shown) = shown_pixels(&scene.crop, scene.size, scene.rotation, scene.flip);
         let origin = (ox + px * z - clip.x * z, oy + py * z - clip.y * z);
+        // Straightened in the unflipped photograph: the other way round as shown.
+        let angle = if scene.flip { -scene.crop.angle } else { scene.crop.angle };
         let uniform = PhotoUniform {
-            origin_scale: [origin.0 as f32, origin.1 as f32, z as f32, scene.crop.angle.to_radians() as f32],
+            origin_scale: [origin.0 as f32, origin.1 as f32, z as f32, angle.to_radians() as f32],
             shown: [shown.width as f32, shown.height as f32, scene.rotation.rem_euclid(4) as f32, 0.0],
             clip: [clip.x as f32, clip.y as f32, clip.width as f32, clip.height as f32],
             quad: screen(px, py, pw, ph),
-            extra: [1.0, picture.wide as u8 as f32, 0.0, 0.0],
+            extra: [1.0, picture.wide as u8 as f32, scene.flip as u8 as f32, 0.0],
         };
         let exact = self.exact_draw(&picture, scene, (ox + px * z, oy + py * z), clip, shown);
         items.push(Draw::Photo(picture, uniform));
@@ -1446,7 +1459,7 @@ impl View {
             shown: [cropping.photo.width as f32, cropping.photo.height as f32, cropping.rotation.rem_euclid(4) as f32, 1.0],
             clip: [shown.x as f32, shown.y as f32, shown.width as f32, shown.height as f32],
             quad: rect(frame.x + bounds.x * scale - 1.0, frame.y + bounds.y * scale - 1.0, bounds.width * scale + 2.0, bounds.height * scale + 2.0),
-            extra: [super::theme::CROP_SHADE_OPACITY, picture.wide as u8 as f32, 0.0, 0.0],
+            extra: [super::theme::CROP_SHADE_OPACITY, picture.wide as u8 as f32, cropping.flip as u8 as f32, 0.0],
         };
         items.push(Draw::Photo(picture, uniform));
         let c = crop_rect;
@@ -1923,11 +1936,11 @@ mod tests {
     fn shown_crop_turns_the_exporters_pixels() {
         let crop = CropSettings { rect: Rect::new(0.1, 0.2, 0.5, 0.25), ..Default::default() };
         let size = Size::new(1000.0, 800.0);
-        let (r, s) = shown_pixels(&crop, size, 0);
+        let (r, s) = shown_pixels(&crop, size, 0, false);
         assert_eq!((r, s), (Rect::new(100.0, 160.0, 500.0, 200.0), size));
-        let (r, s) = shown_pixels(&crop, size, 1);
+        let (r, s) = shown_pixels(&crop, size, 1, false);
         assert_eq!((r, s), (Rect::new(440.0, 100.0, 200.0, 500.0), Size::new(800.0, 1000.0)));
-        let (r, _) = shown_pixels(&crop, size, 4);
+        let (r, _) = shown_pixels(&crop, size, 4, false);
         assert_eq!(r, Rect::new(100.0, 160.0, 500.0, 200.0));
     }
 

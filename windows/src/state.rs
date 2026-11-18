@@ -92,7 +92,7 @@ pub const PREP_EXPOSURE: &str = "prep.exposure_ev";
 pub fn match_inputs(state: &EditState) -> Value {
     let mut params = state.params.clone();
     for path in [
-        "prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.crop", "io.crop_center",
+        "prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.flip", "io.crop", "io.crop_center",
         "io.crop_size", "io.output_color_space", "io.output_cctf_encoding", "settings.serial_grain",
     ] {
         json::set(&mut params, path, Value::Null);
@@ -102,8 +102,9 @@ pub fn match_inputs(state: &EditState) -> Value {
 
 impl EditState {
     /// The state without presentation-only settings, to decide whether an
-    /// edit needs a new render. The preview is never rotated: the canvas
-    /// turns it, and saving and exporting rotate the result. With an Image
+    /// edit needs a new render. The preview is never rotated or mirrored:
+    /// the canvas turns and mirrors it, and saving and exporting do it to the
+    /// result. With an Image
     /// Size target the crop's extent sets the working size, so it stays; its
     /// position, angle and ratio never change the render.
     pub fn rendered(&self) -> EditState {
@@ -116,6 +117,7 @@ impl EditState {
             state.crop.rect.height = self.crop.rect.height;
         }
         json::set(&mut state.params, "io.rotate_cw", Value::Null);
+        json::set(&mut state.params, FLIP, Value::Null);
         state
     }
 
@@ -126,7 +128,20 @@ impl EditState {
     pub fn rotation(&self) -> i32 {
         json::number(self.value("io.rotate_cw")) as i32
     }
+
+    /// Mirrored left to right after the crop, before the turns (`io.flip`).
+    pub fn flip(&self) -> bool {
+        self.value(FLIP).as_bool().unwrap_or(false)
+    }
+
+    pub fn orientation(&self) -> crate::crop::Orientation {
+        crate::crop::Orientation::new(self.rotation(), self.flip())
+    }
 }
+
+/// Flip (`IoParams::flip`): the engine mirrors the saved photograph left to
+/// right after the crop and before `io.rotate_cw`.
+pub const FLIP: &str = "io.flip";
 
 /// Image Size (`ImageSize.swift`): the resolution the film develops at. A
 /// Longest side target describes the cropped photograph before borders and

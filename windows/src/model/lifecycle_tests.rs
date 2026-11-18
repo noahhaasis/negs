@@ -2022,3 +2022,48 @@ lifecycle_test! {
         let _ = std::fs::remove_dir_all(&folder);
     }
 }
+
+lifecycle_test! {
+    /// Flip (`io.flip`) starts cropping like a turn: Cancel takes it back,
+    /// Done keeps it with the crop as one undo step. It never develops again
+    /// (the canvas mirrors the preview), and Save Preview mirrors the file
+    /// as the exporter does from the same edit, a quarter turn included.
+    fn a_flip_mirrors_without_a_develop_and_saves_as_the_exporter() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
+        let photo = h.photo.clone();
+        h.open(&photo);
+        h.clear_logs();
+        h.edit(|m| m.flip());
+        assert!(h.model().cropping() && h.model().state.flip());
+        h.edit(|m| m.end_crop(false));
+        assert!(!h.model().cropping() && !h.model().state.flip(), "Cancel takes the flip back");
+        assert!(h.model().undo_title().is_none());
+        h.edit(|m| m.begin_crop());
+        h.edit(|m| m.rotate());
+        h.edit(|m| m.flip());
+        let o = h.model().state.orientation();
+        assert_eq!((o.turns, o.flip), (3, true), "flipped as shown: the quarter turn conjugated");
+        h.edit(|m| m.end_crop(true));
+        h.idle();
+        assert_eq!(h.model().undo_title(), Some("Crop"));
+        assert!(h.command_names().iter().all(|c| c != "render"), "{:?}", h.command_names());
+        let dir = std::env::temp_dir().join(format!("negs-flip-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save = super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 };
+        let saved = dir.join("flipped.tif");
+        h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
+        h.idle();
+        let flipped_state = h.model().state.clone();
+        let saved_bytes = std::fs::read(&saved).unwrap();
+        assert_eq!(saved_bytes, fast_render(&h, &flipped_state, &dir.join("flipped-fast.tif"), save), "the exporter flips from io.flip");
+        let mut unflipped = flipped_state.clone();
+        crate::json::set(&mut unflipped.params, state::FLIP, serde_json::Value::Bool(false));
+        assert_ne!(saved_bytes, fast_render(&h, &unflipped, &dir.join("unflipped-fast.tif"), save));
+        h.edit(|m| m.perform_undo());
+        assert!(!h.model().state.flip() && h.model().rotation() == 0);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

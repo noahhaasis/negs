@@ -3043,6 +3043,8 @@ const C_RESET: u16 = CROP_FIRST + 18;
 const C_DONE: u16 = CROP_FIRST + 19;
 const C_CANCEL: u16 = CROP_FIRST + 20;
 const C_SIZE_NOTE: u16 = CROP_FIRST + 21;
+/// Flip left to right (`io.flip`), a tick box.
+const C_FLIP: u16 = CROP_FIRST + 22;
 const C_LABELS: u16 = CROP_FIRST + 30;
 /// The labels: Ratio, ×, Orientation, Angle, Size, the size's hint, the
 /// instructions, and the two sections' heads.
@@ -3054,6 +3056,7 @@ const L_ANGLE: u16 = C_LABELS + 5;
 const L_SIZE: u16 = C_LABELS + 6;
 const L_HINT: u16 = C_LABELS + 7;
 const L_SIZE_HINT: u16 = C_LABELS + 8;
+const L_FLIP: u16 = C_LABELS + 9;
 
 /// The foot's words, the aspect formats and the orientation words (`Crop.swift`).
 const CROP_FOOT: TextStyle = TextStyle::serif(14.0, 400).italic();
@@ -3103,6 +3106,7 @@ fn build_crop(app: &mut App) {
     ink_static(L_STRAIGHTEN, "STRAIGHTEN", Role::Section);
     ink_static(L_ANGLE, "Angle", Role::Label);
     ink_static(C_ANGLE_VALUE, "0°", Role::Readout);
+    ink_static(L_FLIP, "FLIP", Role::Section);
     ink_static(L_SIZE, "Size", Role::Label);
     let size = ink_static(C_SIZE, "", Role::Readout);
     super::dialogs::tooltip(size, "The exported photograph’s size, before the border.");
@@ -3155,6 +3159,10 @@ fn build_crop(app: &mut App) {
     draw::track_hover(angle);
     draw::set_default_pos(angle, 0);
     super::dialogs::tooltip(angle, "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.");
+    let flip = add(C_FLIP, w!("BUTTON"), "Flip left to right", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_CHECKBOX as u32), fonts.ui);
+    draw::set_role(flip, Role::Tick);
+    draw::track_hover(flip);
+    super::dialogs::tooltip(flip, "Mirrors the photograph, as a negative photographed from its base side needs. With a half turn it mirrors top to bottom.");
     let reset_crop = add(C_RESET, w!("BUTTON"), "Reset Crop", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_PUSHBUTTON as u32), fonts.ui);
     draw::set_role(reset_crop, Role::WordButton);
     draw::track_hover(reset_crop);
@@ -3286,6 +3294,11 @@ fn crop_rows(ins: &Inspector, width: i32) -> (Vec<(HWND, i32, i32, i32, i32)>, i
     place(C_ANGLE, gutter + label, y, (right - gutter - label - value - reset).max(0), row);
     place(C_ANGLE_VALUE, right - reset - value, y, value, row);
     place(C_ANGLE_RESET, right - reset, y, reset, row);
+    y += row + ins.px(10.0);
+    place(L_FLIP, gutter, y, right - gutter, ins.px(ink::SECTION_HEAD));
+    y += ins.px(ink::SECTION_HEAD);
+    let margin = ins.px(ink::MARGIN);
+    place(C_FLIP, gutter - margin, y, right - gutter + 2 * margin, row);
     y += row + ins.px(14.0);
     place(L_SIZE, gutter, y, label, row);
     place(C_SIZE, gutter + label, y, right - gutter - label, row);
@@ -3347,6 +3360,12 @@ fn sync_crop(app: &mut App) {
         let _ = ShowWindow(crop.get(C_ANGLE_RESET), if session.angle != 0.0 { SW_SHOWNA } else { SW_HIDE });
     }
     ink::set_changed(crop.get(L_ANGLE), session.angle != 0.0);
+    let flip = crop.get(C_FLIP);
+    ink::set_changed(flip, session.flip);
+    unsafe {
+        SendMessageW(flip, BM_SETCHECK, WPARAM(if session.flip { 1 } else { 0 }), LPARAM(0));
+        let _ = InvalidateRect(flip, None, false);
+    }
     set_text(crop.get(C_ANGLE_VALUE), &format!("{}°", format(session.angle, 0.1, decimal)));
     // The draft's pixels in the frame an export develops; with a target, a
     // smaller crop needs a larger frame, up to the working limit.
@@ -3527,6 +3546,8 @@ fn crop_command(app: &mut App, id: u16, code: u32) {
             session.end_straightening();
         }
         C_RESET if code == BN_CLICKED => session.reset(),
+        // The edit, not the session: Done keeps it with the crop, Cancel takes it back.
+        C_FLIP if code == BN_CLICKED => return app.model.flip(),
         C_DONE if code == BN_CLICKED => return app.model.end_crop(true),
         C_CANCEL if code == BN_CLICKED => return app.model.end_crop(false),
         C_WIDTH | C_HEIGHT if code == EN_SETFOCUS => session.typing = true,

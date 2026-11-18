@@ -316,3 +316,39 @@ fn notes_read_as_the_macs_status_line() {
     assert_eq!(note_detail(&note), "3 photographs · 1 not saved");
     assert_eq!(note_duration(&note).as_millis(), 2500);
 }
+
+/// Flip (`io.flip`) goes to the sidecar as the Mac writes it and comes back
+/// on reopening; the unflipped default isn't stored as an edit.
+#[test]
+fn a_flip_goes_through_the_sidecar_and_back() {
+    let dir = std::env::temp_dir().join(format!("negs-windows-flip-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("photos")).unwrap();
+    let photo = dir.join("photos").join("F.png");
+    std::fs::write(&photo, b"png").unwrap();
+    let config = || Config { data: data(), app: "windows-test".into(), bin: Box::new(FolderBin::new(dir.join("bin"))), pairing: true, sidecars: true, id_seed: Some(5) };
+    let mut library = Library::new(dir.join("photos"), config()).unwrap();
+    library.set_defaults(defaults());
+    let item = library.items()[0].clone();
+    let opened = library.open(&item);
+    let mut win = from_library(&opened.state, false).unwrap();
+    assert!(!win.flip(), "a new photograph isn't flipped");
+    // As Flip does from a quarter turn: mirrored as shown, the turns conjugated.
+    let flipped = win.orientation().flipped_as_shown();
+    negs_windows_library_map::json::set(&mut win.params, state::FLIP, json!(flipped.flip));
+    negs_windows_library_map::json::set(&mut win.params, "io.rotate_cw", json!(flipped.turns));
+    library.edit(to_library(&win, None));
+    library.save().unwrap();
+    library.close().unwrap();
+    let text = String::from_utf8(sidecar::read_bytes(&photo).unwrap().unwrap()).unwrap();
+    assert!(text.contains("\"flip\""), "{text}");
+    let mut library = Library::new(dir.join("photos"), config()).unwrap();
+    library.set_defaults(defaults());
+    let item = library.items()[0].clone();
+    let back = from_library(&library.open(&item).state, false).unwrap();
+    assert!(back.flip());
+    assert_eq!(back, win);
+    assert!(back.rendered() == from_library(&opened.state, false).unwrap().rendered(), "a flip doesn't need a new develop");
+    library.close().unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+}

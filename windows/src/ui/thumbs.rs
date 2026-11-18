@@ -345,6 +345,8 @@ struct DevelopJob {
     solve: Option<f64>,
     raw: bool,
     rotation: i32,
+    /// Mirrored left to right before the turns (`io.flip`).
+    flip: bool,
 }
 
 fn develop_job(model: &Model, want: &Want, key: String) -> Option<DevelopJob> {
@@ -365,7 +367,7 @@ fn develop_job(model: &Model, want: &Want, key: String) -> Option<DevelopJob> {
         let r = state.crop.rect;
         command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": state.crop.angle});
     }
-    Some(DevelopJob { key, loose: want.loose.clone(), source: source.clone(), command, solve, raw: crate::model::is_raw(&source), rotation: state.rotation() })
+    Some(DevelopJob { key, loose: want.loose.clone(), source: source.clone(), command, solve, raw: crate::model::is_raw(&source), rotation: state.rotation(), flip: state.flip() })
 }
 
 fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) {
@@ -425,6 +427,7 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
         let (w, h) = (js::number(&result["width"]) as u32, js::number(&result["height"]) as u32);
         let rgba = rgba?;
         let image = image::RgbaImage::from_raw(w, h, rgba).ok_or_else(|| anyhow::anyhow!("short buffer"))?;
+        let image = if job.flip { image::imageops::flip_horizontal(&image) } else { image };
         let image = match job.rotation.rem_euclid(4) {
             1 => image::imageops::rotate90(&image),
             2 => image::imageops::rotate180(&image),

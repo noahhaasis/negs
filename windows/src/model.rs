@@ -952,10 +952,14 @@ impl Model {
         self.catalog = catalog;
         // Keep anything already applied to the photograph, such as its rotation.
         let rotation = self.state.value("io.rotate_cw").clone();
+        let flip = self.state.value(state::FLIP).clone();
         let mut next = self.state.clone();
         next.params = self.defaults.clone();
         if !rotation.is_null() {
             json::set(&mut next.params, "io.rotate_cw", rotation);
+        }
+        if !flip.is_null() {
+            json::set(&mut next.params, state::FLIP, flip);
         }
         if !self.stocks.iter().any(|s| !s.paper && s.id == next.film) {
             if let Some(first) = self.stocks.iter().find(|s| !s.paper) {
@@ -1293,6 +1297,7 @@ impl Model {
         next.params = self.defaults.clone();
         next.brightness_match = self.new_match();
         json::set(&mut next.params, "io.rotate_cw", self.state.value("io.rotate_cw").clone());
+        json::set(&mut next.params, state::FLIP, self.state.value(state::FLIP).clone());
         json::set(&mut next.params, state::SIZE_TARGET, self.state.value(state::SIZE_TARGET).clone());
         let positive = self.stocks.iter().find(|s| !s.paper && s.id == next.film).is_some_and(|s| s.positive);
         json::set(&mut next.params, "io.scan_film", Value::Bool(positive));
@@ -1322,12 +1327,12 @@ impl Model {
         let render = next.rendered() != self.state.rendered();
         let structure = self.structure_key(&next) != self.structure_key(&self.state);
         let crop_changed = next.crop != self.state.crop;
-        let rotation_changed = next.rotation() != self.state.rotation();
+        let rotation_changed = next.orientation() != self.state.orientation();
         self.state = next;
         if rotation_changed {
-            let (shown, rotation) = (self.shown_image_size(), self.rotation());
+            let (shown, rotation, flip) = (self.shown_image_size(), self.rotation(), self.state.flip());
             if let Some(session) = &mut self.crop_session {
-                session.update(shown, rotation);
+                session.update(shown, rotation, flip);
             }
         }
         if crop_changed || rotation_changed {
@@ -1406,6 +1411,23 @@ impl Model {
 
     pub fn rotate(&mut self) {
         self.turn(true);
+    }
+
+    /// Flip: mirrors the photograph left to right as shown, as a negative
+    /// photographed from its base side needs. Like a quarter turn it
+    /// happens while cropping; Done keeps it, Cancel takes it back.
+    pub fn flip(&mut self) {
+        if !self.cropping() {
+            self.begin_crop();
+        }
+        if !self.cropping() {
+            return;
+        }
+        let flipped = self.state.orientation().flipped_as_shown();
+        let mut next = self.state.clone();
+        json::set(&mut next.params, "io.rotate_cw", json::num(flipped.turns as f64));
+        json::set(&mut next.params, state::FLIP, Value::Bool(flipped.flip));
+        self.replace_state(next);
     }
 
     /// A quarter turn, as cropping's arrows and View › Rotate turn: while
@@ -1814,7 +1836,7 @@ impl Model {
         self.hold_original(false);
         // The straighten dial takes the label's place: a stock being tried is kept.
         self.end_tray(true);
-        self.crop_session = Some(CropSession::new(self.state.clone(), self.shown_image_size(), self.rotation()));
+        self.crop_session = Some(CropSession::new(self.state.clone(), self.shown_image_size(), self.rotation(), self.state.flip()));
         self.mark(dirty::CROP | dirty::CANVAS | dirty::CHROME | dirty::LAYOUT | dirty::STRIP);
     }
 
@@ -1828,19 +1850,22 @@ impl Model {
         }
         let Some(session) = self.crop_session.take() else { return };
         let rotation = session.start.value("io.rotate_cw").clone();
+        let flip = session.start.value(state::FLIP).clone();
         if apply {
             let mut previous = self.state.clone();
             previous.crop = session.start.crop;
             json::set(&mut previous.params, "io.rotate_cw", rotation);
+            json::set(&mut previous.params, state::FLIP, flip);
             let mut next = self.state.clone();
             next.crop = session.settings();
             if next != previous {
                 self.register_undo(previous, "Crop");
             }
             self.replace_state(next);
-        } else if !json::same(self.state.value("io.rotate_cw"), &rotation) {
+        } else if !json::same(self.state.value("io.rotate_cw"), &rotation) || !json::same(self.state.value(state::FLIP), &flip) {
             let mut next = self.state.clone();
             json::set(&mut next.params, "io.rotate_cw", rotation);
+            json::set(&mut next.params, state::FLIP, flip);
             self.replace_state(next);
         }
         // Cropping kept a held frame's solve from starting.
@@ -1958,6 +1983,7 @@ impl Model {
                 self.state.border = BorderSettings::default();
             }
             json::set(&mut self.state.params, "io.rotate_cw", json::num(0.0));
+            json::set(&mut self.state.params, state::FLIP, Value::Bool(false));
             // How one file's colours are read never carries over to the next.
             let interpretation = json::get(&self.defaults, "io.input_interpretation").clone();
             if !interpretation.is_null() {
@@ -2675,9 +2701,9 @@ impl Model {
             self.film_histogram = film;
             self.mark(dirty::TONE_GRAPH);
         }
-        let (shown, rotation) = (self.shown_image_size(), self.rotation());
+        let (shown, rotation, flip) = (self.shown_image_size(), self.rotation(), self.state.flip());
         if let Some(session) = &mut self.crop_session {
-            session.update(shown, rotation);
+            session.update(shown, rotation, flip);
         }
         self.lens_supported = json::boolean(&result["lens_correction_supported"]);
         self.rendered_space = json::string(&result["output_color_space"]).to_string();
@@ -2784,7 +2810,7 @@ impl Model {
             self.mark(dirty::HISTOGRAM);
             return;
         };
-        let (request, crop, rotation) = (self.histogram_request, self.state.crop, self.rotation());
+        let (request, crop, rotation) = (self.histogram_request, self.state.crop, self.state.orientation());
         #[cfg(test)]
         let background = ui::testing::background();
         std::thread::spawn(move || {
@@ -2964,7 +2990,7 @@ impl Model {
     /// Saves the current preview with the crop, rotation, border, and size.
     fn save_command(&self, output: &Path, size: ExportSize, save: SaveSettings) -> Value {
         let mut command = json!({"command": "save", "render_id": self.render_id, "output": output, "rotate_cw": self.rotation(),
-            "save_options": save.json()});
+            "flip": self.state.flip(), "save_options": save.json()});
         if self.state.crop.cropped() {
             let r = self.state.crop.rect;
             command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": self.state.crop.angle});
