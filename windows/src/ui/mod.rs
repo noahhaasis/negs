@@ -16,6 +16,8 @@ mod dialogs;
 mod draw;
 mod drop;
 mod empty;
+mod grid;
+mod grid_bench;
 mod ink;
 pub mod folder_watch;
 pub mod inspector;
@@ -30,6 +32,7 @@ mod status;
 mod strip;
 mod surface;
 mod theme;
+mod thumbs;
 mod titlebar;
 mod tone_graph;
 mod tray;
@@ -368,6 +371,8 @@ pub mod testing {
                 splitter_drag: None,
                 full_screen: None,
                 strip_view: strip::Strip::default(),
+                thumbs: thumbs::Thumbs::default(),
+                grid: None,
                 empty_view: empty::Empty::default(),
                 taskbar: None,
                 original_key: None,
@@ -547,6 +552,9 @@ pub struct App {
     splitter_drag: Option<(i32, f64)>,
     full_screen: Option<(WINDOWPLACEMENT, i32)>,
     pub strip_view: strip::Strip,
+    pub thumbs: thumbs::Thumbs,
+    /// The grid, made on first use.
+    pub grid: Option<grid::Grid>,
     pub empty_view: empty::Empty,
     taskbar: Option<ITaskbarList3>,
     original_key: Option<u32>,
@@ -560,6 +568,11 @@ pub struct App {
 }
 
 impl App {
+    /// The strip and grid's device is made (again): they repaint through it.
+    pub fn surfaces_ready(&mut self) {
+        strip::surfaces_ready(self);
+    }
+
     pub fn scale(&self) -> f64 {
         self.dpi as f64 / 96.0
     }
@@ -594,7 +607,8 @@ impl App {
             empty::sync_recent(self);
             crate::updates::set_busy(self.model.exporting || self.model.saving);
         }
-        if flags & dirty::STATUS != 0 {
+        // While cropping it says the draft's aspect and size.
+        if flags & (dirty::STATUS | dirty::CROP) != 0 {
             self.update_status();
         }
         if flags & (dirty::LAYOUT | dirty::CHROME) != 0 {
@@ -618,6 +632,7 @@ impl App {
         }
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
             strip::sync(self);
+            grid::sync(self);
         }
         if flags & (dirty::TRAY | dirty::PREVIEWS | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME | dirty::STRUCTURE) != 0 {
             tray::sync(self);
@@ -687,6 +702,17 @@ impl App {
             let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_default();
             left.push(Span::strong("Couldn’t develop", Tone::Label));
             left.push(Span::new(name, Tone::Dim));
+        } else if let Some(session) = &model.crop_session {
+            // "Cropping · Original · 6016 × 4016 px": the draft's aspect and
+            // the pixels an export develops, as the crop pane's Size says.
+            let size = match model.crop_draft_size() {
+                Some(Ok(size)) => (size.photo.0 as f64, size.photo.1 as f64),
+                _ => (session.shown().width, session.shown().height),
+            };
+            left.push(Span::new(
+                format!("Cropping · {} · {} × {} px", session.aspect.title(), size.0.round() as i64, size.1.round() as i64),
+                Tone::Dim,
+            ));
         } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
             left.push(Span::new(model.status.clone(), Tone::Dim));
         }
@@ -765,7 +791,8 @@ impl App {
             let chrome = photo && !image_only && !self.drop_target_active && !shows_tray;
             let status_height = if chrome { self.px(status::HEIGHT) } else { 0 };
             let show_strip = self.model.prefs.filmstrip_visible && chrome;
-            let strip_height = if show_strip { self.px(112.0) } else { 0 };
+            // 158 + 28: the tray's 186, so the canvas keeps its size when it opens.
+            let strip_height = if show_strip { self.px(crate::sheet_rules::BAND) - status_height } else { 0 };
             let canvas_bottom = (bottom - status_height - strip_height - tray_height).max(top);
             tray::layout(self, RECT { left: 0, top: bottom - tray_height, right: column, bottom }, shows_tray);
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
@@ -774,6 +801,9 @@ impl App {
             let _ = ShowWindow(self.empty, if photo { SW_HIDE } else { SW_SHOWNA });
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
+            // The leader stands on the strip's top edge, or the status line's.
+            strip::layout_leader(self, column, canvas_bottom, chrome && !self.model.cropping());
+            grid::layout(self, RECT { left: 0, top, right: client.right, bottom });
             let _ = MoveWindow(self.status, 0, bottom - status_height, column, status_height, true);
             let _ = ShowWindow(self.status, if chrome { SW_SHOWNA } else { SW_HIDE });
             titlebar::set_inspector_edge(self.main, if shows_inspector { column + splitter } else { 0 });
@@ -1346,6 +1376,9 @@ pub fn run() {
     // The installer/uninstaller waits for every app to stop before touching data.
     let _app_lifetime_mutex = unsafe { CreateMutexW(None, false, w!("Local\\Negs.AppLifetime")) };
     let launched = platform::qpc();
+    if grid_bench::run_if_asked() {
+        return;
+    }
     if sampler::run_if_asked() {
         return;
     }
@@ -1480,6 +1513,8 @@ pub fn run() {
             splitter_drag: None,
             full_screen: None,
             strip_view: strip::Strip::default(),
+            grid: None,
+            thumbs: thumbs::Thumbs::default(),
             empty_view: empty::Empty::default(),
             taskbar: None,
             original_key: None,
@@ -1591,7 +1626,7 @@ fn pre_translate(msg: &MSG) -> bool {
             app.model.end_tray(true);
         }
         // Rating keys never reach the library while typing (in the tray's Search too).
-        if app.original_key(msg) || view_modes::key(app, msg, text_focus()) || library::key(app, msg) {
+        if app.original_key(msg) || view_modes::key(app, msg, text_focus()) || grid::key(app, msg, text_focus()) || library::key(app, msg) {
             return true;
         }
         if msg.message == WM_KEYDOWN && app.model.cropping() && !text_focus() {
@@ -1709,6 +1744,11 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| {
                     app.report.stamp("inspector_shown");
                     inspector::report_geometry(app);
+                    // The strip and grid's GPU device, which launch never waits for.
+                    surface::prepare(|app, ms, hardware| {
+                        crate::trace::event("surface_ready", || serde_json::json!({"ms": ms, "hardware": hardware}));
+                        app.surfaces_ready();
+                    });
                 });
                 LRESULT(0)
             }

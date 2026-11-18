@@ -709,6 +709,11 @@ impl Model {
         self.dirty |= flags;
     }
 
+    /// The engine's tools, once located.
+    pub fn engine_paths(&self) -> Option<&EnginePaths> {
+        self.paths.as_ref()
+    }
+
     pub fn has_catalog(&self) -> bool {
         !self.stocks.is_empty()
     }

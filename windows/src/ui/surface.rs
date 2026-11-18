@@ -79,7 +79,7 @@ pub fn prepare(done: impl FnOnce(&mut super::App, f64, bool) + Send + 'static) {
     }
     let _ = std::thread::Builder::new().name("negs-surface".into()).spawn(move || {
         let start = crate::platform::qpc();
-        let made = make();
+        let made = make(false);
         let ms = crate::platform::qpc_ms(start, crate::platform::qpc());
         let hardware = made.as_ref().is_some_and(|g| g.hardware);
         if let Some(gpu) = made {
@@ -90,11 +90,22 @@ pub fn prepare(done: impl FnOnce(&mut super::App, f64, bool) + Send + 'static) {
     });
 }
 
-fn make() -> Option<Gpu> {
+/// Makes the device here and now (the grid bench); `warp` skips the GPU.
+pub fn make_now(warp: bool) -> bool {
+    if let Some(gpu) = make(warp) {
+        *GPU.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(gpu));
+    }
+    ready()
+}
+
+fn make(warp: bool) -> Option<Gpu> {
     let shared = d2d::shared()?;
     let factory: ID2D1Factory1 = shared.factory().cast().ok()?;
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     for (driver, hardware) in [(D3D_DRIVER_TYPE_HARDWARE, true), (D3D_DRIVER_TYPE_WARP, false)] {
+        if warp && hardware {
+            continue;
+        }
         let mut device = None;
         let made = unsafe {
             D3D11CreateDevice(None, driver, HMODULE::default(), D3D11_CREATE_DEVICE_BGRA_SUPPORT, None, D3D11_SDK_VERSION, Some(&mut device), None, None)

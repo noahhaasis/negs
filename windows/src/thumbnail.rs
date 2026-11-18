@@ -1,6 +1,6 @@
 //! Decodes for the canvas and the film strip, never through the engine:
 //! the placeholder shown while a photograph develops, the original for Show
-//! Original (non-RAW), and film strip thumbnails. JPEG, PNG and TIFF go
+//! Original (non-RAW), and the strip's and grid's thumbnails. JPEG, PNG and TIFF go
 //! through WIC with the EXIF orientation applied, like the engine's loader;
 //! RAW files use their embedded preview (never a full development).
 
@@ -177,44 +177,16 @@ pub fn original(path: &Path, max_pixels: u32) -> Result<Picture> {
     Ok(Picture::new(decoded.rgba, decoded.width, decoded.height))
 }
 
-/// A film strip thumbnail: Explorer's cached thumbnail (which uses an
-/// installed RAW codec), else the embedded preview for RAW files.
-pub fn strip_thumbnail(path: &Path, pixels: i32) -> Option<(Vec<u8>, u32, u32)> {
-    use windows::Win32::Graphics::Gdi::*;
-    use windows::Win32::UI::Shell::*;
-    unsafe {
-        let name = wide(path);
-        let shell: Option<IShellItemImageFactory> = SHCreateItemFromParsingName(PCWSTR(name.as_ptr()), None).ok();
-        if let Some(Ok(bitmap)) = shell.map(|f| f.GetImage(windows::Win32::Foundation::SIZE { cx: pixels, cy: pixels }, SIIGBF_THUMBNAILONLY | SIIGBF_BIGGERSIZEOK)) {
-            let mut info = BITMAP::default();
-            GetObjectW(bitmap, std::mem::size_of::<BITMAP>() as i32, Some(&mut info as *mut _ as *mut _));
-            let (w, h) = (info.bmWidth.max(1) as u32, info.bmHeight.unsigned_abs().max(1));
-            let header = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: w as i32,
-                    biHeight: -(h as i32),
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let mut bgra = vec![0u8; (w * h * 4) as usize];
-            let dc = GetDC(None);
-            let lines = GetDIBits(dc, bitmap, 0, h, Some(bgra.as_mut_ptr() as *mut _), &header as *const _ as *mut _, DIB_RGB_COLORS);
-            ReleaseDC(None, dc);
-            let _ = DeleteObject(bitmap);
-            if lines > 0 {
-                for p in bgra.chunks_exact_mut(4) {
-                    p.swap(0, 2);
-                    p[3] = 255;
-                }
-                return Some((bgra, w, h));
-            }
-        }
+/// A strip or grid thumbnail, as BGRA: the embedded preview of a RAW, the
+/// file itself otherwise, `pixels` on its long side at most. Never
+/// Explorer's thumbnails, whose cache writes `Thumbs.db` into network
+/// folders.
+pub fn read(path: &Path, pixels: u32) -> Option<(Vec<u8>, u32, u32)> {
+    let decoded = if is_raw(path) { raw_preview(path, pixels).ok()? } else { wic(path, pixels, false).ok()? };
+    let mut bgra = decoded.rgba;
+    for p in bgra.chunks_exact_mut(4) {
+        p.swap(0, 2);
+        p[3] = 255;
     }
-    let decoded = if is_raw(path) { raw_preview(path, pixels as u32).ok()? } else { wic(path, pixels as u32, false).ok()? };
-    Some((decoded.rgba, decoded.width, decoded.height))
+    Some((bgra, decoded.width, decoded.height))
 }

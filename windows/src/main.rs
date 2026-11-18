@@ -6,6 +6,7 @@
 mod border;
 mod brightness;
 mod crop;
+mod edited_store;
 mod edits;
 mod engine;
 mod exact_fit;
