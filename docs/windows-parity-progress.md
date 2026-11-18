@@ -16,7 +16,7 @@ decisions made with their reasons, and what was carried over. See
 | 5 | Tray | not started |
 | 6 | Library | crate merged; glue built on the Mac (`win-p6b-library-glue`), now on the PC for its gates |
 | 7 | Strip and grid | not started |
-| 8 | Remaining features (Open in Lightroom last) | not started |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | not started |
 | 9 | Validation and release | not started |
 
 ## 2026-11-19: phase 4 merged, the canvas (`8f5bdde`, branch tip `5726c97`)
@@ -63,7 +63,17 @@ decisions made with their reasons, and what was carried over. See
   - While cropping, the status line still shows the size and develop time; the Mac shows
     "Cropping · Original · 6016 × 4016 px" and dims Fit/100%. Carry to phase 7.
   - The window size can be 1 px off at fractional scales.
-- **For Noah:** a tooltip on the paper lock? An `io.flip` engine parameter for Flip?
+- **Decided by Noah:**
+  - The paper lock gets a tooltip if it's non-invasive. Phase 5 adds it with the Mac's
+    `ControlHelp.paperLock`/`paperKept` wording.
+  - Flip comes to Windows. The engine already takes it (`spektrafilm-native`'s
+    `IoParams::flip`, applied after the crop and before the turn), so the work is on the
+    Windows side:
+    - the `io.flip` edit state, mapped in the library glue;
+    - the crop panel's Flip tick box;
+    - a mirrored preview, and passing the flag to the engine.
+
+    Added to phase 8.
 
 ## 2026-11-19: speed-ups agreed with Noah
 
