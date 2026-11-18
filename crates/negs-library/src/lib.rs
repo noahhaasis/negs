@@ -17,6 +17,6 @@ pub use filter::{EditsFilter, Filter, FlagFilter, RatingFilter};
 pub use folder::{Listing, PhotoFile};
 pub use item::{Item, Summary};
 pub use json::Json;
-pub use library::{Config, CopiedEdits, Library, Note, Opened, Outcome};
+pub use library::{Config, CopiedEdits, ExportEdits, Library, Note, Opened, Outcome};
 pub use selection::Selection;
 pub use sidecar::{DefaultsTable, Flag, Patch, Problem, Sidecar, Tables};

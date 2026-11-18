@@ -270,6 +270,11 @@ impl EngineClient {
         if running { epoch } else { epoch + 1 }
     }
 
+    /// A helper process runs now (a request wouldn't start one).
+    pub fn helper_running(&self) -> bool {
+        (*self.child.lock().unwrap()).is_some_and(pid_running)
+    }
+
     /// Tests: kills the running helper, as a crash would; the next request
     /// starts another.
     #[cfg(test)]

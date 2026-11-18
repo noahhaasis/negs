@@ -28,7 +28,9 @@ use spektrafilm_io::image_size::PHOTO_LONG_SIDE_RANGE;
 use crate::ui::{self, App};
 
 // The library: sidecars, ratings, flags and per-photograph edits.
+mod batch;
 mod library;
+pub mod lightroom;
 pub mod library_map;
 mod recycle_bin;
 pub use library::Shelf;
@@ -493,6 +495,19 @@ impl KeptDevelop {
     }
 }
 
+/// The developed thumbnail filed as `key`, else the last one filed for the
+/// same edits under an older engine, as the canvas's stand-in.
+fn stand_in(key: &str, loose: Option<&str>) -> Option<Picture> {
+    let store = crate::edited_store::thumbnails();
+    let key = if store.contains(key) { key.to_string() } else { store.previous(loose?)? };
+    let file = std::fs::read(store.path(&key)).ok()?;
+    let (mut rgba, w, h) = crate::edited_store::decode(&file)?;
+    for p in rgba.chunks_exact_mut(4) {
+        p.swap(0, 2);
+    }
+    Some(Picture::new(rgba, w, h))
+}
+
 pub struct Model {
     pub state: EditState,
     pub defaults: Value,
@@ -505,6 +520,10 @@ pub struct Model {
     pub image: Option<Picture>,
     /// The unprocessed photograph, shown while the first render develops.
     pub placeholder: Option<Picture>,
+    /// The photograph's developed thumbnail, shown as it opens until the
+    /// kept develop or the camera's preview is read (`standIn`): cropped,
+    /// turned and bordered already.
+    pub stand_in: Option<Picture>,
     /// The last settled develop's pixels, kept as the photograph is left
     /// (`edited_store::renders`), so it opens on them next time.
     kept: Option<KeptDevelop>,
@@ -632,6 +651,24 @@ pub struct Model {
     /// (no inputs, such as a RAW without a camera preview) or for these match
     /// inputs, with the source generation and the note.
     brightness_failure: Option<(u64, Option<Value>, String)>,
+    /// The edit (revision, generation) whose solve couldn't decode the
+    /// photograph: its render runs anyway and reports why.
+    match_decode_failed: Option<(u64, u64)>,
+    /// The reference PNG made for a photograph (generation) at its decoded
+    /// size, so another solve on it (a film tried) doesn't read it again.
+    match_reference: Option<(u64, (u32, u32), Arc<Vec<u8>>)>,
+    /// The match cache's engine stamp for a helper and data folder.
+    match_engine: Option<(PathBuf, PathBuf, String)>,
+    /// The batch export running or last run (`model/batch.rs`), and its
+    /// worker's controls while it runs.
+    pub batch: Option<crate::batch::Run>,
+    batch_control: Option<std::sync::Arc<batch::Control>>,
+    /// Where an unfinished batch is journalled (`batch::Journal::path`).
+    pub batch_journal: PathBuf,
+    /// The batch popover shows: it clears a finished batch when it closes.
+    pub batch_popover_shown: bool,
+    /// Open in Lightroom (`model/lightroom.rs`).
+    pub lightroom: lightroom::State,
     /// Save or Export waiting for a pending brightness match and its preview,
     /// so they write what the inspector shows: what it is, when it was asked
     /// for, and the action (see `settle_outputs`).
@@ -689,6 +726,7 @@ impl Model {
         // Each launch starts with both editing panels available, even if they
         // were hidden in the previous session. F6/F7 still toggle them in use.
         prefs.filmstrip_visible = true;
+        let lightroom = lightroom::State::remembered(&prefs);
         Self {
             state: EditState::default(),
             defaults: json!({}),
@@ -698,6 +736,7 @@ impl Model {
             source: None,
             image: None,
             placeholder: None,
+            stand_in: None,
             kept: None,
             original: None,
             histogram: None,
@@ -773,6 +812,14 @@ impl Model {
             matching_brightness: false,
             match_request: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             brightness_failure: None,
+            match_decode_failed: None,
+            match_reference: None,
+            match_engine: None,
+            batch: None,
+            batch_control: None,
+            batch_journal: crate::batch::Journal::path(),
+            batch_popover_shown: false,
+            lightroom,
             waiting_output: None,
             held: None,
             quick_step: None,
@@ -1167,10 +1214,12 @@ impl Model {
         if !self.preview_current {
             self.schedule_activity();
         }
-        // A press without a change kept a held frame's solve from starting,
-        // and a quick frame from settling.
+        // A press without a change kept a held frame's solve or a pending
+        // match's from starting, and a quick frame from settling.
         self.release_held();
+        self.reconcile_brightness_match();
         self.settle_quick_frame();
+        self.render_after_match();
         self.settle_outputs();
         self.mark(dirty::CHROME);
     }
@@ -1887,8 +1936,11 @@ impl Model {
             json::set(&mut next.params, "io.rotate_cw", rotation);
             self.replace_state(next);
         }
-        // Cropping kept a held frame's solve from starting.
+        // Cropping kept a held frame's solve or a pending match's from
+        // starting.
         self.release_held();
+        self.reconcile_brightness_match();
+        self.render_after_match();
         self.settle_outputs();
         self.mark(dirty::CROP | dirty::CANVAS | dirty::CHROME | dirty::LAYOUT | dirty::STRIP);
         self.zoom(true);
@@ -1920,6 +1972,8 @@ impl Model {
         let thumbnail = self.open_thumbnail();
         let kept = self.kept.take().filter(|k| k.revision == self.revision && k.generation == self.source_generation && self.preview_current);
         let left = self.library_item();
+        // A session restored at launch, rather than the library's edits.
+        let at_launch = session.is_some();
         // Its folder's library opens it, saving the one before: the edits
         // come from its sidecar, as a restored session's do.
         let (path, session) = self.library_opening(path, session);
@@ -1931,6 +1985,12 @@ impl Model {
         }
         // It opens on its own last develop, if one was kept for these edits.
         let kept_key = self.library_item().and_then(|item| self.kept_key(&item));
+        // The developed thumbnail stands in until then, if it's been made:
+        // read now (a few ms), so the window's next frame shows it rather
+        // than an empty canvas. A restored session tries its saved frame
+        // first, then reads it off the UI thread.
+        let stand_in_key = self.library_item().and_then(|item| self.filed_key(crate::edited_store::thumbnails(), &item));
+        self.stand_in = None;
         let path = path.as_path();
         self.source = Some(path.to_path_buf());
         self.image = None;
@@ -1961,6 +2021,14 @@ impl Model {
         let generation = self.source_generation;
         let restoring = session.is_some();
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
+        let stand_in_key = match stand_in_key {
+            Some((key, loose)) if !at_launch => {
+                self.stand_in = stand_in(&key, loose.as_deref());
+                crate::trace::event("stand_in", || json!({"shown": self.stand_in.is_some()}));
+                None
+            }
+            key => key,
+        };
         if self.prefs.fresh_edits {
             self.custom_film_format = false;
         }
@@ -2042,6 +2110,9 @@ impl Model {
         let fallback = move || {
             #[cfg(test)]
             let _background = background;
+            if let Some(picture) = stand_in_key.and_then(|(key, loose)| stand_in(&key, loose.as_deref())) {
+                ui::post(move |app: &mut App| app.model.show_stand_in(picture, generation));
+            }
             if let Some((picture, size)) = kept_key.and_then(|(key, loose)| KeptDevelop::load(&key, loose.as_deref())).or_else(|| crate::thumbnail::placeholder(&path)) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
             }
@@ -2062,7 +2133,7 @@ impl Model {
                         if model.render_state().rendered() != expected { std::thread::spawn(fallback); return; }
                         model.image = Some(picture); model.image_size = size; model.is_raw = raw; model.lens_supported = lens_supported;
                         model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
-                        model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
+                        model.showing_cached_preview = true; model.placeholder = None; model.stand_in = None; model.hide_activity();
                         model.shown_frame = Some(FrameTag { request: 0, revision: model.revision, generation, kind: FrameKind::Cached });
                         #[cfg(test)]
                         model.frame_log.extend(model.shown_frame);
@@ -2121,6 +2192,12 @@ impl Model {
 
     /// The name `item`'s kept develop is filed under, with its edits as saved.
     fn kept_key(&self, item: &negs_library::Item) -> Option<(String, Option<String>)> {
+        self.filed_key(crate::edited_store::renders(), item)
+    }
+
+    /// The name `item`'s kept develop or developed thumbnail (`store`) is
+    /// filed under, with its edits as saved, and its loose key.
+    fn filed_key(&self, store: &crate::edited_store::Store, item: &negs_library::Item) -> Option<(String, Option<String>)> {
         let library = self.shelf.library.as_ref()?;
         let file = library.file(item)?;
         let unedited;
@@ -2131,14 +2208,23 @@ impl Model {
                 &unedited
             }
         };
-        let key = crate::edited_store::renders().key(file, item, look)?;
+        let key = store.key(file, item, look)?;
         Some((key, crate::edited_store::Store::loose_key(file, item, look)))
+    }
+
+    fn show_stand_in(&mut self, picture: Picture, generation: u64) {
+        if generation != self.source_generation || self.image.is_some() || self.placeholder.is_some() {
+            return;
+        }
+        self.stand_in = Some(picture);
+        self.mark(dirty::CANVAS);
     }
 
     fn show_placeholder(&mut self, picture: Picture, size: Size, generation: u64) {
         if generation != self.source_generation || self.image.is_some() {
             return;
         }
+        self.stand_in = None;
         self.placeholder_size = size;
         self.placeholder = Some(picture);
         self.mark(dirty::CANVAS | dirty::INSPECTOR);
@@ -2526,6 +2612,20 @@ impl Model {
         {
             return;
         }
+        // A pending brightness match is solved first, on a decode alone, so
+        // the old exposure is never rendered (ticket 39). The solve's end
+        // renders the matched edit (`render_after_match`). A solve that runs
+        // already is waited for even while a slider is pressed or Crop is
+        // open, which only keep a new one from starting: a render scheduled
+        // by the edit before them would show the old exposure.
+        if self.brightness_match_pending() && self.match_decode_failed != Some((revision, generation)) {
+            if !self.interacting() && !self.cropping() {
+                self.reconcile_brightness_match();
+            }
+            if self.matching_brightness {
+                return;
+            }
+        }
         let buffer = engine.directory().join("preview.rgba");
         let state = self.render_state();
         let mut command = json!({
@@ -2570,9 +2670,12 @@ impl Model {
         let started = Instant::now();
         let paths = self.paths.clone();
         std::thread::spawn(move || {
-            let cache_key = if interactive_scale.is_none() { paths.and_then(|paths| rendered_preview::key(&source, &state, &paths)) } else { None };
+            // The rendered-preview cache's name stats the helper and its
+            // data files: worked out while the helper renders (ticket 39).
+            let cache_key = interactive_scale.is_none().then(|| std::thread::spawn(move || paths.and_then(|paths| rendered_preview::key(&source, &state, &paths))));
             let client = engine.clone();
             engine.request(command, engine::timeout_for("render"), move |result| {
+                let cache_key = cache_key.and_then(|key| key.join().ok().flatten());
                 // The worker sends nothing between this request and its
                 // reply, so this is the epoch of the helper that kept it.
                 let kept = (kind == FrameKind::Settled && result.is_ok()).then(|| (client.helper_epoch(), key));
@@ -2738,8 +2841,8 @@ impl Model {
         self.image.is_some() && !self.showing_cached_preview
     }
 
-    /// The shown frame is the current edit's quick frame: the helper holds
-    /// its decode.
+    /// The shown frame is the current edit's quick frame (tests).
+    #[cfg(test)]
     fn shows_quick_frame(&self) -> bool {
         self.quick_frame == Some((self.revision, self.source_generation))
     }
@@ -2761,6 +2864,7 @@ impl Model {
         self.showing_interactive_frame = rendered.interactive;
         self.image = Some(rendered.picture);
         self.placeholder = None;
+        self.stand_in = None;
         self.update_histogram();
         let film = FilmHistogram::parse(&result["film_histogram"]);
         if film != self.film_histogram {
@@ -3214,24 +3318,26 @@ impl Model {
         }
     }
 
-    /// Solves the match when it's on and stale, once the preview of the
-    /// current settings is shown or held, its quick frame included (the
-    /// helper then holds their decode), so before their settled render. One
-    /// solve at a time; its answer looks again, so edits made meanwhile
-    /// coalesce. A result is applied only if the inputs it was
-    /// solved for are still current, without an undo step of its own: Undo
-    /// restores a state together with the match solved for it, and a
-    /// restored state whose match is stale is solved again.
+    /// Solves the match when it's on and stale, before anything renders
+    /// (ticket 39): a decode alone first, which the helper keeps for the
+    /// render (nearly free when it holds the photograph already), with the
+    /// camera preview read meanwhile, then the solve on it. A solve kept in
+    /// the match cache for this file and request is used as it is. One solve
+    /// at a time; its answer looks again, so edits made meanwhile coalesce,
+    /// then renders (`render_after_match`). A result is applied only if the
+    /// inputs it was solved for are still current, without an undo step of
+    /// its own: Undo restores a state together with the match solved for it,
+    /// and a restored state whose match is stale is solved again.
     fn reconcile_brightness_match(&mut self) {
         // Cheap checks first: this runs on every edit, drag frames included.
         if self.matching_brightness
             || self.interacting()
-            || !(self.preview_current || self.held.is_some() || self.shows_quick_frame())
             || self.rendering
             || !self.ready
             || self.cropping()
             || self.closing
             || self.state.brightness_match.is_none()
+            || self.match_decode_failed == Some((self.revision, self.source_generation))
             || !self.brightness_match_pending()
         {
             return;
@@ -3240,26 +3346,85 @@ impl Model {
         let inputs = state::match_inputs(&self.state);
         let id = self.match_request.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let current = self.match_request.clone();
-        let (generation, size, raw) = (self.source_generation, self.source_size, self.is_raw);
+        let (revision, generation) = (self.revision, self.source_generation);
         // The solve's own exposure: Prep and the print exposure are the user's.
         let mut request = self.render_state();
         json::set(&mut request.params, "prep", json::get(&self.defaults, "prep").clone());
         json::set(&mut request.params, "enlarger.print_exposure", json::get(&self.defaults, "enlarger.print_exposure").clone());
         let reference = engine.directory().join(format!("camera-brightness-{id}.png"));
-        crate::trace::event("match_start", || json!({"match": id, "revision": self.revision, "generation": generation}));
+        let decode = json!({
+            "command": "thumbnail", "input": source, "source_generation": generation,
+            "film": request.film, "paper": request.paper, "params": request.params,
+            "long_side": 16, "preview_path": engine.directory().join("decode-only.rgba"),
+            "reduced_decode": false, "decode_only": true,
+        });
+        let made = self.match_reference.clone().filter(|(made, ..)| *made == generation);
+        let stamp = self.match_engine_stamp();
+        // A RAW by its name; the decode says for sure.
+        let named_raw = is_raw(&source);
+        crate::trace::event("match_start", || json!({"match": id, "revision": revision, "generation": generation}));
         self.matching_brightness = true;
         self.mark(dirty::INSPECTOR);
+        #[cfg(test)]
+        let background = ui::testing::background();
         std::thread::spawn(move || {
-            crate::thumbnail::com_thread();
-            let made = if raw { crate::brightness::camera_reference(&source, size) } else { crate::brightness::file_reference(&source, size) };
+            #[cfg(test)]
+            let _background = background;
             let superseded = || current.load(std::sync::atomic::Ordering::Relaxed) != id;
-            let written = made.and_then(|png| Ok(std::fs::write(&reference, png)?));
-            if let Err(error) = written {
-                return ui::post(move |app: &mut App| app.model.brightness_solved(id, generation, inputs, Err(error)));
+            let answer = move |result: Result<Value>| ui::post(move |app: &mut App| app.model.brightness_solved(id, generation, inputs, result));
+            // Solved before on this file for this very request: the same value.
+            let key = stamp.and_then(|stamp| crate::match_cache::key(&source, &request, &stamp).map(|key| (key, stamp)));
+            if let Some((key, _)) = &key
+                && let Some((ev, limited)) = crate::match_cache::shared().solved(key)
+            {
+                return answer(Ok(json!({"exposure_ev": ev, "highlight_limited": limited, "kept": true})));
+            }
+            // The whole photograph, as a render decodes it, with the
+            // pipeline the solve and the render use; the camera preview is
+            // read meanwhile, once a photograph.
+            let (sender, receiver) = std::sync::mpsc::channel();
+            engine.request(decode, engine::timeout_for("thumbnail"), move |result| {
+                let _ = sender.send(result);
+            });
+            let preview = (named_raw && made.is_none()).then(|| crate::brightness::read_camera_preview(&source));
+            let decoded = match receiver.recv() {
+                Ok(Ok((_, decoded))) => decoded,
+                // The render reports why, as it would without the match.
+                Ok(Err(error)) => {
+                    return ui::post(move |app: &mut App| app.model.match_decode_failed(id, (revision, generation), error));
+                }
+                // Shut down.
+                Err(_) => return answer(Err(anyhow!("superseded"))),
+            };
+            let size = (json::number(&decoded["source_width"]) as u32, json::number(&decoded["source_height"]) as u32);
+            let raw = json::boolean(&decoded["raw"]);
+            crate::trace::event("match_decoded", || json!({"match": id, "generation": generation, "elapsed_ms": decoded["elapsed_ms"]}));
+            if superseded() {
+                return answer(Err(anyhow!("superseded")));
+            }
+            let png = match made.filter(|(_, at, _)| *at == size) {
+                Some((.., png)) => Ok(png),
+                None => crate::brightness::reference(&source, raw, preview, size).map(Arc::new),
+            };
+            ui::post(move |app: &mut App| app.model.match_decoded(generation, size, raw));
+            let png = match png {
+                Ok(png) => png,
+                Err(error) => return answer(Err(error)),
+            };
+            ui::post({
+                let png = png.clone();
+                move |app: &mut App| {
+                    if app.model.source_generation == generation {
+                        app.model.match_reference = Some((generation, size, png));
+                    }
+                }
+            });
+            if let Err(error) = std::fs::write(&reference, png.as_slice()) {
+                return answer(Err(error.into()));
             }
             if superseded() {
                 let _ = std::fs::remove_file(&reference);
-                return ui::post(move |app: &mut App| app.model.brightness_solved(id, generation, inputs, Err(anyhow!("superseded"))));
+                return answer(Err(anyhow!("superseded")));
             }
             let command = json!({
                 "command": "place_exposure", "input": source, "source_generation": generation,
@@ -3267,14 +3432,81 @@ impl Model {
             });
             engine.request(command, engine::timeout_for("place_exposure"), move |result| {
                 let _ = std::fs::remove_file(&reference);
-                ui::post(move |app: &mut App| app.model.brightness_solved(id, generation, inputs, result.map(|(_, r)| r)));
+                let result = result.map(|(_, r)| r);
+                // Kept unless the file changed while it was solved.
+                if let (Ok(solved), Some((key, stamp))) = (&result, key)
+                    && let Some(ev) = solved["exposure_ev"].as_f64().filter(|ev| ev.is_finite())
+                    && crate::match_cache::key(&source, &request, &stamp).as_ref() == Some(&key)
+                {
+                    crate::match_cache::shared().store(key, ev, json::boolean(&solved["highlight_limited"]));
+                }
+                answer(result);
             });
         });
     }
 
+    /// The match cache's name for the engine (`match_cache::engine_stamp`),
+    /// worked out once per helper.
+    fn match_engine_stamp(&mut self) -> Option<String> {
+        let paths = self.paths.as_ref()?;
+        if !self.match_engine.as_ref().is_some_and(|(helper, data, _)| *helper == paths.helper && *data == paths.data) {
+            self.match_engine = Some((paths.helper.clone(), paths.data.clone(), crate::match_cache::engine_stamp(paths)));
+        }
+        self.match_engine.as_ref().map(|(.., stamp)| stamp.clone())
+    }
+
+    /// A solve's decode: the photograph's size and kind, known before its
+    /// first render.
+    fn match_decoded(&mut self, generation: u64, size: (u32, u32), raw: bool) {
+        if generation == self.source_generation && !self.closing && size.0 > 0 && size.1 > 0 {
+            self.source_size = size;
+            self.is_raw = raw;
+        }
+    }
+
+    /// A solve couldn't decode the photograph: the render runs and reports it.
+    fn match_decode_failed(&mut self, id: u64, frame: (u64, u64), error: anyhow::Error) {
+        crate::trace::event("match_solved", || json!({"match": id, "generation": frame.1, "decode_error": format!("{error:#}")}));
+        if id != self.match_request.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        self.matching_brightness = false;
+        self.mark(dirty::INSPECTOR);
+        if self.closing || frame.1 != self.source_generation {
+            return;
+        }
+        self.match_decode_failed = Some(frame);
+        self.reconcile_brightness_match();
+        self.release_held();
+        self.settle_quick_frame();
+        self.render_after_match();
+        self.settle_outputs();
+    }
+
+    /// The solve is over and the edit it waited for is still unrendered: a
+    /// match that moved the exposure rendered already (a new edit), so this
+    /// is one it left as it was, or a failed one.
+    fn render_after_match(&mut self) {
+        if !self.ready
+            || self.source.is_none()
+            || self.closing
+            || self.preview_current
+            || self.render_failed
+            || self.rendering
+            || self.pending_render
+            || self.matching_brightness
+            || self.interacting()
+            || self.cropping()
+            || self.held.is_some()
+        {
+            return;
+        }
+        self.schedule_render();
+    }
+
     fn brightness_solved(&mut self, id: u64, generation: u64, inputs: Value, result: Result<Value>) {
         crate::trace::event("match_solved", || match &result {
-            Ok(r) => json!({"match": id, "generation": generation, "exposure_ev": r["exposure_ev"], "elapsed_ms": r["elapsed_ms"]}),
+            Ok(r) => json!({"match": id, "generation": generation, "exposure_ev": r["exposure_ev"], "elapsed_ms": r["elapsed_ms"], "kept": r["kept"]}),
             Err(error) => json!({"match": id, "generation": generation, "error": format!("{error:#}")}),
         });
         // Opening another photograph or shutting down superseded this one.
@@ -3305,9 +3537,11 @@ impl Model {
         // An unchanged answer or a failure leaves the held frame current:
         // shown, unless another solve started. A changed exposure was an
         // edit, which dropped it and renders the matched one. A quick frame
-        // then settles (at the matched exposure).
+        // then settles (at the matched exposure). Otherwise the edit the
+        // solve waited for renders now.
         self.release_held();
         self.settle_quick_frame();
+        self.render_after_match();
         self.settle_outputs();
     }
 
@@ -3325,21 +3559,11 @@ impl Model {
     /// Moves the total with the match, keeping the user's exposure above it.
     /// A change under 0.05 EV keeps the values and only marks them current.
     fn apply_brightness_match(&mut self, ev: f64, limited: bool, inputs: Value) {
-        let Some(mut matched) = self.state.brightness_match.clone() else { return };
         if !json::same(&state::match_inputs(&self.state), &inputs) {
             return;
         }
-        let mut next = self.state.clone();
-        let offset = json::number(next.value(state::PREP_EXPOSURE)) - matched.ev.unwrap_or(0.0);
-        if matched.ev.is_none_or(|old| (ev - old).abs() >= 0.05) {
-            matched.ev = Some(ev);
-            let (low, high) = state::PREP_EXPOSURE_RANGE;
-            let total = if offset.abs() < 1e-9 { ev } else { ev + offset };
-            json::set(&mut next.params, state::PREP_EXPOSURE, json::num(total.clamp(low, high)));
-        }
-        matched.inputs = Some(inputs);
-        matched.highlight_limited = limited;
-        next.brightness_match = Some(matched);
+        // As a batch applies it to a photograph it exports.
+        let Some(next) = crate::batch::matched(&self.state, ev, limited, inputs) else { return };
         self.replace_state(next);
     }
 
@@ -3353,10 +3577,17 @@ impl Model {
     }
 
     /// Something running or due will end the wait: a render, a solve, a held
-    /// frame (its solve, or what keeps it from starting), a slider held, or
+    /// frame (its solve, or what keeps it from starting), a slider held, a
+    /// crop that keeps a pending solve from starting (its end starts it), or
     /// a quick frame whose settled render `settle_quick_frame` starts.
     fn outputs_progressing(&self) -> bool {
-        self.rendering || self.pending_render || self.matching_brightness || self.held.is_some() || self.interacting() || self.quick_frame_unsettled()
+        self.rendering
+            || self.pending_render
+            || self.matching_brightness
+            || self.held.is_some()
+            || self.interacting()
+            || (self.cropping() && self.brightness_match_pending())
+            || self.quick_frame_unsettled()
     }
 
     /// The current edit's quick frame is done and its settled frame isn't
@@ -3640,10 +3871,22 @@ impl Model {
         self.drop_held("close");
         self.waiting_output = None;
         self.cancel_export();
+        self.stop_batch_for_quit();
         if let Some(engine) = &self.engine {
             engine.stop();
         }
         self.preview_cache.flush();
+        crate::match_cache::shared().flush();
+    }
+
+    /// Lets the helper free the film side it keeps between renders
+    /// (ticket 41): the grid opened over the photograph, or memory is low.
+    pub fn release_film_cache(&mut self, reason: crate::film_cache_release::Reason) {
+        if let Some(engine) = &self.engine
+            && !self.closing
+        {
+            crate::film_cache_release::release(engine, reason);
+        }
     }
 
     /// Try Again on the canvas: develops the current edit once more.

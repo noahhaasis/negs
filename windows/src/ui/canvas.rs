@@ -591,7 +591,18 @@ pub fn update_scene(app: &mut App) {
         Some((picture, size)) => (Some(picture), size, false, CropSettings::default()),
         None => (picture, size, developed, model.state.crop),
     };
-    let border = model.state.border.shown(cropped.width as u32, cropped.height as u32);
+    // As a photograph opens, its developed thumbnail until anything else
+    // (`standIn`): cropped, turned and bordered already, so shown as it is,
+    // at its own shape with a RAW's 2048 px on the long side.
+    let stand_in = model.stand_in.as_ref().filter(|_| picture.is_none());
+    let (picture, size, crop) = match stand_in {
+        Some(stand_in) => {
+            let (w, h) = crate::tray_rules::stand_in_size((stand_in.width, stand_in.height), (0.0, 0.0));
+            (Some(stand_in.clone()), Size::new(w, h), CropSettings::default())
+        }
+        None => (picture, size, crop),
+    };
+    let border = if stand_in.is_some() { None } else { model.state.border.shown(cropped.width as u32, cropped.height as u32) };
     let cropping = model.crop_session.as_ref().map(|s| CropScene {
         photo: s.photo,
         rotation: s.rotation,
@@ -603,7 +614,7 @@ pub fn update_scene(app: &mut App) {
         picture,
         developed,
         size,
-        rotation: model.rotation(),
+        rotation: if stand_in.is_some() { 0 } else { model.rotation() },
         crop,
         border,
         film: model.state.film.clone(),

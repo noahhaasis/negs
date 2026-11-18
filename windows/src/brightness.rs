@@ -12,7 +12,7 @@ use windows::Win32::Graphics::Imaging::*;
 use windows::core::{Interface, PCWSTR};
 
 use crate::platform::wide;
-pub use spektrafilm_io::brightness::{failure, same_shape};
+pub use spektrafilm_io::brightness::{CameraPreview, failure, same_shape};
 #[cfg(test)]
 pub use spektrafilm_io::brightness::Unusable;
 use spektrafilm_io::brightness::{LONG_SIDE, unusable};
@@ -22,8 +22,32 @@ use spektrafilm_io::brightness::{LONG_SIDE, unusable};
 /// sRGB: the preview is only a brightness reference, and its colorimetry
 /// has to be known.
 pub fn camera_reference(path: &Path, expected: (u32, u32)) -> Result<Vec<u8>> {
-    let file = std::fs::read(path)?;
-    encoded(spektrafilm_io::brightness::camera_preview(&file, expected)?, "The camera preview couldn’t be read.")
+    camera_png(&read_camera_preview(path)?, expected)
+}
+
+/// The slow part of [`camera_reference`] (reading the file, decoding its
+/// preview, its colour), which runs while the helper decodes the
+/// photograph, before its size is known.
+pub fn read_camera_preview(path: &Path) -> Result<CameraPreview> {
+    CameraPreview::read(&std::fs::read(path)?)
+}
+
+/// [`camera_reference`] from a preview [`read_camera_preview`] read.
+pub fn camera_png(preview: &CameraPreview, expected: (u32, u32)) -> Result<Vec<u8>> {
+    encoded(preview.reference(expected)?, "The camera preview couldn’t be read.")
+}
+
+/// The reference for `source` at `expected` size: the camera preview `read`
+/// (if given, else read now) for a RAW, else the file's own pixels.
+pub fn reference(source: &Path, raw: bool, read: Option<Result<CameraPreview>>, expected: (u32, u32)) -> Result<Vec<u8>> {
+    if !raw {
+        crate::thumbnail::com_thread();
+        return file_reference(source, expected);
+    }
+    match read {
+        Some(preview) => camera_png(&preview?, expected),
+        None => camera_reference(source, expected),
+    }
 }
 
 /// A JPEG, PNG or TIFF as its own brightness reference: the file is what the

@@ -85,6 +85,9 @@ enum Act {
     Filter,
     Clear,
     Size,
+    /// A batch export's Cancel and Show in the foot (`ui::batch`).
+    BatchCancel,
+    BatchShow,
 }
 
 pub fn shown(app: &App) -> bool {
@@ -253,6 +256,8 @@ pub fn open(app: &mut App) {
     app.model.file_open_thumbnail();
     app.model.shelf.in_grid = true;
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
+    // The editor closed: its film side won't be used soon (ticket 41).
+    app.model.release_film_cache(crate::film_cache_release::Reason::EditorClosed);
     let grid = app.grid.as_mut().unwrap();
     grid.shown = true;
     grid.cells.clear();
@@ -449,7 +454,19 @@ fn paint(app: &mut App, hwnd: HWND) {
         });
         paint_scroll_bar(p, &t, *scroll, layout.height, viewport, ox + w as f32, oy + rules::SENTENCE as f32, bar, wide);
         sentence(p, &parts, &t, ox, oy, &mut places);
-        foot_line(p, &foot, size, &t, ox, oy + (h - rules::FOOT) as f32, w as f32, &mut places);
+        // A batch started here shows its progress here too, then its outcome.
+        // Lightroom's words (ticket 48) come after a running batch's.
+        let batch = model.batch.as_ref().filter(|b| b.running || b.needs_attention());
+        let words = model.lightroom.words.as_deref().filter(|_| !batch.is_some_and(|b| b.running));
+        let foot_y = oy + (h - rules::FOOT) as f32;
+        foot_line(p, if batch.is_some() || words.is_some() { "" } else { &foot }, size, &t, ox, foot_y, w as f32, &mut places);
+        if let Some(words) = words {
+            let m = p.measure(words, &FOOT, 0.0);
+            let baseline = foot_y + (rules::FOOT as f32 / 2.0 + FOOT.size * 0.36).round();
+            p.text(words, &FOOT, ox + 14.0, baseline - m.baseline, Ink::hex(t.hex.label));
+        } else if let Some(run) = batch {
+            batch_foot(p, run, &t, ox, foot_y, &mut places);
+        }
       });
     });
     grid.places = places;
@@ -521,6 +538,43 @@ fn foot_line(p: &mut Painter, count: &str, size: f64, t: &Tokens, ox: f32, y: f3
     let label = p.measure("Size", &FOOT, 0.0);
     p.text("Size", &FOOT, track.x - 14.0 - label.width, baseline - label.baseline, Ink::hex(t.hex.dim));
     places.push((RectF::new(track.x - 6.0, y, track.w + 12.0, h), Act::Size));
+}
+
+/// "Exporting 5 of 12 photographs", its rule and Cancel; or "Exported 10
+/// of 12 · 2 failed" and Show, which opens the batch's popover.
+fn batch_foot(p: &mut Painter, run: &crate::batch::Run, t: &Tokens, ox: f32, y: f32, places: &mut Vec<(RectF, Act)>) {
+    const STRONG: TextStyle = TextStyle::ui(12.0, 600);
+    let h = rules::FOOT as f32;
+    let baseline = y + (h / 2.0 + FOOT.size * 0.36).round();
+    let mut x = ox + 14.0;
+    let mut word = |p: &mut Painter, text: &str, style: &TextStyle, ink: u32| {
+        let m = p.measure(text, style, 0.0);
+        p.text(text, style, x, baseline - m.baseline, Ink::hex(ink));
+        let r = RectF::new(x, y, m.width, h);
+        x += m.width + 5.0;
+        r
+    };
+    if run.running {
+        let words = word(p, &run.progress_words(), &FOOT, t.hex.label);
+        let left = words.x + words.w + 9.0;
+        let middle = (y + h / 2.0).round();
+        p.fill_rect(RectF::new(left, middle, 150.0, 1.0), Ink::hex(t.hex.track));
+        p.fill_rect(RectF::new(left, middle - 0.5, 150.0 * run.fraction().clamp(0.0, 1.0) as f32, 2.0), Ink::hex(t.hex.accent));
+        let m = p.measure("Cancel", &FOOT, 0.0);
+        let at = left + 150.0 + 16.0;
+        p.text("Cancel", &FOOT, at, baseline - m.baseline, Ink::hex(t.hex.dim));
+        places.push((RectF::new(at - 4.0, y, m.width + 8.0, h), Act::BatchCancel));
+    } else {
+        let (words, failed) = run.outcome_words();
+        word(p, &words, &FOOT, t.hex.label);
+        if let Some(failed) = failed {
+            word(p, "·", &FOOT, t.hex.label);
+            word(p, &failed, &STRONG, t.hex.paper);
+        }
+        let r = word(p, "Show", &FOOT, t.hex.dim);
+        p.fill_rect(RectF::new(r.x, baseline + 2.0, r.w, 1.0), Ink::hex(t.hex.track));
+        places.push((RectF::new(r.x - 4.0, y, r.w + 8.0, h), Act::BatchShow));
+    }
 }
 
 // MARK: Input
@@ -823,6 +877,19 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                         Some(Act::Size) => {
                             grid.sliding = true;
                             return slide(app, at.0);
+                        }
+                        Some(Act::BatchCancel) => {
+                            let _ = ReleaseCapture();
+                            return app.model.cancel_batch();
+                        }
+                        Some(Act::BatchShow) => {
+                            let _ = ReleaseCapture();
+                            let Some((r, _)) = grid.places.iter().find(|(_, a)| *a == Act::BatchShow).copied() else { return };
+                            let s = scale(hwnd) as f32;
+                            let mut corner = POINT { x: ((r.x + 4.0) * s) as i32, y: (r.y * s) as i32 };
+                            let _ = ClientToScreen(hwnd, &mut corner);
+                            let anchor = RECT { left: corner.x, top: corner.y, right: corner.x + (r.w * s) as i32, bottom: corner.y + (r.h * s) as i32 };
+                            return super::batch::toggle(app, anchor);
                         }
                         None => {}
                     }
