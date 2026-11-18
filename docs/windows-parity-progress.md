@@ -16,10 +16,10 @@ decisions made with their reasons, and what was carried over. See
 | 5 | Tray | done, merged (see log) |
 | 6 | Library | done: crate and glue merged (`c421063`) |
 | 7 | Strip and grid | done, merged `f9b8f47` |
-| 8 | Remaining features, Flip added (Open in Lightroom last) | 8c merged `1396397`; 8b ready on `win-p8b-open-export` (see log); 8a in progress |
+| 8 | Remaining features, Flip added (Open in Lightroom last) | 8c merged `1396397`, 8b merged `4a15d7f`; 8a in progress |
 | 9 | Validation and release | not started |
 
-## 2026-11-19: phase 8b, faster open, batch export and Open in Lightroom (branch `win-p8b-open-export`)
+## 2026-11-19: phase 8b merged, faster open, batch export and Open in Lightroom (`4a15d7f`, branch tip `fbb7a11`)
 
 - **What users see:**
   - **Faster open (ticket 39).** While Match camera brightness is pending, the
