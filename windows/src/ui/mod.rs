@@ -40,6 +40,7 @@ mod tone_graph;
 mod tray;
 mod tray_access;
 mod view_modes;
+mod view_switch;
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -157,6 +158,10 @@ pub mod id {
     pub const COMPARE: u16 = 405;
     pub const GRID: u16 = 406;
     pub const COMPARE_OFFER: u16 = 407;
+    /// The title bar's Grid · Photo · Compare (`view_switch`).
+    pub const VIEW_GRID: u16 = 408;
+    pub const VIEW_PHOTO: u16 = 409;
+    pub const VIEW_COMPARE: u16 = 410;
     pub const UPDATES: u16 = 500;
     pub const ABOUT: u16 = 501;
     pub const CANCEL_EXPORT: u16 = 600;
@@ -688,6 +693,7 @@ impl App {
         titlebar::set_title(self.main, &name);
         panes::sync(self.panes, model.pane() == crate::model::Pane::Presets);
         self.update_taskbar();
+        view_switch::sync(self);
     }
 
     /// The status line (§4.7): what's happening on the left, the canvas's
@@ -947,6 +953,7 @@ impl App {
             id::COMPARE => compare::toggle(self),
             id::COMPARE_OFFER => compare::take_offer(self),
             id::GRID => grid::toggle(self),
+            id::VIEW_GRID | id::VIEW_PHOTO | id::VIEW_COMPARE => view_switch::act(self, command),
             id::IMAGE_ONLY => view_modes::toggle_image_only(self),
             id::CROP => {
                 if model.cropping() {
@@ -1841,6 +1848,9 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             WM_NOTIFY => {
                 if let Some(result) = titlebar::dropdown(hwnd, lparam) {
+                    return result;
+                }
+                if let Some(result) = view_switch::notify(lparam) {
                     return result;
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)

@@ -500,6 +500,8 @@ pub enum Role {
     InkValue = 31,
     /// A choice: the value word and a ⌄, its menu on a click.
     Choice = 32,
+    /// The title bar's Grid · Photo · Compare: a word, penciled when shown.
+    ViewWord = 33,
     /// Owner-drawn statics and buttons.
     Label = 40,
     Section = 41,
@@ -514,7 +516,7 @@ pub enum Role {
 
 const ROLE: PCWSTR = w!("NegsRole");
 
-const ROLES: [Role; 31] = [
+const ROLES: [Role; 32] = [
     Role::Primary,
     Role::Secondary,
     Role::Glyph,
@@ -537,6 +539,7 @@ const ROLES: [Role; 31] = [
     Role::InkSlider,
     Role::InkValue,
     Role::Choice,
+    Role::ViewWord,
     Role::Label,
     Role::Section,
     Role::Hint,

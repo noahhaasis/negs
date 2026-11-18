@@ -7,8 +7,9 @@
 //! status line. It is drawn in the client area (`WM_NCCALCSIZE` removes the
 //! standard caption; the side and bottom frame stay the system's).
 //!
-//! The macOS app's Grid · Photo · Compare switch at the band's right is left
-//! out until the grid and Compare come to Windows (parity phases 7 and 8).
+//! The Grid · Photo · Compare switch stands before the caption buttons
+//! whenever a photograph is open (`view_switch`), the name ending 16 DIPs
+//! before it.
 //!
 //! The menu row is a toolbar control with a button per menu, so screen
 //! readers see "File", "Edit" … as buttons with menus. Its menus are the
@@ -194,7 +195,9 @@ pub fn layout(main: HWND, bar: HWND) {
         let x = px(main, MENU_INSET);
         let _ = MoveWindow(bar, x, (band - menus.cy) / 2, menus.cx, menus.cy, true);
         let captions = if full_screen(main) { 0 } else { 3 * px(main, CAPTION_BUTTON) };
-        let area = RECT { left: x + menus.cx + px(main, NAME_GAP), top: 0, right: client.right - captions - px(main, 16.0), bottom: band };
+        let views = super::view_switch::layout(main, client.right - captions, band);
+        let right = if views < client.right - captions { views - px(main, super::view_switch::NAME_GAP) } else { client.right - captions - px(main, 16.0) };
+        let area = RECT { left: x + menus.cx + px(main, NAME_GAP), top: 0, right, bottom: band };
         TITLE_AREA.with(|t| t.set(area));
         let _ = InvalidateRect(main, Some(&RECT { left: 0, top: 0, right: client.right, bottom: band }), false);
     }
