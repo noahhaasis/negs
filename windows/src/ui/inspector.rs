@@ -1588,7 +1588,13 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
     let mut placed = std::collections::HashMap::new();
     unsafe {
         let mut defer = BeginDeferWindowPos(positions.len() as i32).ok();
+        // Wrapped hints repaint whole when they move: a static resized
+        // repaints only what it gained, leaving two wrappings side by side.
+        let mut hints = vec![];
         for (hwnd, x, y, w, h) in positions {
+            if draw::role_of(hwnd) == Some(Role::Hint) {
+                hints.push(hwnd);
+            }
             let top = y - ins.scroll;
             placed.insert(hwnd.0 as isize, top);
             let mut at = top;
@@ -1615,6 +1621,9 @@ fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
         }
         if let Some(d) = defer {
             let _ = EndDeferWindowPos(d);
+        }
+        for hwnd in hints {
+            let _ = InvalidateRect(hwnd, None, false);
         }
         if !moves.is_empty() {
             // Revealed rows wait until the rows below have made room.
