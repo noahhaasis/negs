@@ -176,6 +176,10 @@ pub struct Preferences {
     /// `WINDOWPLACEMENT` of the editor: show command and normal rectangle in
     /// workspace coordinates.
     pub window: Option<[i32; 5]>,
+    /// The normal rectangle's size in pixels and the DPI it was saved at:
+    /// at the same DPI the window reopens at exactly that size (the DIPs in
+    /// `window` round a pixel off at 125 % and 150 %).
+    pub window_pixels: Option<[i32; 3]>,
     /// The adjustments column's width, in DIPs.
     pub inspector_width: f64,
     pub check_for_updates: bool,
@@ -275,6 +279,7 @@ impl Default for Preferences {
             jpeg_quality: 95,
             last_save_folder: None,
             window: None,
+            window_pixels: None,
             inspector_width: 404.0,
             check_for_updates: true,
             image_size_long_side: None,
