@@ -362,21 +362,42 @@ impl<'a> Tiff<'a> {
     }
 }
 
+/// Adobe RGB (1998) to sRGB, linear: rows are sRGB red, green, blue.
+const ADOBE_TO_SRGB: [[f64; 3]; 3] = [[1.3982832, -0.3982831, 0.0], [0.0, 1.0, 0.0], [0.0, -0.0429383, 1.0429383]];
+
 /// Converts Adobe RGB (1998) pixels to sRGB, clipping what sRGB can't hold:
 /// the reference only has to be as bright as the camera's preview.
+///
+/// The matrix's zeros make sRGB red a function of Adobe red and green, green
+/// of green alone, and blue of green and blue. So every answer is worked out
+/// once, by the per-pixel expression, into two 256 × 256 tables and one of
+/// 256: the same bytes as converting each pixel, without three `powf` a
+/// pixel (about 0.9 s for a 24 MP preview on an M1, 4 s on a Ryzen 5 3600).
 pub fn adobe_to_srgb(rgba: &mut image::RgbaImage) {
-    const M: [[f64; 3]; 3] = [[1.3982832, -0.3982831, 0.0], [0.0, 1.0, 0.0], [0.0, -0.0429383, 1.0429383]];
+    let m = ADOBE_TO_SRGB;
     let decode: Vec<f64> = (0..256).map(|v| (v as f64 / 255.0).powf(563.0 / 256.0)).collect();
     let encode = |v: f64| {
         let v = v.clamp(0.0, 1.0);
         let e = if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
         (e * 255.0).round() as u8
     };
-    for p in rgba.pixels_mut() {
-        let linear = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
-        for c in 0..3 {
-            p[c] = encode(M[c][0] * linear[0] + M[c][1] * linear[1] + M[c][2] * linear[2]);
+    // The channel a zero multiplies is set to 0: 0 × any decoded value is 0.
+    let convert = |c: usize, linear: [f64; 3]| encode(m[c][0] * linear[0] + m[c][1] * linear[1] + m[c][2] * linear[2]);
+    let mut red = vec![0u8; 256 * 256];
+    let mut blue = vec![0u8; 256 * 256];
+    let mut green = [0u8; 256];
+    for g in 0..256 {
+        green[g] = convert(1, [0.0, decode[g], 0.0]);
+        for other in 0..256 {
+            red[g * 256 + other] = convert(0, [decode[other], decode[g], 0.0]);
+            blue[g * 256 + other] = convert(2, [0.0, decode[g], decode[other]]);
         }
+    }
+    for p in rgba.pixels_mut() {
+        let (r, g, b) = (p[0] as usize, p[1] as usize, p[2] as usize);
+        p[0] = red[g * 256 + r];
+        p[1] = green[g];
+        p[2] = blue[g * 256 + b];
     }
 }
 
@@ -707,6 +728,35 @@ mod tests {
         let grey = image.get_pixel(0, 0).0;
         assert!(grey[0] == grey[1] && grey[1] == grey[2] && (126..=130).contains(&grey[0]), "{grey:?}");
         assert_eq!(image.get_pixel(1, 0).0, [0, 255, 0, 255]);
+    }
+
+    /// The tables give all 2^24 colours the bytes the per-pixel conversion
+    /// (as it was before them, verbatim) gives. That rests on the zeros.
+    #[test]
+    fn adobe_rgb_tables_equal_converting_each_pixel() {
+        fn per_pixel(rgba: &mut image::RgbaImage) {
+            const M: [[f64; 3]; 3] = [[1.3982832, -0.3982831, 0.0], [0.0, 1.0, 0.0], [0.0, -0.0429383, 1.0429383]];
+            let decode: Vec<f64> = (0..256).map(|v| (v as f64 / 255.0).powf(563.0 / 256.0)).collect();
+            let encode = |v: f64| {
+                let v = v.clamp(0.0, 1.0);
+                let e = if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+                (e * 255.0).round() as u8
+            };
+            for p in rgba.pixels_mut() {
+                let linear = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
+                for c in 0..3 {
+                    p[c] = encode(M[c][0] * linear[0] + M[c][1] * linear[1] + M[c][2] * linear[2]);
+                }
+            }
+        }
+        let every = image::RgbaImage::from_fn(4096, 4096, |x, y| {
+            let i = y * 4096 + x;
+            image::Rgba([(i >> 16) as u8, (i >> 8) as u8, i as u8, (i * 7) as u8])
+        });
+        let (mut tables, mut each) = (every.clone(), every);
+        adobe_to_srgb(&mut tables);
+        per_pixel(&mut each);
+        assert!(tables == each, "the tables differ from converting each pixel");
     }
 
     /// Not a RAW: no preview, and it says so.
