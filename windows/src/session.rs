@@ -187,9 +187,12 @@ pub struct Preferences {
     /// Settings › Use less memory for export: grain channels one at a time.
     /// Only exports read it; previews always develop the channels together.
     pub low_memory_export: bool,
-    /// Lab › Advanced controls. Off, the Lab shows each group's basics and
-    /// anything changed from its default.
+    /// View › Show All Controls (once the Lab's Advanced controls). Off, the
+    /// Lab shows each module's basics and anything changed from its default.
     pub lab_all_controls: bool,
+    /// The modules (by title) and sections ("section:Print") whose "N more"
+    /// was clicked, comma-separated (`InspectorReveal`).
+    pub more_adjustments: String,
     /// The scope above the tabs: "Histogram" or "Waveform".
     pub scope_mode: String,
     /// The scope's height in DIPs, dragged with the handle below it.
@@ -237,7 +240,7 @@ impl Default for Preferences {
             jpeg_quality: 95,
             last_save_folder: None,
             window: None,
-            inspector_width: 340.0,
+            inspector_width: 404.0,
             check_for_updates: true,
             image_size_long_side: None,
             previews: true,
@@ -248,6 +251,7 @@ impl Default for Preferences {
             limit_preview: None,
             low_memory_export: false,
             lab_all_controls: false,
+            more_adjustments: String::new(),
             scope_mode: "Histogram".into(),
             scope_height: SCOPE_HEIGHTS.0,
             favorite_films: DEFAULT_FAVORITE_FILMS.iter().map(|s| s.to_string()).collect(),
@@ -291,6 +295,21 @@ impl Preferences {
             titles.push(title);
         }
         self.expanded_adjustments = titles.join(",");
+    }
+
+    /// Whether a module's or section's "N more" was clicked.
+    pub fn revealed(&self, key: &str) -> bool {
+        self.more_adjustments.split(',').any(|t| t == key)
+    }
+
+    /// Shows or folds back `key`'s extra controls; kept sorted, as on the Mac.
+    pub fn set_revealed(&mut self, key: &str, shown: bool) {
+        let mut keys: Vec<&str> = self.more_adjustments.split(',').filter(|t| !t.is_empty() && *t != key).collect();
+        if shown {
+            keys.push(key);
+        }
+        keys.sort_unstable();
+        self.more_adjustments = keys.join(",");
     }
 
     /// The tab the inspector shows. Post became Output; settings files from

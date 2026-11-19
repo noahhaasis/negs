@@ -6,6 +6,7 @@
 mod border;
 mod brightness;
 mod crop;
+mod edits;
 mod engine;
 mod gpu;
 mod help;

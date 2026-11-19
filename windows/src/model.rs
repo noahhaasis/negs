@@ -923,6 +923,12 @@ impl Model {
     }
     pub fn set(&mut self, path: &str, value: Value) {
         let mut next = self.state.clone();
+        self.set_in(&mut next, path, value);
+        self.apply(next, "Change Adjustment");
+    }
+
+    /// `set` on a state of one's own, to change several values in one step.
+    fn set_in(&self, next: &mut EditState, path: &str, value: Value) {
         if let Some((field, index)) = state::grain_lane(path) {
             // The whole array materializes from the preset; back at the
             // preset in every lane it returns to null, so a later film
@@ -947,7 +953,60 @@ impl Model {
         } else {
             json::set(&mut next.params, path, value);
         }
-        self.apply(next, "Change Adjustment");
+    }
+
+    /// Puts the edits a tab's list names back to their defaults, as one
+    /// undo step (`resetEdits` in `TabEdits.swift`).
+    pub fn reset_edits(&mut self, targets: &[crate::edits::Target], action: impl Into<Cow<'static, str>>) {
+        use crate::edits::Target;
+        if self.cropping() || targets.is_empty() {
+            return;
+        }
+        let mut next = self.state.clone();
+        let mut space = false;
+        for target in targets {
+            match *target {
+                Target::Param(path) => {
+                    let value = self.default_value(path).clone();
+                    if state::grain_lane(path).is_some() {
+                        // Lanes start from the state being built, so a
+                        // second lane keeps the first one's reset.
+                        let current = std::mem::replace(&mut self.state, next.clone());
+                        self.set_in(&mut next, path, value);
+                        self.state = current;
+                    } else {
+                        self.set_in(&mut next, path, value);
+                    }
+                }
+                Target::MatchBrightness => {
+                    next.brightness_match = self.new_match();
+                    if next.brightness_match.is_some() {
+                        json::set(&mut next.params, state::PREP_EXPOSURE, json::num(0.0));
+                    }
+                }
+                Target::Exposure => {
+                    let matched = self.matched_ev();
+                    json::set(&mut next.params, state::PREP_EXPOSURE, json::num(matched));
+                }
+                Target::ScanFilm => {
+                    let positive = self.stocks.iter().find(|s| !s.paper && s.id == next.film).is_some_and(|s| s.positive);
+                    json::set(&mut next.params, "io.scan_film", Value::Bool(positive));
+                }
+                Target::PreviewSpace => space = true,
+                Target::Border => next.border.enabled = false,
+                Target::FilmFormat => {
+                    self.custom_film_format = false;
+                    let path = state::FILM_FORMAT.path();
+                    let value = self.default_value(path).clone();
+                    self.set_in(&mut next, path, value);
+                }
+            }
+        }
+        self.apply(next, action);
+        if space {
+            self.choose_preview_space(COLOR_SPACES[0]);
+        }
+        self.mark(dirty::INSPECTOR | dirty::STRUCTURE);
     }
     pub fn reset_value(&mut self, path: &str) {
         let value = self.default_value(path).clone();
