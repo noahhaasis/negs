@@ -12,6 +12,8 @@ struct PreviewCanvas: NSViewRepresentable {
     /// Mirrored left to right after the crop, before `rotation` (`io.flip`).
     var flip = false
     let crop: CropSettings
+    /// The tile's pixels have already been cropped and straightened.
+    var cut = false
     let border: BorderSettings?
     let filmTexture: CGImage?
     let filmStrip: FilmStrip?
@@ -73,7 +75,7 @@ struct PreviewCanvas: NSViewRepresentable {
         let recropped = photo.crop != crop && oldSize.width != 0
         if recropped { scroll.fitting = true }
         photo.settled = settled
-        photo.show(image, size: size, rotation: rotation, flip: flip, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
+        photo.show(image, size: size, rotation: rotation, flip: flip, crop: crop, cut: cut, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
         photo.turned = upsideDown
         photo.split = split
         if oldSize != documentSize {
@@ -346,6 +348,7 @@ final class PhotographView: NSView {
     private var rotation = 0
     private var flip = false
     private(set) var crop = CropSettings()
+    private var cut = false
     private var border: BorderSettings?
     private var filmTexture: CGImage?
     private var filmStrip: FilmStrip?
@@ -417,10 +420,10 @@ final class PhotographView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ image: AnyObject, size: CGSize, rotation: Int, flip: Bool = false, crop: CropSettings = CropSettings(), border: BorderSettings? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
+    func show(_ image: AnyObject, size: CGSize, rotation: Int, flip: Bool = false, crop: CropSettings = CropSettings(), cut: Bool = false, border: BorderSettings? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
         guard image !== self.image || size != self.size || rotation != self.rotation || flip != self.flip || crop != self.crop
-            || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
-        self.image = image; self.size = size; self.rotation = rotation; self.flip = flip; self.crop = crop
+            || cut != self.cut || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
+        self.image = image; self.size = size; self.rotation = rotation; self.flip = flip; self.crop = crop; self.cut = cut
         self.border = border; self.filmTexture = filmTexture; self.filmStrip = filmStrip
         photo.contents = image
         needsLayout = true
@@ -433,7 +436,8 @@ final class PhotographView: NSView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         turn.bounds = CGRect(origin: .zero, size: bounds.size)
         placeTurn()
-        Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, flip: flip, center: CGPoint(x: bounds.midX, y: bounds.midY))
+        Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, flip: flip,
+                    center: CGPoint(x: bounds.midX, y: bounds.midY), cut: cut)
         borderLayers.layout(border, photo: displaySize, host: turn, texture: filmTexture, filmStrip: filmStrip)
         refreshSharp()
         CATransaction.commit()
