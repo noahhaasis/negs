@@ -333,7 +333,7 @@ impl Canvas {
                 let _ = GdiFlush();
             }
         }
-        let drawn = super::d2d::paint(self.dc, self.w, self.h, scale, plain, draw);
+        let drawn = super::d2d::paint_pixels(self.dc, self.bits as *mut u8, self.stride as usize * 4, self.w, self.h, scale, plain, draw);
         // Direct2D wrote through the DC: flush before touching the pixels.
         self.gdi = true;
         drawn

@@ -1036,6 +1036,7 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
     }
     let t2 = crate::platform::qpc();
     update_values(ins, model, &expanded);
+    let t_paint = crate::platform::qpc();
     if lock {
         hold_redraw(ins.panel, false);
     }
@@ -1045,7 +1046,7 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
     app.model.show_tone_graph(graph && app.model.inspector_visible && app.model.pane() == crate::model::Pane::Adjustments);
     if created {
         let ms = |a, b| crate::platform::qpc_ms(a, b);
-        app.report.line(&format!("inspector sync: create {:.1} ms, layout {:.1} ms, values {:.1} ms", ms(t0, t1), ms(t1, t2), ms(t2, t3)));
+        app.report.line(&format!("inspector sync: create {:.1} ms, layout {:.1} ms, values {:.1} ms (painting {:.1} ms)", ms(t0, t1), ms(t1, t2), ms(t2, t3), ms(t_paint, t3)));
     }
 }
 

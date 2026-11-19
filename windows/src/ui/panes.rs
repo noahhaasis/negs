@@ -45,11 +45,10 @@ pub fn create(main: HWND, font: HFONT) -> HWND {
         let word = create_control(w!("BUTTON"), title, style | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), band, command, font);
         draw::set_role(word, Role::PaneWord);
         draw::track_hover(word);
-        super::dialogs::tooltip(word, help);
+        TIPS.with(|t| t.borrow_mut().push((word, help)));
     }
     let count = create_control(w!("STATIC"), "", WS_CHILD | WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), band, EDIT_COUNT, font);
     draw::set_role(count, Role::EditCount);
-    super::accessible_role(count, 0x29);
     let words = [
         (id::RESET_ALL, "Reset", "Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this."),
         (id::NEW_PRESET, "New", "Save the film, paper and Lab settings as a preset (Ctrl+Shift+S)"),
@@ -60,9 +59,28 @@ pub fn create(main: HWND, font: HFONT) -> HWND {
         let word = create_control(w!("BUTTON"), title, WS_CHILD | WS_TABSTOP | group | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), band, command, font);
         draw::set_role(word, Role::WordButton);
         draw::track_hover(word);
-        super::dialogs::tooltip(word, help);
+        TIPS.with(|t| t.borrow_mut().push((word, help)));
     }
     band
+}
+
+thread_local! {
+    /// The words' tooltips, waiting for the first frame (`sync_edits`): the
+    /// tooltip window and the accessibility service cost the first window
+    /// 3 ms.
+    static TIPS: std::cell::RefCell<Vec<(HWND, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The tooltips, and the count read as text, once the first frame is up.
+fn finish(band: HWND) {
+    let tips = TIPS.with(|t| std::mem::take(&mut *t.borrow_mut()));
+    if tips.is_empty() {
+        return;
+    }
+    for (word, help) in tips {
+        super::dialogs::tooltip(word, help);
+    }
+    super::accessible_role(button(band, EDIT_COUNT), 0x29);
 }
 
 fn button(band: HWND, command: u16) -> HWND {
@@ -98,6 +116,7 @@ fn show_words(band: HWND, presets: bool) {
 /// The adjustments' edits on all tabs ("3 edits"; none without a
 /// photograph), whether Reset can, and whether the presets can change.
 pub fn sync_edits(band: HWND, edits: usize, can_reset: bool, can_presets: bool) {
+    finish(band);
     let count = button(band, EDIT_COUNT);
     let text = match edits {
         0 => String::new(),
