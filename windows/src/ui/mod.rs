@@ -16,6 +16,7 @@ mod dialogs;
 mod draw;
 mod drop;
 mod empty;
+mod ink;
 mod folder_watch;
 pub mod inspector;
 mod motion;
@@ -55,16 +56,41 @@ use crate::session::{EditorSession, Preferences, SessionStore};
 
 /// Annotate icon buttons and numeric editors without changing their visual text.
 pub fn accessible_name(hwnd: HWND, name: &str) {
-    use windows::Win32::UI::Accessibility::{CAccPropServices, IAccPropServices, PROPID_ACC_NAME};
+    use windows::Win32::UI::Accessibility::PROPID_ACC_NAME;
+    with_props(|service| {
+        let name = wide(name);
+        unsafe { let _ = service.SetHwndPropStr(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_NAME, pcwstr(&name)); }
+    });
+}
+
+/// Gives `hwnd` an accessible value: a slider reads its value, not the
+/// trackbar's step.
+pub fn accessible_value(hwnd: HWND, value: &str) {
+    use windows::Win32::UI::Accessibility::PROPID_ACC_VALUE;
+    with_props(|service| {
+        let value = wide(value);
+        unsafe { let _ = service.SetHwndPropStr(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_VALUE, pcwstr(&value)); }
+    });
+}
+
+/// Gives `hwnd` an accessible role (`ROLE_SYSTEM_*`): owner-drawn statics
+/// otherwise read as graphics.
+pub fn accessible_role(hwnd: HWND, role: u32) {
+    use windows::Win32::UI::Accessibility::PROPID_ACC_ROLE;
+    with_props(|service| unsafe {
+        let _ = service.SetHwndProp(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_ROLE, &windows_core::VARIANT::from(role as i32));
+    });
+}
+
+fn with_props(f: impl FnOnce(&windows::Win32::UI::Accessibility::IAccPropServices)) {
+    use windows::Win32::UI::Accessibility::{CAccPropServices, IAccPropServices};
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     thread_local! {
         static PROPS: std::cell::OnceCell<Option<IAccPropServices>> = const { std::cell::OnceCell::new() };
     }
     PROPS.with(|cell| {
-        let service = cell.get_or_init(|| unsafe { CoCreateInstance(&CAccPropServices, None, CLSCTX_INPROC_SERVER).ok() });
-        if let Some(service) = service {
-            let name = wide(name);
-            unsafe { let _ = service.SetHwndPropStr(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_NAME, pcwstr(&name)); }
+        if let Some(service) = cell.get_or_init(|| unsafe { CoCreateInstance(&CAccPropServices, None, CLSCTX_INPROC_SERVER).ok() }) {
+            f(service);
         }
     });
 }
@@ -105,6 +131,8 @@ pub mod id {
     pub const FULL_SCREEN: u16 = 306;
     pub const PRESETS: u16 = 307;
     pub const PANEL: u16 = 308;
+    /// Every control in every module of the Lab (`toggleAllControls`).
+    pub const ALL_CONTROLS: u16 = 309;
     /// View › Theme, in `ThemeName::ALL`'s order.
     pub const THEME: u16 = 320; // ..325
     pub const ROTATE: u16 = 400;
@@ -801,6 +829,11 @@ impl App {
             id::ADJUSTMENTS => model.toggle_pane(crate::model::Pane::Adjustments),
             id::PRESETS => model.toggle_pane(crate::model::Pane::Presets),
             id::PANEL => model.toggle_inspector(),
+            id::ALL_CONTROLS => {
+                model.prefs.lab_all_controls = !model.prefs.lab_all_controls;
+                model.prefs.save();
+                model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR | dirty::CHROME;
+            }
             id::ORIGINAL => {
                 let shown = model.holding_original;
                 model.hold_original(!shown);
@@ -897,6 +930,7 @@ impl App {
         check(id::FILMSTRIP, model.prefs.filmstrip_visible);
         check(id::ADJUSTMENTS, model.inspector_visible && !presets::shown(model));
         check(id::PRESETS, presets::shown(model));
+        check(id::ALL_CONTROLS, model.prefs.lab_all_controls);
         enable(id::NEW_PRESET, model.can_change_presets());
         enable(id::IMPORT_PRESETS, model.can_change_presets());
         check(id::FULL_SCREEN, self.full_screen.is_some());
@@ -1164,6 +1198,8 @@ fn build_menu() -> (HMENU, HMENU) {
         add(view, id::ADJUSTMENTS, "&Adjustments\tF7");
         add(view, id::PRESETS, "&Presets\tF8");
         add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
+        // Every control in every module, as the Lab's Advanced controls switch did.
+        add(view, id::ALL_CONTROLS, "Show A&ll Controls");
         separator(view);
         add(view, id::FIT, "Fi&t Photograph\tCtrl+0");
         add(view, id::ACTUAL, "Actual &Size\tCtrl+1");

@@ -855,65 +855,9 @@ impl Painter<'_> {
 
     // MARK: Text
 
-    fn format(&mut self, style: &TextStyle) -> Option<IDWriteTextFormat> {
-        let k = FormatKey::of(style);
-        if let Some(f) = self.caches.formats.get(&k) {
-            return Some(f.clone());
-        }
-        let format = make_format(self.shared, style).ok()?;
-        self.caches.formats.insert(k, format.clone());
-        Some(format)
-    }
-
-    fn typography(&mut self) -> Option<IDWriteTypography> {
-        if self.caches.typography.is_none() {
-            self.caches.typography = unsafe {
-                self.shared.dwrite.CreateTypography().ok().filter(|t| {
-                    [DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_FEATURE_TAG_LINING_FIGURES]
-                        .into_iter()
-                        .all(|tag| t.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: tag, parameter: 1 }).is_ok())
-                })
-            };
-        }
-        self.caches.typography.clone()
-    }
-
     /// `text` laid out in `style`, `width` wide (unbounded for 0), cached.
     pub fn layout(&mut self, text: &str, style: &TextStyle, width: f32, align: Align) -> Option<IDWriteTextLayout> {
-        let style = style.resolved(self.plain);
-        let id = key((text, FormatKey::of(&style), style.tracking.to_bits(), style.wrap, width.to_bits(), align));
-        if let Some((cached, layout)) = self.caches.layouts.get(&id) {
-            if **cached == *text {
-                return Some(layout.clone());
-            }
-        }
-        let format = self.format(&style)?;
-        let typography = self.typography();
-        let wide: Vec<u16> = text.encode_utf16().collect();
-        let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };
-        let width = if width > 0.0 { width } else { 1.0e6 };
-        let layout = unsafe {
-            let layout = self.shared.dwrite.CreateTextLayout(&wide, &format, width, 1.0e6).ok()?;
-            if let Some(typography) = &typography {
-                let _ = layout.SetTypography(typography, range);
-            }
-            if style.tracking != 0.0 {
-                if let Ok(layout1) = layout.cast::<IDWriteTextLayout1>() {
-                    let _ = layout1.SetCharacterSpacing(0.0, style.tracking * style.size, 0.0, range);
-                }
-            }
-            let _ = layout.SetTextAlignment(match align {
-                Align::Leading => DWRITE_TEXT_ALIGNMENT_LEADING,
-                Align::Center => DWRITE_TEXT_ALIGNMENT_CENTER,
-                Align::Trailing => DWRITE_TEXT_ALIGNMENT_TRAILING,
-            });
-            layout
-        };
-        if self.caches.layouts.len() >= MOST_LAYOUTS {
-            self.caches.layouts.clear();
-        }
-        self.caches.layouts.insert(id, (text.into(), layout.clone()));
-        Some(layout)
+        layout_in(self.shared, self.caches, self.plain, text, style, width, align)
     }
 
     /// The size of `text` in `style` on one line (or wrapped at `width`).
@@ -956,6 +900,82 @@ impl Painter<'_> {
         unsafe { self.rt.DrawTextLayout(D2D_POINT_2F { x: r.x, y: r.y }, &layout, self.ink(ink), D2D1_DRAW_TEXT_OPTIONS_NONE) };
         metrics(&layout)
     }
+}
+
+fn format_in(shared: &Shared, caches: &mut Caches, style: &TextStyle) -> Option<IDWriteTextFormat> {
+    let k = FormatKey::of(style);
+    if let Some(f) = caches.formats.get(&k) {
+        return Some(f.clone());
+    }
+    let format = make_format(shared, style).ok()?;
+    caches.formats.insert(k, format.clone());
+    Some(format)
+}
+
+fn typography_in(shared: &Shared, caches: &mut Caches) -> Option<IDWriteTypography> {
+    if caches.typography.is_none() {
+        caches.typography = unsafe {
+            shared.dwrite.CreateTypography().ok().filter(|t| {
+                [DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, DWRITE_FONT_FEATURE_TAG_LINING_FIGURES]
+                    .into_iter()
+                    .all(|tag| t.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: tag, parameter: 1 }).is_ok())
+            })
+        };
+    }
+    caches.typography.clone()
+}
+
+/// `text` laid out in `style`, `width` wide (unbounded for 0), cached per
+/// thread: painting the same words again makes nothing.
+fn layout_in(shared: &Shared, caches: &mut Caches, plain: bool, text: &str, style: &TextStyle, width: f32, align: Align) -> Option<IDWriteTextLayout> {
+    let style = style.resolved(plain);
+    let id = key((text, FormatKey::of(&style), style.tracking.to_bits(), style.wrap, width.to_bits(), align));
+    if let Some((cached, layout)) = caches.layouts.get(&id) {
+        if **cached == *text {
+            return Some(layout.clone());
+        }
+    }
+    let format = format_in(shared, caches, &style)?;
+    let typography = typography_in(shared, caches);
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let range = DWRITE_TEXT_RANGE { startPosition: 0, length: wide.len() as u32 };
+    let width = if width > 0.0 { width } else { 1.0e6 };
+    let layout = unsafe {
+        let layout = shared.dwrite.CreateTextLayout(&wide, &format, width, 1.0e6).ok()?;
+        if let Some(typography) = &typography {
+            let _ = layout.SetTypography(typography, range);
+        }
+        if style.tracking != 0.0 {
+            if let Ok(layout1) = layout.cast::<IDWriteTextLayout1>() {
+                let _ = layout1.SetCharacterSpacing(0.0, style.tracking * style.size, 0.0, range);
+            }
+        }
+        let _ = layout.SetTextAlignment(match align {
+            Align::Leading => DWRITE_TEXT_ALIGNMENT_LEADING,
+            Align::Center => DWRITE_TEXT_ALIGNMENT_CENTER,
+            Align::Trailing => DWRITE_TEXT_ALIGNMENT_TRAILING,
+        });
+        layout
+    };
+    if caches.layouts.len() >= MOST_LAYOUTS {
+        caches.layouts.clear();
+    }
+    caches.layouts.insert(id, (text.into(), layout.clone()));
+    Some(layout)
+}
+
+/// The size of `text` in `style`, wrapped at `width` (0: one line), without
+/// painting: for laying out rows whose height follows their words. The
+/// layout is cached for the paint that follows. Zero when Direct2D isn't there.
+pub fn measure_text(text: &str, style: &TextStyle, width: f32, plain: bool) -> TextMetrics {
+    if text.is_empty() {
+        return TextMetrics::default();
+    }
+    let Some(shared) = shared() else { return TextMetrics::default() };
+    DEVICE.with(|cell| {
+        let Ok(mut device) = cell.try_borrow_mut() else { return TextMetrics::default() };
+        layout_in(shared, &mut device.caches, plain, text, style, width, Align::Leading).map_or_else(TextMetrics::default, |l| metrics(&l))
+    })
 }
 
 fn metrics(layout: &IDWriteTextLayout) -> TextMetrics {

@@ -20,11 +20,13 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
 use super::draw::{self, Canvas, RectF, Role};
+use super::ink;
 use super::motion;
 use super::theme;
 use super::{App, TBM_GETPOS, create, post, with_app};
 use crate::border::{self, BorderColor, BorderStyle};
 use crate::crop::CropAspect;
+use crate::edits::MoreAction;
 use crate::json;
 use crate::model::{BorderWidth, Model, dirty};
 use crate::platform::{pcwstr, wide};
@@ -43,12 +45,18 @@ const HEADER: u16 = 6;
 const ACTION: u16 = 7;
 const TAB_LAB: u16 = 900;
 const TAB_OUTPUT: u16 = 901;
-const RESET_ALL: u16 = 902;
 const TAB_PREP: u16 = 903;
-const SCOPE_MODE: u16 = 904;
+/// Histogram · Waveform.
+const SCOPE_HISTOGRAM: u16 = 904;
+const SCOPE_WAVEFORM: u16 = 906;
 /// The Film grid's search field, on the pinned panel.
 const FILM_SEARCH: u16 = 905;
+/// Each tab's dot and count, which opens its edits: 907–909.
+const TAB_COUNT: u16 = 907;
+/// What an export makes, over Export (`ExportFoot`).
+const FOOT_SUMMARY: u16 = 910;
 const TABS: [(u16, &str); 3] = [(TAB_PREP, "Prep"), (TAB_LAB, "Lab"), (TAB_OUTPUT, "Output")];
+const EDIT_TABS: [crate::edits::Tab; 3] = crate::edits::Tab::ALL;
 /// An open stock grid's height, in DIPs: it scrolls inside itself, keeping
 /// the tabs in reach.
 const GRID_HEIGHT: f64 = 290.0;
@@ -90,11 +98,12 @@ enum When {
     MeterAuto,
     /// Film format › Custom…: the long-edge slider.
     CustomFormat,
-    /// Not among the Lab's basics: with Advanced controls, or once changed.
-    Shows(&'static str),
+    /// A section's loose row: its "N more" was clicked, or it changed.
+    Shows(Section, &'static str),
     ScanToggle,
-    ScanSection,
     OutputGroup,
+    /// A "N more" line with something to say.
+    More(More),
     /// An adjustment group: it has basics, or something in it changed.
     Group(usize),
     Mat,
@@ -118,8 +127,8 @@ enum Kind {
     ExposureOffset,
     /// Lab › Camera › Film format: stills formats, or Custom….
     FilmFormat,
-    /// Lab › Advanced controls (a preference).
-    AllControls,
+    /// "N more controls…", "Hide …", or "Showing all controls. Show fewer".
+    More(More),
     /// The paper row while scanning film directly.
     PaperSkipped,
     /// The colour space the preview develops in (a preference).
@@ -151,8 +160,25 @@ enum Note {
     Size,
     /// What the brightness match did, or why it can't.
     Brightness,
-    /// What Advanced controls shows.
-    AllControls,
+}
+
+/// What a "N more" line folds: a module's controls, a section's modules
+/// and rows, or (at the Lab's top) View › Show All Controls.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum More {
+    Module(usize),
+    Section(Section),
+    All,
+}
+
+/// A "N more" line's words and what a click does; None hides it.
+fn more_line(model: &Model, more: More) -> Option<(String, crate::edits::MoreAction)> {
+    use crate::edits::{self, MoreAction};
+    match more {
+        More::Module(index) => edits::module_more(model, index),
+        More::Section(section) => edits::section_more(model, section),
+        More::All => model.prefs.lab_all_controls.then(|| ("Showing all controls. Show fewer".into(), MoreAction::ShowFewer)),
+    }
 }
 
 struct Row {
@@ -175,7 +201,8 @@ struct Row {
 pub struct Inspector {
     pub panel: HWND,
     scope: HWND,
-    scope_mode: HWND,
+    /// Histogram · Waveform, as words.
+    scope_words: [HWND; 2],
     scope_label: HWND,
     grip: HWND,
     /// The scope's height in DIPs, as dragged.
@@ -184,8 +211,16 @@ pub struct Inspector {
     pinned: HWND,
     pinned_height: i32,
     tabs: [HWND; 3],
+    /// Each tab's dot and count; hidden while it has no edits.
+    counts: [HWND; 3],
+    /// The edits each tab held at the last sync.
+    tab_counts: [usize; 3],
     rows_panel: HWND,
-    reset: HWND,
+    /// The Output tab's foot: what an export makes, and Export.
+    foot_summary: HWND,
+    export: HWND,
+    /// Whether the foot shows (the Output tab).
+    foot_shown: bool,
     crop: Option<CropPanel>,
     pub rect: RECT,
     rows: Vec<Row>,
@@ -226,6 +261,8 @@ struct Slide {
 thread_local! {
     /// The current film and paper names, for the foldout headers.
     static FOLDOUT_NAMES: RefCell<[String; 2]> = const { RefCell::new([String::new(), String::new()]) };
+    /// The value each slider last gave UI Automation.
+    static ACC_VALUES: RefCell<std::collections::HashMap<isize, String>> = RefCell::new(std::collections::HashMap::new());
     /// The tiles as drawn, by grid (film, paper) and position.
     static TILES: RefCell<[Vec<TileLook>; 2]> = const { RefCell::new([Vec::new(), Vec::new()]) };
     /// What the scope draws: the histogram, the waveform, and whether it shows the waveform.
@@ -291,15 +328,19 @@ impl Inspector {
         Self {
             panel,
             scope: HWND::default(),
-            scope_mode: HWND::default(),
+            scope_words: [HWND::default(); 2],
             scope_label: HWND::default(),
             grip: HWND::default(),
             scope_height: SCOPE_HEIGHTS.0,
             pinned: HWND::default(),
             pinned_height: 0,
             tabs: [HWND::default(); 3],
+            counts: [HWND::default(); 3],
+            tab_counts: [usize::MAX; 3],
             rows_panel: HWND::default(),
-            reset: HWND::default(),
+            foot_summary: HWND::default(),
+            export: HWND::default(),
+            foot_shown: false,
             crop: None,
             rect: RECT::default(),
             rows: vec![],
@@ -355,50 +396,79 @@ impl Inspector {
         }
     }
 
-    /// The scope, the pinned stocks, the tab switch, the rows and the reset
-    /// button.
+    /// The scope with its words and grabber, the pinned stocks, the tabs
+    /// between two rules, the rows, and on Output the Export foot
+    /// (`AdjustmentInspector`, `ScopePanelView`).
     fn layout_frame(&mut self) {
         if !self.built {
             return;
         }
         let (w, h) = (self.rect.right - self.rect.left, self.rect.bottom - self.rect.top);
-        let pad = self.px(16.0);
-        // On the 8 DIP grid: the scope's menu, the scope and its grabber,
-        // the pinned stocks, the tabs, the rows and the reset button.
-        let inner = w - 2 * pad;
-        let mode = self.px(24.0);
+        let gutter = self.px(ink::GUTTER);
+        let margin = self.px(ink::MARGIN);
+        let inner = w - 2 * gutter;
         let scope = self.px(self.scope_height);
-        let grip = self.px(8.0);
-        let tabs = self.px(32.0);
-        let reset = self.px(32.0);
-        let mut y = self.px(8.0);
+        let words = self.px(18.0);
         // Moved together (`DeferWindowPos`): one at a time, each move
         // repainted what it uncovered before the next filled it, which
         // flickered on every step of dragging the scope's grabber.
-        let mut positions = vec![(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0))];
-        positions.push((self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0)));
-        y += mode + self.px(8.0);
-        positions.push((self.scope, pad, y, inner, scope));
-        y += scope;
-        positions.push((self.grip, pad, y, inner, grip));
-        y += grip;
-        positions.push((self.pinned, 0, y, w, self.pinned_height));
-        y += self.pinned_height + self.px(8.0);
-        let each = inner / 3;
-        for (i, &tab) in self.tabs.iter().enumerate() {
-            let x = pad + each * i as i32;
-            let width = if i == 2 { inner - 2 * each } else { each };
-            positions.push((tab, x, y, width, tabs));
+        let mut positions = vec![];
+        let mut x = gutter - margin;
+        for (&word, title) in self.scope_words.iter().zip(["Histogram", "Waveform"]) {
+            let width = self.px(ink::width(title, &ink::SCOPE_WORD) as f64) + 2 * margin;
+            positions.push((word, x, 0, width, words));
+            x += width - 2 * margin + self.px(14.0);
         }
-        y += tabs + self.px(8.0);
-        let rows_bottom = h - reset - pad - self.px(8.0);
-        positions.push((self.rows_panel, 0, y, w, (rows_bottom - y).max(0)));
-        positions.push((self.reset, pad, h - reset - pad, inner, reset));
+        positions.push((self.scope_label, w - gutter - self.px(40.0), 0, self.px(40.0), words));
+        let mut y = words + self.px(4.0);
+        positions.push((self.scope, gutter, y, inner, scope));
+        y += scope;
+        // The grabber in the 6 DIPs under the scope and its 8 DIP line, then 10 to the tabs.
+        positions.push((self.grip, gutter, y + self.px(2.0), inner, self.px(12.0)));
+        y += self.px(24.0);
+        positions.push((self.pinned, 0, y, w, self.pinned_height));
+        y += self.pinned_height;
+        let tabs_top = y;
+        self.place_tabs(&mut positions, tabs_top);
+        y += self.px(ink::TAB_ROW);
+        let foot = if self.foot_shown { self.px(91.0) } else { 0 };
+        positions.push((self.rows_panel, 0, y, w, (h - foot - y).max(0)));
+        let mut rules = vec![tabs_top, tabs_top + self.px(ink::TAB_ROW) - self.px(1.0).max(1)];
+        if self.foot_shown {
+            let top = h - foot;
+            rules.push(top);
+            positions.push((self.foot_summary, gutter, top + self.px(11.0), inner, self.px(20.0)));
+            positions.push((self.export, gutter - margin, h - self.px(16.0 + 36.0) - margin, inner + 2 * margin, self.px(36.0) + 2 * margin));
+        }
+        ink::set_rules(self.panel, rules);
         if let Some(crop) = &self.crop {
             positions.push((crop.panel, 0, 0, w, h));
         }
         place(&positions, 0);
         layout_crop(self);
+    }
+
+    /// Prep · Lab · Output from the gutter, one gap apart, each followed by
+    /// its count when it has edits (`TabRow`).
+    fn place_tabs(&self, positions: &mut Vec<(HWND, i32, i32, i32, i32)>, top: i32) {
+        let margin = self.px(ink::MARGIN);
+        let plain = theme::tokens().plain;
+        let mut x = self.px(ink::GUTTER);
+        let (y, height) = (top + 1, self.px(ink::TAB_ROW) - 2);
+        for (i, (_, title)) in TABS.iter().enumerate() {
+            let word = self.px(ink::tab_width(title, plain) as f64);
+            let count = self.tab_counts[i];
+            // The count follows the word's last ink; the word's own box stops there.
+            let counted = count > 0 && count != usize::MAX;
+            positions.push((self.tabs[i], x - margin, y, word + if counted { margin } else { 2 * margin }, height));
+            x += word;
+            if counted {
+                let width = self.px(13.0 + ink::width(&count.to_string(), &ink::COUNT) as f64) + margin;
+                positions.push((self.counts[i], x, y, width, height));
+                x += width - margin;
+            }
+            x += self.px(ink::TAB_GAP);
+        }
     }
 }
 
@@ -421,6 +491,8 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::PaperSkipped, pinned, None, When::Scanning);
 
     let prep = Tab::Prep;
+    // An untitled section: 8 DIPs, the white balance, a rule.
+    add(&mut rows, Kind::Section(""), prep, None, When::Raw);
     add(&mut rows, Kind::Choice("White balance", "io.raw_white_balance.mode", state::WHITE_BALANCE), prep, None, When::Raw);
     add(&mut rows, Kind::Slider(state::WB_TEMPERATURE), prep, None, When::CustomWhiteBalance);
     add(&mut rows, Kind::Slider(state::WB_TINT), prep, None, When::CustomWhiteBalance);
@@ -439,6 +511,7 @@ fn rows() -> Vec<Row> {
     // How the file is read; set once per photograph.
     add(&mut rows, Kind::Section("Lens"), prep, None, When::LensCorrection);
     add(&mut rows, Kind::Toggle("Lens corrections", state::LENS_CORRECTION), prep, None, When::LensCorrection);
+    add(&mut rows, Kind::Section(""), prep, None, When::NotRaw);
     let input = add(&mut rows, Kind::Group { title: "Input Colour", enable: None }, prep, None, When::NotRaw);
     add(&mut rows, Kind::Choice("Read as", "io.input_interpretation.mode", state::INPUT_MODES), prep, Some(input), When::NotRaw);
     add(&mut rows, Kind::Choice("Colour space", "io.input_interpretation.color_space", state::ASSUMED_SPACES), prep, Some(input), When::AssumeInput);
@@ -467,29 +540,39 @@ fn rows() -> Vec<Row> {
                 rows[row].print = section == Section::Print;
                 rows[row].basic = Some((index, place));
             }
+            let more = More::Module(index);
+            let row = add(rows, Kind::More(more), lab, Some(header), When::More(more));
+            rows[row].print = section == Section::Print;
         }
     };
+    let section_more = |rows: &mut Vec<Row>, section: Section| {
+        let more = More::Section(section);
+        add(rows, Kind::More(more), lab, None, When::More(more));
+    };
+    // View › Show All Controls says so where it shows, with the way back.
+    add(&mut rows, Kind::More(More::All), lab, None, When::More(More::All));
     add(&mut rows, Kind::Section("Camera"), lab, None, When::Always);
     add(&mut rows, Kind::Slider(state::NEGATIVE_EXPOSURE), lab, None, When::Always);
     add(&mut rows, Kind::FilmFormat, lab, None, When::Always);
     add(&mut rows, Kind::Slider(state::FILM_FORMAT), lab, None, When::CustomFormat);
-    add(&mut rows, Kind::Slider(state::LENS_BLUR), lab, None, When::Shows(state::LENS_BLUR.path()));
+    add(&mut rows, Kind::Slider(state::LENS_BLUR), lab, None, When::Shows(Section::Camera, state::LENS_BLUR.path()));
     groups(&mut rows, Section::Camera);
+    section_more(&mut rows, Section::Camera);
     add(&mut rows, Kind::Section("Film"), lab, None, When::Always);
     groups(&mut rows, Section::Film);
+    section_more(&mut rows, Section::Film);
     add(&mut rows, Kind::Section("Print"), lab, None, When::Always);
     // Here rather than beside the stocks: few photographs want it.
     add(&mut rows, Kind::Toggle("Scan film directly", "io.scan_film"), lab, None, When::ScanToggle);
-    groups(&mut rows, Section::Print);
     add(&mut rows, Kind::Footer("Printing and the paper are skipped while scanning film directly."), lab, None, When::Scanning);
-    add(&mut rows, Kind::Section("Scan & Color"), lab, None, When::ScanSection);
+    groups(&mut rows, Section::Print);
+    section_more(&mut rows, Section::Print);
+    add(&mut rows, Kind::Section("Scan & Color"), lab, None, When::Always);
     groups(&mut rows, Section::Scan);
     let output = add(&mut rows, Kind::Group { title: "Output", enable: None }, lab, None, When::OutputGroup);
     add(&mut rows, Kind::PreviewSpace, lab, Some(output), When::OutputGroup);
     add(&mut rows, Kind::Toggle("Encode with the colour space’s curve", "io.output_cctf_encoding"), lab, Some(output), When::OutputGroup);
-    add(&mut rows, Kind::Section(""), lab, None, When::Always);
-    add(&mut rows, Kind::AllControls, lab, None, When::Always);
-    add(&mut rows, Kind::Note(Note::AllControls), lab, None, When::Always);
+    section_more(&mut rows, Section::Scan);
 
     // The size and frame of the finished photograph. Tone and colour edits
     // live in Prep, before the film, where nothing has clipped yet.
@@ -527,32 +610,42 @@ pub fn build(app: &mut App) {
     ins.decimal = decimal_separator();
     ins.scope_height = app.model.prefs.scope_height.clamp(SCOPE_HEIGHTS.0, SCOPE_HEIGHTS.1).round();
     let visible = WS_CHILD | WS_VISIBLE;
-    ins.scope_mode = create(w!("COMBOBOX"), "", visible | WS_TABSTOP | WS_GROUP | WINDOW_STYLE(CBS_DROPDOWNLIST as u32), WINDOW_EX_STYLE(0), ins.panel, SCOPE_MODE, fonts.small);
-    for title in ["Histogram", "Waveform"] {
-        let text = wide(title);
-        unsafe {
-            SendMessageW(ins.scope_mode, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
-        }
+    // Histogram · Waveform as words, like the pane header's.
+    let word_style = visible | WS_TABSTOP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
+    for (i, (id, title)) in [(SCOPE_HISTOGRAM, "Histogram"), (SCOPE_WAVEFORM, "Waveform")].into_iter().enumerate() {
+        let word = create(w!("BUTTON"), title, word_style | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, id, fonts.small);
+        draw::set_role(word, Role::ScopeWord);
+        draw::track_hover(word);
+        ins.scope_words[i] = word;
     }
-    draw::paint_combo(ins.scope_mode);
-    super::accessible_name(ins.scope_mode, "Scope view");
-    ins.scope_label = create(w!("STATIC"), "RGB", visible | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), ins.panel, 0, fonts.small);
+    ins.scope_label = create(w!("STATIC"), "RGB", visible | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0 | SS_CENTERIMAGE.0), WINDOW_EX_STYLE(0), ins.panel, 0, fonts.small);
     ins.scope = create(w!("NegsScope"), "Histogram", visible, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
-    ins.grip = create(w!("NegsScopeGrip"), "Scope height", visible | WS_TABSTOP, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
+    ins.grip = create(w!("NegsScopeGrip"), "Scope height", visible | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
     draw::track_hover(ins.grip);
     super::dialogs::tooltip(ins.grip, "Drag to resize the scope; double-click for its smallest height");
     ins.pinned = create(w!("NegsRows"), "", visible | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
+    // Prep · Lab · Output in type (§4.8).
     let tab_style = visible | WS_TABSTOP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
     for (i, (id, title)) in TABS.into_iter().enumerate() {
         ins.tabs[i] = create(w!("BUTTON"), title, tab_style | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, id, fonts.ui);
-        // Prep | Lab | Output: Lab is the switch's middle segment.
-        if i == 1 {
-            draw::set_role(ins.tabs[i], Role::SegmentMiddle);
-        }
+        draw::set_role(ins.tabs[i], Role::TabWord);
+        draw::track_hover(ins.tabs[i]);
+    }
+    // Their counts after the switch, so the arrows keep to the tabs.
+    for i in 0..3 {
+        let count = create(w!("BUTTON"), "", WS_CHILD | WS_TABSTOP | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, TAB_COUNT + i as u16, fonts.small);
+        draw::set_role(count, Role::Count);
+        draw::track_hover(count);
+        ins.counts[i] = count;
     }
     ins.rows_panel = create(w!("NegsRows"), "", visible | WS_VSCROLL | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
-    ins.reset = create(w!("BUTTON"), "Reset Adjustments", visible | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, RESET_ALL, fonts.ui);
-    super::dialogs::tooltip(ins.reset, "Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.");
+    ins.foot_summary = create(w!("STATIC"), "", WS_CHILD | WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), ins.panel, FOOT_SUMMARY, fonts.ui);
+    draw::set_role(ins.foot_summary, Role::Summary);
+    super::accessible_role(ins.foot_summary, 0x29);
+    ins.export = create(w!("BUTTON"), "Export Photograph…", WS_CHILD | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, super::id::EXPORT, fonts.ui);
+    draw::set_role(ins.export, Role::Export);
+    draw::track_hover(ins.export);
+    super::dialogs::tooltip(ins.export, "Export photograph (Ctrl+Shift+E)");
     ins.rows = rows();
     ins.built = true;
     ITEM_HEIGHT.with(|h| h.set(ins.px(20.0)));
@@ -572,10 +665,7 @@ pub fn dpi_changed(app: &mut App) {
         for (i, &c) in row.controls.iter().enumerate() {
             // The font each control was created with, at the new size.
             let f = match (row.kind, i) {
-                (Kind::Section(_), _) => fonts.section,
-                (Kind::Footer(_) | Kind::Note(_) | Kind::BorderStyles | Kind::ToneGraph, _) => fonts.small,
-                (Kind::Group { .. }, 0) => fonts.bold,
-                (Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset, 3) => fonts.glyph_small,
+                (Kind::BorderStyles | Kind::ToneGraph, _) => fonts.small,
                 _ => fonts.ui,
             };
             unsafe {
@@ -583,12 +673,12 @@ pub fn dpi_changed(app: &mut App) {
             }
         }
     }
-    for &c in ins.tabs.iter().chain([&ins.reset]).chain([&ins.film_search].into_iter().filter(|s| !s.is_invalid())) {
+    for &c in ins.tabs.iter().chain([&ins.export]).chain([&ins.film_search].into_iter().filter(|s| !s.is_invalid())) {
         unsafe {
             SendMessageW(c, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
         }
     }
-    for &c in [&ins.scope_mode, &ins.scope_label] {
+    for &c in ins.scope_words.iter().chain([&ins.scope_label]) {
         let small = app.fonts.small;
         unsafe {
             SendMessageW(c, WM_SETFONT, WPARAM(small.0 as usize), LPARAM(1));
@@ -620,18 +710,6 @@ fn output_changed(model: &Model) -> bool {
     model.preview_space() != crate::model::COLOR_SPACES[0] || model.is_modified("io.output_cctf_encoding")
 }
 
-fn control_modified(model: &Model, control: &Adjustment) -> bool {
-    !matches!(control, Adjustment::BalancePrint { .. }) && model.is_modified(control.path())
-}
-
-/// Whether the Lab shows a group: it has basics, or something in it changed.
-fn group_shows(model: &Model, group: &state::AdjustmentGroup) -> bool {
-    model.prefs.lab_all_controls
-        || group.basic > 0
-        || group.enable.is_some_and(|path| model.is_modified(path))
-        || group.controls.iter().any(|c| control_modified(model, c))
-}
-
 fn photo_size(model: &Model) -> Option<(u32, u32)> {
     let size = model.photo_size();
     (!size.is_zero()).then(|| (size.width as u32, size.height as u32))
@@ -647,7 +725,6 @@ fn stock_times(model: &Model, paper: bool) -> Vec<f64> {
 fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> bool {
     let scanning = json::boolean(model.value("io.scan_film"));
     let border = model.state.border;
-    let all = model.prefs.lab_all_controls;
     let shown = match row.when {
         When::Always => true,
         When::FilmTimes => stock_times(model, false).len() > 1,
@@ -667,13 +744,11 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
         When::Meter => model.shows_meter(),
         When::MeterAuto => model.shows_meter() && json::boolean(model.value("camera.auto_exposure")),
         When::CustomFormat => model.film_format_custom(),
-        When::Shows(path) => all || model.is_modified(path),
-        When::ScanToggle => all || scanning,
-        When::ScanSection => {
-            all || output_changed(model) || ADJUSTMENT_GROUPS.iter().any(|g| g.section == Section::Scan && group_shows(model, g))
-        }
-        When::OutputGroup => all || output_changed(model),
-        When::Group(index) => group_shows(model, &ADJUSTMENT_GROUPS[index]),
+        When::Shows(section, path) => crate::edits::shows_section(model, section) || model.is_modified(path),
+        When::ScanToggle => scanning || crate::edits::shows_section(model, Section::Print),
+        When::OutputGroup => output_changed(model) || crate::edits::shows_section(model, Section::Scan),
+        When::More(more) => more_line(model, more).is_some(),
+        When::Group(index) => crate::edits::group_shows(model, index),
         When::Mat => matches!(border.style, BorderStyle::Solid | BorderStyle::Keyline),
         When::Keyline => border.style == BorderStyle::Keyline,
         When::FilmStyle => border.style == BorderStyle::Film,
@@ -685,12 +760,28 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
             Kind::Foldout(_) => model.prefs.previews,
             _ => true,
         };
-    // The Lab shows each group's basics, and anything changed from its default.
-    let basic = row.basic.is_none_or(|(index, place)| {
-        let group = &ADJUSTMENT_GROUPS[index];
-        all || place < group.basic || control_modified(model, &group.controls[place])
-    });
+    // The Lab shows each module's basics, those revealed, and anything
+    // changed from its default.
+    let basic = row.basic.is_none_or(|(index, place)| crate::edits::control_shows(model, index, place));
     shown && basic && row.group.is_none_or(|g| group_shown(g))
+}
+
+/// What an export makes, over the Export button: "6048 × 4024 · PNG 16-bit
+/// · sRGB", from the last save's choices (`ExportFoot.summary`).
+fn export_summary(model: &Model) -> String {
+    use crate::model::{OutputFormat, SaveSettings, COLOR_SPACES, QUALITY_RANGE};
+    let prefs = &model.prefs;
+    let format = OutputFormat::from_key(&prefs.output_format);
+    let depth = |d: u32| if d == 16 { 16 } else { 8 };
+    let (kind, bits) = match format {
+        OutputFormat::Jpeg => (format!("JPEG {}", prefs.jpeg_quality.clamp(QUALITY_RANGE.0, QUALITY_RANGE.1)), 8),
+        OutputFormat::Png => (format!("PNG {}-bit", depth(prefs.png_bit_depth)), depth(prefs.png_bit_depth)),
+        OutputFormat::Tiff => (format!("TIFF {}-bit", depth(prefs.tiff_bit_depth)), depth(prefs.tiff_bit_depth)),
+    };
+    let chosen = COLOR_SPACES.iter().position(|s| *s == prefs.color_space).unwrap_or(0);
+    let space = COLOR_SPACES[SaveSettings::effective_space(chosen, bits)];
+    let size = photo_size(model).map(|(w, h)| format!("{w} × {h}"));
+    size.into_iter().chain([kind, space.to_string()]).collect::<Vec<_>>().join(" · ")
 }
 
 /// A note's text; empty hides it.
@@ -698,8 +789,6 @@ fn note_text(model: &Model, note: Note) -> String {
     match note {
         Note::Size => size_note(model),
         Note::Brightness => model.brightness_match_note().unwrap_or_default(),
-        Note::AllControls if model.prefs.lab_all_controls => "Every camera, film, print and scan setting.".into(),
-        Note::AllControls => "The settings most photographs need. Any setting you or a preset changed also shows.".into(),
     }
 }
 
@@ -786,29 +875,73 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
     sync_crop(app);
     let cropping = app.model.cropping();
     let ins = &mut app.inspector;
+    let current = tab(&app.model);
+    let foot = current == Tab::Output;
     unsafe {
-        for c in [ins.scope, ins.scope_mode, ins.scope_label, ins.grip, ins.pinned, ins.tabs[0], ins.tabs[1], ins.tabs[2], ins.rows_panel, ins.reset] {
+        let frame = [ins.scope, ins.scope_words[0], ins.scope_words[1], ins.scope_label, ins.grip, ins.pinned, ins.tabs[0], ins.tabs[1], ins.tabs[2], ins.rows_panel];
+        for c in frame {
             let _ = ShowWindow(c, if cropping { SW_HIDE } else { SW_SHOWNA });
+        }
+        for c in [ins.foot_summary, ins.export] {
+            let _ = ShowWindow(c, if cropping || !foot { SW_HIDE } else { SW_SHOWNA });
         }
     }
     if cropping {
+        for c in ins.counts {
+            unsafe {
+                let _ = ShowWindow(c, SW_HIDE);
+            }
+        }
         app.model.show_tone_graph(false);
         return;
     }
-    let current = tab(&app.model);
+    // The Export foot on Output (§4.11).
+    if ins.foot_shown != foot {
+        ins.foot_shown = foot;
+        ins.layout_frame();
+    }
+    if foot {
+        set_text(ins.foot_summary, &export_summary(&app.model));
+        let can = app.model.can_export() && !app.model.cropping();
+        enable(ins.export, can);
+    }
+    // Each tab's count, and the header's "3 edits" and Reset.
+    let counts = EDIT_TABS.map(|t| crate::edits::count(t, &app.model));
+    if counts != ins.tab_counts {
+        ins.tab_counts = counts;
+        for (i, &count) in counts.iter().enumerate() {
+            let words = |n: usize| if n == 1 { "edit" } else { "edits" };
+            let title = TABS[i].1;
+            unsafe {
+                let _ = ShowWindow(ins.counts[i], if count > 0 { SW_SHOWNA } else { SW_HIDE });
+            }
+            set_text(ins.counts[i], &count.to_string());
+            super::accessible_name(ins.counts[i], &format!("{count} {} on {title}", words(count)));
+            super::dialogs::tooltip(ins.counts[i], &format!("Show the {} on {title}", words(count)));
+            super::accessible_name(ins.tabs[i], &if count > 0 { format!("{title}, {count} {}", words(count)) } else { title.to_string() });
+        }
+        ins.layout_frame();
+    }
+    let total = if app.model.source.is_some() { counts.iter().sum() } else { 0 };
+    super::panes::sync_edits(app.panes, total, app.model.has_catalog() && !app.model.cropping(), app.model.can_change_presets());
+    let ins = &mut app.inspector;
     unsafe {
         for (i, tab) in [Tab::Prep, Tab::Lab, Tab::Output].into_iter().enumerate() {
             SendMessageW(ins.tabs[i], BM_SETCHECK, WPARAM((current == tab) as usize), LPARAM(0));
         }
-        let _ = EnableWindow(ins.reset, app.model.has_catalog());
-        let mode = (app.model.prefs.scope_mode == "Waveform") as isize;
-        if SendMessageW(ins.scope_mode, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != mode {
-            SendMessageW(ins.scope_mode, CB_SETCURSEL, WPARAM(mode as usize), LPARAM(0));
-            super::accessible_name(ins.scope, if mode == 1 { "RGB waveform" } else { "Histogram" });
+        let waveform = app.model.prefs.scope_mode == "Waveform";
+        for (i, &word) in ins.scope_words.iter().enumerate() {
+            if (SendMessageW(word, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1) != (waveform == (i == 1)) {
+                SendMessageW(word, BM_SETCHECK, WPARAM((waveform == (i == 1)) as usize), LPARAM(0));
+                super::accessible_name(ins.scope, if waveform { "RGB waveform" } else { "Histogram" });
+            }
         }
     }
     let model = &app.model;
-    let expanded: Vec<bool> = ins.rows.iter().map(|r| matches!(r.kind, Kind::Group { .. }) && model.prefs.expanded(row_title(&r.kind))).collect();
+    let scanning = json::boolean(model.value("io.scan_film"));
+    // Scanning the film skips the print's modules: struck, their bodies hidden.
+    let expanded: Vec<bool> =
+        ins.rows.iter().map(|r| matches!(r.kind, Kind::Group { .. }) && model.prefs.expanded(row_title(&r.kind)) && !(r.print && scanning)).collect();
     // A group's rows show only below its header, on screen and open.
     let mut want = vec![false; ins.rows.len()];
     for (i, row) in ins.rows.iter().enumerate() {
@@ -921,33 +1054,68 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
     let id = |part: u16| FIRST_ID + index as u16 * PARTS + part;
     let kind = ins.rows[index].kind;
     let hidden = WS_CHILD;
-    let label = |text: &str, font: HFONT| create(w!("STATIC"), text, hidden | WINDOW_STYLE(SS_NOTIFY.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), font);
-    let check = |text: &str| create(w!("BUTTON"), text, hidden | WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), WINDOW_EX_STYLE(0), parent, id(CHECK), fonts.ui);
+    // Owner-drawn statics in ink (`ink::draw_item`), which keep their text
+    // for UI Automation.
+    let ink_static = |text: &str, role: Role, part: u16, notify: bool| {
+        let style = SS_OWNERDRAW.0 | SS_NOPREFIX.0 | if notify { SS_NOTIFY.0 } else { 0 };
+        let c = create(w!("STATIC"), text, hidden | WINDOW_STYLE(style), WINDOW_EX_STYLE(0), parent, id(part), fonts.ui);
+        draw::set_role(c, role);
+        // Text, as the plain statics were, not a graphic.
+        super::accessible_role(c, 0x29);
+        if notify {
+            draw::track_hover(c);
+        }
+        c
+    };
+    let label = |text: &str, _: HFONT| ink_static(text, Role::Label, LABEL, true);
+    let check = |text: &str| {
+        let c = create(w!("BUTTON"), text, hidden | WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), WINDOW_EX_STYLE(0), parent, id(CHECK), fonts.ui);
+        draw::set_role(c, Role::Tick);
+        draw::track_hover(c);
+        c
+    };
     let combo = |owner_draw: bool| {
         let style = CBS_DROPDOWNLIST as u32 | WS_VSCROLL.0 | if owner_draw { (CBS_OWNERDRAWFIXED | CBS_HASSTRINGS) as u32 } else { 0 };
         let c = create(w!("COMBOBOX"), "", hidden | WS_TABSTOP | WINDOW_STYLE(style), WINDOW_EX_STYLE(0), parent, id(COMBO), fonts.ui);
         unsafe {
             SendMessageW(c, CB_SETMINVISIBLE, WPARAM(30), LPARAM(0));
+            // The closed box as tall as the row's line.
+            SendMessageW(c, CB_SETITEMHEIGHT, WPARAM(usize::MAX), LPARAM(ins.px(ink::ROW) as isize - 6));
         }
+        draw::set_role(c, Role::Choice);
         draw::paint_combo(c);
         c
     };
     let mut controls = vec![];
     match kind {
-        Kind::Section(title) => controls.push(label(title, fonts.section)),
-        Kind::Footer(text) => {
-            let footer = create(w!("STATIC"), text, hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), fonts.small);
-            controls.push(footer);
+        Kind::Section(title) => {
+            // Small capitals, read as the title.
+            let head = ink_static(&title.to_uppercase(), Role::Section, LABEL, false);
+            if !title.is_empty() {
+                super::accessible_name(head, title);
+            }
+            controls.push(head);
+        }
+        Kind::Footer(text) => controls.push(ink_static(text, Role::Hint, LABEL, false)),
+        Kind::More(_) => {
+            let more = create(w!("BUTTON"), "", hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
+            draw::set_role(more, Role::More);
+            draw::track_hover(more);
+            super::dialogs::tooltip(more, "Shows them here. View › Show All Controls shows every control.");
+            controls.push(more);
         }
         Kind::Group { title, enable } => {
             let header = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.bold);
+            draw::set_role(header, Role::Module);
             draw::track_hover(header);
             if let Some(help) = crate::help::group(title) {
                 super::dialogs::tooltip(header, help);
             }
             controls.push(header);
             if enable.is_some() {
-                let on = check("On");
+                // The module's own tick box, at the end of its line.
+                let on = check("");
+                super::accessible_name(on, &format!("{title} on"));
                 super::dialogs::tooltip(on, &format!("Turns {title} on or off, keeping its settings."));
                 controls.push(on);
             }
@@ -980,17 +1148,19 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 SendMessageW(slider, TBM_SETPAGESIZE, WPARAM(0), LPARAM((steps / 10).max(1)));
                 let _ = SetWindowSubclass(slider, Some(trackbar_subclass), 1, id(RESET) as usize);
             }
+            draw::set_role(slider, Role::InkSlider);
             draw::track_hover(slider);
             controls.push(slider);
             let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
-            draw::set_role(edit, Role::Value);
+            ink::value_box(edit);
             draw::track_hover(edit);
             super::accessible_name(edit, title);
             unsafe {
                 let _ = SetWindowSubclass(edit, Some(edit_subclass), 1, 0);
             }
             controls.push(edit);
-            let reset = create(w!("BUTTON"), "\u{E777}", hidden | WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.glyph_small);
+            let reset = create(w!("BUTTON"), "↺", hidden | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.ui);
+            draw::set_role(reset, Role::ResetMark);
             draw::track_hover(reset);
             super::accessible_name(reset, &format!("Reset {title} to Default"));
             controls.push(reset);
@@ -1016,11 +1186,6 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             controls.push(c);
         }
         Kind::MatchBrightness => controls.push(check("Match camera brightness")),
-        Kind::AllControls => {
-            let c = check("Advanced controls");
-            super::dialogs::tooltip(c, "Shows every Lab setting. Off, the Lab shows the few most photographs need, and any that you or a preset changed.");
-            controls.push(c);
-        }
         Kind::FilmFormat => {
             controls.push(label("Film format", fonts.ui));
             let c = combo(false);
@@ -1035,7 +1200,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         }
         Kind::PaperSkipped => {
             controls.push(label("Paper", fonts.ui));
-            let value = create(w!("STATIC"), "Skipped – scanning film", hidden | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            let value = ink_static("Skipped – scanning film", Role::Readout, EDIT, true);
             super::dialogs::tooltip(value, "Scan film directly is on in the Lab’s Print section.");
             controls.push(value);
         }
@@ -1058,6 +1223,8 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         }
         Kind::BalancePrint(title, help) => {
             let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
+            draw::set_role(c, Role::Outlined);
+            draw::track_hover(c);
             super::dialogs::tooltip(c, help);
             controls.push(c);
         }
@@ -1096,17 +1263,15 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 let _ = SetWindowSubclass(edit, Some(size_edit_subclass), 1, 0);
             }
             controls.push(edit);
-            controls.push(create(w!("STATIC"), "px", hidden | WINDOW_STYLE(SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.ui));
+            controls.push(ink_static("px", Role::Unit, RESET, false));
         }
         Kind::Photograph => {
             controls.push(label("Photograph", fonts.ui));
-            let value = create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            let value = ink_static("", Role::Readout, EDIT, true);
             super::dialogs::tooltip(value, "The exported photograph, cropped, before rotation, the border, and any export size.");
             controls.push(value);
         }
-        Kind::Note(_) => {
-            controls.push(create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), fonts.small));
-        }
+        Kind::Note(_) => controls.push(ink_static("", Role::Hint, LABEL, false)),
         Kind::Choice(title, path, options) => {
             controls.push(label(title, fonts.ui));
             let c = combo(false);
@@ -1134,6 +1299,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         Kind::Foldout(paper) => {
             let title = if paper { "Paper" } else { "Film" };
             let header = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
+            draw::set_role(header, Role::Foldout);
             unsafe {
                 SetWindowLongPtrW(header, GWLP_USERDATA, (paper as isize) << 1);
             }
@@ -1152,6 +1318,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         Kind::Color(line) => {
             controls.push(label(if line { "Line color" } else { "Color" }, fonts.ui));
             let b = create(w!("BUTTON"), if line { "Line color" } else { "Color" }, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.ui);
+            draw::set_role(b, Role::Well);
             draw::track_hover(b);
             controls.push(b);
         }
@@ -1183,19 +1350,12 @@ fn fix_z_order(ins: &Inspector) {
     }
 }
 
+/// A hint's height wrapped at `width` pixels, in pixels.
 fn footer_height(ins: &Inspector, hwnd: HWND, width: i32) -> i32 {
-    unsafe {
-        let mut text = [0u16; 512];
-        let n = GetWindowTextW(hwnd, &mut text);
-        let dc = GetDC(hwnd);
-        let font = HFONT(SendMessageW(hwnd, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _);
-        let old = SelectObject(dc, font);
-        let mut r = RECT { left: 0, top: 0, right: width, bottom: 0 };
-        DrawTextW(dc, &mut text[..n as usize], &mut r, DT_CALCRECT | DT_WORDBREAK);
-        SelectObject(dc, old);
-        ReleaseDC(hwnd, dc);
-        r.bottom + ins.px(2.0)
-    }
+    let s = ins.dpi as f32 / 96.0;
+    let text = window_text(hwnd);
+    let height = ink::hint_height(&text, width as f32 / s);
+    (height * s).ceil() as i32
 }
 
 /// Lays out the pinned rows, which sizes their panel and moves the tabs,
@@ -1209,24 +1369,39 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
     place_rows(ins, model, false);
 }
 
-/// Places one panel's rows; returns the height they take.
+/// Places one panel's rows; returns the height they take. Rows are 29 DIPs
+/// from a 22 DIP gutter (`Theme.Size`); sections end 9 DIPs under their
+/// last row with a rule, and modules have a rule above them.
 fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
+    place_rows_at(ins, model, pinned, true)
+}
+
+/// `place_rows`; `fit` lets it show or hide the scroll bar first when the
+/// rows need it (or no longer do) and place them once, at the width left.
+fn place_rows_at(ins: &mut Inspector, model: &Model, pinned: bool, fit: bool) -> i32 {
     let panel = if pinned { ins.pinned } else { ins.rows_panel };
     let mut client = RECT::default();
     unsafe {
         let _ = GetClientRect(panel, &mut client);
     }
     let width = if pinned { ins.rect.right - ins.rect.left } else { client.right };
-    // An 8 DIP grid: rows are multiples of 8 high, and every row's control
-    // starts at one column, grouped or not.
-    let pad = ins.px(16.0);
-    let indent = ins.px(16.0);
-    let column = pad + ins.px(128.0);
-    let text = ins.px(20.0);
-    let mut y = ins.px(if pinned { 0.0 } else { 8.0 });
+    let gutter = ins.px(ink::GUTTER);
+    let margin = ins.px(ink::MARGIN);
+    let row_h = ins.px(ink::ROW);
+    let right = width - gutter;
+    // The labels' column, then the slider, the value and its ↺.
+    let column = gutter + ins.px(ink::SLIDER_LABEL);
+    let value = ins.px(ink::VALUE_WIDTH);
+    let reset = ins.px(ink::RESET_WIDTH);
+    let rule = ins.px(1.0).max(1);
+    let mut y = 0;
     let mut positions: Vec<(HWND, i32, i32, i32, i32)> = vec![];
+    let mut rules = vec![];
     let mut grids_shown = [false; 2];
-    let mut first = true;
+    // Whether a section is open (its rule still to draw), and whether the
+    // last row was a section's head (a module right under it has no rule).
+    let mut in_section = false;
+    let mut after_head = false;
     let dpi = ins.dpi;
     let grid_height = ins.px(GRID_HEIGHT);
     for i in 0..ins.rows.len() {
@@ -1234,92 +1409,110 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
         if !row.shown || row.controls.is_empty() || (row.tab == Tab::Pinned) != pinned {
             continue;
         }
-        let x = pad + if row.group.is_some() { indent } else { 0 };
-        let right = width - pad;
-        let label = (column - x - ins.px(8.0)).max(ins.px(48.0));
         let c = &row.controls;
+        // A section closes the one before it: 9 DIPs, then a rule.
+        if let Kind::Section(_) = row.kind {
+            if in_section {
+                y += ins.px(9.0);
+                rules.push(y);
+                y += rule;
+            }
+            in_section = true;
+        }
+        let was_head = std::mem::replace(&mut after_head, matches!(row.kind, Kind::Section(_)));
         let height = match row.kind {
             // An untitled section only adds a gap.
-            Kind::Section("") => ins.px(8.0),
+            Kind::Section("") => {
+                positions.push((c[0], 0, y, 0, 0));
+                ins.px(8.0)
+            }
             Kind::Section(_) => {
-                // The first section needs no space above it.
-                let top = if first { 0 } else { ins.px(16.0) };
-                positions.push((c[0], pad, y + top, right - pad, ins.px(24.0)));
-                top + ins.px(32.0)
+                positions.push((c[0], gutter, y + ins.px(8.0), right - gutter, ins.px(ink::SECTION_HEAD - 8.0)));
+                ins.px(ink::SECTION_HEAD)
             }
             Kind::Footer(_) | Kind::Note(_) => {
-                let text_height = footer_height(ins, c[0], right - x);
-                positions.push((c[0], x, y, right - x, text_height));
-                text_height + ins.px(8.0)
+                let text_height = footer_height(ins, c[0], right - gutter);
+                positions.push((c[0], gutter, y, right - gutter, text_height));
+                text_height + ins.px(7.0)
+            }
+            Kind::More(more) => {
+                // A section's line sits 6 DIPs lower, the Lab's top one 10.
+                let top = ins.px(match more {
+                    More::Module(_) => 2.0,
+                    More::Section(_) => 8.0,
+                    More::All => 10.0,
+                });
+                positions.push((c[0], gutter - margin, y + top - ins.px(4.0), right - gutter + 2 * margin, ins.px(25.0)));
+                top + ins.px(17.0 + 8.0)
             }
             Kind::LongestSide => {
-                let (field, unit) = (ins.px(72.0), ins.px(24.0));
-                positions.push((c[0], x, y + ins.px(6.0), label, text));
-                let r = ins.field(right - unit - field, y + ins.px(4.0), field);
+                let (field, unit) = (ins.px(72.0), ins.px(20.0));
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                let r = ins.field(right - unit - field, y + (row_h - ins.px(24.0)) / 2, field);
                 positions.push((c[1], r.left, r.top, r.right - r.left, r.bottom - r.top));
-                positions.push((c[2], right - unit + ins.px(6.0), y + ins.px(6.0), unit - ins.px(6.0), text));
-                ins.px(32.0)
+                positions.push((c[2], right - unit + ins.px(6.0), y, unit - ins.px(6.0), row_h));
+                row_h
             }
-            Kind::Photograph => {
-                positions.push((c[0], x, y + ins.px(2.0), label, text));
-                positions.push((c[1], column, y + ins.px(2.0), right - column, text));
-                ins.px(24.0)
-            }
-            Kind::PaperSkipped => {
-                // In the paper foldout's place: as tall, the title and the
-                // value where its title and its stock are.
-                let title = pad + ins.px(16.0);
-                positions.push((c[0], title, y + ins.px(6.0), column - title - ins.px(8.0), text));
-                positions.push((c[1], column, y + ins.px(6.0), right - column - ins.px(8.0), text));
-                ins.px(32.0)
+            Kind::Photograph | Kind::PaperSkipped => {
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                positions.push((c[1], column, y, right - column, row_h));
+                row_h
             }
             Kind::Group { enable, .. } => {
-                let check = if enable.is_some() { ins.px(56.0) } else { 0 };
-                positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0) - check, ins.px(28.0)));
+                // A rule above, unless the section's head is right above.
+                let ruled = !was_head && y > 0;
+                let top = if ruled {
+                    rules.push(y);
+                    rule
+                } else {
+                    0
+                };
+                let line = ins.px(ink::MODULE_ROW);
+                let tick = if enable.is_some() { ins.px(13.0) + 2 * margin } else { 0 };
+                positions.push((c[0], gutter - margin, y + top, right - gutter + 2 * margin - tick, line));
                 if enable.is_some() {
-                    positions.push((c[1], right - check + ins.px(8.0), y + ins.px(4.0), check - ins.px(8.0), ins.px(24.0)));
+                    positions.push((c[1], right + margin - tick, y + top, tick, line));
                 }
-                ins.px(32.0)
+                top + line
             }
             Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset => {
-                let edit = ins.px(56.0);
-                let reset = ins.px(24.0);
-                positions.push((c[0], x, y + ins.px(2.0), right - x - reset - edit, text));
-                positions.push((c[3], right - edit - reset, y, reset, ins.px(22.0)));
-                // 26 DIPs: the thumb's focus ring, uncut.
-                positions.push((c[1], x - ins.px(8.0), y + ins.px(22.0), right - x - edit, ins.px(26.0)));
-                let r = ins.field(right - edit, y + ins.px(22.0), edit);
-                positions.push((c[2], r.left, r.top, r.right - r.left, r.bottom - r.top));
-                ins.px(48.0)
+                // One line: the label, the track, the value and its ↺.
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                let reset_x = right - ins.px(10.0);
+                let value_x = reset_x - value;
+                positions.push((c[1], column, y, (value_x - column - ins.px(4.0)).max(0), row_h));
+                let line = ins.px(24.0);
+                positions.push((c[2], value_x, y + (row_h - line) / 2, value, line));
+                positions.push((c[3], reset_x, y, reset, row_h));
+                row_h
             }
-            Kind::Toggle(..) | Kind::BorderToggle(..) | Kind::MatchBrightness | Kind::AllControls => {
-                positions.push((c[0], x, y + ins.px(4.0), right - x, ins.px(24.0)));
-                ins.px(32.0)
+            Kind::Toggle(..) | Kind::BorderToggle(..) | Kind::MatchBrightness => {
+                positions.push((c[0], gutter - margin, y, right - gutter + 2 * margin, row_h));
+                row_h
             }
             Kind::ToneGraph => {
-                // The label and the RGB | R | G | B switch on one 32 DIP
-                // line, the graph below on the grid.
+                // The label and the RGB | R | G | B switch on one line, the graph below.
                 let button = ins.px(32.0);
                 let buttons = 4 * button;
-                positions.push((c[0], x, y + ins.px(4.0), right - x - buttons - ins.px(8.0), ins.px(24.0)));
+                positions.push((c[0], gutter, y + ins.px(6.0), right - gutter - buttons - ins.px(8.0), ins.px(24.0)));
                 for (i, &b) in c[2..].iter().enumerate() {
-                    positions.push((b, right - buttons + button * i as i32, y + ins.px(4.0), button, ins.px(24.0)));
+                    positions.push((b, right - buttons + button * i as i32, y + ins.px(6.0), button, ins.px(24.0)));
                 }
-                positions.push((c[1], x, y + ins.px(32.0), right - x, ins.px(168.0)));
-                ins.px(32.0 + 168.0 + 8.0)
+                positions.push((c[1], gutter, y + ins.px(36.0), right - gutter, ins.px(168.0)));
+                ins.px(36.0 + 168.0 + 6.0)
             }
-            Kind::BalancePrint(..) => {
-                let button = ins.px(128.0).min(right - x);
-                positions.push((c[0], right - button, y + ins.px(4.0), button, ins.px(32.0)));
-                ins.px(40.0)
+            Kind::BalancePrint(title, _) => {
+                let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                positions.push((c[0], right - button + margin, y, button, ins.px(35.0)));
+                ins.px(35.0)
             }
             Kind::Foldout(paper) => {
-                positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0), ins.px(28.0)));
-                let header = ins.px(32.0);
+                positions.push((c[0], gutter - margin, y, right - gutter + 2 * margin, row_h));
+                let header = row_h;
                 let open = model.previews.open(paper);
                 // The Film grid's search field sits over the grid, outside its
                 // scrolling, so it stays in reach.
-                let search = (!paper && !ins.film_search.is_invalid()).then(|| (ins.film_search, ins.field(x, y + header + ins.px(4.0), right - x), ins.px(SEARCH_HEIGHT)));
+                let search = (!paper && !ins.film_search.is_invalid()).then(|| (ins.film_search, ins.field(gutter, y + header + ins.px(4.0), right - gutter), ins.px(SEARCH_HEIGHT)));
                 match &mut ins.grids[paper as usize] {
                     Some(grid) if open => {
                         grids_shown[paper as usize] = true;
@@ -1330,34 +1523,42 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                             }
                             None => 0,
                         };
-                        let height = layout_grid(grid, right - x, grid_height, dpi);
-                        positions.push((grid.window, x, y + header + below, right - x, height));
+                        let height = layout_grid(grid, right - gutter, grid_height, dpi);
+                        positions.push((grid.window, gutter, y + header + below, right - gutter, height));
                         header + below + height + ins.px(8.0)
                     }
                     _ => header,
                 }
             }
             Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
-                positions.push((c[0], x, y + ins.px(6.0), label, text));
-                positions.push((c[1], column, y + ins.px(4.0), right - column, ins.px(300.0)));
-                ins.px(32.0)
+                // The label, and the value at the row's end; the box takes
+                // the rest of the line, so a click anywhere after the label opens it.
+                let label = (column - gutter).min(ins.px(ink::width(&window_text(c[0]), &ink::LABEL) as f64 + 12.0)).max(ins.px(60.0));
+                positions.push((c[0], gutter, y, label, row_h));
+                positions.push((c[1], gutter + label, y + ins.px(3.0), right - gutter - label + margin, ins.px(300.0)));
+                row_h
             }
             Kind::BorderStyles => {
                 let gap = ins.px(8.0);
-                let each = (right - x + gap) / 4;
+                let each = (right - gutter + gap) / 4;
                 for (i, &b) in c.iter().enumerate() {
-                    positions.push((b, x + each * i as i32, y + ins.px(4.0), each - gap, ins.px(72.0)));
+                    positions.push((b, gutter + each * i as i32, y + ins.px(6.0), each - gap, ins.px(72.0)));
                 }
-                ins.px(80.0)
+                ins.px(84.0)
             }
             Kind::Color(_) => {
-                positions.push((c[0], x, y + ins.px(6.0), label, text));
-                positions.push((c[1], column, y + ins.px(4.0), ins.px(64.0), ins.px(24.0)));
-                ins.px(32.0)
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                positions.push((c[1], column, y, right - column + margin, row_h));
+                row_h
             }
         };
-        first = false;
         y += height;
+    }
+    // The last section's rule.
+    if in_section {
+        y += ins.px(9.0);
+        rules.push(y);
+        y += rule;
     }
     if pinned {
         for (grid, shown) in ins.grids.iter_mut().zip(grids_shown) {
@@ -1374,11 +1575,35 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
             }
         }
         place(&positions, 0);
+        ink::set_rules(ins.pinned, rules);
         unsafe {
             let _ = InvalidateRect(ins.pinned, None, true);
         }
         return y;
     }
+    if fit {
+        let content = y + ins.px(8.0);
+        let mut window = RECT::default();
+        unsafe {
+            let _ = GetWindowRect(ins.rows_panel, &mut window);
+        }
+        let has_bar = client.right < window.right - window.left;
+        if (content >= client.bottom) != has_bar {
+            let info = SCROLLINFO {
+                cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                fMask: SIF_RANGE | SIF_PAGE,
+                nMin: 0,
+                nMax: content,
+                nPage: client.bottom.max(0) as u32,
+                ..Default::default()
+            };
+            unsafe {
+                SetScrollInfo(ins.rows_panel, SB_VERT, &info, false);
+            }
+            return place_rows_at(ins, model, pinned, false);
+        }
+    }
+    ink::set_rules(ins.rows_panel, rules);
     ins.content = y + ins.px(8.0);
     let visible = client.bottom;
     ins.scroll = ins.scroll.clamp(0, (ins.content - visible).max(0));
@@ -1401,7 +1626,9 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                         at = from;
                     }
                     Some(_) => {}
-                    None => reveal.push(hwnd),
+                    // Only what shows: a hidden ↺ stays hidden after the slide.
+                    None if IsWindowVisible(hwnd).as_bool() => reveal.push(hwnd),
+                    None => {}
                 }
             }
             if let Some(d) = defer
@@ -1602,6 +1829,20 @@ fn format(value: f64, step: f64, decimal: char) -> String {
     if decimal != '.' { text.replace('.', &decimal.to_string()) } else { text }
 }
 
+/// A folded module's value: its first slider's, without trailing zeros, or
+/// its first choice's title (`summary(_ group:)`).
+fn group_summary(model: &Model, index: usize, decimal: char) -> Option<String> {
+    ADJUSTMENT_GROUPS[index].controls.iter().find_map(|control| match *control {
+        Adjustment::Slider { path, step, .. } => {
+            let text = format(json::number(model.value(path)), step, decimal);
+            let text = if text.contains(decimal) { text.trim_end_matches('0').trim_end_matches(decimal).to_string() } else { text };
+            Some(if text == "-0" { "0".into() } else { text })
+        }
+        Adjustment::Choice { path, .. } => Some(state::option_title(&json::string(model.value(path))).to_string()),
+        _ => None,
+    })
+}
+
 fn slider_value(model: &Model, kind: &Kind) -> Option<(f64, f64, f64, f64, f64)> {
     match *kind {
         Kind::ExposureOffset => {
@@ -1644,24 +1885,59 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             && !(row.border && !model.state.border.enabled)
             && !row.group.is_some_and(|g| group_off[g]);
         match row.kind {
-            Kind::Section(_) | Kind::Footer(_) => {
-                if let Kind::Footer("") = row.kind {
+            Kind::Section(title) => {
+                // The Lab's sections: the dot when edited, Print struck while scanning.
+                let section = [Section::Camera, Section::Film, Section::Print, Section::Scan].into_iter().find(|&s| crate::edits::section_title(s) == title);
+                let look = section.map_or_else(ink::Look::default, |s| ink::Look {
+                    edited: crate::edits::section_count(s, model) > 0,
+                    skipped: s == Section::Print && scanning,
+                    ..Default::default()
+                });
+                ink::set_look(c[0], look);
+            }
+            Kind::Footer(text) => {
+                if text.is_empty() {
                     if let Some((w, h)) = photo {
                         set_text(c[0], &format!("35mm needs a 3:2 or 3:4 photograph. This one is {}; crop it to 3:2 or 4:3 to use it.", state::ratio_name(w as f64, h as f64)));
                     }
+                    ink::set_look(c[0], ink::Look { warn: true, ..Default::default() });
                 }
             }
-            Kind::Group { enable, .. } => {
+            Kind::More(more) => {
+                if let Some((text, _)) = more_line(model, more) {
+                    set_text(c[0], &text);
+                }
+                enable(c[0], catalog);
+            }
+            Kind::Group { title, enable: switch } => {
+                let index = match row.when {
+                    When::Group(index) => Some(index),
+                    _ => None,
+                };
+                let edited = match (index, title) {
+                    (Some(index), _) => crate::edits::group_count(index, model) > 0,
+                    (None, "Output") => output_changed(model),
+                    (None, "Input Colour") => crate::edits::INPUT_PATHS.iter().any(|p| model.is_modified(p)),
+                    _ => false,
+                };
+                let off = switch.is_some_and(|path| !json::boolean(model.value(path)));
+                let skipped = row.print && scanning;
+                let summary = index.and_then(|index| group_summary(model, index, decimal)).unwrap_or_default();
                 unsafe {
-                    let open = expanded[i] as isize;
+                    // Read out with its state, as the foldouts are.
+                    let open = expanded[i] as isize + 2 * skipped as isize + 4;
                     if GetWindowLongPtrW(c[0], GWLP_USERDATA) != open {
                         SetWindowLongPtrW(c[0], GWLP_USERDATA, open);
-                        let _ = InvalidateRect(c[0], None, false);
+                        let state = if skipped { "skipped while scanning film" } else if expanded[i] { "expanded" } else { "collapsed" };
+                        super::accessible_name(c[0], &format!("{title}, {state}"));
                     }
                 }
-                enable_all(c, catalog && !(row.print && scanning));
-                if let Some(path) = enable {
+                ink::set_look(c[0], ink::Look { open: expanded[i], off, edited, skipped, summary, ..Default::default() });
+                enable(c[0], catalog);
+                if let Some(path) = switch {
                     set_check(c[1], json::boolean(model.value(path)));
+                    enable(c[1], catalog && !skipped);
+                    ink::set_look(c[1], ink::Look { skipped, ..Default::default() });
                 }
             }
             Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset => {
@@ -1677,8 +1953,13 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     if SendMessageW(c[1], TBM_GETPOS, WPARAM(0), LPARAM(0)).0 != pos {
                         SendMessageW(c[1], TBM_SETPOS, WPARAM(1), LPARAM(pos));
                     }
+                    let text = format(value, step, decimal);
                     if GetFocus() != c[2] {
-                        set_text(c[2], &format(value, step, decimal));
+                        set_text(c[2], &text);
+                    }
+                    // The slider reads its value, as the Mac's does.
+                    if ACC_VALUES.with(|v| v.borrow_mut().insert(c[1].0 as isize, text.clone()).as_ref() != Some(&text)) {
+                        super::accessible_value(c[1], &text);
                     }
                     let modified = match row.kind {
                         Kind::Slider(Adjustment::Slider { path, .. }) => model.is_modified(path),
@@ -1688,11 +1969,14 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     let _ = ShowWindow(c[3], if modified && row.shown { SW_SHOWNA } else { SW_HIDE });
                     let tip = format!("Reset to {}", format(default, step, decimal));
                     super::dialogs::tooltip(c[3], &tip);
+                    ink::set_changed(c[0], modified);
+                    ink::set_changed(c[2], modified);
                 }
                 enable_all(c, on);
             }
             Kind::Toggle(_, path) => {
                 set_check(c[0], json::boolean(model.value(path)));
+                ink::set_changed(c[0], model.is_modified(path));
                 enable(c[0], on);
             }
             Kind::MatchBrightness => {
@@ -1706,11 +1990,8 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 set_check(c[0], model.matches_brightness());
                 enable(c[0], on);
             }
-            Kind::AllControls => {
-                set_check(c[0], model.prefs.lab_all_controls);
-                enable(c[0], catalog);
-            }
             Kind::FilmFormat => {
+                ink::set_changed(c[1], model.is_modified(state::FILM_FORMAT.path()));
                 let selected = if model.film_format_custom() {
                     state::FILM_FORMATS.len()
                 } else {
@@ -1740,6 +2021,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             }
             Kind::PreviewSpace => {
                 let selected = crate::model::COLOR_SPACES.iter().position(|s| *s == model.preview_space()).unwrap_or(0) as isize;
+                ink::set_changed(c[1], selected != 0);
                 unsafe {
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
                         SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
@@ -1750,6 +2032,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             Kind::SizeMode => {
                 unsafe {
                     let selected = (model.size_mode() == state::SizeMode::LongestSide) as isize;
+                    ink::set_changed(c[1], selected != 0);
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
                         SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
                     }
@@ -1780,6 +2063,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 enable(c[0], catalog && (which == 0 || b.enabled));
             }
             Kind::Choice(_, path, options) => {
+                ink::set_changed(c[1], model.is_modified(path));
                 let index = options.iter().position(|o| *o == json::string(model.value(path))).map_or(-1, |i| i as isize);
                 unsafe {
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
@@ -1800,6 +2084,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 let name = if paper { model.paper_name() } else { model.film_name() };
                 let title = if paper { "Paper" } else { "Film" };
                 let changed = FOLDOUT_NAMES.with(|n| std::mem::replace(&mut n.borrow_mut()[paper as usize], name.clone()) != name);
+                ink::set_look(c[0], ink::Look { open, summary: name.clone(), ..Default::default() });
                 unsafe {
                     let data = (paper as isize) << 1 | open as isize;
                     if changed || GetWindowLongPtrW(c[0], GWLP_USERDATA) != data {
@@ -1831,6 +2116,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     }
                 }
                 let path = if paper { "print_render.development_time" } else { "film_render.development_time" };
+                ink::set_changed(c[1], model.is_modified(path));
                 let value = model.value(path).as_f64();
                 let index = value.and_then(|v| times.iter().position(|t| (t - v).abs() < 1e-9)).map_or(0, |i| i + 1);
                 unsafe {
@@ -1847,11 +2133,19 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     }
                 }
             }
-            Kind::Color(_) => {
+            Kind::Color(line) => {
                 enable_all(c, on);
-                unsafe {
-                    let _ = InvalidateRect(c[1], None, false);
-                }
+                let b = model.state.border;
+                let color = if line { b.line_color } else { b.color };
+                let summary = match color {
+                    BorderColor::WHITE => "White".to_string(),
+                    BorderColor::BLACK => "Black".to_string(),
+                    c => c.hex().to_uppercase(),
+                };
+                let [r, g, bl] = color.0;
+                let defaults = crate::border::BorderSettings::default();
+                ink::set_changed(c[0], color != if line { defaults.line_color } else { defaults.color });
+                ink::set_look(c[1], ink::Look { summary, color: (r as u32) << 16 | (g as u32) << 8 | bl as u32, ..Default::default() });
             }
         }
     }
@@ -1975,17 +2269,17 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         }
         return;
     }
-    if id == SCOPE_MODE {
-        if code == CBN_SELCHANGE {
-            let waveform = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 } == 1;
-            app.model.prefs.scope_mode = if waveform { "Waveform" } else { "Histogram" }.into();
+    if id == SCOPE_HISTOGRAM || id == SCOPE_WAVEFORM {
+        let mode = if id == SCOPE_WAVEFORM { "Waveform" } else { "Histogram" };
+        if app.model.prefs.scope_mode != mode {
+            app.model.prefs.scope_mode = mode.into();
             app.model.prefs.save();
             app.model.dirty |= dirty::HISTOGRAM | dirty::INSPECTOR;
         }
         return;
     }
-    if id == RESET_ALL {
-        app.model.reset();
+    if (TAB_COUNT..TAB_COUNT + 3).contains(&id) {
+        tab_edits(app, EDIT_TABS[(id - TAB_COUNT) as usize], hwnd);
         return;
     }
     if id == FILM_SEARCH {
@@ -2010,9 +2304,16 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::MatchBrightness, CHECK) if code == BN_CLICKED => app.model.set_matches_brightness(checked()),
-        (Kind::AllControls, CHECK) if code == BN_CLICKED => {
-            app.model.prefs.lab_all_controls = checked();
-            app.model.prefs.save();
+        (Kind::More(more), ACTION) if code == BN_CLICKED => {
+            let Some((_, action)) = more_line(&app.model, more) else { return };
+            let prefs = &mut app.model.prefs;
+            match action {
+                MoreAction::Reveal(key) => prefs.set_revealed(&key, true),
+                MoreAction::Conceal(key) => prefs.set_revealed(&key, false),
+                MoreAction::ShowFewer => prefs.lab_all_controls = false,
+            }
+            prefs.save();
+            app.inspector.slide = true;
             app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
         }
         (Kind::FilmFormat, COMBO) if code == CBN_SELCHANGE => {
@@ -2154,22 +2455,62 @@ fn context_menu(app: &mut App, control: HWND, x: i32, y: i32) {
     }
 }
 
+/// A tab's edits under its count, each to reset on its own, then the whole
+/// tab: the Mac's popover (`TabEdits`) as a menu.
+fn tab_edits(app: &mut App, tab: crate::edits::Tab, count: HWND) {
+    let edits = crate::edits::edits(tab, &app.model, app.inspector.decimal);
+    if edits.is_empty() {
+        return;
+    }
+    let escape = |text: &str| text.replace('&', "&&");
+    let title = tab.title();
+    unsafe {
+        let menu = CreatePopupMenu().unwrap();
+        let n = edits.len();
+        let head = wide(&format!("{n} {} in {title}", if n == 1 { "edit" } else { "edits" }));
+        let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, pcwstr(&head));
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        for (i, edit) in edits.iter().enumerate() {
+            let text = wide(&format!("Reset {}\t{}", escape(&edit.title), escape(&edit.value)));
+            let _ = AppendMenuW(menu, MF_STRING, 1 + i, pcwstr(&text));
+        }
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        let all = wide(&format!("&Reset {title}"));
+        let _ = AppendMenuW(menu, MF_STRING, 1000, pcwstr(&all));
+        let mut r = RECT::default();
+        let _ = GetWindowRect(count, &mut r);
+        let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, r.left, r.bottom, 0, app.inspector.panel, None);
+        let _ = DestroyMenu(menu);
+        let chosen = chosen.0 as usize;
+        if chosen == 1000 {
+            let targets: Vec<_> = edits.iter().map(|e| e.target).collect();
+            app.model.reset_edits(&targets, format!("Reset {title}"));
+        } else if let Some(edit) = chosen.checked_sub(1).and_then(|i| edits.get(i)) {
+            app.model.reset_edits(&[edit.target], format!("Reset {}", edit.title));
+        }
+    }
+}
+
 extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
-                if id == SCOPE_MODE && matches!(code, CBN_DROPDOWN | CBN_CLOSEUP) {
-                    // The scope's menu, as the column's drop-down lists.
-                    if code == CBN_DROPDOWN && theme::dark() {
-                        theme::combo_list(HWND(lparam.0 as *mut _));
+                if id == super::id::EXPORT {
+                    // The foot's Export is File › Export.
+                    if code == BN_CLICKED {
+                        let _ = PostMessageW(GetAncestor(hwnd, GA_ROOT), WM_COMMAND, WPARAM(id as usize), LPARAM(0));
                     }
-                    let _ = InvalidateRect(HWND(lparam.0 as *mut _), None, false);
+                    return LRESULT(0);
                 }
-                if code == BN_CLICKED || (id == SCOPE_MODE && code == CBN_SELCHANGE) {
+                if code == BN_CLICKED {
                     with_app(|app| command(app, id, code, HWND(lparam.0 as *mut _)));
                 }
                 LRESULT(0)
+            }
+            WM_DRAWITEM => {
+                ink::draw_item(&*(lparam.0 as *const DRAWITEMSTRUCT));
+                LRESULT(1)
             }
             WM_CTLCOLORLISTBOX => {
                 let dc = HDC(wparam.0 as *mut _);
@@ -2188,7 +2529,12 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             }
             WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
-            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
+                // The column, and the rules about the tabs and the foot.
+                draw::paint_panel(hwnd, theme::palette().panel);
+                LRESULT(0)
+            }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
@@ -2265,7 +2611,10 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(1)
             }
             WM_DRAWITEM => {
-                draw_item(&*(lparam.0 as *const DRAWITEMSTRUCT));
+                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
+                if !ink::draw_item(item) {
+                    draw_item(item);
+                }
                 LRESULT(1)
             }
             WM_CTLCOLORBTN => draw::button_brush(),
@@ -2275,7 +2624,10 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 draw::paint_panel(hwnd, theme::palette().panel);
                 LRESULT(0)
             }
-            WM_CTLCOLOREDIT => draw::color_edit(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
+            WM_CTLCOLOREDIT => {
+                let (dc, control) = (HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _));
+                if draw::role_of(control) == Some(Role::InkValue) { ink::color_value(dc) } else { draw::color_edit(dc, control) }
+            }
             WM_CTLCOLORLISTBOX => {
                 // A drop-down list's colours.
                 let dc = HDC(wparam.0 as *mut _);
@@ -2504,6 +2856,19 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         }
         if msg == WM_MOUSEWHEEL && GetFocus() != hwnd {
             return SendMessageW(GetParent(hwnd).unwrap_or_default(), msg, wparam, lparam);
+        }
+        // Return types a value: it moves to the slider's value box.
+        let returned = |m: *const MSG| !m.is_null() && (*m).message == WM_KEYDOWN && (*m).wParam.0 == VK_RETURN.0 as usize;
+        if msg == WM_GETDLGCODE && returned(lparam.0 as *const MSG) {
+            return LRESULT(DefSubclassProc(hwnd, msg, wparam, lparam).0 | DLGC_WANTMESSAGE as isize);
+        }
+        if msg == WM_KEYDOWN && wparam.0 == VK_RETURN.0 as usize {
+            let parent = GetParent(hwnd).unwrap_or_default();
+            if let Ok(edit) = GetDlgItem(parent, (reset as u16 - RESET + EDIT) as i32) {
+                let _ = SetFocus(edit);
+                SendMessageW(edit, EM_SETSEL, WPARAM(0), LPARAM(-1));
+            }
+            return LRESULT(0);
         }
         if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONDBLCLK) {
             let alt = GetKeyState(VK_MENU.0 as i32) < 0;
@@ -3396,16 +3761,18 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 let _ = GetClientRect(hwnd, &mut r);
                 let (w, h) = (r.right.max(1) as usize, r.bottom.max(1) as usize);
                 let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as usize;
-                let well = 0x1a1a1a;
+                // The well is the window's `bg`, its grid in `line` (`scopeGrid`).
+                let hex = theme::tokens().hex;
+                let well = hex.bg;
                 let mut pixels = vec![well; w * h];
                 let (has_photo, waveform) = SCOPE.with(|scope| {
                     let scope = scope.borrow();
                     if scope.2 {
                         // The levels' column, then the raster scaled into the plot.
-                        let left = 26 * dpi / 96;
+                        let left = 32 * dpi / 96;
                         let (top, bottom) = (6 * dpi / 96, 6 * dpi / 96);
-                        let (plot_w, plot_h) = (w.saturating_sub(left + 4).max(1), h.saturating_sub(top + bottom).max(1));
-                        grid_lines(&mut pixels, w, left, top, plot_w, plot_h);
+                        let (plot_w, plot_h) = (w.saturating_sub(left + 6 * dpi / 96).max(1), h.saturating_sub(top + bottom).max(1));
+                        grid_lines(&mut pixels, w, left, top, plot_w, plot_h, hex.line);
                         if let Some(waveform) = scope.1.as_ref().filter(|wf| wf.samples > 0) {
                             let raster = waveform.raster();
                             for y in 0..plot_h {
@@ -3423,12 +3790,18 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                         }
                         (scope.0.is_some(), Some((left, top, plot_h)))
                     } else {
-                        let (inset, top) = (4, 6);
+                        let (inset, top) = (4 * dpi / 96, 6 * dpi / 96);
                         let (plot_w, plot_h) = (w.saturating_sub(2 * inset).max(1), h.saturating_sub(top).max(1));
-                        grid_lines(&mut pixels, w, inset, top, plot_w, plot_h);
+                        grid_lines(&mut pixels, w, inset, top, plot_w, plot_h, hex.line);
                         if let Some(histogram) = &scope.0 {
                             let peak = histogram.peak() as f64;
                             if peak > 0.0 {
+                                // Each channel filled at 0.4 with a 0.9 outline, the
+                                // three added together (`plusLighter` in the Mac's
+                                // canvas), then laid over the well: in light themes the
+                                // colours stay, rather than adding up to white.
+                                let colors = [[1.0, 0.42, 0.42], [0.42, 0.8, 0.47], [0.3, 0.59, 1.0]];
+                                let line = (dpi / 96).max(1);
                                 for x in 0..plot_w {
                                     let bin = x as f64 * 255.0 / (plot_w - 1).max(1) as f64;
                                     let (i, f) = (bin.floor() as usize, bin.fract());
@@ -3438,22 +3811,21 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                                         ((a * (1.0 - f) + b * f) / peak).min(1.0)
                                     };
                                     let heights = [at(&histogram.red), at(&histogram.green), at(&histogram.blue)];
-                                    let colors = [[1.0, 0.2, 0.2], [0.2, 1.0, 0.2], [0.25, 0.35, 1.0]];
-                                    for y in 0..plot_h {
-                                        let level = 1.0 - (y as f64 + 0.5) / plot_h as f64;
-                                        if heights.iter().all(|&height| height < level) {
-                                            continue;
-                                        }
-                                        let mut c = [0.1f64, 0.1, 0.1];
+                                    let tops = heights.map(|v| ((1.0 - v) * plot_h as f64).round() as usize);
+                                    let first = tops.iter().copied().min().unwrap_or(plot_h).saturating_sub(line);
+                                    for y in first..plot_h {
+                                        let p = &mut pixels[(top + y) * w + inset + x];
+                                        let (mut c, mut alpha) = ([0.0f64; 3], 0.0f64);
                                         for k in 0..3 {
-                                            if heights[k] >= level {
-                                                for j in 0..3 {
-                                                    c[j] += colors[k][j] * 0.75;
-                                                }
+                                            let weight = if y + line > tops[k] && y <= tops[k] { 0.9 } else if y > tops[k] { 0.4 } else { 0.0 };
+                                            alpha += weight;
+                                            for j in 0..3 {
+                                                c[j] += colors[k][j] * weight;
                                             }
                                         }
-                                        let byte = |v: f64| (v.min(1.0) * 255.0) as u32;
-                                        pixels[(top + y) * w + inset + x] = byte(c[0]) << 16 | byte(c[1]) << 8 | byte(c[2]);
+                                        let alpha = alpha.min(1.0);
+                                        let byte = |v: f64, shift: u32| ((v.min(1.0) * 255.0 + (*p >> shift & 0xff) as f64 * (1.0 - alpha)).round().min(255.0)) as u32;
+                                        *p = byte(c[0], 16) << 16 | byte(c[1], 8) << 8 | byte(c[2], 0);
                                     }
                                 }
                             }
@@ -3475,20 +3847,10 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 };
                 let mut c = Canvas::new(dc, r);
                 SetDIBitsToDevice(c.hdc(), 0, 0, w as u32, h as u32, 0, 0, 0, h as u32, pixels.as_ptr() as *const _, &info, DIB_RGB_COLORS);
-                // Labels on the dark well, which is dark in either theme.
-                let ink = theme::rgb(0x9a, 0x9a, 0x9a);
-                let font = HFONT(with_app_fonts_small().0);
-                if let Some((left, top, plot_h)) = waveform {
-                    for (i, level) in [100, 75, 50, 25, 0].into_iter().enumerate() {
-                        let y = (top + plot_h * i / 4) as i32;
-                        let tr = RECT { left: 2, top: y - 8, right: left as i32 - 3, bottom: y + 8 };
-                        c.text(&level.to_string(), tr, font, ink, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
-                    }
-                }
-                if !has_photo {
-                    c.text("No developed photograph", r, font, ink, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-                }
-                c.round_corners(RectF::of(r), 6.0 * draw::dpi_of(hwnd), theme::palette().panel);
+                // The levels and the empty well's words, in `dim`.
+                let s = draw::dpi_of(hwnd);
+                ink::scope_labels(&mut c, s, waveform, !has_photo);
+                c.round_corners(RectF::of(r), 3.0 * s, theme::palette().panel);
                 c.present(dc);
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
@@ -3504,28 +3866,15 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
 }
 
 /// Faint lines across the plot at a quarter, half and three quarters.
-fn grid_lines(pixels: &mut [u32], width: usize, left: usize, top: usize, plot_w: usize, plot_h: usize) {
+fn grid_lines(pixels: &mut [u32], width: usize, left: usize, top: usize, plot_w: usize, plot_h: usize, line: u32) {
     for fraction in [1, 2, 3] {
         let y = top + plot_h * fraction / 4;
         for x in left..(left + plot_w).min(width) {
             if let Some(p) = pixels.get_mut(y * width + x) {
-                *p = 0x2c2c2c;
+                *p = line;
             }
         }
     }
-}
-
-/// The small UI font, for the scope's labels.
-fn with_app_fonts_small() -> HGDIOBJ {
-    thread_local! {
-        static SMALL: Cell<isize> = const { Cell::new(0) };
-    }
-    SMALL.with(|f| {
-        if f.get() == 0 {
-            with_app(|app| f.set(app.fonts.small.0 as isize));
-        }
-        HGDIOBJ(f.get() as *mut _)
-    })
 }
 
 /// The scope's height: a grabber under it. Drag to resize (88–420 DIPs,
@@ -3554,15 +3903,16 @@ extern "system" fn grip_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 let dc = BeginPaint(hwnd, &mut ps);
                 let mut r = RECT::default();
                 let _ = GetClientRect(hwnd, &mut r);
-                // A pill in the middle, darker under the pointer or while dragged.
+                // A 32 × 3 capsule in `track`, `dim` under the pointer or while dragged.
                 let p = theme::palette();
+                let hex = theme::tokens().hex;
                 let s = draw::dpi_of(hwnd);
                 let mut c = Canvas::new(dc, r);
                 c.clear(p.panel);
-                let (cw, ch) = (32.0 * s, 4.0 * s);
+                let (cw, ch) = (32.0 * s, (3.0 * s).round());
                 let pill = RectF::new(((r.right as f32 - cw) / 2.0).round(), ((r.bottom as f32 - ch) / 2.0).round(), cw, ch);
                 let active = draw::is_hot(hwnd) || GRIP_DRAG.get().is_some();
-                c.round_rect(pill, ch / 2.0, if active { p.secondary } else { theme::mix(p.border, p.strong_border, 0.4) });
+                c.round_rect(pill, ch / 2.0, theme::gdi(if active { hex.dim } else { hex.track }));
                 if GetFocus() == hwnd && draw::focus_cues(hwnd) {
                     draw::focus_ring(&mut c, RectF::new(pill.x - 8.0 * s, 0.0, cw + 16.0 * s, r.bottom as f32), 3.0 * s, s);
                 }
@@ -4229,16 +4579,24 @@ mod tests {
         assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fourth basic");
         assert!(!rows.iter().any(slider("enlarger.preflash_exposure")));
         assert!(!rows.iter().any(slider("camera.lens_blur_um")));
-        assert!(!rows.iter().any(title("Scanner")) && !rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
+        // Scan & Color always heads its "N more" line, as on the Mac.
+        assert!(!rows.iter().any(title("Scanner")) && rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
         assert!(!rows.iter().any(|k| matches!(k, Kind::Toggle("Scan film directly", _))));
+        assert!(rows.iter().any(|k| *k == Kind::More(More::Section(Section::Scan))));
+        // Revealing a module's hidden controls shows them, and folds back.
+        let key = "Enlarger".to_string();
+        model.prefs.set_revealed(&key, true);
+        assert!(shown(&model).iter().any(slider("enlarger.preflash_exposure")));
+        model.prefs.set_revealed(&key, false);
+        assert!(!shown(&model).iter().any(slider("enlarger.preflash_exposure")));
         // A change shows its control, and its group and section.
         crate::json::set(&mut model.state.params, "enlarger.preflash_exposure", serde_json::json!(0.1));
         crate::json::set(&mut model.state.params, "scanner.lens_blur", serde_json::json!(1.0));
         let rows = shown(&model);
         assert!(rows.iter().any(slider("enlarger.preflash_exposure")) && rows.iter().any(title("Scanner")));
-        assert!(rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
         model.prefs.lab_all_controls = true;
         let rows = shown(&model);
+        assert!(rows.iter().any(|k| *k == Kind::More(More::All)), "Showing all controls. Show fewer");
         assert!(rows.iter().any(slider("camera.lens_blur_um")) && rows.iter().any(title("Color Management")));
         assert!(rows.iter().any(|k| matches!(k, Kind::Toggle("Scan film directly", _))) && rows.iter().any(title("Output")));
         assert!(rows.iter().all(|k| !matches!(k, Kind::ExposureOffset)), "Prep's rows stay on Prep");
