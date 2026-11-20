@@ -2427,6 +2427,14 @@ impl Model {
     /// reaches the button.
     pub fn prepare_original(&mut self) {
         self.drop_stale_original();
+        // Compare draws the original from its pixels, which leave memory
+        // once it's left (`leave_compare`): a held original needs only its texture.
+        if self.comparison().is_some_and(|c| c.against_original())
+            && !self.original_loading
+            && self.original_cache.as_ref().is_some_and(|(_, picture)| !picture.has_pixels())
+        {
+            self.original_cache = None;
+        }
         if self.can_show_original() && self.original_cache.is_none() {
             self.load_original();
         }
@@ -2514,9 +2522,9 @@ impl Model {
             // The camera's JPEG, laid over the RAW's frame (`loadCameraPicture`).
             let frame = (image.width, image.height);
             std::thread::spawn(move || {
-                let picture = crate::thumbnail::original(&jpeg, max_pixels).and_then(|p| {
-                    let placed = p.with_pixels(|rgba| compare::over_frame(rgba, p.width, p.height, frame)).flatten();
-                    placed.map(|(rgba, w, h)| Picture::new(rgba, w, h)).ok_or_else(|| anyhow!("The camera JPEG couldn’t be read"))
+                let picture = crate::thumbnail::original(&jpeg, max_pixels).and_then(|(rgba, width, height)| {
+                    let placed = compare::over_frame(&rgba, width, height, frame);
+                    placed.map(|(rgba, w, h)| Picture::kept(rgba, w, h)).ok_or_else(|| anyhow!("The camera JPEG couldn’t be read"))
                 });
                 ui::post(move |app: &mut App| finish(app, picture));
             });
@@ -2531,7 +2539,7 @@ impl Model {
             });
             engine.request(command, engine::timeout_for("original"), move |result| {
                 let picture = result.and_then(|(_, r)| {
-                    Picture::read(&buffer, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32)
+                    Picture::read_kept(&buffer, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32)
                         .map(|p| p.in_display_space(json::string(&r["display_color_space"])))
                 });
                 ui::post(move |app: &mut App| finish(app, picture));
@@ -2539,7 +2547,7 @@ impl Model {
         } else {
             let path = source.clone();
             std::thread::spawn(move || {
-                let picture = crate::thumbnail::original(&path, max_pixels);
+                let picture = crate::thumbnail::original(&path, max_pixels).map(|(rgba, width, height)| Picture::kept(rgba, width, height));
                 ui::post(move |app: &mut App| finish(app, picture));
             });
         }
@@ -3308,19 +3316,20 @@ impl Model {
         }
     }
 
-    /// The badge at the top of the canvas.
+    /// The tag at the top of the canvas (`DevelopTagTitle`): Developing,
+    /// Loading original while a held original is still being decoded, or
+    /// Updating. A held original once in shows no tag, as on the Mac: the
+    /// tag's running line says something is on its way, and the caption
+    /// under the print already says Original.
     pub fn badge(&self) -> Option<&'static str> {
-        if self.original.is_some() {
-            return Some("Original");
-        }
-        if self.holding_original {
-            return Some("Loading Original");
-        }
         if self.source.is_none() || self.render_failed {
             return None;
         }
         if self.image.is_none() {
             return Some("Developing");
+        }
+        if self.holding_original && self.original.is_none() {
+            return Some(if self.shows_camera_jpeg() { "Loading camera JPEG" } else { "Loading original" });
         }
         self.shows_activity.then_some("Updating")
     }

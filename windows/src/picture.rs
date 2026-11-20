@@ -18,6 +18,8 @@ const SMALL: u32 = 1024;
 
 struct Inner {
     cpu: Mutex<Option<Vec<u8>>>,
+    /// The pixels stay in memory after the upload (`Picture::kept`).
+    keep: bool,
     texture: OnceLock<GpuImage>,
     small: (Vec<u8>, u32, u32),
 }
@@ -35,15 +37,26 @@ pub struct Picture {
 }
 
 impl Picture {
-    /// Reads the helper's RGBA buffer (alpha ignored).
-    pub fn read(path: &Path, width: u32, height: u32) -> Result<Picture> {
+    /// Reads the helper's RGBA buffer (alpha ignored), kept in memory
+    /// after the upload (`kept`): the original.
+    pub fn read_kept(path: &Path, width: u32, height: u32) -> Result<Picture> {
         ensure!(width > 0 && height > 0 && width <= MAX_PREVIEW && height <= MAX_PREVIEW, "Invalid preview dimensions");
         let bytes = std::fs::read(path)?;
         ensure!(bytes.len() == width as usize * height as usize * 4, "The image engine returned an invalid preview buffer.");
-        Ok(Picture::new(bytes, width, height))
+        Ok(Picture::kept(bytes, width, height))
     }
 
-    pub fn new(mut rgba: Vec<u8>, width: u32, height: u32) -> Picture {
+    pub fn new(rgba: Vec<u8>, width: u32, height: u32) -> Picture {
+        Picture::made(rgba, width, height, false)
+    }
+
+    /// A picture whose pixels stay in memory after the upload too: the
+    /// original, which Compare also draws from its pixels.
+    pub fn kept(rgba: Vec<u8>, width: u32, height: u32) -> Picture {
+        Picture::made(rgba, width, height, true)
+    }
+
+    fn made(mut rgba: Vec<u8>, width: u32, height: u32, keep: bool) -> Picture {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         for alpha in rgba.iter_mut().skip(3).step_by(4) {
             *alpha = 255;
@@ -54,7 +67,7 @@ impl Picture {
             height,
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             wide: false,
-            inner: Arc::new(Inner { cpu: Mutex::new(Some(rgba)), texture: OnceLock::new(), small }),
+            inner: Arc::new(Inner { cpu: Mutex::new(Some(rgba)), keep, texture: OnceLock::new(), small }),
         };
         picture.upload();
         picture
@@ -71,9 +84,34 @@ impl Picture {
         let Some(gpu) = gpu::shared() else { return };
         let mut cpu = self.inner.cpu.lock().unwrap();
         if let Some(rgba) = cpu.as_ref() {
-            let image = gpu.upload(rgba, self.width, self.height);
-            let _ = self.inner.texture.set(image);
-            *cpu = None;
+            if self.inner.texture.get().is_none() {
+                let image = gpu.upload(rgba, self.width, self.height);
+                let _ = self.inner.texture.set(image);
+            }
+            if !self.inner.keep {
+                *cpu = None;
+            }
+        }
+    }
+
+    /// The pixels are in memory (`with_pixels` has them).
+    pub fn has_pixels(&self) -> bool {
+        self.inner.cpu.lock().unwrap().is_some()
+    }
+
+    /// A kept picture lets its pixels go once it is on the GPU; until then
+    /// (no GPU yet, the software canvas) they stay.
+    pub fn release_kept(&self) {
+        if self.inner.texture.get().is_some() {
+            *self.inner.cpu.lock().unwrap() = None;
+        }
+    }
+
+    /// Tests, which have no GPU: what an upload leaves in memory.
+    #[cfg(test)]
+    pub fn as_if_uploaded(&self) {
+        if !self.inner.keep {
+            *self.inner.cpu.lock().unwrap() = None;
         }
     }
 
@@ -193,13 +231,13 @@ impl Picture {
             height,
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             wide: false,
-            inner: Arc::new(Inner { cpu: Mutex::new(Some(rgba)), texture: OnceLock::new(), small: (vec![], 0, 0) }),
+            inner: Arc::new(Inner { cpu: Mutex::new(Some(rgba)), keep: false, texture: OnceLock::new(), small: (vec![], 0, 0) }),
         };
         picture.upload();
         picture
     }
 
     fn empty() -> Picture {
-        Picture { width: 0, height: 0, id: 0, wide: false, inner: Arc::new(Inner { cpu: Mutex::new(None), texture: OnceLock::new(), small: (vec![], 0, 0) }) }
+        Picture { width: 0, height: 0, id: 0, wide: false, inner: Arc::new(Inner { cpu: Mutex::new(None), keep: false, texture: OnceLock::new(), small: (vec![], 0, 0) }) }
     }
 }

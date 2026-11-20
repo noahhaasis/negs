@@ -2308,6 +2308,66 @@ lifecycle_test! {
     }
 }
 
+lifecycle_test! {
+    /// Original ⌄'s Split line and Side by side: the original's side shows
+    /// once decoded, also after the decode is on the GPU (whose upload
+    /// frees other pictures' pixels; the PC's split line stayed grey), and
+    /// it's made once for each crop, not at each refresh. Holding Original
+    /// says Loading original until it's in, then no tag, as on the Mac.
+    fn compare_with_the_original_shows_it_and_holding_it_ends_the_tag() {
+        use crate::compare::{Layout, Side};
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-original-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+
+        for layout in [Layout::Slider, Layout::SideBySide] {
+            h.edit(|m| m.compare_with_original(layout));
+            h.idle();
+            let original = h.model().comparison().map(|c| c.second.clone()).expect("comparing");
+            assert!(matches!(original, Side::Original(_)));
+            // What the canvas's upload leaves of it.
+            h.model().original_cache.as_ref().expect("decoded").1.as_if_uploaded();
+            assert!(h.edit(|m| m.compared_side(&original)).is_none(), "made off the UI thread");
+            h.idle();
+            let shown = h.edit(|m| m.compared_side(&original)).expect("the original's side");
+            assert_eq!((shown.width, shown.height), (480, 320), "{layout:?}");
+            let again = h.edit(|m| m.compared_side(&original)).unwrap();
+            assert!(std::sync::Arc::ptr_eq(&shown.rgba, &again.rgba), "the same picture until the crop changes");
+            assert_eq!(h.edit(|m| m.badge()), None);
+            h.edit(|m| m.leave_compare());
+            h.idle();
+        }
+
+        // Hold: the decode kept from the comparison shows at once, with no tag.
+        h.edit(|m| m.hold_original(true));
+        assert!(h.model().original.is_some());
+        assert_eq!(h.model().badge(), None, "no running tag over the original");
+        h.edit(|m| m.hold_original(false));
+
+        // Another photograph: Loading original until its decode is in.
+        h.open(&b);
+        h.idle();
+        h.edit(|m| m.hold_original(true));
+        assert_eq!(h.model().badge(), Some("Loading original"));
+        h.idle();
+        assert!(h.model().original.is_some());
+        assert_eq!(h.model().badge(), None);
+        h.edit(|m| m.hold_original(false));
+        assert!(h.model().original.is_none() && h.model().badge().is_none());
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 // MARK: The film side's release (ticket 41)
 
 lifecycle_test! {

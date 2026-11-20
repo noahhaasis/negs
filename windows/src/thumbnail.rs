@@ -177,10 +177,10 @@ pub fn placeholder_pixels(path: &Path) -> Option<(Vec<u8>, u32, u32, Size)> {
 
 /// Show Original for JPEG, PNG and TIFF: the file itself with its colour
 /// profile, at the preview's size.
-pub fn original(path: &Path, max_pixels: u32) -> Result<Picture> {
+pub fn original(path: &Path, max_pixels: u32) -> Result<(Vec<u8>, u32, u32)> {
     com_thread();
     let decoded = wic(path, max_pixels, true)?;
-    Ok(Picture::new(decoded.rgba, decoded.width, decoded.height))
+    Ok((decoded.rgba, decoded.width, decoded.height))
 }
 
 /// A strip or grid thumbnail, as BGRA: the embedded preview of a RAW, the
