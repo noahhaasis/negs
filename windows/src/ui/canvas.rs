@@ -566,6 +566,12 @@ pub fn set_leader(leader: Option<bool>) {
     }
 }
 
+/// The photograph is wider than the view (`clamp_center`'s test): ← and →
+/// pan the focused canvas rather than open the neighbours.
+pub fn pans_sideways() -> bool {
+    with_view(|v| v.zoomed() && v.document.0 > v.viewport().0 / v.zoom).unwrap_or(false)
+}
+
 pub fn zoom_by(factor: f64) {
     with_view(|view| {
         let (w, h) = view.viewport();

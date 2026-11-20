@@ -1757,6 +1757,10 @@ fn pre_translate(msg: &MSG) -> bool {
         if !text_focus() && compare::key(app, msg) {
             return true;
         }
+        // ← and → open the neighbours wherever the focus is, as on the Mac.
+        if strip::arrows_to_step(app, msg) {
+            return true;
+        }
         // A picker waiting for a click on the negative.
         if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && app.model.cancel_negative_pick() {
             return true;

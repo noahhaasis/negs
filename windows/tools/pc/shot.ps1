@@ -74,7 +74,11 @@ $hh = if ($job.height) { [int]$job.height } else { 900 }
 # keep_size: leave the size the app restored (checks that it reopens at it).
 if (-not $job.keep_size) { [NegsWin]::SetWindowPos($h, [IntPtr]::Zero, 40, 40, $w, $hh, 0x0040) | Out-Null }
 # Foreground from a background task: a synthetic Alt tap lets SetForegroundWindow succeed.
-[NegsWin]::keybd_event(0x12, 0, 0, [IntPtr]::Zero); [NegsWin]::keybd_event(0x12, 0, 2, [IntPtr]::Zero)
+# Only when Negs isn't in front already: there the tap gives its menu bar the keyboard,
+# and the job's arrows and letters go to the menus.
+if ([NegsWin]::GetForegroundWindow() -ne $h) {
+  [NegsWin]::keybd_event(0x12, 0, 0, [IntPtr]::Zero); [NegsWin]::keybd_event(0x12, 0, 2, [IntPtr]::Zero)
+}
 [NegsWin]::SetForegroundWindow($h) | Out-Null
 $settle = if ($job.settle_ms) { [int]$job.settle_ms } else { 4000 }
 Start-Sleep -Milliseconds $settle
