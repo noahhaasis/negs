@@ -1,5 +1,6 @@
-//! Dropping a photograph on the canvas opens it. The canvas shows an outline
-//! while a file is dragged over it; folders and other files are refused.
+//! Dropping a photograph on the canvas opens it, and a folder opens on its
+//! first photograph, as on the Mac. The canvas shows an outline while one
+//! is dragged over it; other files are refused.
 //! Files dropped on the Presets panel import as presets, between the rows
 //! they are dropped between.
 
@@ -46,10 +47,10 @@ fn files(data: Option<&IDataObject>) -> Vec<PathBuf> {
     }
 }
 
-/// The first file in a drag, if it is a photograph.
+/// The first file in a drag, if it is a photograph or a folder.
 fn photograph(data: Option<&IDataObject>) -> Option<PathBuf> {
     let path = files(data).into_iter().next()?;
-    (path.is_file() && is_photo(&path)).then_some(path)
+    ((path.is_file() && is_photo(&path)) || path.is_dir()).then_some(path)
 }
 
 fn highlight(on: bool) {
@@ -84,7 +85,7 @@ impl IDropTarget_Impl for Target_Impl {
         let path = photograph(data);
         unsafe { *effect = if path.is_some() { DROPEFFECT_COPY } else { DROPEFFECT_NONE } };
         if let Some(path) = path {
-            super::post(move |app: &mut App| app.model.open(&path));
+            super::post(move |app: &mut App| super::dialogs::open_path(app, &path));
         }
         Ok(())
     }
