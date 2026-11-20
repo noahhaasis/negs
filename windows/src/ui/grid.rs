@@ -63,6 +63,8 @@ pub struct Grid {
     rect: RECT,
     band: RECT,
     surface: Surface,
+    /// The flight's sheet, over the whole window (`Surface::layer`).
+    layer: Surface,
     flight: Option<Flight>,
     /// A band selection: where it started (sheet DIPs) and the selection under it.
     dragging: Option<((f64, f64), (f64, f64), std::collections::HashSet<Item>)>,
@@ -79,8 +81,6 @@ pub struct Grid {
     bar_hover: bool,
     /// Dragging the knob: where in it the pointer took it.
     bar_drag: Option<f64>,
-    /// The flight's region as last set, so a still mask isn't set again.
-    last_mask: Option<(f64, f64, f64, f64)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -253,7 +253,7 @@ pub fn open(app: &mut App) {
             CreateWindowExW(WINDOW_EX_STYLE(0), w!("NegsGrid"), w!("Grid"), WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 1, 1, app.main, None, super::instance(), None)
         }
         .unwrap_or_default();
-        app.grid = Some(Grid { hwnd, ..Default::default() });
+        app.grid = Some(Grid { hwnd, layer: Surface::layer(), ..Default::default() });
         app.layout();
     }
     // The grid shows the open photograph as edited.
@@ -277,9 +277,6 @@ pub fn open(app: &mut App) {
         clamp(grid);
     }
     start_flight(app, true);
-    unsafe {
-        let _ = SetFocus(app.grid.as_ref().unwrap().hwnd);
-    }
 }
 
 /// E, Enter, Esc, a double click: back to the photograph, folding into the
@@ -350,48 +347,36 @@ fn start_flight(app: &mut App, opening: bool) {
     }
     grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current });
     crate::trace::event("grid_flight_start", || serde_json::json!({"opening": opening, "length_ms": rules::flight_length(longest)}));
-    // The window stands where the sheet will, the whole flight: resizing a
-    // flip-model swap chain's window every frame stalls its presents for
-    // two or three refreshes. A region is the sheet's growing edge.
-    set_mask(grid, opening.then(|| pixels(&grid.band)));
-    let r = grid.rect;
-    unsafe {
-        let _ = SetWindowPos(grid.hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    }
+    // The sheet flies in a layer over the whole window, clipped to its
+    // growing edge by the compositor; the grid's own window shows only once
+    // it has landed. Resizing (or reshaping) a swap chain's window every
+    // frame stalls its presents for two or three refreshes.
     tick(app);
-}
-
-/// Clips the window to `mask` (main window pixels), or not at all.
-fn set_mask(grid: &Grid, mask: Option<Rect>) {
-    unsafe {
-        let region = mask.map(|m| {
-            let (x, y) = (m.x - grid.rect.left as f64, m.y - grid.rect.top as f64);
-            CreateRectRgn(x.round() as i32, y.round() as i32, (x + m.w).round() as i32, (y + m.h).round() as i32)
-        });
-        // The system owns the region from here.
-        SetWindowRgn(grid.hwnd, region.unwrap_or_default(), true);
-    }
 }
 
 fn finish_flight(app: &mut App, opening: bool) {
     let grid = app.grid.as_mut().unwrap();
     grid.flight = None;
-    grid.last_mask = None;
+    let hwnd = grid.hwnd;
     if opening {
-        set_mask(grid, None);
         let r = grid.rect;
         unsafe {
-            let _ = SetWindowPos(grid.hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            let _ = SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
-        invalidate(grid.hwnd);
+        // The window's sheet on screen, under the layer, before the layer goes.
+        paint(app, hwnd);
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            let _ = SetFocus(hwnd);
+        }
+        app.grid.as_mut().unwrap().layer.release();
     } else {
         grid.shown = false;
         grid.surface.release();
         unsafe {
-            let _ = ShowWindow(grid.hwnd, SW_HIDE);
+            let _ = ShowWindow(hwnd, SW_HIDE);
         }
-        // Hidden first, so the whole sheet never shows for a frame.
-        set_mask(grid, None);
+        grid.layer.release();
     }
     app.thumbs.held = false;
     if opening {
@@ -404,9 +389,9 @@ fn pixels(r: &RECT) -> Rect {
     Rect::new(r.left as f64, r.top as f64, (r.right - r.left) as f64, (r.bottom - r.top) as f64)
 }
 
-/// One frame of the flight: the window's region set to the sheet's growing
-/// edge, the frame painted and presented, and the next one asked for. The
-/// present waits for the display, which paces the flight at its refresh.
+/// One frame of the flight: the layer clipped to the sheet's growing edge,
+/// the frame painted and presented, and the next one asked for. The present
+/// waits for the display, which paces the flight at its refresh.
 fn tick(app: &mut App) {
     let grid = app.grid.as_mut().unwrap();
     let Some(flight) = &grid.flight else { return };
@@ -418,20 +403,39 @@ fn tick(app: &mut App) {
     }
     let along = if opening { elapsed } else { length - elapsed };
     let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
+    let (r, hwnd) = (grid.rect, grid.hwnd);
+    let place = |grid: &Grid| {
+        let (x, y) = ((mask.x - r.left as f64) as f32, (mask.y - r.top as f64) as f32);
+        grid.layer.place((r.left as f32, r.top as f32), (x, y, x + mask.w as f32, y + mask.h as f32));
+    };
     let started = Instant::now();
-    let mask = if std::env::var_os("NEGS_FLIGHT_HOLD").is_some() { rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), 60.0) } else { mask };
-    let prior = grid.last_mask;
-    grid.last_mask = Some((mask.x, mask.y, mask.w, mask.h));
-    if prior != grid.last_mask {
-        set_mask(grid, Some(mask));
+    // Windows the grid's window uncovers paint now: the frames posted
+    // back to back would keep their WM_PAINT waiting.
+    unsafe {
+        let _ = RedrawWindow(model_main(hwnd), None, None, RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
-    let hwnd = grid.hwnd;
-    let masked = started.elapsed().as_secs_f64() * 1000.0;
-    paint(app, hwnd);
-    let (draw, present, vblank) = app.grid.as_ref().map_or((0.0, 0.0, 0), |g| g.surface.timing);
+    let made = grid.layer.made();
+    place(grid);
+    if !paint(app, hwnd) {
+        // No layer (no GPU, or no DirectComposition): it lands at once.
+        return finish_flight(app, opening);
+    }
+    let grid = app.grid.as_mut().unwrap();
+    if !made {
+        // The layer was just made: placed once it exists.
+        place(grid);
+    }
+    if !made && !opening {
+        // Folding: the sheet in the layer on screen, then the window under it goes.
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+    let (draw, present, vblank) = grid.layer.timing;
     let took = started.elapsed();
     crate::trace::event("grid_flight_paint", || {
-        serde_json::json!({"at_ms": elapsed, "mask_ms": masked, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "present_ms": present, "vblank": vblank})
+        serde_json::json!({"at_ms": elapsed, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "present_ms": present, "vblank": vblank})
     });
     // A present that didn't wait (no GPU, or a display that let it through)
     // waits for the compositor instead, so the flight never spins.
@@ -447,24 +451,15 @@ fn tick(app: &mut App) {
 
 // MARK: Painting
 
-fn paint(app: &mut App, hwnd: HWND) {
+/// Paints the sheet: in the layer while it flies, else in the window. False
+/// if it couldn't (no GPU, the window's painted plainly instead).
+fn paint(app: &mut App, hwnd: HWND) -> bool {
     let t = theme::tokens();
     let s = scale(hwnd);
     let App { grid, thumbs, model, .. } = app;
-    let Some(grid) = grid.as_mut() else { return };
+    let Some(grid) = grid.as_mut() else { return false };
     let full = (grid.rect.right - grid.rect.left, grid.rect.bottom - grid.rect.top);
     let (w, h) = (full.0 as f64 / s, full.1 as f64 / s);
-    let mut window = RECT::default();
-    unsafe {
-        let _ = GetWindowRect(hwnd, &mut window);
-        let mut points = [POINT { x: window.left, y: window.top }];
-        MapWindowPoints(None, model_main(hwnd), &mut points);
-        window.left = points[0].x;
-        window.top = points[0].y;
-    }
-    // During the flight the window is the mask: the sheet is drawn where it
-    // will stand, offset by how far the mask's corner is from the sheet's.
-    let (ox, oy) = (-((window.left - grid.rect.left) as f64) / s, -((window.top - grid.rect.top) as f64) / s);
     let (_, viewport) = sheet_size(grid);
     let filter = model.library_filter();
     let total = model.shelf.library.as_ref().map_or(0, |l| l.items().len());
@@ -480,20 +475,21 @@ fn paint(app: &mut App, hwnd: HWND) {
     let (bar, wide) = bar_look(grid);
     let mut places = std::mem::take(&mut grid.places);
     places.clear();
-    let Grid { cells, layout, scroll, surface, flight, .. } = grid;
+    let Grid { cells, layout, scroll, surface, layer, flight, .. } = grid;
+    let flying = flight.is_some();
+    let (surface, target) = if flying { (layer, model_main(hwnd)) } else { (surface, hwnd) };
     // A fold's last 180 ms fade the sheet off the strip.
     let fade = match (&*flight, elapsed) {
         (Some(f), Some(e)) if !f.opening => (e / rules::FOLD_FADE_MS).clamp(0.0, 1.0) as f32,
         _ => 1.0,
     };
-    let painted = surface.paint(hwnd, (full.0.max(1) as u32, full.1.max(1) as u32), s as f32, t.plain, |p| {
-      p.fill_rect(RectF::new(-ox as f32, -oy as f32, w as f32 * 2.0, h as f32 * 2.0), Ink::hex(t.film.film));
+    let painted = surface.paint(target, (full.0.max(1) as u32, full.1.max(1) as u32), s as f32, t.plain, |p| {
+      p.fill_rect(RectF::new(0.0, 0.0, w as f32, h as f32), Ink::hex(t.film.film));
       p.faded(fade, |p| {
-        let (ox, oy) = (ox as f32, oy as f32);
-        p.fill_rect(RectF::new(ox, oy, w as f32, h as f32), Ink::hex(t.hex.grid));
+        p.fill_rect(RectF::new(0.0, 0.0, w as f32, h as f32), Ink::hex(t.hex.grid));
         let top = rules::SENTENCE - *scroll;
         let boxes = elapsed.map_or(1.0, |e| ((e / rules::FLIGHT_MS - rules::BOXES_FROM) / (1.0 - rules::BOXES_FROM)).clamp(0.0, 1.0)) as f32;
-        p.clipped(RectF::new(ox, oy + rules::SENTENCE as f32, w as f32, viewport as f32), |p| {
+        p.clipped(RectF::new(0.0, rules::SENTENCE as f32, w as f32, viewport as f32), |p| {
             let placed: Vec<(usize, RectF)> = range
                 .clone()
                 .map(|i| {
@@ -503,7 +499,7 @@ fn paint(app: &mut App, hwnd: HWND) {
                         (Some(e), Some(from)) => rules::flyer_at(&from, &to, e, rules::flight_delay(i, flight.as_ref().unwrap().current)),
                         _ => to,
                     };
-                    (i, RectF::new(r.x as f32 + ox, r.y as f32 + oy, r.w as f32, r.h as f32))
+                    (i, RectF::new(r.x as f32, r.y as f32, r.w as f32, r.h as f32))
                 })
                 .collect();
             for &(i, r) in &placed {
@@ -527,24 +523,31 @@ fn paint(app: &mut App, hwnd: HWND) {
                 }
             }
         });
-        paint_scroll_bar(p, &t, *scroll, layout.height, viewport, ox + w as f32, oy + rules::SENTENCE as f32, bar, wide);
-        sentence(p, &parts, &t, ox, oy, &mut places);
+        paint_scroll_bar(p, &t, *scroll, layout.height, viewport, w as f32, rules::SENTENCE as f32, bar, wide);
+        sentence(p, &parts, &t, 0.0, 0.0, &mut places);
         // A batch started here shows its progress here too, then its outcome.
         // Lightroom's words (ticket 48) come after a running batch's.
         let batch = model.batch.as_ref().filter(|b| b.running || b.needs_attention());
         let words = model.lightroom.words.as_deref().filter(|_| !batch.is_some_and(|b| b.running));
-        let foot_y = oy + (h - rules::FOOT) as f32;
-        foot_line(p, if batch.is_some() || words.is_some() { "" } else { &foot }, size, &t, ox, foot_y, w as f32, &mut places);
+        let foot_y = (h - rules::FOOT) as f32;
+        foot_line(p, if batch.is_some() || words.is_some() { "" } else { &foot }, size, &t, 0.0, foot_y, w as f32, &mut places);
         if let Some(words) = words {
             let m = p.measure(words, &FOOT, 0.0);
             let baseline = foot_y + (rules::FOOT as f32 / 2.0 + FOOT.size * 0.36).round();
-            p.text(words, &FOOT, ox + 14.0, baseline - m.baseline, Ink::hex(t.hex.label));
+            p.text(words, &FOOT, 14.0, baseline - m.baseline, Ink::hex(t.hex.label));
         } else if let Some(run) = batch {
-            batch_foot(p, run, &t, ox, foot_y, &mut places);
+            batch_foot(p, run, &t, 0.0, foot_y, &mut places);
         }
       });
     });
     grid.places = places;
+    if flying {
+        // The window shows nothing of its own while the layer flies.
+        unsafe {
+            let _ = ValidateRect(hwnd, None);
+        }
+        return painted;
+    }
     if painted {
         grid.painted = app.thumbs.revision;
         unsafe {
@@ -560,6 +563,7 @@ fn paint(app: &mut App, hwnd: HWND) {
             let _ = EndPaint(hwnd, &ps);
         }
     }
+    painted
 }
 
 fn model_main(hwnd: HWND) -> HWND {

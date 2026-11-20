@@ -27,6 +27,7 @@ use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::Direct3D::*;
 use windows::Win32::Graphics::Direct3D11::*;
+use windows::Win32::Graphics::DirectComposition::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::core::Interface;
@@ -218,17 +219,54 @@ pub struct Surface {
     target: Option<ID2D1Bitmap1>,
     size: (u32, u32),
     generation: u64,
+    /// Shown through DirectComposition above a window's children instead
+    /// of in a window of its own (`Surface::layer`).
+    layered: bool,
+    layer: Option<Layer>,
     /// The last paint's drawing and present times (ms), and the vblank its
     /// last shown present reached (`PresentRefreshCount`), for traces.
     pub timing: (f64, f64, u32),
 }
 
+/// A layered surface's visual, over every child of its window.
+struct Layer {
+    device: IDCompositionDevice,
+    _target: IDCompositionTarget,
+    visual: IDCompositionVisual,
+}
+
 impl Surface {
-    /// Paints `hwnd` through the GPU: a swap chain `buffer` pixels (at
-    /// least the window; the grid keeps one as large as the window it
-    /// grows into, `DXGI_SCALING_NONE` showing its top left), `draw` in DIPs
-    /// at `scale`, then presented. False before the device is made, or when
-    /// it couldn't paint: the caller paints with GDI instead.
+    /// A surface shown above every child of the window it paints, through
+    /// DirectComposition, placed and clipped by `place`: the compositor
+    /// moves it, so no window changes shape (the grid's flight; resizing a
+    /// swap chain's window every frame stalls its presents).
+    pub fn layer() -> Self {
+        Self { layered: true, ..Default::default() }
+    }
+
+    /// It has a swap chain (it has painted since it was released).
+    pub fn made(&self) -> bool {
+        self.swap.is_some()
+    }
+
+    /// Where a layered surface stands in its window's client area and the
+    /// part of it shown (left, top, right, bottom), in pixels; shown when
+    /// the next present is.
+    pub fn place(&self, at: (f32, f32), clip: (f32, f32, f32, f32)) {
+        let Some(layer) = &self.layer else { return };
+        let rect = D2D_RECT_F { left: clip.0, top: clip.1, right: clip.2, bottom: clip.3 };
+        unsafe {
+            let _ = layer.visual.SetOffsetX2(at.0);
+            let _ = layer.visual.SetOffsetY2(at.1);
+            let _ = layer.visual.SetClip2(&rect);
+            let _ = layer.device.Commit();
+        }
+    }
+
+    /// Paints `hwnd` through the GPU (or, layered, a visual over its
+    /// children): a swap chain `buffer` pixels, `draw` in DIPs at `scale`,
+    /// then presented. False before the device is made, or when it
+    /// couldn't paint: the caller paints with GDI instead.
     pub fn paint(&mut self, hwnd: HWND, buffer: (u32, u32), scale: f32, plain: bool, draw: impl FnOnce(&mut Painter)) -> bool {
         let Some(gpu) = current() else { return false };
         let (w, h) = (buffer.0.max(1), buffer.1.max(1));
@@ -244,16 +282,24 @@ impl Surface {
                 SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
                 BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
                 BufferCount: 2,
-                Scaling: DXGI_SCALING_NONE,
+                // A composition swap chain must stretch; it's never resized.
+                Scaling: if self.layered { DXGI_SCALING_STRETCH } else { DXGI_SCALING_NONE },
                 SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
                 AlphaMode: DXGI_ALPHA_MODE_IGNORE,
                 Flags: 0,
             };
-            let Ok(swap) = (unsafe { gpu.dxgi.CreateSwapChainForHwnd(&gpu.d3d, hwnd, &desc, None, None) }) else { return false };
-            // Alt+Enter is the app's own (F11), not DXGI's.
-            unsafe {
-                let _ = gpu.dxgi.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
-            }
+            let swap = if self.layered {
+                let Some((swap, layer)) = make_layer(&gpu, hwnd, &desc) else { return false };
+                self.layer = Some(layer);
+                swap
+            } else {
+                let Ok(swap) = (unsafe { gpu.dxgi.CreateSwapChainForHwnd(&gpu.d3d, hwnd, &desc, None, None) }) else { return false };
+                // Alt+Enter is the app's own (F11), not DXGI's.
+                unsafe {
+                    let _ = gpu.dxgi.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+                }
+                swap
+            };
             self.swap = Some(swap);
             self.size = (w, h);
             self.generation = gpu.generation;
@@ -317,10 +363,34 @@ impl Surface {
         true
     }
 
-    /// Lets the swap chain go (the window hides, or the device was lost).
+    /// Lets the swap chain go (the window hides, or the device was lost);
+    /// a layer leaves its window.
     pub fn release(&mut self) {
+        if let Some(layer) = self.layer.take() {
+            unsafe {
+                let _ = layer.visual.SetContent(None::<&windows::core::IUnknown>);
+                let _ = layer.device.Commit();
+            }
+        }
         self.target = None;
         self.swap = None;
         self.size = (0, 0);
+    }
+}
+
+/// A composition swap chain on a visual over every child of `hwnd`.
+fn make_layer(gpu: &Gpu, hwnd: HWND, desc: &DXGI_SWAP_CHAIN_DESC1) -> Option<(IDXGISwapChain1, Layer)> {
+    unsafe {
+        let swap = gpu.dxgi.CreateSwapChainForComposition(&gpu.d3d, desc, None).ok()?;
+        let dxgi_device: IDXGIDevice = gpu.d3d.cast().ok()?;
+        let device: IDCompositionDevice = DCompositionCreateDevice(&dxgi_device).ok()?;
+        let target = device.CreateTargetForHwnd(hwnd, true).ok()?;
+        let visual = device.CreateVisual().ok()?;
+        // Nothing shows until it's placed.
+        visual.SetClip2(&D2D_RECT_F::default()).ok()?;
+        visual.SetContent(&swap).ok()?;
+        target.SetRoot(&visual).ok()?;
+        device.Commit().ok()?;
+        Some((swap, Layer { device, _target: target, visual }))
     }
 }
