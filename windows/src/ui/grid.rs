@@ -243,6 +243,7 @@ pub fn open(app: &mut App) {
     if shown(app) || app.model.shelf.library.is_none() || app.model.cropping() || app.model.source.is_none() {
         return;
     }
+    crate::trace::event("grid_open", || serde_json::json!({}));
     if app.grid.is_none() {
         register();
         let hwnd = unsafe {
@@ -340,6 +341,7 @@ fn start_flight(app: &mut App, opening: bool) {
         return;
     }
     grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current });
+    crate::trace::event("grid_flight_start", || serde_json::json!({"opening": opening, "length_ms": rules::flight_length(longest)}));
     unsafe {
         let _ = ShowWindow(grid.hwnd, SW_SHOWNA);
         SetTimer(grid.hwnd, TIMER_FLIGHT, 8, None);
@@ -441,23 +443,35 @@ fn paint(app: &mut App, hwnd: HWND) {
         let top = rules::SENTENCE - *scroll;
         let boxes = elapsed.map_or(1.0, |e| ((e / rules::FLIGHT_MS - rules::BOXES_FROM) / (1.0 - rules::BOXES_FROM)).clamp(0.0, 1.0)) as f32;
         p.clipped(RectF::new(ox, oy + rules::SENTENCE as f32, w as f32, viewport as f32), |p| {
-            for i in range.clone() {
+            let placed: Vec<(usize, RectF)> = range
+                .clone()
+                .map(|i| {
+                    let f = layout.frames[i];
+                    let to = Rect::new(f.x, f.y + top, f.w, f.h);
+                    let r = match (elapsed, flight.as_ref().and_then(|fl| fl.from.get(i).copied().flatten())) {
+                        (Some(e), Some(from)) => rules::flyer_at(&from, &to, e, rules::flight_delay(i, flight.as_ref().unwrap().current)),
+                        _ => to,
+                    };
+                    (i, RectF::new(r.x as f32 + ox, r.y as f32 + oy, r.w as f32, r.h as f32))
+                })
+                .collect();
+            for &(i, r) in &placed {
                 let cell = &cells[i];
-                let f = layout.frames[i];
-                let to = Rect::new(f.x, f.y + top, f.w, f.h);
-                let r = match (elapsed, flight.as_ref().and_then(|fl| fl.from.get(i).copied().flatten())) {
-                    (Some(e), Some(from)) => rules::flyer_at(&from, &to, e, rules::flight_delay(i, flight.as_ref().unwrap().current)),
-                    _ => to,
-                };
-                let r = RectF::new(r.x as f32 + ox, r.y as f32 + oy, r.w as f32, r.h as f32);
                 let opacity = if cell.summary.flag == Some(Flag::Reject) { rules::reject_opacity(false, false) as f32 } else { 1.0 };
                 strip::paint_frame(p, thumbs, cell, r, opacity, &t, false);
-                if boxes > 0.0 {
-                    if cell.summary.flag == Some(Flag::Pick) {
-                        p.pick_box(BoxInk::Grid, &cell.name, r, Ink::hex(t.film.paper).alpha(boxes), true);
+            }
+            // The boxes reach past their pictures, over the gaps and the
+            // thumbnails beside them, so they're drawn above every thumbnail:
+            // all the pick boxes, then all the selection boxes (LibraryGrid).
+            if boxes > 0.0 {
+                for &(i, r) in &placed {
+                    if cells[i].summary.flag == Some(Flag::Pick) {
+                        p.pick_box(BoxInk::Grid, &cells[i].name, r, Ink::hex(t.film.paper).alpha(boxes), true);
                     }
-                    if cell.selected {
-                        p.pick_box(BoxInk::Selection, &cell.name, r, Ink::hex(t.hex.accent).alpha(boxes), false);
+                }
+                for &(i, r) in &placed {
+                    if cells[i].selected {
+                        p.pick_box(BoxInk::Selection, &cells[i].name, r, Ink::hex(t.hex.accent).alpha(boxes), false);
                     }
                 }
             }
@@ -833,7 +847,16 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
     unsafe {
         match msg {
             WM_PAINT => {
-                if with_app(|app| paint(app, hwnd)).is_none() {
+                let started = Instant::now();
+                let painted = with_app(|app| {
+                    let flight = app.grid.as_ref().and_then(|g| g.flight.as_ref()).map(|f| f.started.elapsed().as_secs_f64() * 1000.0);
+                    paint(app, hwnd);
+                    flight
+                });
+                if let Some(Some(at)) = painted {
+                    crate::trace::event("grid_flight_paint", || serde_json::json!({"at_ms": at, "paint_ms": started.elapsed().as_secs_f64() * 1000.0}));
+                }
+                if painted.is_none() {
                     let mut ps = PAINTSTRUCT::default();
                     BeginPaint(hwnd, &mut ps);
                     let _ = EndPaint(hwnd, &ps);

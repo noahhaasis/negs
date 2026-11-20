@@ -374,21 +374,30 @@ fn paint(app: &mut App, hwnd: HWND) {
     let Strip { cells, layout, scroll, hover, pressed, surface, .. } = strip;
     let painted = surface.paint(hwnd, (client.right.max(1) as u32, client.bottom.max(1) as u32), s as f32, t.plain, |p| {
         p.fill_rect(RectF::new(0.0, 0.0, w as f32, h as f32), Ink::hex(t.film.film));
+        let rect = |i: usize| RectF::new((layout.xs[i] - *scroll) as f32, rules::STRIP_TOP as f32, layout.widths[i] as f32, rules::PICTURE as f32);
         for i in range.clone() {
             let cell = &cells[i];
-            let r = RectF::new((layout.xs[i] - *scroll) as f32, rules::STRIP_TOP as f32, layout.widths[i] as f32, rules::PICTURE as f32);
+            let r = rect(i);
             let rejected = cell.summary.flag == Some(Flag::Reject);
             let opacity = rules::strip_opacity(cell.open, cell.selected && selecting, rejected, *hover == Some(i), *pressed == Some(i));
             paint_frame(p, thumbs, cell, r, opacity as f32, &t, true);
-            if cell.summary.flag == Some(Flag::Pick) {
-                p.pick_box(BoxInk::Strip, &cell.name, r, Ink::hex(t.film.paper), true);
-            }
-            if selecting && cell.selected && !cell.open {
-                p.pick_box(BoxInk::Selection, &cell.name, r, Ink::hex(t.film.accent), false);
-            }
             if cell.open {
                 let pencil = RectF::new(r.x, r.y + r.h + rules::PENCIL_DROP as f32, r.w, rules::PENCIL_WIDTH as f32 + 2.0);
                 p.underline(pencil, &t, true);
+            }
+        }
+        // A box reaches past its frame, over the gap and the frames beside
+        // it, so the boxes are drawn above every frame (PhotoBrowser): the
+        // pick boxes, then the selection's.
+        for i in range.clone() {
+            if cells[i].summary.flag == Some(Flag::Pick) {
+                p.pick_box(BoxInk::Strip, &cells[i].name, rect(i), Ink::hex(t.film.paper), true);
+            }
+        }
+        for i in range.clone() {
+            let cell = &cells[i];
+            if selecting && cell.selected && !cell.open {
+                p.pick_box(BoxInk::Selection, &cell.name, rect(i), Ink::hex(t.film.accent), false);
             }
         }
     });
