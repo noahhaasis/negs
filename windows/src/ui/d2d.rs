@@ -990,34 +990,6 @@ impl Painter<'_> {
         unsafe { fx.context.DrawBitmap(bitmap, Some(&r.d2d()), opacity, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, Some(&source), None) };
     }
 
-    /// Clears the target to nothing (a layer the window shows through).
-    pub fn clear(&mut self) {
-        let none = windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
-        unsafe { self.rt.Clear(Some(&none)) };
-    }
-
-    /// Draws `draw` at `opacity` as one layer (a fading flyer's boxes).
-    pub fn faded(&mut self, opacity: f32, draw: impl FnOnce(&mut Self)) {
-        if opacity >= 1.0 {
-            return draw(self);
-        }
-        let Some(fx) = &self.fx else { return draw(self) };
-        let params = D2D1_LAYER_PARAMETERS1 {
-            contentBounds: D2D_RECT_F { left: -1e7, top: -1e7, right: 1e7, bottom: 1e7 },
-            geometricMask: std::mem::ManuallyDrop::new(None),
-            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-            maskTransform: IDENTITY,
-            opacity,
-            opacityBrush: std::mem::ManuallyDrop::new(None),
-            layerOptions: D2D1_LAYER_OPTIONS1_NONE,
-        };
-        unsafe { fx.context.PushLayer(&params, None::<&ID2D1Layer>) };
-        draw(self);
-        if let Some(fx) = &self.fx {
-            unsafe { fx.context.PopLayer() };
-        }
-    }
-
     fn ink(&self, ink: Ink) -> &ID2D1SolidColorBrush {
         unsafe { self.brush.SetColor(&ink.color()) };
         self.brush
