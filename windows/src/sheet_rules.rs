@@ -105,11 +105,6 @@ impl Rect {
     pub fn spanning(a: (f64, f64), b: (f64, f64)) -> Rect {
         Rect::new(a.0.min(b.0), a.1.min(b.1), (a.0 - b.0).abs(), (a.1 - b.1).abs())
     }
-    /// `self` → `to` by `t` (0…1), each edge on its own.
-    pub fn lerp(&self, to: &Rect, t: f64) -> Rect {
-        let l = |a: f64, b: f64| a + (b - a) * t;
-        Rect::new(l(self.x, to.x), l(self.y, to.y), l(self.w, to.w), l(self.h, to.h))
-    }
 }
 
 // MARK: The strip
@@ -1061,11 +1056,10 @@ mod tests {
     }
 
     #[test]
-    fn rects_lerp_and_span() {
+    fn rects_span() {
         let r = Rect::spanning((10.0, 20.0), (0.0, 5.0));
         assert_eq!(r, Rect::new(0.0, 5.0, 10.0, 15.0));
         assert!(r.intersects(&Rect::new(9.0, 19.0, 5.0, 5.0)));
         assert!(!r.intersects(&Rect::new(10.0, 5.0, 5.0, 5.0)), "touching edges don't count");
-        assert_eq!(r.lerp(&Rect::new(10.0, 15.0, 20.0, 25.0), 0.5), Rect::new(5.0, 10.0, 15.0, 20.0));
     }
 }
