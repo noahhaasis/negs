@@ -452,11 +452,9 @@ fn tick(app: &mut App) {
     });
     // The frame waits for the compositor to show it (a layer isn't
     // presented), which paces the flight at the display's refresh.
-    let t0 = Instant::now();
     unsafe {
         let _ = windows::Win32::Graphics::Dwm::DwmFlush();
     }
-    crate::trace::event("grid_flight_flush", || serde_json::json!({"ms": t0.elapsed().as_secs_f64() * 1000.0}));
     unsafe {
         let _ = PostMessageW(hwnd, WM_FLIGHT_FRAME, WPARAM(0), LPARAM(0));
     }
@@ -926,9 +924,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             WM_FLIGHT_FRAME => {
                 // What the fold uncovers paints first: frames posted back to
                 // back would keep the editor's WM_PAINT waiting.
-                let t0 = std::time::Instant::now();
                 let _ = RedrawWindow(model_main(hwnd), None, None, RDW_UPDATENOW | RDW_ALLCHILDREN);
-                crate::trace::event("grid_flight_redraw", || serde_json::json!({"ms": t0.elapsed().as_secs_f64() * 1000.0}));
                 with_app(tick);
                 LRESULT(0)
             }
