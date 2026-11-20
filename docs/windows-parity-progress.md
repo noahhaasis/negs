@@ -21,6 +21,55 @@ decisions made with their reasons, and what was carried over. See
 | – | Findings from using the build | first three fixed (`win-findings-1`); faster flight (`win-findings-2`), see log |
 | – | Phase 9's differences from the Mac | five of seven settled (`win-mac-diffs`), see log |
 
+## 2026-11-20: a large folder opened smoothly (branch `win-grid-smooth`)
+
+Noah: opening a large folder isn't as smooth as on the Mac (the animation and the
+thumbnails' loading). Measured on a copy of `free_raws` (61 RAWs, 3440×1400, cold
+profile, `NEGS_RENDER_TRACE`), base `9418b29`'s build against this branch's, two runs
+each of ten flights during loading plus a scroll.
+
+- **Embedded previews were slow:** rawler opened and parsed each RAW whole for its
+  preview, about 210 ms a thumbnail, so the folder's thumbnails took 24–28 s.
+  `embedded_preview.rs` finds the JPEGs from the TIFF IFDs (SubIFDs, EXIF, RW2's
+  0x2E, RAF's header) and picks the smallest of the largest's shape big enough;
+  WIC decodes it scaled (Fant, during the JPEG decode). A quarter-turned one is
+  decoded once before WIC turns it (its FlipRotator over the scaler re-decoded
+  per strip: 3–30 s). Median read 144–214 → 27–39 ms, every thumbnail in about 7 s.
+  rawler stays the fallback. `header_previews_match_rawlers` (ignored, needs
+  `NEGS_PREVIEW_FOLDER`) checks shape and mean difference against rawler's on all 58.
+- **Reads twice:** the grid's smaller size read a photograph again when the strip's
+  larger one was in. Now served from it: 104–114 reads → 58.
+- **Painting under the grid:** each strip paint presents, and a present waits for
+  the one before, so strip paints under the grid (thumbnails arriving) held the UI
+  thread a refresh each, inside flight frames too. The strip isn't painted while the
+  grid or an opening flight covers it; a fold paints it once its fade starts.
+- **Thumbnail helpers** ran at the app's priority (the Mac's run at `.utility`):
+  now below normal on CPU and GPU (`D3DKMTSetProcessSchedulingPriorityClass`, once
+  the helper has the GPU open). The worst layer commit in a run's
+  flights was 153–199 ms in some base runs, 7–14 ms in this branch's.
+- **Frames moving as thumbnails arrive:** no header pre-read, so rows reflowed as
+  shapes came in. Each photograph's shape is read from its header first, 48 at a time
+  outward from the open one (the Mac's `PhotoAspects`): 61 in 9 ms. Grid relayouts
+  that moved frames 3–4 → 0–1 a run.
+- **Result:** flight frames over 20 ms (after the second) 40/165, 26/178, 35/194,
+  31/205 → 21/204, 23/209; mid-flight frames 16–17 ms. A flight's first frame still
+  takes 20–50 ms (the layer made, two DwmFlushes); the clock starts a refresh before
+  the second frame, so it doesn't jump.
+- **Flight bugs fixed:** a fold faded the sheet to plain film over the strip, so its
+  frames vanished for 110 ms and popped back when the layer went; the layer has alpha
+  now and the strip shows through the fade, as on the Mac. Flyers leave and land at
+  the strip's opacity (dimmed ones at 0.42) instead of jumping to full. Folding onto
+  another photograph aimed the flyers at the strip before it moved; the strip is laid
+  out (glide finished) under the sheet first.
+- Tracing: `ui_slow`, `sync_slow`, `thumbnail_read`, `raw_preview`, `upload_slow`,
+  `grid_paint` (draw and present), `grid_relayout`, `strip_relayout`,
+  `headers_read`; `NEGS_FLIGHT_SLOW=<factor>` slows flights. GDI captures
+  (`CopyFromScreen`) don't show the DirectComposition layer, so Windows flight frames
+  weren't captured.
+- Scroll timings varied between runs (16 or 33 ms a frame over the same grid) with
+  other Negs instances on the PC; not pinned down.
+- Tests: 283 pass on the PC.
+
 ## 2026-11-20: phase 9's differences from the Mac (branch `win-mac-diffs`)
 
 Noah chose five of the seven differences the side-by-side found; border tiles and

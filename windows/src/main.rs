@@ -10,6 +10,7 @@ mod compare;
 mod crop;
 mod edited_store;
 mod edits;
+mod embedded_preview;
 mod engine;
 mod film_cache_release;
 mod exact_fit;

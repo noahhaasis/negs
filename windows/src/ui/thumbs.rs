@@ -105,6 +105,11 @@ pub struct Thumbs {
     images: Lru<u64, Image>,
     /// Each photograph's shape as its embedded preview has it.
     ratios: HashMap<PathBuf, f64>,
+    /// Each photograph's shape from its header, read for the whole folder
+    /// before its thumbnails (`PhotoAspects`), so rows and frames don't move
+    /// as they arrive; and those asked for.
+    header_ratios: HashMap<PathBuf, f64>,
+    headers_asked: HashSet<PathBuf>,
     reading: HashSet<(PathBuf, ThumbSize)>,
     unreadable: HashSet<PathBuf>,
     queue: Option<Arc<Queue>>,
@@ -132,6 +137,8 @@ impl Default for Thumbs {
             edited: Lru::new(160 << 20, 600),
             images: Lru::new(384 << 20, 1400),
             ratios: HashMap::new(),
+            header_ratios: HashMap::new(),
+            headers_asked: HashSet::new(),
             reading: HashSet::new(),
             unreadable: HashSet::new(),
             queue: None,
@@ -180,7 +187,44 @@ impl Thumbs {
         if let Some(p) = want.key.as_ref().and_then(|k| self.edited.peek(k)) {
             return Some(p.ratio());
         }
-        self.ratios.get(&want.item.photo).copied()
+        let path = &want.item.photo;
+        self.ratios.get(path).or_else(|| self.header_ratios.get(path)).copied()
+    }
+
+    /// Reads the shapes of `wants` not known yet from their headers, nearest
+    /// `centre` first, on a thread, a batch at a time (`PhotoAspects.read`):
+    /// about a millisecond each.
+    pub fn read_headers(&mut self, wants: &[Want], centre: usize) {
+        if !surface::ready() {
+            return;
+        }
+        let missing: Vec<(usize, PathBuf)> = wants
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| !self.ratios.contains_key(&w.item.photo) && !self.headers_asked.contains(&w.item.photo))
+            .map(|(i, w)| (i, w.item.photo.clone()))
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        self.headers_asked.extend(missing.iter().map(|(_, p)| p.clone()));
+        let order = rules::outward(missing, centre);
+        let _ = std::thread::Builder::new().name("negs-headers".into()).spawn(move || {
+            crate::thumbnail::com_thread();
+            unsafe {
+                use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
+                let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+            }
+            for batch in order.chunks(rules::HEADER_BATCH) {
+                let started = std::time::Instant::now();
+                let read: Vec<(PathBuf, f64)> = batch.iter().filter_map(|p| crate::thumbnail::header_ratio(p).map(|r| (p.clone(), r))).collect();
+                crate::trace::event("headers_read", || json!({"count": batch.len(), "known": read.len(), "ms": started.elapsed().as_secs_f64() * 1000.0}));
+                post(move |app: &mut App| {
+                    app.thumbs.header_ratios.extend(read);
+                    app.model.dirty |= crate::model::dirty::STRIP;
+                });
+            }
+        });
     }
 
     /// Asks for `wants` at `size`, most wanted first (replacing what was
@@ -204,7 +248,9 @@ impl Thumbs {
         for want in wants {
             let path = &want.item.photo;
             let has_edited = want.key.as_ref().is_some_and(|k| self.edited.contains(k));
-            if has_edited || self.embedded[slot(size)].contains(path) || self.unreadable.contains(path) {
+            // The strip's (432) serves the grid's smaller size (384) as well.
+            let covered = ThumbSize::ALL.iter().any(|s| s.pixels() >= size.pixels() && self.embedded[slot(*s)].contains(path));
+            if has_edited || covered || self.unreadable.contains(path) {
                 continue;
             }
             if !self.reading.insert((path.clone(), size)) {
@@ -231,7 +277,15 @@ impl Thumbs {
                 self.reading.remove(&(path.clone(), size));
                 match pixels {
                     Some(pixels) => {
-                        self.ratios.insert(path.clone(), pixels.ratio());
+                        // The header's shape, from the preview at full size,
+                        // unless the thumbnail's differs by more than its
+                        // rounding: frames don't move a pixel as they arrive.
+                        let ratio = pixels.ratio();
+                        let ratio = match self.header_ratios.get(&path) {
+                            Some(h) if (h - ratio).abs() / h < 0.01 => *h,
+                            _ => ratio,
+                        };
+                        self.ratios.insert(path.clone(), ratio);
                         self.upload(&pixels);
                         let bytes = pixels.bgra.len();
                         self.embedded[slot(size)].insert(path, pixels, bytes);
@@ -252,7 +306,13 @@ impl Thumbs {
     }
 
     fn upload(&mut self, pixels: &Pixels) {
-        if let Some(image) = surface::upload(&pixels.bgra, pixels.width, pixels.height) {
+        let started = std::time::Instant::now();
+        let made = surface::upload(&pixels.bgra, pixels.width, pixels.height);
+        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        if ms > 2.0 {
+            crate::trace::event("upload_slow", || json!({"ms": ms, "width": pixels.width, "height": pixels.height}));
+        }
+        if let Some(image) = made {
             let bytes = image.bytes();
             self.images.insert(pixels.id, image, bytes);
         }
@@ -307,7 +367,7 @@ impl Thumbs {
                 continue;
             };
             while self.helpers.len() < target {
-                match EngineClient::start(paths.clone()) {
+                match EngineClient::start_background(paths.clone()) {
                     Ok(engine) => self.helpers.push(Arc::new(engine)),
                     Err(_) => return,
                 }
@@ -483,7 +543,18 @@ fn start_readers() -> Arc<Queue> {
                     }
                     jobs.remove(0)
                 };
+                let started = std::time::Instant::now();
+                let name = job.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let size = job.size;
                 let arrived = read_one(job);
+                crate::trace::event("thumbnail_read", || {
+                    let (kind, w, h) = match &arrived {
+                        Arrived::Edited { pixels, .. } => (if pixels.stale { "stand_in" } else { "edited" }, pixels.width, pixels.height),
+                        Arrived::Embedded { pixels: Some(p), .. } => ("embedded", p.width, p.height),
+                        Arrived::Embedded { pixels: None, .. } => ("failed", 0, 0),
+                    };
+                    json!({"name": name, "size": size as usize, "kind": kind, "width": w, "height": h, "ms": started.elapsed().as_secs_f64() * 1000.0})
+                });
                 post(move |app: &mut App| {
                     app.thumbs.arrived(arrived);
                     app.model.dirty |= crate::model::dirty::STRIP;

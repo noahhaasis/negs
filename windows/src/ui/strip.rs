@@ -70,6 +70,8 @@ pub struct Strip {
     surface: Surface,
     /// `Thumbs::revision` when last painted.
     painted: u64,
+    /// A paint was put off while the grid covered the strip.
+    pub stale: bool,
     leader: HWND,
     leader_hover: bool,
     leader_shown: bool,
@@ -227,6 +229,10 @@ fn relist(app: &mut App) -> bool {
         strip.open = open_item;
         changed = true;
     } else if same_list && strip.layout != layout {
+        crate::trace::event("strip_relayout", || {
+            let moved = strip.layout.widths.iter().zip(&layout.widths).filter(|(a, b)| a != b).count();
+            serde_json::json!({"frames": layout.widths.len(), "resized": moved})
+        });
         // Shapes were read: the frame in the middle stays where it is.
         let anchor = open_index.or_else(|| strip.layout.index_at(strip.scroll + visible / 2.0)).unwrap_or(0);
         if anchor < layout.count() {
@@ -258,6 +264,7 @@ fn request(app: &mut App) {
         app.thumbs.read(&wants, ThumbSize::Strip);
     }
     let all: Vec<Want> = strip.cells.iter().map(|c| c.want.clone()).collect();
+    app.thumbs.read_headers(&all, open.unwrap_or_else(|| rules::thumbnail_centre(&on_screen, None)));
     app.thumbs.pump(&app.model, &all, range, open);
 }
 
@@ -288,6 +295,19 @@ pub fn resized(app: &mut App) {
     clamp(&mut app.strip_view, visible);
     request(app);
     invalidate(app.strip);
+}
+
+/// Brings the strip up to date at once, a glide to its end: under a folding
+/// sheet, whose flyers land on its frames.
+pub fn settle(app: &mut App) {
+    sync(app);
+    if let Some((_, to, _)) = app.strip_view.glide.take() {
+        app.strip_view.scroll = to;
+        unsafe {
+            let _ = KillTimer(app.strip, TIMER_GLIDE);
+        }
+        request(app);
+    }
 }
 
 fn glide(app: &mut App) {
@@ -324,13 +344,20 @@ fn scroll_by(app: &mut App, delta: f64) {
 /// One frame: its picture (or bare film until it's read), dimmed as the
 /// strip dims it, its marks, the badge, the edited dot. Shared with the
 /// grid's flight, which draws the strip's frames as they leave.
-pub fn paint_frame(p: &mut Painter, thumbs: &mut Thumbs, cell: &Cell, r: RectF, opacity: f32, t: &Tokens, in_strip: bool) {
+pub fn paint_frame(p: &mut Painter, thumbs: &mut Thumbs, cell: &Cell, r: RectF, opacity: f32, t: &Tokens, in_strip: bool) -> bool {
     let size = if in_strip { ThumbSize::Strip } else { ThumbSize::for_rows(r.h as f64, 1.0) };
-    match thumbs.shown(&cell.want, size) {
-        Some(image) => p.picture(image.bitmap(), (image.width, image.height), r, opacity),
-        None => p.fill_rect(r, Ink::hex(t.film.panel).alpha(opacity)),
-    }
+    let shown = match thumbs.shown(&cell.want, size) {
+        Some(image) => {
+            p.picture(image.bitmap(), (image.width, image.height), r, opacity);
+            true
+        }
+        None => {
+            p.fill_rect(r, Ink::hex(t.film.panel).alpha(opacity));
+            false
+        }
+    };
     marks(p, cell, r, t, in_strip);
+    shown
 }
 
 /// `PhotoMarks`: the reject's cross over the picture, the stars at its
@@ -360,7 +387,19 @@ pub fn marks(p: &mut Painter, cell: &Cell, r: RectF, t: &Tokens, in_strip: bool)
     }
 }
 
-fn paint(app: &mut App, hwnd: HWND) {
+pub fn paint(app: &mut App, hwnd: HWND) {
+    // Under the grid, or the layer it flies in, nothing of the strip shows:
+    // a present here would only hold the UI thread for a refresh (each
+    // waits for the one before), a flight's frame with it. The fold paints
+    // it before it lands (`grid::finish_flight`).
+    if super::grid::covers_strip(app) {
+        app.strip_view.stale = true;
+        unsafe {
+            let _ = ValidateRect(hwnd, None);
+        }
+        return;
+    }
+    app.strip_view.stale = false;
     let t = theme::tokens();
     let s = scale(hwnd);
     let mut client = RECT::default();
@@ -379,7 +418,7 @@ fn paint(app: &mut App, hwnd: HWND) {
             let r = rect(i);
             let rejected = cell.summary.flag == Some(Flag::Reject);
             let opacity = rules::strip_opacity(cell.open, cell.selected, rejected, *hover == Some(i), *pressed == Some(i));
-            paint_frame(p, thumbs, cell, r, opacity as f32, &t, true);
+            let _ = paint_frame(p, thumbs, cell, r, opacity as f32, &t, true);
             if cell.open {
                 let pencil = RectF::new(r.x, r.y + r.h + rules::PENCIL_DROP as f32, r.w, rules::PENCIL_WIDTH as f32 + 2.0);
                 p.underline(pencil, &t, true);
