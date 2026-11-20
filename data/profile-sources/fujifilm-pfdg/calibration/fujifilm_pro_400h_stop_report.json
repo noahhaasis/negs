@@ -1,0 +1,40 @@
+{
+ "stop": "no variant passes the filter range on the target print: stop and report (D8 check 8)",
+ "target_print": "fujifilm_crystal_archive_typeii",
+ "shipped_range_TH_KG3": {
+  "M": [
+   43.6,
+   98.3
+  ],
+  "Y": [
+   50.0,
+   116.5
+  ]
+ },
+ "variants": {
+  "none": {
+   "filters_final": [
+    0.0,
+    33.63,
+    33.17
+   ],
+   "mean_neutrality_error": 0.1312
+  },
+  "green": {
+   "filters_final": [
+    0.0,
+    44.6,
+    45.28
+   ],
+   "mean_neutrality_error": 0.1398
+  },
+  "mid": {
+   "filters_final": [
+    0.0,
+    47.98,
+    45.24
+   ],
+   "mean_neutrality_error": 0.1372
+  }
+ }
+}

@@ -127,3 +127,25 @@ Volpato; measurement data (c) FUJIFILM Corporation):
 - borders/35mm/: edge-print strips for the 5 new films (Fujifilm 35 mm
   product codes 8563, 8546, 8553, 8583, 8543),
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-20: Fujifilm still negatives prepared from Fujifilm's Professional
+Film Data Guide (CC BY-SA 4.0; method and generic dye spectra from
+spektrafilm by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: 4 new colour negatives, fujifilm_pro_160s, fujifilm_pro_160c,
+  fujifilm_pro_800z and fujifilm_superia_1600, built by tools/film_profiles
+  from the curves in the FUJIFILM Professional Film Data Guide (US),
+  AF3-207U, 2005 (document, pages and SHA-256 in each profile's datasource
+  and in profile-sources/fujifilm-pfdg/recipe.json). Method as the
+  2026-11-14 Eterna entry, with the grey-ramp refinement run through
+  fujifilm_crystal_archive_typeii. The extracted points, axis calibration
+  and the calibration against the shipped X-TRA 400 and Pro 400H are in
+  profile-sources/fujifilm-pfdg/. No existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 4 new films
+  on every colour paper, from upstream's solver. Existing entries
+  unchanged.
+- presets/grain.toml: grain sections for the 4 new films in a fourth
+  Negs-only block at the end (the guide's RMS granularity on every layer).
+  Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 4 new films,
+  crates/spektrafilm-io/src/film35.rs.

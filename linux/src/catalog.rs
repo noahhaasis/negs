@@ -216,7 +216,7 @@ mod tests {
         let papers = super::stocks(true);
         // 23, plus the 24 colour and 5 B&W films ported from Fotufilm and the
         // 5 Fujifilm Eterna negatives prepared from Fujifilm's datasheets.
-        assert_eq!(films.len(), 57);
+        assert_eq!(films.len(), 61);
         assert_eq!(papers.len(), 10);
         assert!(
             films

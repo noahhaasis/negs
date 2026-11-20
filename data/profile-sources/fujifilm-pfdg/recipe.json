@@ -1,0 +1,2721 @@
+{
+  "about": "Per-stock build recipe for tools/film_profiles/build.py, as data/profile-sources/fujifilm-cine/recipe.json; see README.md. rms_granularity and product_code are the Data Guide's (diffuse RMS granularity, 48 um aperture, 12x, D 1.0 over D-min; the bracketed code).",
+  "stocks": {
+    "fujifilm_pro_160s": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_pro_160s",
+      "name": "Fujifilm Pro 160S",
+      "antihalation": "weak",
+      "datasheet_heading": "FUJICOLOR PRO 160S PROFESSIONAL [PRO 160S]  ISO 160/23\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 3,
+      "product_code": "PRO 160S",
+      "notes": [
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+      ]
+    },
+    "fujifilm_pro_160c": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_pro_160c",
+      "name": "Fujifilm Pro 160C",
+      "antihalation": "weak",
+      "datasheet_heading": "FUJICOLOR PRO 160C PROFESSIONAL [PRO 160C]  ISO 160/23\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 3,
+      "product_code": "PRO 160C",
+      "notes": [
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+      ]
+    },
+    "fujifilm_npl_160": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "T",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_npl_160",
+      "name": "Fujifilm NPL 160",
+      "antihalation": "weak",
+      "datasheet_heading": "FUJICOLOR NPL 160 PROFESSIONAL [NPL]  ISO 160/23\u00b0, Tungsten Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 4,
+      "product_code": "NPL",
+      "notes": [
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+      ]
+    },
+    "fujifilm_pro_800z": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_pro_800z",
+      "name": "Fujifilm Pro 800Z",
+      "antihalation": "weak",
+      "datasheet_heading": "FUJICOLOR PRO 800Z PROFESSIONAL [PRO 800Z]  ISO 800/30\u00b0, Daylight Type \u25cf SPECTRAL SENSITIVITY CURVES \u25cf SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 5,
+      "product_code": "PRO 800Z",
+      "notes": [
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only",
+        "the spectral sensitivity chart is measured with status A densitometry (the other Data Guide negatives use status M); used as printed"
+      ]
+    },
+    "fujifilm_superia_100": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_superia_100",
+      "name": "Fujifilm Superia 100",
+      "antihalation": "weak",
+      "datasheet_heading": "FUJICOLOR SUPERIA 100 [CN]   ISO 100/21\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 4,
+      "product_code": "CN",
+      "notes": [
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+      ]
+    },
+    "fujifilm_xtra_800": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_xtra_800",
+      "name": "Fujifilm X-Tra 800",
+      "antihalation": "weak",
+      "datasheet_heading": "FUJICOLOR SUPERIA X-TRA 800 [CZ]   ISO 800/30\u00b0, Daylight Type FUJICOLOR PRESS 800 [CZ] \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 5,
+      "product_code": "CZ",
+      "notes": [
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+      ]
+    },
+    "fujifilm_superia_1600": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_superia_1600",
+      "name": "Fujifilm Superia 1600",
+      "antihalation": "weak",
+      "datasheet_heading": "FUJICOLOR SUPERIA 1600 [CU]   ISO 1600/33\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 7,
+      "product_code": "CU",
+      "notes": [
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+      ]
+    },
+    "fujifilm_pro_400h": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "calibration_only": true,
+      "stock": "fujifilm_pro_400h",
+      "name": "Fujifilm Pro 400H (re-derived, calibration)",
+      "antihalation": "strong",
+      "notes": [
+        "calibration against the shipped spektrafilm profile, which upstream built from datasheet AF3-176E (upstream raw CSVs, spektrafilm 9428440); upstream used reference_channel 'mid'"
+      ],
+      "datasheet_heading": "FUJICOLOR PRO 400H PROFESSIONAL [PRO 400H]  ISO 400/27\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 4,
+      "product_code": "PRO 400H"
+    },
+    "fujifilm_xtra_400": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "calibration_only": true,
+      "stock": "fujifilm_xtra_400",
+      "name": "Fujifilm X-Tra 400 (re-derived, calibration)",
+      "antihalation": "weak",
+      "notes": [
+        "calibration against the shipped spektrafilm profile, which upstream built from datasheet AF3-151E ('NEW' X-TRA 400; upstream raw CSVs, spektrafilm 9428440); upstream used no alignment"
+      ],
+      "datasheet_heading": "FUJICOLOR SUPERIA X-TRA 400 [CH]   ISO 400/27\u00b0, Daylight Type FUJICOLOR PRESS 400 [CH] \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 4,
+      "product_code": "CH"
+    },
+    "fujifilm_reala_100": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "calibration_only": true,
+      "stock": "fujifilm_reala_100",
+      "name": "Fujifilm Superia Reala 100 (re-derived, cross-check)",
+      "antihalation": "weak",
+      "notes": [
+        "cross-check only: Negs ships a Fotufilm port of this stock, which stays"
+      ],
+      "datasheet_heading": "FUJICOLOR SUPERIA REALA [CS]   ISO 100/21\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 4,
+      "product_code": "CS"
+    },
+    "fujifilm_superia_200": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "calibration_only": true,
+      "stock": "fujifilm_superia_200",
+      "name": "Fujifilm Superia 200 (re-derived, cross-check)",
+      "antihalation": "weak",
+      "notes": [
+        "cross-check only: Negs ships a Fotufilm port of this stock, which stays"
+      ],
+      "datasheet_heading": "FUJICOLOR SUPERIA 200 [CA]   ISO 200/24\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 4,
+      "product_code": "CA"
+    },
+    "fujifilm_true_definition_400": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "calibration_only": true,
+      "stock": "fujifilm_true_definition_400",
+      "name": "Fujifilm True Definition 400 (cross-check against X-TRA 400)",
+      "antihalation": "weak",
+      "notes": [
+        "cross-check only: same emulsion code [CH] as X-TRA 400"
+      ],
+      "datasheet_heading": "FUJICOLOR TRUE DEFINITION 400 [CH] ISO 400/27\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
+      "rms_granularity": 5,
+      "product_code": "CH"
+    }
+  },
+  "extraction": {
+    "fujifilm_pro_160s": {
+      "info": "Fujifilm Pro 160S, Professional Film Data Guide AF3-207U 2005, PDF page 29",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 28,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            177.0,
+            89.9,
+            272.6,
+            171.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.29 %, 0.996 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ],
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.00705 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 28,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            52.3,
+            252.0,
+            193.2,
+            365.3
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 28,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            43.6,
+            90.5,
+            139.5,
+            172.8
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_pro_160c": {
+      "info": "Fujifilm Pro 160C, Professional Film Data Guide AF3-207U 2005, PDF page 29",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 28,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            469.4,
+            89.1,
+            565.1,
+            170.7
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ],
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.29 %, 0.0088 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 28,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            343.9,
+            251.8,
+            484.9,
+            364.2
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 28,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            338.2,
+            89.0,
+            432.7,
+            172.3
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_npl_160": {
+      "info": "Fujifilm NPL 160, Professional Film Data Guide AF3-207U 2005, PDF page 30",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 29,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            177.3,
+            89.9,
+            272.9,
+            172.8
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 29,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            51.0,
+            251.9,
+            191.6,
+            365.2
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.21 %, 0.0106 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.23 %, 0.00923 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 29,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            44.9,
+            89.1,
+            142.9,
+            173.1
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_pro_800z": {
+      "info": "Fujifilm Pro 800Z, Professional Film Data Guide AF3-207U 2005, PDF page 31",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 30,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            176.0,
+            91.1,
+            274.0,
+            173.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.31 %, 1.05 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 30,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            49.9,
+            250.9,
+            190.9,
+            363.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 0.0205 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.40 %, 0.0162 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 30,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            45.6,
+            88.9,
+            141.2,
+            172.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 1.41 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_superia_100": {
+      "info": "Fujifilm Superia 100, Professional Film Data Guide AF3-207U 2005, PDF page 32",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 31,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            176.3,
+            90.5,
+            274.3,
+            173.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.36 %, 1.23 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.00516 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 31,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            51.2,
+            251.2,
+            192.2,
+            363.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 0.0205 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.40 %, 0.0162 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 31,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            47.1,
+            90.2,
+            142.7,
+            173.7
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 1.41 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_xtra_800": {
+      "info": "Fujifilm X-Tra 800, Professional Film Data Guide AF3-207U 2005, PDF page 34",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 33,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            177.1,
+            88.0,
+            273.5,
+            173.1
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.21 %, 0.731 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 33,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            49.9,
+            250.3,
+            190.9,
+            362.7
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.31 %, 0.0154 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.40 %, 0.0162 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 33,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            44.2,
+            87.5,
+            140.5,
+            172.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_superia_1600": {
+      "info": "Fujifilm Superia 1600, Professional Film Data Guide AF3-207U 2005, PDF page 34",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 33,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            471.2,
+            88.7,
+            565.6,
+            172.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.21 %, 0.731 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 0.0102 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 33,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            341.6,
+            250.2,
+            483.3,
+            363.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 33,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            337.5,
+            88.9,
+            431.9,
+            172.3
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_pro_400h": {
+      "info": "FUJICOLOR PRO 400H PROFESSIONAL [PRO 400H], Professional Film Data Guide AF3-207U 2005, PDF page 30",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 29,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            469.5,
+            88.4,
+            567.5,
+            170.9
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.31 %, 1.05 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.21 %, 0.00463 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 29,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            341.9,
+            248.9,
+            482.9,
+            361.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.30 %, 0.0152 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.28 %, 0.0115 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 29,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            338.9,
+            88.1,
+            434.4,
+            171.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.25 %, 0.865 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_xtra_400": {
+      "info": "FUJICOLOR SUPERIA X-TRA 400 [CH], Professional Film Data Guide AF3-207U 2005, PDF page 33",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 32,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            178.3,
+            89.6,
+            272.8,
+            172.9
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.21 %, 0.731 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 0.0102 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 32,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            50.4,
+            250.5,
+            192.1,
+            363.9
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 32,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            43.7,
+            88.0,
+            140.1,
+            173.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_reala_100": {
+      "info": "FUJICOLOR SUPERIA REALA [CS], Professional Film Data Guide AF3-207U 2005, PDF page 31",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 30,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            468.0,
+            89.0,
+            566.0,
+            171.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.31 %, 1.05 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.00516 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 30,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            341.9,
+            250.9,
+            482.9,
+            363.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 0.0205 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.40 %, 0.0162 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 30,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            338.7,
+            89.1,
+            434.3,
+            172.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 1.42 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_superia_200": {
+      "info": "FUJICOLOR SUPERIA 200 [CA], Professional Film Data Guide AF3-207U 2005, PDF page 32",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 31,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            467.9,
+            90.1,
+            565.9,
+            172.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.36 %, 1.23 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.00516 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 31,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            340.5,
+            251.3,
+            482.3,
+            364.7
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.004,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.32 %, 0.0157 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.48 %, 0.0192 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 31,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            339.2,
+            90.3,
+            434.8,
+            173.8
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.005,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 1.41 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_true_definition_400": {
+      "info": "FUJICOLOR TRUE DEFINITION 400 [CH], Professional Film Data Guide AF3-207U 2005, PDF page 33",
+      "source": {
+        "file": "ProfessionalFilmDataGuide.pdf",
+        "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+        "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+        "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 32,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            471.9,
+            88.2,
+            565.4,
+            170.7
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.20 %, 0.71 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null,
+              "gate": 0.003,
+              "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.28 %, 0.0069 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 2
+              }
+            },
+            "dye_density_min": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 2
+              }
+            }
+          }
+        },
+        "characteristic": {
+          "page": 32,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            344.0,
+            250.3,
+            485.8,
+            363.7
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -3.5,
+                -3.0,
+                -2.5,
+                -2.0,
+                -1.5,
+                -1.0,
+                -0.5,
+                0.0,
+                0.5
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                3.5,
+                3.0,
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": null
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "density_curve_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "density_curve_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "y_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 32,
+          "frame_kind": "fill",
+          "grid_crossing": true,
+          "frame": [
+            339.0,
+            88.5,
+            435.4,
+            173.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                400,
+                500,
+                600,
+                700
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                1.0,
+                0.0
+              ],
+              "frame": null,
+              "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 0,
+                "of": 3
+              }
+            },
+            "log_sensitivity_g": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 1,
+                "of": 3
+              }
+            },
+            "log_sensitivity_r": {
+              "color": "any",
+              "dashed": false,
+              "select": {
+                "sort": "x_mid",
+                "index": 2,
+                "of": 3
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -243,3 +243,17 @@ rms_granularity = [3.7, 5.8, 7.4]
 
 [fujifilm_eterna_vivid_160]
 rms_granularity = [3.5, 5.5, 7.0]
+# --- Negs only, not upstream: the Fujifilm still negatives prepared from the
+# Professional Film Data Guide AF3-207U (tools/film_profiles,
+# data/profile-sources/fujifilm-pfdg). rms_granularity is the guide's diffuse
+# RMS granularity on every layer, as upstream's C200, X-TRA 400 and Pro 400H
+# sections use their datasheets' figure (the guide gives 4 for all three).
+# The rest from upstream's colour defaults.
+[fujifilm_pro_160s]
+rms_granularity = [3.0, 3.0, 3.0]
+[fujifilm_pro_160c]
+rms_granularity = [3.0, 3.0, 3.0]
+[fujifilm_pro_800z]
+rms_granularity = [5.0, 5.0, 5.0]
+[fujifilm_superia_1600]
+rms_granularity = [7.0, 7.0, 7.0]

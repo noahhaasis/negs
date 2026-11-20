@@ -493,6 +493,20 @@ Inputs are in `~/Downloads/fuji spectral/`. Page contents are in `fuji-data-inve
 
 For every brochure, the manual (`fujifilm_motion_picture_film_manual.pdf`) repeats the characteristic curves. Use it as a second trace (they should agree within 0.02 D), and for the edge-marking pages (p31–34).
 
+### E.1 Still negatives from the Professional Film Data Guide (2026-11-20)
+
+The FUJIFILM Professional Film Data Guide (AF3-207U, 2005) has each still negative's sensitivity, characteristic and dye charts, two stocks per spread. Record: `data/profile-sources/fujifilm-pfdg/README.md`. What differs from the Eterna brochures:
+
+- **Black curves.** All three curves of a chart share one colour and often one PDF path. `extract_pdf.py` splits paths into subpaths and selects curves by line style and position (`style_match`, `select_subpath`).
+- **Filled, skewed frames.** Plot areas are grey fills or four-line quads skewed by about 0.25 pt (`quad_rect`, `frame_kind: "fill"`).
+- **Hand-drafted grids.** One uneven template is reused across spreads. Fit axes to the labelled gridlines only; frame edges make it worse. Expect per-axis gates of 0.3–0.5 % with a `gate_reason`, and bound them with a cross-check against an independent trace (X-TRA 400 against spektrafilm's AF3-151E: 0.006 D).
+- **Relative sensitivity axes.** No tick values, only a 1.0 scale bar between two gridlines: `fit_axis` accepts two positions when `relative_reason` is set. D5 removes the offset.
+- **Target print** `fujifilm_crystal_archive_typeii` and `use: still`, as the shipped Fujifilm still negatives. D8 check 8's range is that paper's shipped films (yellow 50.0–116.5).
+- **Fourth layer.** Fujifilm's cyan-sensitive fourth layer (dashed) is not modelled; recorded in each profile's notes.
+- **Product codes are not identities.** True Definition 400 carries X-TRA 400's [CH] but different curves; compare traces before treating two stocks as one.
+
+Shipped: Pro 160S, Pro 160C, Pro 800Z, Superia 1600. Stopped at D8 and kept for a decision: NPL 160 and Superia 100 (print-weighted dye residual 0.013/0.011 D, bound 0.01), X-TRA 800 (check 8). Calibration only: Pro 400H, X-TRA 400, Reala, Superia 200.
+
 ---
 
 ## F. Tooling gap
