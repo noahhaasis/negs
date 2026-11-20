@@ -1328,7 +1328,17 @@ impl View {
     fn build_failure(&mut self, items: &mut Vec<Draw>, name: &str, reason: &str) {
         let s = self.scale();
         let t = super::theme::tokens();
-        let photo = self.shown_rect();
+        // The exact-size picture lies on whole pixels, so on a photograph
+        // at a fractional place (a portrait one, fitted to the height) it
+        // can reach a pixel past the photograph's own edge: fade that too.
+        let mut photo = self.shown_rect();
+        for item in items.iter() {
+            if let Draw::Exact(_, u) = item {
+                let [x, y, w, h] = u.quad.map(f64::from);
+                let (x0, y0) = (photo.x.min(x), photo.y.min(y));
+                photo = Rect::new(x0, y0, photo.max_x().max(x + w) - x0, photo.max_y().max(y + h) - y0);
+            }
+        }
         if photo.width > 0.0 {
             items.push(Draw::Fill(QuadInstance::fill(rect(photo.x, photo.y, photo.width, photo.height), hex(t.hex.bg, 0.88))));
         }
