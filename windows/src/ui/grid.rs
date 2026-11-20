@@ -5,12 +5,15 @@
 //! it, × to clear it) and the foot under it (the count, the Size slider).
 //! G shows it and hides it, E, Enter, Esc and a double click go back to the
 //! photograph; click, Ctrl, Shift, a band and the arrows select; Ctrl+plus,
-//! minus and the wheel change the size. It unfolds out of the strip and
-//! folds back into it: the sheet grows from the strip's band as the
-//! frames fly to their places, drawn in a DirectComposition layer over the
-//! window (`Surface::layer`) whose clip is the growing edge; the grid's own
-//! window shows once it has landed. The flight is paced by the compositor
-//! and holds the thumbnails' developing, which shares the GPU.
+//! minus and the wheel change the size. It fades in over the photograph as
+//! it rises a little, and out again (`rules::Transition`): painted once into
+//! a DirectComposition layer over the window (`Surface::layer`) whose fade
+//! the compositor runs; the grid's own window shows once it's in. With
+//! `NEGS_GRID_TRANSITION=flight` it unfolds out of the strip and folds back
+//! into it, as on the Mac: the sheet grows from the strip's band as the
+//! frames fly to their places, the layer's clip the growing edge, a frame
+//! painted at each refresh. Either holds the thumbnails' developing, which
+//! shares the GPU.
 //!
 //! Made on first use; only the rows in view are painted, through Direct2D
 //! on the GPU (`surface.rs`), with the strip's frames and marks. A wheel's
@@ -41,12 +44,15 @@ use crate::sheet_rules::{self as rules, Part, Rect, SheetLayout, ThumbSize};
 const WM_FLIGHT_FRAME: u32 = WM_APP + 1;
 /// A wheel's glide and the scroll bar's fade.
 const TIMER_SCROLL: usize = 2;
+/// A fade's end: the grid's window takes over from the layer.
+const TIMER_FADE: usize = 3;
 const SENTENCE: TextStyle = TextStyle::serif(17.0, 400).italic();
 const FOOT: TextStyle = TextStyle::ui(12.0, 400);
 /// The Size slider's track at the foot's right.
 const SLIDER: f64 = 72.0;
 
 struct Flight {
+    kind: rules::Transition,
     opening: bool,
     started: Instant,
     /// Each cell's place in the strip (window DIPs), by index.
@@ -61,9 +67,12 @@ impl Flight {
     /// Milliseconds into the flight; `NEGS_FLIGHT_SLOW=<factor>` slows it
     /// down for frame captures.
     fn elapsed(&self) -> f64 {
+        self.started.elapsed().as_secs_f64() * 1000.0 / Self::slow()
+    }
+
+    fn slow() -> f64 {
         static SLOW: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-        let slow = *SLOW.get_or_init(|| std::env::var("NEGS_FLIGHT_SLOW").ok().and_then(|s| s.parse().ok()).filter(|f: &f64| *f >= 1.0).unwrap_or(1.0));
-        self.started.elapsed().as_secs_f64() * 1000.0 / slow
+        *SLOW.get_or_init(|| std::env::var("NEGS_FLIGHT_SLOW").ok().and_then(|s| s.parse().ok()).filter(|f: &f64| *f >= 1.0).unwrap_or(1.0))
     }
 }
 
@@ -117,7 +126,10 @@ pub fn shown(app: &App) -> bool {
 pub fn covers_strip(app: &App) -> bool {
     app.grid.as_ref().is_some_and(|g| {
         g.shown
-            || g.flight.as_ref().is_some_and(|f| f.opening || rules::flight_length(f.longest) - f.elapsed() > rules::FOLD_FADE_MS)
+            || g.flight.as_ref().is_some_and(|f| {
+                // A fade shows the strip through it from the start of a close.
+                f.opening || (f.kind == rules::Transition::Flight && rules::flight_length(f.longest) - f.elapsed() > rules::FOLD_FADE_MS)
+            })
     })
 }
 
@@ -382,9 +394,13 @@ fn start_flight(app: &mut App, opening: bool) {
         finish_flight(app, opening);
         return;
     }
+    let kind = rules::Transition::chosen();
+    if kind != rules::Transition::Flight {
+        return start_fade(app, opening, kind);
+    }
     // Folding before it has unfolded: the frames already coming carry on.
     let running = grid.flight.is_some();
-    grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current, frames: 0 });
+    grid.flight = Some(Flight { kind, opening, started: Instant::now(), from, longest, current, frames: 0 });
     crate::trace::event("grid_flight_start", || serde_json::json!({"opening": opening, "length_ms": rules::flight_length(longest)}));
     // The sheet flies in a layer over the whole window, clipped to its
     // growing edge by the compositor; the grid's own window shows only once
@@ -393,6 +409,91 @@ fn start_flight(app: &mut App, opening: bool) {
     if !running {
         tick(app);
     }
+}
+
+/// The grid fading in or out (`rules::sheet_look`): the sheet painted once
+/// into the layer, which the compositor fades, rises or settles; the grid's
+/// window shows under it once it's in (`fade_ended`). Turned round midway,
+/// it carries on from where it is.
+fn start_fade(app: &mut App, opening: bool, kind: rules::Transition) {
+    let length = kind.length();
+    let grid = app.grid.as_mut().unwrap();
+    let along = grid.flight.as_ref().filter(|f| f.kind == kind).map(|f| {
+        let e = f.elapsed().min(length);
+        if f.opening { e } else { length - e }
+    });
+    let along = along.unwrap_or(if opening { 0.0 } else { length });
+    let elapsed = if opening { along } else { length - along };
+    let slow = Flight::slow();
+    let started = Instant::now() - std::time::Duration::from_secs_f64(elapsed * slow / 1000.0);
+    let current = grid.cells.iter().position(|c| c.open);
+    grid.flight = Some(Flight { kind, opening, started, from: Vec::new(), longest: 0.0, current, frames: 0 });
+    crate::trace::event("grid_fade_start", || serde_json::json!({"opening": opening, "kind": format!("{kind:?}"), "from_ms": along}));
+    let (r, hwnd) = (grid.rect, grid.hwnd);
+    let made = grid.layer.made();
+    if !opening {
+        // The strip and the photograph show through the fading sheet.
+        if app.strip_view.stale {
+            let strip = app.strip;
+            strip::paint(app, strip);
+        }
+    }
+    if !paint(app, hwnd) {
+        // No layer (no GPU, or no DirectComposition): it's in at once.
+        return finish_flight(app, opening);
+    }
+    let grid = app.grid.as_mut().unwrap();
+    let s = scale(hwnd);
+    // Zooming about the open photograph, or the middle if it isn't in view.
+    let (w, h) = ((r.right - r.left) as f64, (r.bottom - r.top) as f64);
+    let about = current
+        .and_then(|i| grid.layout.frames.get(i))
+        .map(|f| ((f.x + f.w / 2.0) * s, (f.y + f.h / 2.0 + rules::SENTENCE - grid.scroll) * s))
+        .filter(|&(x, y)| x >= 0.0 && x <= w && y >= 0.0 && y <= h)
+        .unwrap_or((w / 2.0, h / 2.0));
+    let left = if opening { length - along } else { along };
+    let animated = grid.layer.animate(left * slow / 1000.0, (about.0 as f32, about.1 as f32), |t| {
+        let at = t * 1000.0 / slow;
+        let (opacity, rise, scale) = rules::sheet_look(kind, if opening { along + at } else { along - at });
+        (opacity, rise * s, scale)
+    });
+    if !animated {
+        return finish_flight(app, opening);
+    }
+    grid.layer.place((r.left as f32, r.top as f32), (0.0, 0.0, w as f32, h as f32));
+    if !made && !opening {
+        // Closing: the sheet in the layer on screen, then the window under it goes.
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+    unsafe {
+        SetTimer(hwnd, TIMER_FADE, (left * slow).ceil().max(1.0) as u32, None);
+    }
+}
+
+/// A fade's timer: once it's in (or out), the grid's window takes over.
+fn fade_ended(app: &mut App) {
+    let Some(grid) = app.grid.as_mut() else { return };
+    let hwnd = grid.hwnd;
+    let Some(flight) = grid.flight.as_ref().filter(|f| f.kind != rules::Transition::Flight) else {
+        unsafe {
+            let _ = KillTimer(hwnd, TIMER_FADE);
+        }
+        return;
+    };
+    let (opening, left) = (flight.opening, flight.kind.length() - flight.elapsed());
+    if left > 0.5 {
+        unsafe {
+            SetTimer(hwnd, TIMER_FADE, (left * Flight::slow()).ceil() as u32, None);
+        }
+        return;
+    }
+    unsafe {
+        let _ = KillTimer(hwnd, TIMER_FADE);
+    }
+    finish_flight(app, opening);
 }
 
 fn finish_flight(app: &mut App, opening: bool) {
@@ -524,7 +625,8 @@ fn paint(app: &mut App, hwnd: HWND) -> bool {
     let parts = rules::sentence(&filter, grid.cells.len(), total);
     let foot = rules::foot(grid.cells.len(), total, selected, filter.active());
     let size = model.prefs.grid_size;
-    let elapsed = grid.flight.as_ref().map(|f| {
+    // A fade's sheet is the grid at rest; the compositor fades it.
+    let elapsed = grid.flight.as_ref().filter(|f| f.kind == rules::Transition::Flight).map(|f| {
         let e = f.elapsed();
         if f.opening { e } else { rules::flight_length(f.longest) - e }
     });
@@ -538,7 +640,7 @@ fn paint(app: &mut App, hwnd: HWND) -> bool {
     // A fold's last FOLD_FADE_MS fade the sheet off the strip, which shows
     // through the layer (`SheetFlight.fold`): it's painted again once the
     // fade starts (`covers_strip`).
-    let folding = flight.as_ref().is_some_and(|f| !f.opening);
+    let folding = flight.as_ref().is_some_and(|f| !f.opening && f.kind == rules::Transition::Flight);
     let fade = match (&*flight, elapsed) {
         (Some(f), Some(e)) if !f.opening => (e / rules::FOLD_FADE_MS).clamp(0.0, 1.0) as f32,
         _ => 1.0,
@@ -1005,6 +1107,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_TIMER if wparam.0 == TIMER_SCROLL => {
                 with_app(scroll_tick);
+                LRESULT(0)
+            }
+            WM_TIMER if wparam.0 == TIMER_FADE => {
+                with_app(fade_ended);
                 LRESULT(0)
             }
             WM_MOUSELEAVE => {

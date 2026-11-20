@@ -716,6 +716,86 @@ pub fn mask_at(band: &Rect, window: &Rect, elapsed: f64) -> Rect {
     Rect::new(r.x.max(window.x), top, r.w.min(window.w), (r.max_y() - top).max(0.0))
 }
 
+// MARK: The grid's fade (Windows only)
+
+/// How the grid opens and closes. Windows fades it (Noah, 2026-11-20: the
+/// flight felt slow at 59 Hz, drawn a frame at a time); the Mac keeps the
+/// flight. `NEGS_GRID_TRANSITION=flight|fade|zoom` picks another to compare.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transition {
+    /// The strip's frames fly to their places (`SheetFlight`).
+    Flight,
+    /// The sheet fades in over the photograph as it rises a little.
+    Fade,
+    /// The sheet fades in as it settles from a little larger, about the open photograph.
+    Zoom,
+}
+
+pub const FADE_MS: f64 = 150.0;
+pub const ZOOM_MS: f64 = 180.0;
+/// How far below its place the fading sheet starts (DIPs).
+pub const FADE_RISE: f64 = 14.0;
+/// How much larger the zooming sheet starts.
+pub const ZOOM_FROM: f64 = 0.1;
+
+impl Transition {
+    pub fn named(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "flight" => Some(Self::Flight),
+            "fade" => Some(Self::Fade),
+            "zoom" => Some(Self::Zoom),
+            _ => None,
+        }
+    }
+
+    pub fn chosen() -> Self {
+        static CHOSEN: std::sync::OnceLock<Transition> = std::sync::OnceLock::new();
+        *CHOSEN.get_or_init(|| std::env::var("NEGS_GRID_TRANSITION").ok().and_then(|n| Self::named(&n)).unwrap_or(Self::Fade))
+    }
+
+    /// A fade's or a zoom's length; a flight's depends on its flyers.
+    pub fn length(self) -> f64 {
+        match self {
+            Self::Flight => FLIGHT_MS,
+            Self::Fade => FADE_MS,
+            Self::Zoom => ZOOM_MS,
+        }
+    }
+}
+
+/// The sheet `along` ms into a fade or zoom (closing plays it backwards):
+/// its opacity, how far below its place it is (DIPs) and its scale.
+pub fn sheet_look(kind: Transition, along: f64) -> (f64, f64, f64) {
+    let p = (along / kind.length()).clamp(0.0, 1.0);
+    let settled = flight_curve(p);
+    match kind {
+        Transition::Flight => (1.0, 0.0, 1.0),
+        Transition::Fade => (p, FADE_RISE * (1.0 - settled), 1.0),
+        Transition::Zoom => ((p * 1.5).min(1.0), 0.0, 1.0 + ZOOM_FROM * (1.0 - settled)),
+    }
+}
+
+/// `f` over `0…length` as `pieces` cubics, for the compositor's
+/// animations: each piece's start and its coefficients in time since it
+/// (`c0 + c1·u + c2·u² + c3·u³`), meeting `f` and its slope at both ends.
+pub fn cubic_pieces(f: impl Fn(f64) -> f64, length: f64, pieces: usize) -> Vec<[f64; 5]> {
+    let pieces = pieces.max(1);
+    let h = length / pieces as f64;
+    let eps = h * 1e-3;
+    (0..pieces)
+        .map(|i| {
+            let (t0, t1) = (i as f64 * h, (i + 1) as f64 * h);
+            let (v0, v1) = (f(t0), f(t1));
+            // Slopes from inside the piece, so a kink at its ends stays sharp.
+            let d0 = (f(t0 + eps) - v0) / eps;
+            let d1 = (v1 - f(t1 - eps)) / eps;
+            let c2 = (3.0 * (v1 - v0) / h - 2.0 * d0 - d1) / h;
+            let c3 = (2.0 * (v0 - v1) / h + d0 + d1) / (h * h);
+            [t0, v0, d0, c2, c3]
+        })
+        .collect()
+}
+
 // MARK: The grid's scrolling
 
 /// A wheel's notch glides the grid there, quickly, then easing off (the
@@ -1045,6 +1125,33 @@ mod tests {
         assert_eq!(foot(12, 12, 1, false), "12 photographs · 1 selected");
         assert_eq!(foot(4, 12, 1, true), "4 of 12 photographs");
         assert_eq!(sentence(&Filter::default(), 1, 1)[2], Part::Words(" 1 photograph".into()));
+    }
+
+    #[test]
+    fn the_fade_runs_from_nothing_to_the_sheet() {
+        assert_eq!(Transition::named(" Zoom"), Some(Transition::Zoom));
+        assert_eq!(Transition::named("slide"), None);
+        for kind in [Transition::Fade, Transition::Zoom] {
+            assert_eq!(sheet_look(kind, 0.0).0, 0.0);
+            assert_eq!(sheet_look(kind, kind.length()), (1.0, 0.0, 1.0));
+            assert_eq!(sheet_look(kind, kind.length() * 2.0), (1.0, 0.0, 1.0));
+        }
+        assert_eq!(sheet_look(Transition::Fade, 0.0), (0.0, FADE_RISE, 1.0));
+        assert!((sheet_look(Transition::Zoom, 0.0).2 - (1.0 + ZOOM_FROM)).abs() < 1e-12);
+        // The compositor's cubics follow the look closely, kink and all.
+        let look = |t: f64| sheet_look(Transition::Zoom, t * 1000.0);
+        let length = ZOOM_MS / 1000.0;
+        for channel in [0, 2] {
+            let value = |t: f64| if channel == 0 { look(t).0 } else { look(t).2 };
+            let pieces = cubic_pieces(value, length, 16);
+            for k in 0..=200 {
+                let t = length * k as f64 / 200.0;
+                let p = pieces.iter().rev().find(|p| p[0] <= t).unwrap();
+                let u = t - p[0];
+                let at = p[1] + p[2] * u + p[3] * u * u + p[4] * u * u * u;
+                assert!((at - value(t)).abs() < 0.01, "channel {channel} at {t}: {at} vs {}", value(t));
+            }
+        }
     }
 
     #[test]
