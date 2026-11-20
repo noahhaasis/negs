@@ -182,20 +182,27 @@ impl Thumbs {
     }
 
     /// The photograph's shape as shown: its developed thumbnail's (cropped
-    /// and turned), else its embedded preview's; `None` before either is read.
+    /// and turned), else its embedded preview's, else its header's; `None`
+    /// before any is read. A developed thumbnail within rounding of the
+    /// shape known keeps it (`kept_ratio`): rows don't move as they arrive.
     pub fn ratio(&self, want: &Want) -> Option<f64> {
-        if let Some(p) = want.key.as_ref().and_then(|k| self.edited.peek(k)) {
-            return Some(p.ratio());
-        }
         let path = &want.item.photo;
-        self.ratios.get(path).or_else(|| self.header_ratios.get(path)).copied()
+        let known = self.ratios.get(path).or_else(|| self.header_ratios.get(path)).copied();
+        match want.key.as_ref().and_then(|k| self.edited.peek(k)) {
+            Some(p) => Some(rules::kept_ratio(known, p.ratio())),
+            None => known,
+        }
     }
 
     /// Reads the shapes of `wants` not known yet from their headers, nearest
     /// `centre` first, on a thread, a batch at a time (`PhotoAspects.read`):
-    /// about a millisecond each.
+    /// about a millisecond each. The batch nearest `centre` is read at
+    /// launch, without waiting for the device, so the frames first painted
+    /// have their shapes (not 3:2 and then again); the rest once the device
+    /// is made: reading a whole large folder's at launch slowed it.
     pub fn read_headers(&mut self, wants: &[Want], centre: usize) {
-        if !surface::ready() {
+        let early = !surface::ready();
+        if early && !self.headers_asked.is_empty() {
             return;
         }
         let missing: Vec<(usize, PathBuf)> = wants
@@ -207,8 +214,11 @@ impl Thumbs {
         if missing.is_empty() {
             return;
         }
-        self.headers_asked.extend(missing.iter().map(|(_, p)| p.clone()));
-        let order = rules::outward(missing, centre);
+        let mut order = rules::outward(missing, centre);
+        if early {
+            order.truncate(rules::HEADER_BATCH);
+        }
+        self.headers_asked.extend(order.iter().cloned());
         let _ = std::thread::Builder::new().name("negs-headers".into()).spawn(move || {
             crate::thumbnail::com_thread();
             unsafe {
@@ -280,11 +290,7 @@ impl Thumbs {
                         // The header's shape, from the preview at full size,
                         // unless the thumbnail's differs by more than its
                         // rounding: frames don't move a pixel as they arrive.
-                        let ratio = pixels.ratio();
-                        let ratio = match self.header_ratios.get(&path) {
-                            Some(h) if (h - ratio).abs() / h < 0.01 => *h,
-                            _ => ratio,
-                        };
+                        let ratio = rules::kept_ratio(self.header_ratios.get(&path).copied(), pixels.ratio());
                         self.ratios.insert(path.clone(), ratio);
                         self.upload(&pixels);
                         let bytes = pixels.bgra.len();
