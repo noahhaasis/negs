@@ -158,6 +158,20 @@ impl Canvas {
         }
     }
 
+    /// `r` (pixels) in `color`, opaque: a square box's fill without
+    /// `round_rect`'s coverage of each pixel, a frame's in well under a millisecond.
+    pub fn fill(&mut self, r: RECT, color: Color) {
+        let (x0, x1) = (r.left.clamp(0, self.w) as usize, r.right.clamp(0, self.w) as usize);
+        let (y0, y1) = (r.top.clamp(0, self.h) as usize, r.bottom.clamp(0, self.h) as usize);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let bgr = bgr(color);
+        for row in self.rows().skip(y0).take(y1 - y0) {
+            row[x0..x1].fill(bgr);
+        }
+    }
+
     /// Blends `color` by the coverage `shape` gives each pixel centre
     /// (a signed distance: negative inside) within the box.
     fn cover(&mut self, bounds: (f32, f32, f32, f32), color: Color, alpha: f32, shape: impl Fn(f32, f32) -> f32) {

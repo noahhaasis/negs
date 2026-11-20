@@ -2238,6 +2238,192 @@ lifecycle_test! {
     }
 }
 
+lifecycle_test! {
+    /// Noah's stale pair: A and B compared, then C and D, and one side
+    /// showed A until C developed. Each side shows only its own photograph,
+    /// from the first moment (its stand-in) to its develop, and the edited
+    /// one isn't blank meanwhile, as `openPicture` on the Mac.
+    fn a_new_comparison_shows_only_its_own_photographs() {
+        use crate::compare::{Origin, Side};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-pair-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A and B landscape, C and D portrait: each picture tells which pair it's of.
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let tall = small.rotate90();
+        let paths: Vec<_> = ["a", "b", "c", "d"].iter().map(|n| dir.join(format!("{n}.png"))).collect();
+        small.save(&paths[0]).unwrap();
+        small.fliph().save(&paths[1]).unwrap();
+        tall.save(&paths[2]).unwrap();
+        tall.fliph().save(&paths[3]).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&paths[0]);
+        let items = h.model().shown_items();
+        assert_eq!(items.len(), 4);
+        h.edit(|m| m.compare(items[0].clone(), items[1].clone(), Origin::Photo));
+        h.idle();
+        // The view asks for each side's picture as it syncs; the open one's is made then.
+        let first = Side::Photo(items[0].clone());
+        h.edit(|m| m.compared_side(&first));
+        h.idle();
+        let a = h.model().compared_side(&first).expect("A developed");
+        assert_eq!((a.width, a.height), (480, 320));
+        h.edit(|m| m.leave_compare());
+        // Whatever each side shows of the new pair is portrait: C or D.
+        let check = |m: &mut super::Model, when: &str| {
+            for side in [Side::Photo(items[2].clone()), Side::Photo(items[3].clone())] {
+                if let Some(shown) = m.compared_side(&side) {
+                    assert!(shown.height > shown.width, "{when}: a picture of the first pair ({} × {}) shown for {:?}", shown.width, shown.height, side.item().photo);
+                }
+            }
+        };
+        h.edit(|m| m.compare(items[2].clone(), items[3].clone(), Origin::Photo));
+        check(h.model(), "at once");
+        let mut open_shown = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            if !h.step() {
+                if h.quiescent() {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "not idle");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                continue;
+            }
+            check(h.model(), "while developing");
+            open_shown |= h.model().compared_side(&Side::Photo(items[2].clone())).is_some();
+        }
+        h.edit(|m| m.compared_side(&Side::Photo(items[2].clone())));
+        h.idle();
+        check(h.model(), "developed");
+        assert!(open_shown, "the edited one showed nothing until developed");
+        let m = h.model();
+        let c = m.compared_side(&Side::Photo(items[2].clone())).expect("C developed");
+        let d = m.compared_side(&Side::Photo(items[3].clone())).expect("D developed");
+        assert_eq!(((c.width, c.height), (d.width, d.height)), ((320, 480), (320, 480)));
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+lifecycle_test! {
+    /// Original ⌄'s Split line and Side by side: the original's side shows
+    /// once decoded, also after the decode is on the GPU (whose upload
+    /// frees other pictures' pixels; the PC's split line stayed grey), and
+    /// it's made once for each crop, not at each refresh; on a split line
+    /// it's left of the line. Holding Original says Loading original until
+    /// it's in, then no tag, as on the Mac.
+    fn compare_with_the_original_shows_it_and_holding_it_ends_the_tag() {
+        use crate::compare::{Layout, Side};
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-original-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+
+        let item = h.model().library_item().unwrap();
+        for layout in [Layout::Slider, Layout::SideBySide] {
+            h.edit(|m| m.compare_with_original(layout));
+            let c = h.model().comparison().cloned().expect("comparing");
+            // On a split line the original is left of the line, as on the Mac.
+            let original = if layout == Layout::Slider { c.first.clone() } else { c.second.clone() };
+            assert!(matches!(original, Side::Original(_)), "{layout:?}");
+            assert_eq!(c.edited(), &item);
+            assert!(h.model().compare_summary().ends_with(" and Original"), "{}", h.model().compare_summary());
+            assert_eq!(h.model().compared_original_loading(), Some("Loading original"), "until its side shows it");
+            h.idle();
+            // What the canvas's upload leaves of it.
+            h.model().original_cache.as_ref().expect("decoded").1.as_if_uploaded();
+            assert!(h.edit(|m| m.compared_side(&original)).is_none(), "made off the UI thread");
+            h.idle();
+            let shown = h.edit(|m| m.compared_side(&original)).expect("the original's side");
+            assert_eq!((shown.width, shown.height), (480, 320), "{layout:?}");
+            let again = h.edit(|m| m.compared_side(&original)).unwrap();
+            assert!(std::sync::Arc::ptr_eq(&shown.rgba, &again.rgba), "the same picture until the crop changes");
+            assert_eq!(h.edit(|m| m.badge()), None);
+            h.edit(|m| m.leave_compare());
+            h.idle();
+        }
+
+        // Hold: the decode kept from the comparison shows at once, with no tag.
+        h.edit(|m| m.hold_original(true));
+        assert!(h.model().original.is_some());
+        assert_eq!(h.model().badge(), None, "no running tag over the original");
+        h.edit(|m| m.hold_original(false));
+
+        // Another photograph: Loading original until its decode is in.
+        h.open(&b);
+        h.idle();
+        h.edit(|m| m.hold_original(true));
+        assert_eq!(h.model().badge(), Some("Loading original"));
+        h.idle();
+        assert!(h.model().original.is_some());
+        assert_eq!(h.model().badge(), None);
+        h.edit(|m| m.hold_original(false));
+        assert!(h.model().original.is_none() && h.model().badge().is_none());
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `openPicture`: compare opens on the open photograph's
+    /// develop at once. Two selected with it the one to edit, its picture
+    /// is made ahead; compare shows that, never its stand-in, and shows it
+    /// again at once when compared once more.
+    fn compare_opens_on_the_develop_made_ahead() {
+        use crate::compare::{Origin, Side};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-ahead-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        let items = h.model().shown_items();
+        assert!(!h.model().compare_likely(false), "one selected");
+        h.edit(|m| m.shelf.selection.select_all_of(&items));
+        assert!(h.model().compare_likely(false), "two selected, the open one edited");
+        let (key, job) = h.edit(|m| m.open_job_ahead()).expect("a develop to make it from");
+        assert!(h.edit(|m| m.open_job_ahead()).is_none(), "made once");
+        let ahead = job().expect("made");
+        let id = ahead.id;
+        h.edit(|m| m.compared_open_made(key, Some(ahead)));
+        let first = Side::Photo(items[0].clone());
+        let at_once = h.edit(|m| {
+            m.compare(items[0].clone(), items[1].clone(), Origin::Photo);
+            m.compared_side(&first)
+        });
+        let shown = at_once.expect("the develop at once");
+        assert_eq!((shown.id, shown.width, shown.height), (id, 480, 320));
+        h.edit(|m| m.compared_side(&first));
+        h.idle();
+        assert_eq!(h.edit(|m| m.compared_side(&first)).map(|s| s.id), Some(id), "no stand-in over it, nothing made again");
+        h.edit(|m| m.leave_compare());
+        let again = h.edit(|m| {
+            m.compare(items[0].clone(), items[1].clone(), Origin::Photo);
+            m.compared_side(&first)
+        });
+        assert_eq!(again.map(|s| s.id), Some(id), "compared again at once");
+        h.idle();
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 // MARK: The film side's release (ticket 41)
 
 lifecycle_test! {

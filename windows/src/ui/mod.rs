@@ -646,8 +646,14 @@ impl App {
             }
         }
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
+            let started = Instant::now();
             strip::sync(self);
+            let strip_ms = started.elapsed().as_secs_f64() * 1000.0;
             grid::sync(self);
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            if ms > 4.0 {
+                crate::trace::event("sync_slow", || serde_json::json!({"strip_ms": strip_ms, "ms": ms}));
+            }
         }
         if flags & (dirty::COMPARE | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME) != 0 {
             compare::sync(self);
@@ -1668,9 +1674,18 @@ pub fn run() {
             // scroll the inspector to the newly focused control.
             let keyed = matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR | WM_SYSCHAR);
             let before = keyed.then(|| GetFocus());
+            let started = crate::trace::enabled().then(Instant::now);
             if !pre_translate(&msg) {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+            // The UI thread held up: what by, for the trace.
+            if let Some(ms) = started.map(|s| s.elapsed().as_secs_f64() * 1000.0).filter(|ms| *ms > 12.0) {
+                crate::trace::event("ui_slow", || {
+                    let mut class = [0u16; 64];
+                    let n = GetClassNameW(msg.hwnd, &mut class).max(0) as usize;
+                    serde_json::json!({"message": msg.message, "ms": ms, "class": String::from_utf16_lossy(&class[..n]), "wparam": msg.wParam.0})
+                });
             }
             if before.is_some_and(|before| GetFocus() != before) {
                 with_app(inspector::reveal_focus);

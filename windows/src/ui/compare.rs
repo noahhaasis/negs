@@ -46,6 +46,10 @@ const STACKED_KIND: TextStyle = TextStyle::serif(13.0, 400).italic();
 const STACKED_PAPER: TextStyle = TextStyle::serif(15.0, 400);
 /// The number's ring, in DIPs.
 const RING: f32 = 26.0;
+/// Loading original's tag (`DevelopTag`, the canvas's `TAG`).
+const TAG: TextStyle = TextStyle::serif(17.0, 400).italic();
+/// Redraws the tag's running mark.
+const TIMER_LOADING: usize = 1;
 
 /// What's written round one photograph.
 #[derive(Clone, Default, PartialEq)]
@@ -73,7 +77,7 @@ struct Opens {
 
 struct View {
     hwnd: HWND,
-    /// Each side's picture, by the pixels it was made from.
+    /// Each side's picture, by the pixels it was made from (`Shown::id`).
     bitmaps: [Option<(usize, Arc<Bitmap>)>; 2],
     /// The pixels each side shows next, and those being made into a picture.
     wanted: [Option<usize>; 2],
@@ -96,10 +100,19 @@ struct View {
     pan_unit: (f64, f64),
     /// A press in a frame, and what a drag from it does.
     press: Option<Press>,
+    /// The original's side while its picture is on its way, and what its
+    /// tag says (`loadingOriginal`); when the tag's mark started running.
+    loading: Option<(usize, &'static str)>,
+    running: Option<std::time::Instant>,
     /// The side the open photograph is on, which 100% is a pixel to a pixel.
     open: usize,
     /// Side by side, one over the other.
     column: bool,
+    /// Each side's picture as last drawn, scaled to its frame.
+    scaled: [Scaled; 2],
+    /// The open photograph's picture outside compare: made ahead, or kept
+    /// from the comparison left, by its `Shown::id`.
+    ahead: Option<(usize, Arc<Bitmap>)>,
 }
 
 impl Default for View {
@@ -121,8 +134,84 @@ impl Default for View {
             zoom_command: 0,
             pan_unit: (0.0, 0.0),
             press: None,
+            loading: None,
+            running: None,
             open: 0,
             column: false,
+            scaled: Default::default(),
+            ahead: None,
+        }
+    }
+}
+
+/// What a side's picture is drawn as: the picture, where, and which part of it.
+#[derive(Clone)]
+struct ScaledKey {
+    /// Held weakly: no other picture takes its address while it's compared against.
+    image: std::sync::Weak<Bitmap>,
+    frame: (i32, i32, i32, i32),
+    part: (i32, i32, i32, i32),
+}
+
+impl PartialEq for ScaledKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.image.ptr_eq(&other.image) && self.frame == other.frame && self.part == other.part
+    }
+}
+
+/// A side's picture scaled once to its frame with GDI's halftone stretch,
+/// which costs tens of milliseconds for a large develop: the slider's line
+/// then moves by copying columns (`CompareSlider`'s two layers on the Mac).
+#[derive(Default)]
+struct Scaled {
+    /// What the picture last drawn was drawn as, cached or not.
+    last: Option<ScaledKey>,
+    cache: Option<(ScaledKey, ScaledPixels)>,
+}
+
+/// A memory DC with a 32-bit DIB of the frame's size selected.
+struct ScaledPixels {
+    dc: HDC,
+    bitmap: HBITMAP,
+    old: HGDIOBJ,
+}
+
+impl ScaledPixels {
+    fn new(target: HDC, w: i32, h: i32) -> Option<Self> {
+        unsafe {
+            let dc = CreateCompatibleDC(target);
+            if dc.is_invalid() {
+                return None;
+            }
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w,
+                    biHeight: -h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            let Ok(bitmap) = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) else {
+                let _ = DeleteDC(dc);
+                return None;
+            };
+            let old = SelectObject(dc, bitmap);
+            Some(Self { dc, bitmap, old })
+        }
+    }
+}
+
+impl Drop for ScaledPixels {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.old);
+            let _ = DeleteObject(self.bitmap);
+            let _ = DeleteDC(self.dc);
         }
     }
 }
@@ -229,6 +318,49 @@ fn ensure(app: &App) -> HWND {
     }
 }
 
+/// The open photograph's picture made ahead of compare, with what it was
+/// made from, left here by its thread: the context menu's loop holds the
+/// UI thread until its Compare is chosen.
+static AHEAD: std::sync::Mutex<Option<(crate::model::compare::OpenKey, crate::model::compare::Shown, Arc<Bitmap>)>> = std::sync::Mutex::new(None);
+
+/// While compare is offered on the open photograph, developed: its
+/// picture made ahead, from the develop to the bitmap (about 50 and 120 ms
+/// for a 24 MP develop), so compare opens on it at once, as on the Mac.
+pub fn prepare(app: &mut App) {
+    if !app.model.compare_likely(grid_shown(app)) {
+        return;
+    }
+    let Some((key, job)) = app.model.open_job_ahead() else { return };
+    let color = app.model.previews.color.clone();
+    #[cfg(test)]
+    let background = super::testing::background();
+    std::thread::spawn(move || {
+        #[cfg(test)]
+        let _background = background;
+        let started = std::time::Instant::now();
+        let shown = job();
+        let made = started.elapsed();
+        let bitmap = shown.as_ref().and_then(|s| Bitmap::from_rgba(&s.rgba, s.width, s.height, s.wide, color.as_deref(), 0, false).ok()).map(Arc::new);
+        crate::trace::event("compare_ahead", || {
+            serde_json::json!({"made_ms": made.as_secs_f64() * 1000.0, "ms": started.elapsed().as_secs_f64() * 1000.0, "size": shown.as_ref().map(|s| [s.width, s.height])})
+        });
+        if let (Some(shown), Some(bitmap)) = (&shown, bitmap) {
+            *AHEAD.lock().unwrap() = Some((key.clone(), shown.clone(), bitmap));
+        }
+        post(move |app: &mut App| app.model.compared_open_made(key, shown));
+    });
+}
+
+/// The picture made ahead, into the model and the view, once compare is on.
+fn take_ahead(app: &mut App) {
+    let Some((key, shown, bitmap)) = AHEAD.lock().unwrap().take() else { return };
+    let id = shown.id;
+    app.model.compared_open_made(key, Some(shown));
+    if app.model.open_picture_id() == Some(id) {
+        VIEW.with(|v| v.borrow_mut().ahead = Some((id as usize, bitmap)));
+    }
+}
+
 /// Makes side `i`'s picture off the UI thread (a few hundred milliseconds
 /// for a large one), then shows it if it's still the one wanted.
 fn make_bitmap(i: usize, key: usize, shown: crate::model::compare::Shown, color: Option<Arc<crate::icc::Transform>>) {
@@ -238,8 +370,9 @@ fn make_bitmap(i: usize, key: usize, shown: crate::model::compare::Shown, color:
     std::thread::spawn(move || {
         #[cfg(test)]
         let _background = background;
+        let started = std::time::Instant::now();
         let bitmap = Bitmap::from_rgba(&shown.rgba, shown.width, shown.height, shown.wide, color.as_deref(), 0, false).ok().map(Arc::new);
-        crate::trace::event("compare_picture", || serde_json::json!({"side": i, "width": shown.width, "height": shown.height}));
+        crate::trace::event("compare_picture", || serde_json::json!({"side": i, "width": shown.width, "height": shown.height, "ms": started.elapsed().as_secs_f64() * 1000.0}));
         post(move |app: &mut App| {
             let wanted = VIEW.with(|v| {
                 let mut v = v.borrow_mut();
@@ -259,14 +392,26 @@ fn make_bitmap(i: usize, key: usize, shown: crate::model::compare::Shown, color:
 
 /// Brings the pictures and words up to date with the model.
 pub fn sync(app: &mut App) {
+    let started = std::time::Instant::now();
     let Some(comparison) = app.model.comparison().cloned() else {
         VIEW.with(|v| {
             let mut v = v.borrow_mut();
             v.comparison = None;
+            // The open photograph's stays, to compare it again at once; the
+            // next comparison takes it only by its id (`ahead`).
+            let open = v.open;
+            if let Some(bitmap) = v.bitmaps[open].take() {
+                v.ahead = Some(bitmap);
+            }
             v.bitmaps = [None, None];
+            // A picture made for the comparison left is never shown in the next.
+            v.wanted = [None; 2];
+            v.scaled = Default::default();
         });
+        prepare(app);
         return;
     };
+    take_ahead(app);
     let color = app.model.previews.color.clone();
     let (mut bitmaps, making) = VIEW.with(|v| {
         let v = v.borrow();
@@ -278,10 +423,15 @@ pub fn sync(app: &mut App) {
     for (i, side) in [&comparison.first, &comparison.second].into_iter().enumerate() {
         let shown = app.model.compared_side(side);
         if let Some(shown) = &shown {
-            let key = Arc::as_ptr(&shown.rgba) as usize;
+            let key = shown.id as usize;
             wanted[i] = Some(key);
-            if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) && making[i] != Some(key) {
-                make_bitmap(i, key, shown.clone(), color.clone());
+            if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) {
+                // Made ahead, or kept from the comparison left.
+                if let Some(ahead) = VIEW.with(|v| v.borrow_mut().ahead.take_if(|(k, _)| *k == key)) {
+                    bitmaps[i] = Some(ahead);
+                } else if making[i] != Some(key) {
+                    make_bitmap(i, key, shown.clone(), color.clone());
+                }
             }
             // The picture drawn sets the frame's shape until the next is made.
             aspects[i] = bitmaps[i].as_ref().map_or(shown.aspect(), |(_, b)| b.width as f64 / b.height.max(1) as f64);
@@ -306,8 +456,25 @@ pub fn sync(app: &mut App) {
             }
         };
     }
+    // The original's side, until its picture is in: the photograph's shape
+    // (the same crop), and Loading original over it.
+    let mut loading = None;
+    if let Some(i) = [&comparison.first, &comparison.second].iter().position(|side| side.is_original()) {
+        let shown = bitmaps[i].as_ref().is_some_and(|(key, _)| wanted[i] == Some(*key));
+        if !shown {
+            aspects[i] = aspects[1 - i];
+            // Only over the split line: the Mac's side by side shows the empty frame alone.
+            if comparison.layout == Layout::Slider {
+                loading = app.model.compared_original_loading().map(|title| (i, title));
+            }
+        }
+    }
     VIEW.with(|v| {
         let mut v = v.borrow_mut();
+        if v.loading.is_none() {
+            v.running = None;
+        }
+        v.loading = loading;
         v.bitmaps = bitmaps;
         v.aspects = aspects;
         v.wanted = wanted;
@@ -324,6 +491,7 @@ pub fn sync(app: &mut App) {
     });
     super::status::set_fitting(app.model.fit_image);
     sync_note(app);
+    crate::trace::event("compare_sync", || serde_json::json!({"ms": started.elapsed().as_secs_f64() * 1000.0}));
     let hwnd = hwnd();
     if !hwnd.is_invalid() {
         unsafe {
@@ -538,12 +706,53 @@ fn fitted(frame: RECT, image: &Bitmap) -> RECT {
     RECT { left, top, right: left + w, bottom: top + h }
 }
 
-fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap, relative: f64, centre: (f64, f64)) {
+/// Columns `x0..x1` of `image`'s part for `frame`: copied from the picture
+/// scaled to the frame once, or, while a pan moves the part every frame,
+/// stretched there and then, as before.
+#[allow(clippy::too_many_arguments)]
+fn draw_scaled(c: &mut Canvas, scaled: &mut Scaled, frame: RECT, x0: i32, x1: i32, image: &Arc<Bitmap>, relative: f64, centre: (f64, f64)) {
     let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
     if fw <= 0 || fh <= 0 || x1 <= x0 {
         return;
     }
     let (sx, sy, sw, sh) = shown_part(frame, (image.width as f64, image.height as f64), relative, centre);
+    let key = ScaledKey {
+        image: Arc::downgrade(image),
+        frame: (frame.left, frame.top, frame.right, frame.bottom),
+        part: (sx.round() as i32, sy.round() as i32, sw.round() as i32, sh.round() as i32),
+    };
+    let panning = scaled.last.as_ref().is_some_and(|last| last.image.ptr_eq(&key.image) && last.frame == key.frame && last.part != key.part);
+    scaled.last = Some(key.clone());
+    if scaled.cache.as_ref().is_none_or(|(k, _)| *k != key) {
+        crate::trace::event("compare_scaled", || serde_json::json!({"panning": panning, "width": fw, "height": fh}));
+        if panning {
+            scaled.cache = None;
+            return draw_part(c, frame, x0, x1, image, relative, centre);
+        }
+        let Some(pixels) = ScaledPixels::new(c.hdc(), fw, fh) else { return draw_part(c, frame, x0, x1, image, relative, centre) };
+        let whole = RECT { left: 0, top: 0, right: fw, bottom: fh };
+        stretch(pixels.dc, whole, 0, fw, image, (sx, sy, sw, sh));
+        scaled.cache = Some((key, pixels));
+    }
+    let Some((_, pixels)) = &scaled.cache else { return };
+    unsafe {
+        let _ = BitBlt(c.hdc(), x0, frame.top, x1 - x0, fh, pixels.dc, x0 - frame.left, 0, SRCCOPY);
+    }
+}
+
+fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap, relative: f64, centre: (f64, f64)) {
+    let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
+    if fw <= 0 || fh <= 0 || x1 <= x0 {
+        return;
+    }
+    let part = shown_part(frame, (image.width as f64, image.height as f64), relative, centre);
+    stretch(c.hdc(), frame, x0, x1, image, part);
+}
+
+/// Columns `x0..x1` of `frame` on `dc`, from `image`'s part `(sx, sy, sw, sh)`
+/// stretched over the frame with GDI's halftone.
+fn stretch(dc: HDC, frame: RECT, x0: i32, x1: i32, image: &Bitmap, (sx, sy, sw, sh): (f64, f64, f64, f64)) {
+    let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
     // The source columns under x0..x1.
     let u0 = sx + (x0 - frame.left) as f64 / fw as f64 * sw;
     let u1 = sx + (x1 - frame.left) as f64 / fw as f64 * sw;
@@ -560,7 +769,6 @@ fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap, rela
         ..Default::default()
     };
     unsafe {
-        let dc = c.hdc();
         let previous = SetStretchBltMode(dc, HALFTONE);
         let _ = SetBrushOrgEx(dc, 0, 0, None);
         StretchDIBits(
@@ -583,6 +791,8 @@ fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap, rela
 }
 
 fn paint(hwnd: HWND, dc: HDC) {
+    let started = std::time::Instant::now();
+    let mut pictures_ms = 0.0;
     let t = theme::tokens();
     let ink = super::sheet::ink();
     let s = draw::dpi_of(hwnd);
@@ -633,30 +843,32 @@ fn paint(hwnd: HWND, dc: HDC) {
             _ => (1.0, (0.5, 0.5)),
         };
         v.relative = relative;
+        let View { bitmaps, scaled, .. } = &mut *v;
         if slider {
             let frame = px(frames[0]);
             let split = frame.left + ((frame.right - frame.left) as f64 * comparison.split).round() as i32;
-            c.round_rect(draw::RectF::of(frame), 0.0, blank);
+            c.fill(frame, blank);
             for (i, (x0, x1)) in [(0, (frame.left, split)), (1, (split, frame.right))] {
-                let Some((_, image)) = &v.bitmaps[i] else { continue };
+                let Some((_, image)) = &bitmaps[i] else { continue };
                 if i == 1 && relative <= 1.0 {
                     // The second, fitted into the first's frame: black where its proportions leave room.
-                    c.round_rect(draw::RectF::of(RECT { left: x0, ..frame }), 0.0, theme::gdi(0));
+                    c.fill(RECT { left: x0, ..frame }, theme::gdi(0));
                     let fitted = fitted(frame, image);
-                    draw_part(&mut c, fitted, x0.max(fitted.left), x1.min(fitted.right), image, 1.0, (0.5, 0.5));
+                    draw_scaled(&mut c, &mut scaled[i], fitted, x0.max(fitted.left), x1.min(fitted.right), image, 1.0, (0.5, 0.5));
                 } else {
-                    draw_part(&mut c, frame, x0, x1, image, relative, centre);
+                    draw_scaled(&mut c, &mut scaled[i], frame, x0, x1, image, relative, centre);
                 }
             }
         } else {
             for i in 0..2 {
                 let frame = px(frames[i]);
-                match &v.bitmaps[i] {
-                    Some((_, image)) if relative > 1.0 => draw_part(&mut c, frame, frame.left, frame.right, image, relative, centre),
-                    _ => super::inspector::draw_thumbnail(&mut c, frame, 0.0, v.bitmaps[i].as_ref().map(|(_, b)| b.as_ref()), false, blank, blank),
+                match &bitmaps[i] {
+                    Some((_, image)) if relative > 1.0 => draw_scaled(&mut c, &mut scaled[i], frame, frame.left, frame.right, image, relative, centre),
+                    _ => super::inspector::draw_thumbnail(&mut c, frame, 0.0, bitmaps[i].as_ref().map(|(_, b)| b.as_ref()), false, blank, blank),
                 }
             }
         }
+        pictures_ms = started.elapsed().as_secs_f64() * 1000.0;
         let words = v.words.clone();
         let mut targets = Vec::new();
         let edited = |i: usize| comparison.active_first == (i == 0) && !matches!(if i == 0 { &comparison.first } else { &comparison.second }, Side::Original(_));
@@ -702,8 +914,57 @@ fn paint(hwnd: HWND, dc: HDC) {
             }
         });
         v.targets = targets;
+
+        // Loading original over the original's frame, or the slider's.
+        if let Some((i, title)) = v.loading {
+            let frame = frames[if slider { 0 } else { i }];
+            let animate = super::motion::enabled();
+            let phase = if animate { (v.running.get_or_insert_with(std::time::Instant::now).elapsed().as_secs_f64() / 1.1).fract() } else { 1.0 / 3.0 / 1.3 + 0.3 / 1.3 };
+            c.d2d(s, t.plain, |p| loading_tag(p, &t, frame, title, phase));
+            unsafe {
+                if animate {
+                    SetTimer(hwnd, TIMER_LOADING, 33, None);
+                } else {
+                    let _ = KillTimer(hwnd, TIMER_LOADING);
+                }
+            }
+        } else {
+            unsafe {
+                let _ = KillTimer(hwnd, TIMER_LOADING);
+            }
+        }
     });
     c.present(dc);
+    crate::trace::event("compare_paint", || serde_json::json!({"ms": started.elapsed().as_secs_f64() * 1000.0, "pictures_ms": pictures_ms, "width": client.right, "height": client.bottom}));
+}
+
+/// The canvas's develop tag (`DevelopTag`, `canvas::build_tag`), in DIPs:
+/// at the top centre of `frame`, 16 below its top, on the theme's `bg` at
+/// 0.78 with a faint `paper` edge, the words in italic `paper` over a short
+/// line where a yellow mark runs every 1.1 s (`phase` of the way round).
+fn loading_tag(p: &mut Painter, t: &theme::Tokens, frame: RectF, title: &str, phase: f64) {
+    let m = p.measure(title, &TAG, 0.0);
+    let line = 64.0;
+    let (pad_x, pad_top, pad_bottom, gap) = (16.0, 7.0, 9.0, 5.0);
+    let (w, h) = ((m.width.max(line) + 2.0 * pad_x).round(), (pad_top + m.height + gap + 1.0 + pad_bottom).round());
+    let x = (frame.x + (frame.w - w) / 2.0).round().max(0.0);
+    let y = (frame.y + 16.0).round();
+    let strength = t.shadow_strength();
+    for i in 1..=4 {
+        let spread = i as f32 * 2.0;
+        p.fill_round_rect(RectF::new(x - spread, y + 4.0 - spread, w + 2.0 * spread, h + 2.0 * spread), 3.0 + spread, Ink::hex(0x000000).alpha(0.1 * strength / i as f32));
+    }
+    p.fill_round_rect(RectF::new(x, y, w, h), 3.0, Ink::hex(t.hex.bg).alpha(0.78));
+    p.stroke_round_rect(RectF::new(x + 0.5, y + 0.5, w - 1.0, h - 1.0), 3.0, 1.0, Ink::hex(t.hex.paper).alpha(0.08));
+    p.text(title, &TAG, x + (w - m.width) / 2.0, y + pad_top - 1.0, Ink::hex(t.hex.paper));
+    let (lx, ly) = ((x + (w - line) / 2.0).round(), (y + pad_top + m.height + gap).round());
+    p.fill_rect(RectF::new(lx, ly, line, 1.0), Ink::hex(t.hex.track));
+    // From -0.3 to 1 of the line's width, clipped to it.
+    let start = lx + line * (phase as f32 * 1.3 - 0.3);
+    let (a, b) = (start.max(lx), (start + line * 0.3).min(lx + line));
+    if b > a {
+        p.fill_rect(RectF::new(a, ly, b - a, 1.0), Ink::hex(t.hex.accent));
+    }
 }
 
 fn at(lparam: LPARAM, hwnd: HWND) -> (f32, f32) {
@@ -766,6 +1027,8 @@ pub fn add_offer(app: &mut App, menu: HMENU, item: &negs_library::Item) {
         let _ = AppendMenuW(menu, if offer.enabled { MF_STRING } else { MF_STRING | MF_GRAYED }, super::id::COMPARE_OFFER as usize, super::pcwstr(&text));
     }
     app.model.offer_compare(offer);
+    // Made while the menu is up.
+    prepare(app);
 }
 
 fn grid_shown(app: &App) -> bool {
@@ -807,6 +1070,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
+            WM_TIMER if wparam.0 == TIMER_LOADING => {
+                let _ = InvalidateRect(hwnd, None, false);
+                LRESULT(0)
+            }
             WM_SIZE => {
                 let _ = InvalidateRect(hwnd, None, false);
                 LRESULT(0)
@@ -860,6 +1127,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                         let p = at(lparam, hwnd);
                         let frame = VIEW.with(|v| v.borrow().frames[0]);
                         let split = ((p.0 - frame.x) / frame.w.max(1.0)) as f64;
+                        crate::trace::event("compare_split_move", || serde_json::json!({"split": split}));
                         with_app(|app| app.model.move_split(split));
                     }
                     Drag::Pan => {

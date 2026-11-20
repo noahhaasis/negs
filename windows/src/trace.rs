@@ -24,6 +24,16 @@
 //!   Vulkan present or the software blit (`frame`: the render's request id,
 //!   revision, generation and kind; `canvas` vulkan or software).
 //! - `composited`: DWM finished composing after that present (`DwmFlush`).
+//! - `compare_sync`, `compare_paint`, `compare_split_move`: Compare's view
+//!   brought up to date with the model and drawn (`ms`; `pictures_ms`, the
+//!   photographs before the words), and each move of a slider drag.
+//! - `compare_scaled`: a side's picture scaled to its frame again, or
+//!   stretched for one frame while a pan moves it (`panning`).
+//! - `compare_begin` (whether the open photograph is `developed`),
+//!   `compare_open_made` and `compare_picture` (the open photograph's
+//!   picture made from its develop, and a side's bitmap, `ms`), and
+//!   `compare_ahead`: the open one's picture and bitmap made ahead of
+//!   compare (`made_ms`, `ms`).
 //! - `bench_*`: the benchmark's steps, below.
 //!
 //! `NEGS_RENDER_BENCH=<film>,<film>[,…]` drives the app for the trace: once

@@ -312,6 +312,7 @@ impl Surface {
             self.size = (w, h);
         }
         let swap = self.swap.clone().expect("swap chain");
+        let drawing = std::time::Instant::now();
         let painted = with_context(&gpu, |c| {
             if self.target.is_none() {
                 let surface: IDXGISurface = unsafe { swap.GetBuffer(0) }.ok()?;
@@ -347,7 +348,10 @@ impl Surface {
             }
             _ => return false,
         }
+        let drawn = drawing.elapsed().as_secs_f64() * 1000.0;
+        let presenting = std::time::Instant::now();
         let presented = unsafe { swap.Present(1, DXGI_PRESENT(0)) };
+        self.timing = (drawn, presenting.elapsed().as_secs_f64() * 1000.0);
         if presented == DXGI_ERROR_DEVICE_REMOVED || presented == DXGI_ERROR_DEVICE_RESET {
             self.release();
             lose(gpu.generation);
@@ -371,7 +375,7 @@ impl Surface {
         let painted = with_context(gpu, |c| {
             if layer.drawn.is_none() {
                 let props = D2D1_BITMAP_PROPERTIES1 {
-                    pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+                    pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
                     dpiX: 96.0,
                     dpiY: 96.0,
                     bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET,
@@ -398,7 +402,7 @@ impl Surface {
                 let mut offset = POINT::default();
                 let dxgi: IDXGISurface = unsafe { layer.surface.BeginDraw(None, &mut offset)? };
                 let props = D2D1_BITMAP_PROPERTIES1 {
-                    pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+                    pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
                     dpiX: 96.0,
                     dpiY: 96.0,
                     bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
@@ -447,12 +451,13 @@ impl Surface {
     }
 }
 
-/// A composition surface `size` pixels on a visual over every child of `hwnd`.
+/// A composition surface `size` pixels on a visual over every child of `hwnd`,
+/// with alpha: a fold's sheet fades off the strip under it.
 fn make_layer(gpu: &Gpu, hwnd: HWND, (w, h): (u32, u32)) -> Option<Layer> {
     unsafe {
         let dxgi_device: IDXGIDevice = gpu.d3d.cast().ok()?;
         let device: IDCompositionDevice = DCompositionCreateDevice(&dxgi_device).ok()?;
-        let surface = device.CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE).ok()?;
+        let surface = device.CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED).ok()?;
         let target = device.CreateTargetForHwnd(hwnd, true).ok()?;
         let visual = device.CreateVisual().ok()?;
         // Nothing shows until it's placed.

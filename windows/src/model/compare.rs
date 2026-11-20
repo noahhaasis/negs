@@ -9,6 +9,10 @@ use super::*;
 use crate::compare::{self as rules, Comparison, Layout, Origin, OriginalMode, OriginalReference, Side};
 use negs_library::Item;
 
+/// What the open photograph's picture is made from: its develop's
+/// generation and revision, and the crop and turn.
+pub type OpenKey = (u64, u64, String);
+
 /// The longest side a picture in the view keeps.
 const MAX_SHOWN: u32 = 3072;
 
@@ -19,6 +23,8 @@ pub struct Shown {
     pub width: u32,
     pub height: u32,
     pub wide: bool,
+    /// Never the same for two pictures: what the view's pictures are made from.
+    pub id: u64,
 }
 
 impl Shown {
@@ -67,7 +73,9 @@ impl Shown {
             image
         };
         let (width, height) = image.dimensions();
-        Some(Shown { rgba: Arc::new(image.into_raw()), width, height, wide })
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Some(Shown { rgba: Arc::new(image.into_raw()), width, height, wide, id })
     }
 }
 
@@ -122,15 +130,29 @@ pub struct Memory {
     kept: Option<(Item, Shown)>,
     /// What the open photograph's picture was shown from: its id and edit.
     shown_key: Option<(u64, u64, String)>,
-    shown: Option<Shown>,
+    /// The open photograph's picture, and the photograph it is of: never
+    /// shown for another (a comparison left, or the other one clicked).
+    shown: Option<(Item, Shown)>,
     /// What the picture being made off the UI thread is made from.
     making: Option<(u64, u64, String)>,
+    /// The original as shown, with what it was made from: the decode's id
+    /// and the crop and turn; and what the one being made is made from.
+    original_shown: Option<((u64, String), Shown)>,
+    making_original: Option<(u64, String)>,
     /// What the last context menu offered.
     offered: Option<rules::Offer>,
     /// The other photograph's develop, once the edited one has settled.
     waiting: Option<Waiting>,
     /// Compare's own helper, so the open photograph's decode stays.
     engine: Option<Arc<EngineClient>>,
+}
+
+/// Whose stand-in is being read: the other photograph's, for its request,
+/// or the open one's, while it's open (its `source_generation`).
+#[derive(Clone, Copy, Debug)]
+enum StandInFor {
+    Other(u64),
+    Open(u64),
 }
 
 /// A develop of the other photograph waiting its turn.
@@ -191,18 +213,23 @@ impl Model {
         self.begin_compare(Comparison::new(Side::Photo(first.clone()), Side::Photo(second), edited == first, origin), edited);
     }
 
-    /// The open photograph against its original: developed first.
+    /// The open photograph against its original: developed first, side by
+    /// side; on a split line the original is left of the line, as on the
+    /// Mac's (`startSplit`).
     pub fn compare_with_original(&mut self, layout: Layout) {
         let Some(item) = self.library_item() else { return };
         if !self.can_compare() || self.comparison().is_some() {
             return;
         }
-        let mut comparison = Comparison::new(Side::Photo(item.clone()), Side::Original(item.clone()), true, Origin::Photo);
+        let (photo, original) = (Side::Photo(item.clone()), Side::Original(item.clone()));
+        let mut comparison =
+            if layout == Layout::Slider { Comparison::new(original, photo, false, Origin::Photo) } else { Comparison::new(photo, original, true, Origin::Photo) };
         comparison.layout = layout;
         self.begin_compare(comparison, item);
     }
 
     fn begin_compare(&mut self, comparison: Comparison, edited: Item) {
+        crate::trace::event("compare_begin", || json!({"developed": self.image.is_some(), "kept": self.kept.as_ref().is_some_and(|k| k.generation == self.source_generation)}));
         self.end_tray(true);
         self.hold_original(false);
         let original = comparison.against_original();
@@ -224,8 +251,21 @@ impl Model {
         }
         self.compare.other = None;
         self.compare.kept = None;
+        // The open photograph's own picture stays, for comparing it again at
+        // once; never another's (`open_picture` checks).
+        if self.compare.shown.as_ref().is_some_and(|(item, _)| Some(item) != self.library_item().as_ref()) {
+            self.compare.shown = None;
+            self.compare.shown_key = None;
+        }
+        self.compare.making = None;
+        self.compare.original_shown = None;
+        self.compare.making_original = None;
         self.compare.request += 1;
         self.stop_compare_engine();
+        // Holding Original needs only the texture.
+        if let Some((_, picture)) = &self.original_cache {
+            picture.release_kept();
+        }
         self.mark(dirty::LAYOUT | dirty::CANVAS | dirty::CHROME | dirty::STATUS | dirty::COMPARE);
     }
 
@@ -281,8 +321,8 @@ impl Model {
             self.compare.kept = Some((open.clone(), shown.clone()));
             self.compare.other = Some((open, Some(shown)));
         }
-        if let Some((_, Some(picture))) = other {
-            self.compare.shown = Some(picture);
+        if let Some((other, Some(picture))) = other {
+            self.compare.shown = Some((other, picture));
             self.compare.shown_key = None;
         }
         self.open_item(item);
@@ -311,6 +351,7 @@ impl Model {
     /// The side that isn't open: the original, or another photograph to develop.
     fn prepare_compared(&mut self) {
         let Some(c) = self.comparison().cloned() else { return };
+        self.prepare_open_stand_in();
         let side = c.inactive().clone();
         let Side::Photo(item) = side else { return };
         if item == *c.edited() || self.compare.other.as_ref().is_some_and(|(i, _)| *i == item) {
@@ -322,7 +363,7 @@ impl Model {
         let request = self.compare.request;
         let Some((state, needs_match)) = self.compared_state(&item) else { return };
         if kept.is_none() {
-            self.load_compared_stand_in(&item, &state, request);
+            self.load_compared_stand_in(&item, &state, StandInFor::Other(request));
         }
         self.compare.waiting = Some(Waiting { item, state, needs_match, request });
         self.pump_compared();
@@ -351,10 +392,24 @@ impl Model {
         Some((state, needs))
     }
 
-    /// The other photograph's stand-in at once, as opening it would show
-    /// one (`load(_ other:)`): its last develop if kept, else its developed
+    /// The open photograph's stand-in until a picture of its develop is
+    /// made, as the photo view shows one (`openPicture`): never the picture
+    /// of the photograph open before it.
+    fn prepare_open_stand_in(&mut self) {
+        let Some(open) = self.library_item() else { return };
+        // Developed, it shows its develop (`compared_open`), made ahead
+        // while compare is offered (`prepare_compared_open`).
+        if self.open_picture().is_some() || self.open_developed() {
+            return;
+        }
+        let state = self.state.clone();
+        self.load_compared_stand_in(&open, &state, StandInFor::Open(self.source_generation));
+    }
+
+    /// A photograph's stand-in at once, as opening it would show one
+    /// (`load(_ other:)`): its last develop if kept, else its developed
     /// thumbnail, else the camera's preview.
-    fn load_compared_stand_in(&self, item: &Item, state: &EditState, request: u64) {
+    fn load_compared_stand_in(&self, item: &Item, state: &EditState, target: StandInFor) {
         let (kept, thumbnail) = (self.kept_key(item), self.filed_key(crate::edited_store::thumbnails(), item));
         let (crop, orientation, photo, item) = (state.crop, state.orientation(), item.photo.clone(), item.clone());
         // A develop to an Image Size is cropped by the helper already.
@@ -382,19 +437,32 @@ impl Model {
                     let (rgba, w, h, _) = crate::thumbnail::placeholder_pixels(&photo)?;
                     Some((as_shown((rgba, w, h), false, true)?, "embedded"))
                 });
-            crate::trace::event("compare_stand_in", || json!({"request": request, "shown": shown.as_ref().map(|(_, kind)| *kind)}));
+            crate::trace::event("compare_stand_in", || json!({"for": format!("{target:?}"), "shown": shown.as_ref().map(|(_, kind)| *kind)}));
             let Some((shown, _)) = shown else { return };
             ui::post(move |app: &mut App| {
                 let model = &mut app.model;
-                if request != model.compare.request {
-                    return;
-                }
-                // Never over the develop or the open one's last picture.
-                if let Some((other, picture @ None)) = &mut model.compare.other
-                    && *other == item
-                {
-                    *picture = Some(shown);
-                    model.mark(dirty::COMPARE);
+                match target {
+                    StandInFor::Other(request) => {
+                        if request != model.compare.request {
+                            return;
+                        }
+                        // Never over the develop or the open one's last picture.
+                        if let Some((other, picture @ None)) = &mut model.compare.other
+                            && *other == item
+                        {
+                            *picture = Some(shown);
+                            model.mark(dirty::COMPARE);
+                        }
+                    }
+                    StandInFor::Open(generation) => {
+                        // Still open, still compared, and nothing better made of it yet.
+                        let open = generation == model.source_generation && model.library_item().as_ref() == Some(&item);
+                        if open && model.compare.comparison.is_some() && model.open_picture().is_none() {
+                            model.compare.shown = Some((item, shown));
+                            model.compare.shown_key = None;
+                            model.mark(dirty::COMPARE);
+                        }
+                    }
                 }
             });
         });
@@ -506,7 +574,7 @@ impl Model {
     /// Made off the UI thread (a develop is cropped, turned and scaled down
     /// in about a second): the picture last made shows until then.
     pub fn compared_open(&mut self) -> Option<Shown> {
-        let Some((key, job)) = self.open_shown_job() else { return self.compare.shown.clone() };
+        let Some((key, job)) = self.open_shown_job() else { return self.open_picture() };
         if self.compare.making.as_ref() != Some(&key) {
             self.compare.making = Some(key.clone());
             #[cfg(test)]
@@ -514,11 +582,60 @@ impl Model {
             std::thread::spawn(move || {
                 #[cfg(test)]
                 let _background = background;
+                let started = std::time::Instant::now();
                 let shown = job();
+                crate::trace::event("compare_open_made", || json!({"ms": started.elapsed().as_secs_f64() * 1000.0, "size": shown.as_ref().map(|s| [s.width, s.height])}));
                 ui::post(move |app: &mut App| app.model.compared_open_made(key, shown));
             });
         }
-        self.compare.shown.clone()
+        self.open_picture()
+    }
+
+    /// The picture last made of the open photograph, or its stand-in.
+    fn open_picture(&self) -> Option<Shown> {
+        let open = self.library_item()?;
+        self.compare.shown.as_ref().filter(|(item, _)| *item == open).map(|(_, shown)| shown.clone())
+    }
+
+    /// The open photograph has a settled develop to show.
+    fn open_developed(&self) -> bool {
+        self.kept.as_ref().is_some_and(|k| k.generation == self.source_generation)
+    }
+
+    /// Compare is offered on the open photograph, developed: two selected
+    /// with it the one to edit, or the context menu's Compare. Its picture
+    /// is then made ahead (`open_job_ahead`), so compare opens on its
+    /// develop at once, as the Mac's does. `in_grid` as for `compare_offer`.
+    pub fn compare_likely(&self, in_grid: bool) -> bool {
+        if self.comparison().is_some() || !self.open_developed() {
+            return false;
+        }
+        let Some(open) = self.library_item() else { return false };
+        // The one `compare` edits: the current photograph if it's the second.
+        let current = if in_grid { self.shelf.selection.current() } else { Some(&open) };
+        let edits_open = |first: &Item, second: &Item| *(if current == Some(second) { second } else { first }) == open;
+        let offered = self.compare.offered.as_ref().filter(|o| o.enabled).is_some_and(|o| match &o.pair {
+            Some((first, second)) => edits_open(first, second),
+            None => o.with_original,
+        });
+        // Two selected, counted before they are put in order.
+        offered || self.shelf.selection.selected().len() == 2 && self.compare_word().0 && matches!(self.compare_selection().as_slice(), [first, second] if edits_open(first, second))
+    }
+
+    /// The open photograph's picture to make ahead of compare, and what
+    /// it's made from; None once it's made or being made.
+    pub fn open_job_ahead(&mut self) -> Option<(OpenKey, impl FnOnce() -> Option<Shown> + Send + 'static + use<>)> {
+        let (key, job) = self.open_shown_job()?;
+        if self.compare.making.as_ref() == Some(&key) {
+            return None;
+        }
+        self.compare.making = Some(key.clone());
+        Some((key, job))
+    }
+
+    /// The id of the open photograph's picture, made or being shown.
+    pub fn open_picture_id(&self) -> Option<u64> {
+        self.open_picture().map(|s| s.id)
     }
 
     /// `compared_open` at once, for a photograph about to be closed.
@@ -526,12 +643,12 @@ impl Model {
         if let Some((key, job)) = self.open_shown_job() {
             self.compared_open_made(key, job());
         }
-        self.compare.shown.clone()
+        self.open_picture()
     }
 
     /// What the open photograph's picture would be made from now, and the
     /// making; None while the one shown is current.
-    fn open_shown_job(&self) -> Option<((u64, u64, String), impl FnOnce() -> Option<Shown> + Send + 'static)> {
+    fn open_shown_job(&self) -> Option<((u64, u64, String), impl FnOnce() -> Option<Shown> + Send + 'static + use<>)> {
         let orientation = self.state.orientation();
         let crop = self.state.crop;
         let cropped_render = self.size_mode() == state::SizeMode::LongestSide && crop.cropped();
@@ -545,23 +662,62 @@ impl Model {
         Some((key, move || Shown::of(&rgba, width, height, pixels, orientation, wide)))
     }
 
-    fn compared_open_made(&mut self, key: (u64, u64, String), shown: Option<Shown>) {
+    pub fn compared_open_made(&mut self, key: OpenKey, shown: Option<Shown>) {
         if self.compare.making.as_ref() == Some(&key) {
             self.compare.making = None;
         }
-        if shown.is_some() && self.compare.comparison.is_some() {
+        // Made from a develop of the photograph still open: in this
+        // comparison, or ahead of one (`prepare_compared_open`).
+        let current = key.0 == self.source_generation;
+        if let (Some(shown), Some(open), true) = (shown, self.library_item(), current) {
             self.compare.shown_key = Some(key);
-            self.compare.shown = shown;
+            self.compare.shown = Some((open, shown));
             self.mark(dirty::COMPARE);
         }
     }
 
-    /// The original as shown beside the open photograph.
-    pub fn compared_original(&self) -> Option<Shown> {
+    /// What the original's side says while nothing is shown on it yet
+    /// (`loadingOriginal`): Loading original, unless its decode failed.
+    pub fn compared_original_loading(&self) -> Option<&'static str> {
+        let against = self.comparison().is_some_and(|c| c.against_original());
+        (against && !self.original_failed).then(|| self.loading_original_title())
+    }
+
+    /// The original as shown beside the open photograph: cropped, mirrored
+    /// and turned from the decode's pixels off the UI thread, once for each
+    /// crop and turn, like `compared_open`. Until it's made, the last one
+    /// made from the same decode shows.
+    pub fn compared_original(&mut self) -> Option<Shown> {
         let (_, picture) = self.original_cache.as_ref()?;
-        let crop = self.state.crop;
+        let (crop, orientation) = (self.state.crop, self.state.orientation());
+        let key = (picture.id, format!("{crop:?}{orientation:?}"));
+        let last = self.compare.original_shown.as_ref().filter(|((id, _), _)| *id == picture.id);
+        if last.is_some_and(|(made, _)| *made == key) || self.compare.making_original.as_ref() == Some(&key) {
+            return last.map(|(_, shown)| shown.clone());
+        }
+        let last = last.map(|(_, shown)| shown.clone());
+        self.compare.making_original = Some(key.clone());
+        let picture = picture.clone();
         let pixels = crop.cropped().then(|| (crop.pixels(Size::new(picture.width as f64, picture.height as f64)), crop.angle));
-        picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, pixels, self.state.orientation(), picture.wide)).flatten()
+        #[cfg(test)]
+        let background = ui::testing::background();
+        std::thread::spawn(move || {
+            #[cfg(test)]
+            let _background = background;
+            let shown = picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, pixels, orientation, picture.wide)).flatten();
+            ui::post(move |app: &mut App| app.model.compared_original_made(key, shown));
+        });
+        last
+    }
+
+    fn compared_original_made(&mut self, key: (u64, String), shown: Option<Shown>) {
+        if self.compare.making_original.as_ref() == Some(&key) {
+            self.compare.making_original = None;
+        }
+        if shown.is_some() && self.comparison().is_some_and(|c| c.against_original()) {
+            self.compare.original_shown = shown.map(|shown| (key, shown));
+            self.mark(dirty::COMPARE);
+        }
     }
 
     /// The other photograph's develop, once in.
@@ -609,6 +765,8 @@ impl Model {
         // The original decodes again, from the other file.
         self.original_cache = None;
         self.original = None;
+        self.compare.original_shown = None;
+        self.compare.making_original = None;
         self.mark(dirty::STATUS | dirty::CANVAS | dirty::COMPARE);
         if self.comparison().is_some_and(|c| c.against_original()) {
             self.prepare_original();
@@ -695,7 +853,9 @@ impl Model {
             Side::Original(_) => self.original_word().to_string(),
             Side::Photo(item) => self.frame_number(item),
         };
-        format!("Comparing {} and {}", name(&c.first), name(&c.second))
+        // The photograph first, wherever its original is.
+        let (a, b) = if c.first.is_original() { (&c.second, &c.first) } else { (&c.first, &c.second) };
+        format!("Comparing {} and {}", name(a), name(b))
     }
 }
 

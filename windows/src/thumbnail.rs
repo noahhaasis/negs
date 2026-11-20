@@ -73,10 +73,29 @@ pub fn wic(path: &Path, max_pixels: u32, color_managed: bool) -> Result<Decoded>
         let factory = factory()?;
         let name = wide(path);
         let decoder = factory.CreateDecoderFromFilename(PCWSTR(name.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
-        let frame = decoder.GetFrame(0)?;
+        decode_frame(&factory, &decoder.GetFrame(0)?, max_pixels, color_managed, None)
+    }
+}
+
+/// A JPEG in memory (a RAW's embedded preview), as `wic` decodes a file;
+/// `orientation` when the RAW gives one, else the JPEG's own.
+pub fn wic_jpeg(bytes: &[u8], max_pixels: u32, orientation: Option<u16>) -> Result<Decoded> {
+    unsafe {
+        let factory = factory()?;
+        let stream = factory.CreateStream()?;
+        stream.InitializeFromMemory(bytes)?;
+        let decoder = factory.CreateDecoderFromStream(&stream, &GUID_ContainerFormatJpeg, WICDecodeMetadataCacheOnDemand)?;
+        decode_frame(&factory, &decoder.GetFrame(0)?, max_pixels, false, orientation)
+    }
+}
+
+/// `frame` at most `max_pixels` on its long side, oriented, as RGBA. WIC's
+/// scaler has the JPEG decoder scale as it decodes (`IWICBitmapSourceTransform`).
+fn decode_frame(factory: &IWICImagingFactory, frame: &IWICBitmapFrameDecode, max_pixels: u32, color_managed: bool, orientation_given: Option<u16>) -> Result<Decoded> {
+    unsafe {
         let (mut w, mut h) = (0, 0);
         frame.GetSize(&mut w, &mut h)?;
-        let orientation = orientation(&frame);
+        let orientation = orientation_given.unwrap_or_else(|| orientation(frame));
         let turned = orientation >= 5;
         let full = if turned { Size::new(h as f64, w as f64) } else { Size::new(w as f64, h as f64) };
         let scale = (w.max(h) as f64 / max_pixels as f64).max(1.0);
@@ -88,11 +107,18 @@ pub fn wic(path: &Path, max_pixels: u32, color_managed: bool) -> Result<Decoded>
             source = scaler.into();
         }
         if color_managed {
-            if let Some(converted) = to_srgb(&factory, &frame, &source) {
+            if let Some(converted) = to_srgb(factory, frame, &source) {
                 source = converted;
             }
         }
         if orientation > 1 {
+            // Decoded (and scaled) once into memory first: turning a
+            // quarter, the rotator asks its source for a column at a time,
+            // and a JPEG decoder under it decoded the picture again for
+            // each, seconds for a portrait preview.
+            if orientation >= 5 {
+                source = factory.CreateBitmapFromSource(&source, WICBitmapCacheOnLoad)?.into();
+            }
             let rotator = factory.CreateBitmapFlipRotator()?;
             rotator.Initialize(&source, transform(orientation))?;
             source = rotator.into();
@@ -130,19 +156,49 @@ fn to_srgb(factory: &IWICImagingFactory, frame: &IWICBitmapFrameDecode, source: 
     }
 }
 
-/// A RAW file's embedded preview, oriented.
+/// A RAW file's embedded preview, oriented: the smallest JPEG in it big
+/// enough, found from its header and decoded scaled by WIC; else (CR3, a
+/// file it can't read) the one rawler finds, decoded whole and shrunk.
 pub fn raw_preview(path: &Path, max_pixels: u32) -> Result<Decoded> {
+    let started = std::time::Instant::now();
+    if let Some(previews) = crate::embedded_preview::find(path) {
+        if let Some(jpeg) = previews.for_size(max_pixels) {
+            let found = started.elapsed();
+            let decoded = crate::embedded_preview::bytes(path, &jpeg).context("Short preview").and_then(|b| wic_jpeg(&b, max_pixels, previews.orientation));
+            crate::trace::event("raw_preview", || {
+                let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+                serde_json::json!({"fast": true, "find_ms": ms(found), "decode_ms": ms(started.elapsed() - found), "preview": [jpeg.width, jpeg.height], "ok": decoded.is_ok()})
+            });
+            if let Ok(decoded) = decoded {
+                return Ok(Decoded { full: Size::new(decoded.width as f64, decoded.height as f64), ..decoded });
+            }
+        }
+    }
+    rawler_preview(path, max_pixels)
+}
+
+/// rawler's preview, decoded whole and shrunk.
+fn rawler_preview(path: &Path, max_pixels: u32) -> Result<Decoded> {
+    let started = std::time::Instant::now();
     let source = rawler::rawsource::RawSource::new(path)?;
     let decoder = rawler::get_decoder(&source)?;
     let params = rawler::decoders::RawDecodeParams::default();
+    let opened = started.elapsed();
     let image = decoder
         .preview_image(&source, &params)
         .ok()
         .flatten()
         .or_else(|| decoder.thumbnail_image(&source, &params).ok().flatten())
         .context("No embedded preview")?;
+    let decoded = started.elapsed();
+    let (pw, ph) = (image.width(), image.height());
     let orientation = decoder.raw_metadata(&source, &params).ok().and_then(|m| m.exif.orientation).unwrap_or(1);
+    let read_metadata = started.elapsed();
     let mut image = image.thumbnail(max_pixels, max_pixels);
+    crate::trace::event("raw_preview", || {
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        serde_json::json!({"open_ms": ms(opened), "decode_ms": ms(decoded - opened), "metadata_ms": ms(read_metadata - decoded), "shrink_ms": ms(started.elapsed() - read_metadata), "preview": [pw, ph]})
+    });
     image = match orientation {
         2 => image.fliph(),
         3 => image.rotate180(),
@@ -177,10 +233,34 @@ pub fn placeholder_pixels(path: &Path) -> Option<(Vec<u8>, u32, u32, Size)> {
 
 /// Show Original for JPEG, PNG and TIFF: the file itself with its colour
 /// profile, at the preview's size.
-pub fn original(path: &Path, max_pixels: u32) -> Result<Picture> {
+pub fn original(path: &Path, max_pixels: u32) -> Result<(Vec<u8>, u32, u32)> {
     com_thread();
     let decoded = wic(path, max_pixels, true)?;
-    Ok(Picture::new(decoded.rgba, decoded.width, decoded.height))
+    Ok((decoded.rgba, decoded.width, decoded.height))
+}
+
+/// The photograph's shape as shown upright, from its header alone: a RAW's
+/// largest embedded preview (when its IFDs say how it's turned), else the
+/// file's own size and orientation through WIC, which decodes nothing for it.
+pub fn header_ratio(path: &Path) -> Option<f64> {
+    if is_raw(path) {
+        let previews = crate::embedded_preview::find(path)?;
+        previews.orientation?;
+        return previews.ratio();
+    }
+    unsafe {
+        let factory = factory().ok()?;
+        let name = wide(path);
+        let decoder = factory.CreateDecoderFromFilename(PCWSTR(name.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand).ok()?;
+        let frame = decoder.GetFrame(0).ok()?;
+        let (mut w, mut h) = (0, 0);
+        frame.GetSize(&mut w, &mut h).ok()?;
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let turned = orientation(&frame) >= 5;
+        Some(if turned { h as f64 / w as f64 } else { w as f64 / h as f64 })
+    }
 }
 
 /// A strip or grid thumbnail, as BGRA: the embedded preview of a RAW, the
@@ -195,4 +275,52 @@ pub fn read(path: &Path, pixels: u32) -> Option<(Vec<u8>, u32, u32)> {
         p[3] = 255;
     }
     Some((bgra, decoded.width, decoded.height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `NEGS_PREVIEW_FOLDER=<folder>`: each RAW's preview from its header
+    /// against rawler's, as the strip reads them: the same shape and
+    /// orientation, and nearly the same picture.
+    #[test]
+    #[ignore]
+    fn header_previews_match_rawlers() {
+        let Some(folder) = std::env::var_os("NEGS_PREVIEW_FOLDER") else { return };
+        com_thread();
+        let mut paths: Vec<_> = std::fs::read_dir(folder).unwrap().flatten().map(|e| e.path()).filter(|p| is_raw(p)).collect();
+        paths.sort();
+        let mut failures = vec![];
+        for path in &paths {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let started = std::time::Instant::now();
+            let fast = crate::embedded_preview::find(path)
+                .and_then(|p| p.for_size(432).map(|j| (p.clone(), j)))
+                .and_then(|(p, j)| crate::embedded_preview::bytes(path, &j).map(|b| (p, b)))
+                .map(|(p, b)| wic_jpeg(&b, 432, p.orientation));
+            let fast_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let started = std::time::Instant::now();
+            let slow = rawler_preview(path, 432);
+            let slow_ms = started.elapsed().as_secs_f64() * 1000.0;
+            match (fast, slow) {
+                (Some(Ok(a)), Ok(b)) => {
+                    let ratio = |d: &Decoded| d.width as f64 / d.height as f64;
+                    let shape = (ratio(&a) - ratio(&b)).abs() / ratio(&b);
+                    let diff = if (a.width, a.height) == (b.width, b.height) {
+                        a.rgba.iter().zip(&b.rgba).map(|(x, y)| (*x as f64 - *y as f64).abs()).sum::<f64>() / a.rgba.len() as f64
+                    } else {
+                        f64::NAN
+                    };
+                    println!("{fast_ms:>6.1} ms vs {slow_ms:>6.1} ms {}x{} vs {}x{} shape {shape:.4} diff {diff:.2} {name}", a.width, a.height, b.width, b.height);
+                    if shape > 0.02 || diff > 12.0 {
+                        failures.push(name);
+                    }
+                }
+                (None, Ok(_)) => println!("  none   rawler {slow_ms:.0} ms {name}"),
+                (fast, slow) => println!("  fast {:?} slow {:?} {name}", fast.map(|f| f.err().map(|e| e.to_string())), slow.err().map(|e| e.to_string())),
+            }
+        }
+        assert!(failures.is_empty(), "{failures:?}");
+    }
 }
