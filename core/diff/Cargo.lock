@@ -6,9 +6,22 @@ version = 4
 name = "negs-core-diff"
 version = "0.0.0"
 dependencies = [
+ "negs-core-marks",
+ "negs-core-sys",
  "negs-library",
  "negs-marks",
 ]
+
+[[package]]
+name = "negs-core-marks"
+version = "0.0.0"
+dependencies = [
+ "negs-core-sys",
+]
+
+[[package]]
+name = "negs-core-sys"
+version = "0.0.0"
 
 [[package]]
 name = "negs-library"
