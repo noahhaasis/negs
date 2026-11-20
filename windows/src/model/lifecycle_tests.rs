@@ -2268,6 +2268,7 @@ lifecycle_test! {
             assert!(matches!(original, Side::Original(_)), "{layout:?}");
             assert_eq!(c.edited(), &item);
             assert!(h.model().compare_summary().ends_with(" and Original"), "{}", h.model().compare_summary());
+            assert_eq!(h.model().compared_original_loading(), Some("Loading original"), "until its side shows it");
             h.idle();
             // What the canvas's upload leaves of it.
             h.model().original_cache.as_ref().expect("decoded").1.as_if_uploaded();

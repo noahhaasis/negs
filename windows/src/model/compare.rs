@@ -570,6 +570,13 @@ impl Model {
         }
     }
 
+    /// What the original's side says while nothing is shown on it yet
+    /// (`loadingOriginal`): Loading original, unless its decode failed.
+    pub fn compared_original_loading(&self) -> Option<&'static str> {
+        let against = self.comparison().is_some_and(|c| c.against_original());
+        (against && !self.original_failed).then(|| self.loading_original_title())
+    }
+
     /// The original as shown beside the open photograph: cropped, mirrored
     /// and turned from the decode's pixels off the UI thread, once for each
     /// crop and turn, like `compared_open`. Until it's made, the last one

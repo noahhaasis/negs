@@ -46,6 +46,10 @@ const STACKED_KIND: TextStyle = TextStyle::serif(13.0, 400).italic();
 const STACKED_PAPER: TextStyle = TextStyle::serif(15.0, 400);
 /// The number's ring, in DIPs.
 const RING: f32 = 26.0;
+/// Loading original's tag (`DevelopTag`, the canvas's `TAG`).
+const TAG: TextStyle = TextStyle::serif(17.0, 400).italic();
+/// Redraws the tag's running mark.
+const TIMER_LOADING: usize = 1;
 
 /// What's written round one photograph.
 #[derive(Clone, Default, PartialEq)]
@@ -96,6 +100,10 @@ struct View {
     pan_unit: (f64, f64),
     /// A press in a frame, and what a drag from it does.
     press: Option<Press>,
+    /// The original's side while its picture is on its way, and what its
+    /// tag says (`loadingOriginal`); when the tag's mark started running.
+    loading: Option<(usize, &'static str)>,
+    running: Option<std::time::Instant>,
     /// The side the open photograph is on, which 100% is a pixel to a pixel.
     open: usize,
     /// Side by side, one over the other.
@@ -121,6 +129,8 @@ impl Default for View {
             zoom_command: 0,
             pan_unit: (0.0, 0.0),
             press: None,
+            loading: None,
+            running: None,
             open: 0,
             column: false,
         }
@@ -306,8 +316,22 @@ pub fn sync(app: &mut App) {
             }
         };
     }
+    // The original's side, until its picture is in: the photograph's shape
+    // (the same crop), and Loading original over it.
+    let mut loading = None;
+    if let Some(i) = [&comparison.first, &comparison.second].iter().position(|side| side.is_original()) {
+        let shown = bitmaps[i].as_ref().is_some_and(|(key, _)| wanted[i] == Some(*key));
+        if !shown {
+            aspects[i] = aspects[1 - i];
+            loading = app.model.compared_original_loading().map(|title| (i, title));
+        }
+    }
     VIEW.with(|v| {
         let mut v = v.borrow_mut();
+        if v.loading.is_none() {
+            v.running = None;
+        }
+        v.loading = loading;
         v.bitmaps = bitmaps;
         v.aspects = aspects;
         v.wanted = wanted;
@@ -702,8 +726,56 @@ fn paint(hwnd: HWND, dc: HDC) {
             }
         });
         v.targets = targets;
+
+        // Loading original over the original's frame, or the slider's.
+        if let Some((i, title)) = v.loading {
+            let frame = frames[if slider { 0 } else { i }];
+            let animate = super::motion::enabled();
+            let phase = if animate { (v.running.get_or_insert_with(std::time::Instant::now).elapsed().as_secs_f64() / 1.1).fract() } else { 1.0 / 3.0 / 1.3 + 0.3 / 1.3 };
+            c.d2d(s, t.plain, |p| loading_tag(p, &t, frame, title, phase));
+            unsafe {
+                if animate {
+                    SetTimer(hwnd, TIMER_LOADING, 33, None);
+                } else {
+                    let _ = KillTimer(hwnd, TIMER_LOADING);
+                }
+            }
+        } else {
+            unsafe {
+                let _ = KillTimer(hwnd, TIMER_LOADING);
+            }
+        }
     });
     c.present(dc);
+}
+
+/// The canvas's develop tag (`DevelopTag`, `canvas::build_tag`), in DIPs:
+/// at the top centre of `frame`, 16 below its top, on the theme's `bg` at
+/// 0.78 with a faint `paper` edge, the words in italic `paper` over a short
+/// line where a yellow mark runs every 1.1 s (`phase` of the way round).
+fn loading_tag(p: &mut Painter, t: &theme::Tokens, frame: RectF, title: &str, phase: f64) {
+    let m = p.measure(title, &TAG, 0.0);
+    let line = 64.0;
+    let (pad_x, pad_top, pad_bottom, gap) = (16.0, 7.0, 9.0, 5.0);
+    let (w, h) = ((m.width.max(line) + 2.0 * pad_x).round(), (pad_top + m.height + gap + 1.0 + pad_bottom).round());
+    let x = (frame.x + (frame.w - w) / 2.0).round().max(0.0);
+    let y = (frame.y + 16.0).round();
+    let strength = t.shadow_strength();
+    for i in 1..=4 {
+        let spread = i as f32 * 2.0;
+        p.fill_round_rect(RectF::new(x - spread, y + 4.0 - spread, w + 2.0 * spread, h + 2.0 * spread), 3.0 + spread, Ink::hex(0x000000).alpha(0.1 * strength / i as f32));
+    }
+    p.fill_round_rect(RectF::new(x, y, w, h), 3.0, Ink::hex(t.hex.bg).alpha(0.78));
+    p.stroke_round_rect(RectF::new(x + 0.5, y + 0.5, w - 1.0, h - 1.0), 3.0, 1.0, Ink::hex(t.hex.paper).alpha(0.08));
+    p.text(title, &TAG, x + (w - m.width) / 2.0, y + pad_top - 1.0, Ink::hex(t.hex.paper));
+    let (lx, ly) = ((x + (w - line) / 2.0).round(), (y + pad_top + m.height + gap).round());
+    p.fill_rect(RectF::new(lx, ly, line, 1.0), Ink::hex(t.hex.track));
+    // From -0.3 to 1 of the line's width, clipped to it.
+    let start = lx + line * (phase as f32 * 1.3 - 0.3);
+    let (a, b) = (start.max(lx), (start + line * 0.3).min(lx + line));
+    if b > a {
+        p.fill_rect(RectF::new(a, ly, b - a, 1.0), Ink::hex(t.hex.accent));
+    }
 }
 
 fn at(lparam: LPARAM, hwnd: HWND) -> (f32, f32) {
@@ -807,6 +879,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
+            WM_TIMER if wparam.0 == TIMER_LOADING => {
+                let _ = InvalidateRect(hwnd, None, false);
+                LRESULT(0)
+            }
             WM_SIZE => {
                 let _ = InvalidateRect(hwnd, None, false);
                 LRESULT(0)
