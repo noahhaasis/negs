@@ -6,8 +6,11 @@
 //! G shows it and hides it, E, Enter, Esc and a double click go back to the
 //! photograph; click, Ctrl, Shift, a band and the arrows select; Ctrl+plus,
 //! minus and the wheel change the size. It unfolds out of the strip and
-//! folds back into it: the window grows from the strip's band as the
-//! frames fly to their places.
+//! folds back into it: the sheet grows from the strip's band as the
+//! frames fly to their places, drawn in a DirectComposition layer over the
+//! window (`Surface::layer`) whose clip is the growing edge; the grid's own
+//! window shows once it has landed. The flight is paced by the compositor
+//! and holds the thumbnails' developing, which shares the GPU.
 //!
 //! Made on first use; only the rows in view are painted, through Direct2D
 //! on the GPU (`surface.rs`), with the strip's frames and marks. A wheel's
@@ -34,7 +37,8 @@ use super::{App, with_app};
 use crate::model::dirty;
 use crate::sheet_rules::{self as rules, Part, Rect, SheetLayout, ThumbSize};
 
-const TIMER_FLIGHT: usize = 1;
+/// The flight's next frame, posted once the compositor has shown one.
+const WM_FLIGHT_FRAME: u32 = WM_APP + 1;
 /// A wheel's glide and the scroll bar's fade.
 const TIMER_SCROLL: usize = 2;
 const SENTENCE: TextStyle = TextStyle::serif(17.0, 400).italic();
@@ -62,6 +66,8 @@ pub struct Grid {
     rect: RECT,
     band: RECT,
     surface: Surface,
+    /// The flight's sheet, over the whole window (`Surface::layer`).
+    layer: Surface,
     flight: Option<Flight>,
     /// A band selection: where it started (sheet DIPs) and the selection under it.
     dragging: Option<((f64, f64), (f64, f64), std::collections::HashSet<Item>)>,
@@ -243,13 +249,14 @@ pub fn open(app: &mut App) {
     if shown(app) || app.model.shelf.library.is_none() || app.model.cropping() || app.model.source.is_none() {
         return;
     }
+    crate::trace::event("grid_open", || serde_json::json!({}));
     if app.grid.is_none() {
         register();
         let hwnd = unsafe {
             CreateWindowExW(WINDOW_EX_STYLE(0), w!("NegsGrid"), w!("Grid"), WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 1, 1, app.main, None, super::instance(), None)
         }
         .unwrap_or_default();
-        app.grid = Some(Grid { hwnd, ..Default::default() });
+        app.grid = Some(Grid { hwnd, layer: Surface::layer(), ..Default::default() });
         app.layout();
     }
     // The grid shows the open photograph as edited.
@@ -258,6 +265,8 @@ pub fn open(app: &mut App) {
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
     // The editor closed: its film side won't be used soon (ticket 41).
     app.model.release_film_cache(crate::film_cache_release::Reason::EditorClosed);
+    // Not before the flight lands (`start_flight`).
+    app.thumbs.held = true;
     let grid = app.grid.as_mut().unwrap();
     grid.shown = true;
     grid.cells.clear();
@@ -271,9 +280,6 @@ pub fn open(app: &mut App) {
         clamp(grid);
     }
     start_flight(app, true);
-    unsafe {
-        let _ = SetFocus(app.grid.as_ref().unwrap().hwnd);
-    }
 }
 
 /// E, Enter, Esc, a double click: back to the photograph, folding into the
@@ -311,6 +317,9 @@ pub fn close_for_compare(app: &mut App) {
 }
 
 fn start_flight(app: &mut App, opening: bool) {
+    // The thumbnails' developing waits for the flight: it shares the GPU,
+    // and a frame waiting behind it is late.
+    app.thumbs.held = true;
     let reduce = !unsafe {
         let mut on = BOOL(1);
         let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut on as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
@@ -339,32 +348,46 @@ fn start_flight(app: &mut App, opening: bool) {
         finish_flight(app, opening);
         return;
     }
+    // Folding before it has unfolded: the frames already coming carry on.
+    let running = grid.flight.is_some();
     grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current });
-    unsafe {
-        let _ = ShowWindow(grid.hwnd, SW_SHOWNA);
-        SetTimer(grid.hwnd, TIMER_FLIGHT, 8, None);
+    crate::trace::event("grid_flight_start", || serde_json::json!({"opening": opening, "length_ms": rules::flight_length(longest)}));
+    // The sheet flies in a layer over the whole window, clipped to its
+    // growing edge by the compositor; the grid's own window shows only once
+    // it has landed. Resizing (or reshaping) a swap chain's window every
+    // frame stalls its presents for two or three refreshes.
+    if !running {
+        tick(app);
     }
-    tick(app);
 }
 
 fn finish_flight(app: &mut App, opening: bool) {
     let grid = app.grid.as_mut().unwrap();
     grid.flight = None;
-    unsafe {
-        let _ = KillTimer(grid.hwnd, TIMER_FLIGHT);
-    }
+    let hwnd = grid.hwnd;
     if opening {
         let r = grid.rect;
         unsafe {
-            let _ = SetWindowPos(grid.hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            let _ = SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
-        invalidate(grid.hwnd);
+        // The window's sheet on screen, under the layer, before the layer goes.
+        paint(app, hwnd);
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            let _ = SetFocus(hwnd);
+        }
+        app.grid.as_mut().unwrap().layer.release();
     } else {
         grid.shown = false;
         grid.surface.release();
         unsafe {
-            let _ = ShowWindow(grid.hwnd, SW_HIDE);
+            let _ = ShowWindow(hwnd, SW_HIDE);
         }
+        grid.layer.release();
+    }
+    app.thumbs.held = false;
+    if opening {
+        request(app);
     }
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
 }
@@ -373,8 +396,9 @@ fn pixels(r: &RECT) -> Rect {
     Rect::new(r.left as f64, r.top as f64, (r.right - r.left) as f64, (r.bottom - r.top) as f64)
 }
 
-/// One frame of the flight: the window moved to the sheet's growing edge
-/// (its swap chain stays the whole window's), then painted.
+/// One frame of the flight: the layer clipped to the sheet's growing edge,
+/// the frame painted and committed, and, once the compositor has shown it,
+/// the next one asked for, which paces the flight at the display's refresh.
 fn tick(app: &mut App) {
     let grid = app.grid.as_mut().unwrap();
     let Some(flight) = &grid.flight else { return };
@@ -386,32 +410,56 @@ fn tick(app: &mut App) {
     }
     let along = if opening { elapsed } else { length - elapsed };
     let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
-    unsafe {
-        let _ = SetWindowPos(grid.hwnd, HWND_TOP, mask.x.round() as i32, mask.y.round() as i32, mask.w.round().max(1.0) as i32, mask.h.round().max(1.0) as i32, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    let (r, hwnd) = (grid.rect, grid.hwnd);
+    let place = |grid: &Grid| {
+        let (x, y) = ((mask.x - r.left as f64) as f32, (mask.y - r.top as f64) as f32);
+        grid.layer.place((r.left as f32, r.top as f32), (x, y, x + mask.w as f32, y + mask.h as f32));
+    };
+    let started = Instant::now();
+    let made = grid.layer.made();
+    place(grid);
+    if !paint(app, hwnd) {
+        // No layer (no GPU, or no DirectComposition): it lands at once.
+        return finish_flight(app, opening);
     }
-    invalidate(grid.hwnd);
+    let grid = app.grid.as_mut().unwrap();
+    if !made {
+        // The layer was just made: placed once it exists.
+        place(grid);
+    }
+    if !made && !opening {
+        // Folding: the sheet in the layer on screen, then the window under it goes.
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+    let (draw, commit) = grid.layer.timing;
+    let took = started.elapsed();
+    crate::trace::event("grid_flight_paint", || {
+        serde_json::json!({"at_ms": elapsed, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "commit_ms": commit})
+    });
+    // The frame waits for the compositor to show it (a layer isn't
+    // presented), which paces the flight at the display's refresh.
+    unsafe {
+        let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+    }
+    unsafe {
+        let _ = PostMessageW(hwnd, WM_FLIGHT_FRAME, WPARAM(0), LPARAM(0));
+    }
 }
 
 // MARK: Painting
 
-fn paint(app: &mut App, hwnd: HWND) {
+/// Paints the sheet: in the layer while it flies, else in the window. False
+/// if it couldn't (no GPU, the window's painted plainly instead).
+fn paint(app: &mut App, hwnd: HWND) -> bool {
     let t = theme::tokens();
     let s = scale(hwnd);
     let App { grid, thumbs, model, .. } = app;
-    let Some(grid) = grid.as_mut() else { return };
+    let Some(grid) = grid.as_mut() else { return false };
     let full = (grid.rect.right - grid.rect.left, grid.rect.bottom - grid.rect.top);
     let (w, h) = (full.0 as f64 / s, full.1 as f64 / s);
-    let mut window = RECT::default();
-    unsafe {
-        let _ = GetWindowRect(hwnd, &mut window);
-        let mut points = [POINT { x: window.left, y: window.top }];
-        MapWindowPoints(None, model_main(hwnd), &mut points);
-        window.left = points[0].x;
-        window.top = points[0].y;
-    }
-    // During the flight the window is the mask: the sheet is drawn where it
-    // will stand, offset by how far the mask's corner is from the sheet's.
-    let (ox, oy) = (-((window.left - grid.rect.left) as f64) / s, -((window.top - grid.rect.top) as f64) / s);
     let (_, viewport) = sheet_size(grid);
     let filter = model.library_filter();
     let total = model.shelf.library.as_ref().map_or(0, |l| l.items().len());
@@ -427,59 +475,79 @@ fn paint(app: &mut App, hwnd: HWND) {
     let (bar, wide) = bar_look(grid);
     let mut places = std::mem::take(&mut grid.places);
     places.clear();
-    let Grid { cells, layout, scroll, surface, flight, .. } = grid;
+    let Grid { cells, layout, scroll, surface, layer, flight, .. } = grid;
+    let flying = flight.is_some();
+    let (surface, target) = if flying { (layer, model_main(hwnd)) } else { (surface, hwnd) };
     // A fold's last 180 ms fade the sheet off the strip.
     let fade = match (&*flight, elapsed) {
         (Some(f), Some(e)) if !f.opening => (e / rules::FOLD_FADE_MS).clamp(0.0, 1.0) as f32,
         _ => 1.0,
     };
-    let painted = surface.paint(hwnd, (full.0.max(1) as u32, full.1.max(1) as u32), s as f32, t.plain, |p| {
-      p.fill_rect(RectF::new(-ox as f32, -oy as f32, w as f32 * 2.0, h as f32 * 2.0), Ink::hex(t.film.film));
+    let painted = surface.paint(target, (full.0.max(1) as u32, full.1.max(1) as u32), s as f32, t.plain, |p| {
+      p.fill_rect(RectF::new(0.0, 0.0, w as f32, h as f32), Ink::hex(t.film.film));
       p.faded(fade, |p| {
-        let (ox, oy) = (ox as f32, oy as f32);
-        p.fill_rect(RectF::new(ox, oy, w as f32, h as f32), Ink::hex(t.hex.grid));
+        p.fill_rect(RectF::new(0.0, 0.0, w as f32, h as f32), Ink::hex(t.hex.grid));
         let top = rules::SENTENCE - *scroll;
         let boxes = elapsed.map_or(1.0, |e| ((e / rules::FLIGHT_MS - rules::BOXES_FROM) / (1.0 - rules::BOXES_FROM)).clamp(0.0, 1.0)) as f32;
-        p.clipped(RectF::new(ox, oy + rules::SENTENCE as f32, w as f32, viewport as f32), |p| {
-            for i in range.clone() {
+        p.clipped(RectF::new(0.0, rules::SENTENCE as f32, w as f32, viewport as f32), |p| {
+            let placed: Vec<(usize, RectF)> = range
+                .clone()
+                .map(|i| {
+                    let f = layout.frames[i];
+                    let to = Rect::new(f.x, f.y + top, f.w, f.h);
+                    let r = match (elapsed, flight.as_ref().and_then(|fl| fl.from.get(i).copied().flatten())) {
+                        (Some(e), Some(from)) => rules::flyer_at(&from, &to, e, rules::flight_delay(i, flight.as_ref().unwrap().current)),
+                        _ => to,
+                    };
+                    (i, RectF::new(r.x as f32, r.y as f32, r.w as f32, r.h as f32))
+                })
+                .collect();
+            for &(i, r) in &placed {
                 let cell = &cells[i];
-                let f = layout.frames[i];
-                let to = Rect::new(f.x, f.y + top, f.w, f.h);
-                let r = match (elapsed, flight.as_ref().and_then(|fl| fl.from.get(i).copied().flatten())) {
-                    (Some(e), Some(from)) => rules::flyer_at(&from, &to, e, rules::flight_delay(i, flight.as_ref().unwrap().current)),
-                    _ => to,
-                };
-                let r = RectF::new(r.x as f32 + ox, r.y as f32 + oy, r.w as f32, r.h as f32);
                 let opacity = if cell.summary.flag == Some(Flag::Reject) { rules::reject_opacity(false, false) as f32 } else { 1.0 };
                 strip::paint_frame(p, thumbs, cell, r, opacity, &t, false);
-                if boxes > 0.0 {
-                    if cell.summary.flag == Some(Flag::Pick) {
-                        p.pick_box(BoxInk::Grid, &cell.name, r, Ink::hex(t.film.paper).alpha(boxes), true);
+            }
+            // The boxes reach past their pictures, over the gaps and the
+            // thumbnails beside them, so they're drawn above every thumbnail:
+            // all the pick boxes, then all the selection boxes (LibraryGrid).
+            if boxes > 0.0 {
+                for &(i, r) in &placed {
+                    if cells[i].summary.flag == Some(Flag::Pick) {
+                        p.pick_box(BoxInk::Grid, &cells[i].name, r, Ink::hex(t.film.paper).alpha(boxes), true);
                     }
-                    if cell.selected {
-                        p.pick_box(BoxInk::Selection, &cell.name, r, Ink::hex(t.hex.accent).alpha(boxes), false);
+                }
+                for &(i, r) in &placed {
+                    if cells[i].selected {
+                        p.pick_box(BoxInk::Selection, &cells[i].name, r, Ink::hex(t.hex.accent).alpha(boxes), false);
                     }
                 }
             }
         });
-        paint_scroll_bar(p, &t, *scroll, layout.height, viewport, ox + w as f32, oy + rules::SENTENCE as f32, bar, wide);
-        sentence(p, &parts, &t, ox, oy, &mut places);
+        paint_scroll_bar(p, &t, *scroll, layout.height, viewport, w as f32, rules::SENTENCE as f32, bar, wide);
+        sentence(p, &parts, &t, 0.0, 0.0, &mut places);
         // A batch started here shows its progress here too, then its outcome.
         // Lightroom's words (ticket 48) come after a running batch's.
         let batch = model.batch.as_ref().filter(|b| b.running || b.needs_attention());
         let words = model.lightroom.words.as_deref().filter(|_| !batch.is_some_and(|b| b.running));
-        let foot_y = oy + (h - rules::FOOT) as f32;
-        foot_line(p, if batch.is_some() || words.is_some() { "" } else { &foot }, size, &t, ox, foot_y, w as f32, &mut places);
+        let foot_y = (h - rules::FOOT) as f32;
+        foot_line(p, if batch.is_some() || words.is_some() { "" } else { &foot }, size, &t, 0.0, foot_y, w as f32, &mut places);
         if let Some(words) = words {
             let m = p.measure(words, &FOOT, 0.0);
             let baseline = foot_y + (rules::FOOT as f32 / 2.0 + FOOT.size * 0.36).round();
-            p.text(words, &FOOT, ox + 14.0, baseline - m.baseline, Ink::hex(t.hex.label));
+            p.text(words, &FOOT, 14.0, baseline - m.baseline, Ink::hex(t.hex.label));
         } else if let Some(run) = batch {
-            batch_foot(p, run, &t, ox, foot_y, &mut places);
+            batch_foot(p, run, &t, 0.0, foot_y, &mut places);
         }
       });
     });
     grid.places = places;
+    if flying {
+        // The window shows nothing of its own while the layer flies.
+        unsafe {
+            let _ = ValidateRect(hwnd, None);
+        }
+        return painted;
+    }
     if painted {
         grid.painted = app.thumbs.revision;
         unsafe {
@@ -495,6 +563,7 @@ fn paint(app: &mut App, hwnd: HWND) {
             let _ = EndPaint(hwnd, &ps);
         }
     }
+    painted
 }
 
 fn model_main(hwnd: HWND) -> HWND {
@@ -841,7 +910,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
-            WM_TIMER if wparam.0 == TIMER_FLIGHT => {
+            WM_FLIGHT_FRAME => {
+                // What the fold uncovers paints first: frames posted back to
+                // back would keep the editor's WM_PAINT waiting.
+                let _ = RedrawWindow(model_main(hwnd), None, None, RDW_UPDATENOW | RDW_ALLCHILDREN);
                 with_app(tick);
                 LRESULT(0)
             }

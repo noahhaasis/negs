@@ -1831,11 +1831,17 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                         SetCapture(hwnd);
                     }
                 } else if double {
-                    with_view(|v| {
-                        v.fitting = true;
-                        v.apply_zoom();
-                        invalidate(hwnd);
-                    });
+                    // As in Lightroom (`doubleClickPhotograph`): a zoomed
+                    // photograph fits the window, a fitted one shows the grid.
+                    if with_view(|v| v.zoomed()).unwrap_or(false) {
+                        with_view(|v| {
+                            v.fitting = true;
+                            v.apply_zoom();
+                            invalidate(hwnd);
+                        });
+                    } else {
+                        post(super::grid::open);
+                    }
                 } else {
                     with_view(|v| v.pan = Some((x, y, v.center)));
                     SetCapture(hwnd);
