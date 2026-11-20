@@ -53,6 +53,8 @@ struct Flight {
     from: Vec<Option<Rect>>,
     longest: f64,
     current: Option<usize>,
+    /// Frames painted so far.
+    frames: u32,
 }
 
 #[derive(Default)]
@@ -350,7 +352,7 @@ fn start_flight(app: &mut App, opening: bool) {
     }
     // Folding before it has unfolded: the frames already coming carry on.
     let running = grid.flight.is_some();
-    grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current });
+    grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current, frames: 0 });
     crate::trace::event("grid_flight_start", || serde_json::json!({"opening": opening, "length_ms": rules::flight_length(longest)}));
     // The sheet flies in a layer over the whole window, clipped to its
     // growing edge by the compositor; the grid's own window shows only once
@@ -401,7 +403,16 @@ fn pixels(r: &RECT) -> Rect {
 /// the next one asked for, which paces the flight at the display's refresh.
 fn tick(app: &mut App) {
     let grid = app.grid.as_mut().unwrap();
-    let Some(flight) = &grid.flight else { return };
+    let Some(flight) = grid.flight.as_mut() else { return };
+    // The first frame is the sheet where the strip is, so it looks still;
+    // making the layer and painting what it uncovers can hold the second for
+    // a few refreshes. The clock starts a refresh before the second frame,
+    // so that wait isn't a jump on the fastest stretch of the curve.
+    if flight.frames == 1 {
+        flight.started = Instant::now() - std::time::Duration::from_micros(16_667);
+    }
+    flight.frames += 1;
+    let flight = &*flight;
     let elapsed = flight.started.elapsed().as_secs_f64() * 1000.0;
     let length = rules::flight_length(flight.longest);
     let opening = flight.opening;
