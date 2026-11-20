@@ -393,6 +393,7 @@ fn pixels(r: &RECT) -> Rect {
 /// the frame painted and presented, and the next one asked for. The present
 /// waits for the display, which paces the flight at its refresh.
 fn tick(app: &mut App) {
+    let canvas = app.canvas;
     let grid = app.grid.as_mut().unwrap();
     let Some(flight) = &grid.flight else { return };
     let elapsed = flight.started.elapsed().as_secs_f64() * 1000.0;
@@ -415,6 +416,12 @@ fn tick(app: &mut App) {
         let _ = RedrawWindow(model_main(hwnd), None, None, RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
     let made = grid.layer.made();
+    // EXPERIMENT: the canvas hidden while the sheet flies.
+    if std::env::var_os("NEGS_FLIGHT_NO_CANVAS").is_some() {
+        unsafe {
+            let _ = ShowWindow(canvas, SW_HIDE);
+        }
+    }
     place(grid);
     if !paint(app, hwnd) {
         // No layer (no GPU, or no DirectComposition): it lands at once.
