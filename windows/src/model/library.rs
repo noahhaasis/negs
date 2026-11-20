@@ -728,7 +728,8 @@ impl Model {
         Some((plan, question, permanent))
     }
 
-    /// Deletes `plan` as one undo step; the edit view goes to the next photograph.
+    /// Deletes `plan` as one undo step; the edit view goes to the next
+    /// photograph, or to the duplicate that takes a deleted one's place.
     pub fn delete_photos(&mut self, plan: negs_library::DeletePlan) {
         let order = self.shown_items();
         let mut gone: HashSet<Item> = plan.items.iter().cloned().collect();
@@ -743,7 +744,14 @@ impl Model {
         // The next one shown, else the next in the folder (the filter hides the rest).
         let everything = self.shelf.library.as_ref().map(Library::items).unwrap_or_default();
         let next = self.library_item().and_then(|current| selection::next_after(&current, &order, &gone).or_else(|| selection::next_after(&current, &everything, &gone)));
-        self.library_action(|library| library.delete(&plan), next);
+        // A duplicate that takes its photograph's place is that photograph now.
+        let next = next.map(|n| plan.after(&n));
+        let renamed = plan.renamed.clone();
+        if self.library_action(|library| library.delete(&plan), next) {
+            for (from, to) in &renamed {
+                self.shelf.selection.rename(from, to);
+            }
+        }
         self.prune_selection();
     }
 

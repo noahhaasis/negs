@@ -1402,8 +1402,8 @@ impl Library {
     }
 
     /// Moves `plan`'s photographs to the bin with their sidecars (and their
-    /// camera JPEGs), and removes its duplicates from theirs, as one undo
-    /// step. A read-only folder deletes nothing.
+    /// camera JPEGs), and removes the rest from theirs, as one undo step. A
+    /// read-only folder deletes nothing.
     pub fn delete(&mut self, plan: &DeletePlan) -> Outcome {
         let mut outcome = Outcome::default();
         if plan.is_empty() {
@@ -1432,19 +1432,28 @@ impl Library {
                 gone.insert(Item::duplicate(file, id));
             }
         }
-        let reopen = self.open.as_ref().filter(|o| gone.contains(&o.item)).map(|o| o.item.clone());
+        // The open one goes, or is renamed as its photograph's place is
+        // taken: it opens again afterwards, and Undo opens it as it was.
+        let open = self.open.as_ref().map(|o| o.item.clone());
+        let renamed = open.as_ref().map(|o| plan.after(o)).filter(|after| Some(after) != open.as_ref());
+        let reopen = open.filter(|o| gone.contains(o) || renamed.is_some());
         if reopen.is_some() {
             self.open = None;
             outcome.open_gone = true;
+            outcome.open = renamed;
         }
-        // A duplicate of a photograph that stays leaves its sidecar.
+        // What is chosen of a photograph that stays leaves its sidecar: a
+        // duplicate, or the photograph's own variant, the first.
         let mut recorder = Recorder::default();
         if self.sidecars {
             for item in &plan.duplicates {
-                let Some(id) = &item.variant else { continue };
                 let result = sidecar::read_raw(&item.photo).map_err(|p| p.message(&item.file_name())).and_then(|raw| match raw {
                     None => Ok(None),
-                    Some(raw) => removing_variant(id, &raw).map(Some).map_err(|p| p.message(&item.file_name())),
+                    Some(raw) => {
+                        let first = raw.get("variants").as_array().and_then(|v| v.first()).and_then(|v| v.get("id").as_str()).map(str::to_string);
+                        let Some(id) = item.variant.clone().or(first) else { return Ok(None) };
+                        removing_variant(&id, &raw).map(Some).map_err(|p| p.message(&item.file_name()))
+                    }
                 });
                 match result {
                     Ok(None) => {}

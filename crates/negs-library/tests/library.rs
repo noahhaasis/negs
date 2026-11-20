@@ -282,8 +282,24 @@ fn duplicates_are_named_and_removed_as_on_the_mac() {
     assert_eq!(outcome.select, [made[0].clone()]);
     assert_eq!(folder.sidecar("IMG_1.CR3"), before);
 
-    // The photograph goes with its sidecar, duplicates and camera JPEG.
+    // The photograph alone leaves its sidecar: its first duplicate takes its place.
     let plan = library.delete_plan(&[raw.clone()]);
+    assert!(plan.files.is_empty());
+    assert_eq!(library.delete_question(&plan).message, "Remove “IMG_1.CR3”?");
+    let outcome = library.delete(&plan);
+    assert!(outcome.error.is_none());
+    assert!(folder.photo("IMG_1.CR3").exists() && folder.photo("IMG_1.JPG").exists());
+    assert_eq!(library.items().len(), 3);
+    assert_eq!(library.summary(&raw).rating, 5, "the duplicate's own rating");
+    assert_eq!(library.name(&again[0]), "IMG_1.CR3 (2)");
+    assert_eq!(library.undo_name(), Some("Remove Photograph"));
+    library.undo();
+    assert_eq!(folder.sidecar("IMG_1.CR3"), before);
+    assert_eq!(library.summary(&raw).rating, 2);
+    assert_eq!(library.items().len(), 4);
+
+    // With all its duplicates, the photograph goes with its sidecar and camera JPEG.
+    let plan = library.delete_plan(&[raw.clone(), made[0].clone(), again[0].clone()]);
     assert_eq!(plan.following, 2);
     let question = plan.question(|i| library.name(i), false, "Trash");
     assert_eq!(question.message, "Move “IMG_1.CR3” to the Trash?");

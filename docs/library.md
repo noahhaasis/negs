@@ -106,9 +106,12 @@ shows the same photograph developed its own way.
 | Delete every rejected photograph, after asking | | Photo › Delete Rejected Photographs… |
 
 In the grid these act on every selected photograph; in the edit view on the
-open one only, as the rating keys do. The photograph's file goes to the Trash
-with its `.negs` file, and so with its duplicates. A duplicate on its own is
-removed from the `.negs` file, and the photograph stays. Deleting
+open one only, as the rating keys do. A photograph that has duplicates keeps
+its file while any of them stays: deleting the photograph removes its rating
+and edits from the `.negs` file, and its first duplicate takes its place and
+name. A duplicate on its own is removed from the `.negs` file, and the
+photograph stays. Only a photograph deleted together with all its duplicates
+goes to the Trash, with its `.negs` file. Deleting
 `IMG_0412.JPG` leaves `IMG_0412.CR3` alone. The next photograph becomes
 current.
 

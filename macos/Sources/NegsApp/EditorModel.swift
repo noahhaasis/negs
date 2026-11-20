@@ -2995,8 +2995,9 @@ import UserNotifications
     }
 
     /// Moves `plan`'s photographs to the Trash with their sidecars, and
-    /// removes its duplicates from theirs, as one undo step. If what was
-    /// current goes, the next photograph shown becomes current.
+    /// removes the rest from theirs, as one undo step. If what was current
+    /// goes, the next photograph shown becomes current; a duplicate that
+    /// takes its photograph's place is that photograph from then on.
     func delete(_ plan: DeletePlan, permanent: Bool = false) {
         guard canDelete, !plan.isEmpty else { return }
         // The open photograph's last edits go to its sidecar first, and so
@@ -3004,8 +3005,9 @@ import UserNotifications
         flushSidecar()
         var gone = Set(plan.items)
         for file in plan.files { for id in library.duplicates[file] ?? [] { gone.insert(file.variant(id)) } }
-        // One of the two going to the Trash ends compare.
-        if let comparison, gone.contains(comparison.first.item) || gone.contains(comparison.second.item) { leaveCompare() }
+        // One of the two going to the Trash, or renamed, ends compare.
+        let changes = { (item: URL) in gone.contains(item) || plan.after(item) != item }
+        if let comparison, changes(comparison.first.item) || changes(comparison.second.item) { leaveCompare() }
         let current = mode == .grid ? selection.current : sourceItem
         let next = current.flatMap { current -> URL?? in
             guard gone.contains(current) else { return nil }
@@ -3013,17 +3015,22 @@ import UserNotifications
                 ?? Self.next(after: current, in: library.items.map(\.url), skipping: gone))
         }
         let open = sourceItem, openGone = sourceItem.map(gone.contains) ?? false
+        // The open duplicate takes its photograph's place: it opens again as that.
+        let openRenamed = open.map(plan.after).flatMap { $0 != open ? $0 : nil }
         // Nothing more is written for it.
-        if openGone { sidecarWrite?.cancel(); sidecarWrite = nil; photoSidecar = nil }
+        if openGone || openRenamed != nil { sidecarWrite?.cancel(); sidecarWrite = nil; photoSidecar = nil }
 
-        // A duplicate of a photograph that stays leaves its sidecar.
+        // What is chosen of a photograph that stays leaves its sidecar: a
+        // duplicate, or the photograph's own variant, the first.
         var before: [URL: JSONValue?] = [:], failure: String?
         if let sidecars, sidecars.writes {
             for item in plan.duplicates {
-                guard let id = item.variantID else { continue }
                 let photo = item.photoFile
                 do {
                     guard let raw = try sidecars.readPending(photo: photo) else { continue }
+                    var first: String?
+                    if case .string(let primary) = raw["variants.0.id"] { first = primary }
+                    guard let id = item.variantID ?? first else { continue }
                     let removed = try PhotoSidecar.removing(variant: id, from: raw)
                     if before[photo] == nil { before[photo] = .some(raw) }
                     sidecars.enqueue(SidecarPatch(variant: id, replacement: .some(removed), defaultsVersion: SidecarDefaults.latest,
@@ -3037,7 +3044,8 @@ import UserNotifications
         library.remove(plan.files)
 
         // The selection moves on.
-        switch next {
+        for (from, to) in plan.renamed { selection.rename(from, to: to) }
+        switch next.map({ $0.map(plan.after) }) {
         case .some(.some(let next)):
             if mode == .grid { selection.select(next) } else { self.open(next, restoring: nil) }
         case .some(.none):
@@ -3046,12 +3054,13 @@ import UserNotifications
             selection = LibrarySelection(); mode = .photo
         case .none:
             selection.prune(to: Set(library.items.map(\.url)))
+            if let openRenamed, mode == .photo { self.open(openRenamed, restoring: nil) }
         }
-        if openGone, mode == .grid { sourceDeleted = true }
+        if openGone || openRenamed != nil, mode == .grid { sourceDeleted = true }
 
         let record = TrashRecord()
         if !permanent || !before.isEmpty {
-            let reopen = openGone ? open : nil
+            let reopen = openGone || openRenamed != nil ? open : nil
             undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in
                 MainActor.assumeIsolated { self?.undoDelete(permanent ? plan.withoutFiles : plan, record: record, sidecars: before, reopen: reopen) }
             }
@@ -3107,6 +3116,10 @@ import UserNotifications
             sidecars?.enqueue(SidecarPatch(variant: "", replacement: .some(raw), defaultsVersion: SidecarDefaults.latest, app: Self.appVersion), for: photo)
             library.reload(photo)
         }
+        // A duplicate open in its photograph's place shows the photograph's
+        // own edits again at once, so its preview is never filed under them.
+        let promoted = sourceItem.map { Set(plan.renamed.values).contains($0) } ?? false
+        if promoted, !sourceDeleted { showRestoredEdits() }
         Task { [weak self] in
             await record.task?.value
             let moves = record.moves
@@ -3125,7 +3138,7 @@ import UserNotifications
             if let failure { self.error = failure }
             self.library.unhide(plan.files)
             let restored = plan.items.filter { FileManager.default.fileExists(atPath: $0.photoFile.path) }
-            if self.mode == .photo, let reopen, restored.contains(reopen) || restored.contains(reopen.photoFile) {
+            if self.mode == .photo, let reopen, !(promoted && reopen == self.sourceItem), restored.contains(reopen) || restored.contains(reopen.photoFile) {
                 self.open(reopen, restoring: nil)
             } else if self.source == nil, let first = restored.first {
                 self.open(first, restoring: nil)
@@ -3170,18 +3183,23 @@ import UserNotifications
         if let current = selection.current, let id = current.variantID, library.duplicates[current.photoFile]?.contains(id) != true {
             selection.select(current.photoFile)
         }
-        if let source, files.keys.contains(source) {
-            if let id = sourceVariant, library.duplicates[source]?.contains(id) != true {
-                open(source, restoring: nil)
-            } else {
-                cancelBrightnessMatch(); brightnessMatchFailure = nil
-                customFilmFormat = false
-                adoptEdits(for: source, restore: readSidecar(source, variant: sourceVariant), legacy: nil, previous: state)
-                undoManager?.removeAllActions(withTarget: self)
-                changed()
-            }
-        }
+        if let source, files.keys.contains(source) { showRestoredEdits() }
         writeSidecars()
+    }
+
+    /// The open photograph's sidecar was put back: it shows the edits
+    /// restored, or its photograph opens if it was a duplicate that's gone.
+    private func showRestoredEdits() {
+        guard let source else { return }
+        if let id = sourceVariant, library.duplicates[source]?.contains(id) != true {
+            open(source, restoring: nil)
+        } else {
+            cancelBrightnessMatch(); brightnessMatchFailure = nil
+            customFilmFormat = false
+            adoptEdits(for: source, restore: readSidecar(source, variant: sourceVariant), legacy: nil, previous: state)
+            undoManager?.removeAllActions(withTarget: self)
+            changed()
+        }
     }
 
     /// Writes every queued sidecar change.

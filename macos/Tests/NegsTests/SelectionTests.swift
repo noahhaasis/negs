@@ -236,23 +236,41 @@ final class SelectionTests: XCTestCase {
         let a = URL(fileURLWithPath: "/photos/a.CR3"), b = URL(fileURLWithPath: "/photos/b.CR3")
         let duplicates = { (photo: URL) in photo == a ? ["a2", "a3"] : ["b2"] }
         let name = { (item: URL) in item.variantID.map { "\(item.lastPathComponent) (\($0))" } ?? item.lastPathComponent }
-        let one = DeletePlan([a], duplicates: duplicates)
+        // With all its duplicates, the photograph's file goes.
+        let one = DeletePlan([a, a.variant("a2"), a.variant("a3")], duplicates: duplicates)
         XCTAssertEqual(one.files, [a])
+        XCTAssertEqual(one.items, [a])
         XCTAssertEqual(one.following, 2)
         XCTAssertEqual(one.question(name: name, permanent: false), .init(
             message: "Move “a.CR3” to the Trash?",
             information: "The photograph’s file and its Negs rating and edits are moved to the Trash, with its 2 duplicates. You can put it back with Undo or from the Trash.",
             button: "Move to Trash"))
+        // Without them it leaves its sidecar, and the first duplicate left takes its place.
+        let kept = DeletePlan([a], duplicates: duplicates)
+        XCTAssertEqual(kept.files, [])
+        XCTAssertEqual(kept.duplicates, [a])
+        XCTAssertEqual(kept.renamed, [a.variant("a2"): a])
+        XCTAssertEqual(kept.after(a.variant("a2")), a)
+        XCTAssertEqual(kept.after(a.variant("a3")), a.variant("a3"))
+        XCTAssertEqual(kept.actionName, "Remove Photograph")
+        XCTAssertEqual(kept.question(name: name, permanent: false), .init(
+            message: "Remove “a.CR3”?",
+            information: "Its rating and edits are removed from its .negs file; the file stays, and its duplicate “a.CR3 (a2)” takes its place. You can put it back with Undo.",
+            button: "Remove"))
+        let some = DeletePlan([a, a.variant("a2"), b], duplicates: duplicates)
+        XCTAssertEqual(some.files, [])
+        XCTAssertEqual(some.renamed, [a.variant("a3"): a, b.variant("b2"): b])
+        XCTAssertEqual(some.question(name: name, permanent: false).message, "Remove 2 photographs and 1 duplicate?")
         // A chosen duplicate of a photograph that goes is counted with it.
-        let both = DeletePlan([a, a.variant("a2"), b], duplicates: duplicates)
+        let both = DeletePlan([a, a.variant("a2"), a.variant("a3"), b, b.variant("b2")], duplicates: duplicates)
         XCTAssertEqual(both.items, [a, b])
         XCTAssertEqual(both.duplicates, [])
-        XCTAssertEqual(both.following, 2)
+        XCTAssertEqual(both.following, 3)
         XCTAssertEqual(both.question(name: name, permanent: false).message, "Move 2 photographs to the Trash?")
         let copy = DeletePlan([b.variant("b2")], duplicates: duplicates)
         XCTAssertEqual(copy.question(name: name, permanent: false).message, "Remove the duplicate “b.CR3 (b2)”?")
         XCTAssertEqual(copy.actionName, "Remove Duplicate")
-        let mixed = DeletePlan([a, b.variant("b2")], duplicates: duplicates)
+        let mixed = DeletePlan([a, a.variant("a2"), a.variant("a3"), b.variant("b2")], duplicates: duplicates)
         XCTAssertEqual(mixed.question(name: name, permanent: false).message, "Move 1 photograph to the Trash and remove 1 duplicate?")
         XCTAssertEqual(mixed.question(name: name, permanent: true).message, "Delete 1 photograph permanently and remove 1 duplicate?")
         XCTAssertEqual(mixed.withoutFiles.items, [b.variant("b2")])

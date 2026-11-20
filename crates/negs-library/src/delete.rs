@@ -1,7 +1,8 @@
 //! What a delete does, and the question before it (`DeletePlan` in
-//! `Delete.swift`). Photographs go to the bin with their sidecars, and so
-//! with all their duplicates, and a RAW with its camera JPEG. A duplicate
-//! of a photograph that stays is removed from the sidecar; the file stays.
+//! `Delete.swift`). A photograph goes to the bin with its sidecar, and a
+//! RAW with its camera JPEG, only with all its duplicates. Otherwise what
+//! is chosen leaves the sidecar and the file stays: a duplicate, or the
+//! photograph itself, whose first duplicate left then takes its place.
 
 use crate::item::Item;
 use crate::sidecar;
@@ -66,12 +67,15 @@ pub struct DeletePlan {
     pub items: Vec<Item>,
     /// Photographs whose files go.
     pub files: Vec<PathBuf>,
-    /// Duplicates removed from the sidecar of a photograph that stays.
+    /// What leaves the sidecar of a photograph that stays: duplicates, and
+    /// photographs whose duplicates don't all go.
     pub duplicates: Vec<Item>,
-    /// Duplicates that go with their photographs without being chosen.
+    /// The duplicates that go with `files`.
     pub following: usize,
     /// The camera JPEGs that go with `files`.
     pub companions: HashMap<PathBuf, PathBuf>,
+    /// Each duplicate that becomes its photograph, its photograph removed.
+    pub renamed: Vec<(Item, Item)>,
 }
 
 /// The alert before a delete.
@@ -88,13 +92,37 @@ impl DeletePlan {
     pub fn new(chosen: &[Item], duplicates: impl Fn(&Path) -> Vec<String>, companion: impl Fn(&Path) -> Option<PathBuf>) -> DeletePlan {
         let mut seen = HashSet::new();
         let chosen: Vec<Item> = chosen.iter().filter(|i| seen.insert((*i).clone())).cloned().collect();
-        let files: Vec<PathBuf> = chosen.iter().filter(|i| i.variant.is_none()).map(|i| i.photo.clone()).collect();
+        // A photograph's file goes only with every one of its duplicates.
+        let files: Vec<PathBuf> = chosen
+            .iter()
+            .filter(|i| i.variant.is_none() && duplicates(&i.photo).iter().all(|id| seen.contains(&Item::duplicate(&i.photo, id.as_str()))))
+            .map(|i| i.photo.clone())
+            .collect();
         let trashed: HashSet<&PathBuf> = files.iter().collect();
-        let removed = chosen.iter().filter(|i| i.variant.is_some() && !trashed.contains(&i.photo)).cloned().collect();
+        let removed: Vec<Item> = chosen.iter().filter(|i| !trashed.contains(&i.photo)).cloned().collect();
         let items = chosen.iter().filter(|i| i.variant.is_none() || !trashed.contains(&i.photo)).cloned().collect();
-        let following = files.iter().map(|file| duplicates(file).iter().filter(|id| !seen.contains(&Item::duplicate(file, id.as_str()))).count()).sum();
+        let following = files.iter().map(|file| duplicates(file).len()).sum();
         let companions = files.iter().filter_map(|file| companion(file).map(|p| (file.clone(), p))).collect();
-        DeletePlan { items, files, duplicates: removed, following, companions }
+        let renamed = removed
+            .iter()
+            .filter(|i| i.variant.is_none())
+            .filter_map(|photo| {
+                let first = duplicates(&photo.photo).into_iter().find(|id| !seen.contains(&Item::duplicate(&photo.photo, id.as_str())))?;
+                Some((Item::duplicate(&photo.photo, first), photo.clone()))
+            })
+            .collect();
+        DeletePlan { items, files, duplicates: removed, following, companions, renamed }
+    }
+
+    /// What `item` is called once the plan is done: a duplicate that takes
+    /// its photograph's place becomes the photograph.
+    pub fn after(&self, item: &Item) -> Item {
+        self.renamed.iter().find(|(from, _)| from == item).map(|(_, to)| to.clone()).unwrap_or_else(|| item.clone())
+    }
+
+    /// The photographs among `duplicates`, kept for their duplicates.
+    fn kept_photographs(&self) -> usize {
+        self.duplicates.iter().filter(|i| i.variant.is_none()).count()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -104,7 +132,14 @@ impl DeletePlan {
     /// The same plan without its files: after a permanent delete, only the
     /// duplicates can come back and go again.
     pub fn without_files(&self) -> DeletePlan {
-        DeletePlan { items: self.duplicates.clone(), files: Vec::new(), duplicates: self.duplicates.clone(), following: 0, companions: HashMap::new() }
+        DeletePlan {
+            items: self.duplicates.clone(),
+            files: Vec::new(),
+            duplicates: self.duplicates.clone(),
+            following: 0,
+            companions: HashMap::new(),
+            renamed: self.renamed.clone(),
+        }
     }
 
     /// The Undo menu's name for it. `bin` is what the platform calls it
@@ -112,6 +147,8 @@ impl DeletePlan {
     pub fn action_name(&self, bin: &str) -> String {
         if !self.files.is_empty() {
             format!("Move to {bin}")
+        } else if self.kept_photographs() > 0 {
+            if self.duplicates.len() > 1 { "Remove Photographs" } else { "Remove Photograph" }.into()
         } else if self.duplicates.len() > 1 {
             "Remove Duplicates".into()
         } else {
@@ -158,13 +195,29 @@ impl DeletePlan {
             (false, true) => "the photograph’s file, its camera JPEG and its Negs rating and edits",
             (false, false) => "the photograph files, their camera JPEGs and their Negs ratings and edits",
         };
-        let copies_go = if copies == 1 {
-            "The duplicate’s rating and edits are removed from its .negs file; the photograph stays."
-        } else {
-            "The duplicates’ ratings and edits are removed from their .negs files; the photographs stay."
+        let kept = self.kept_photographs();
+        let copies_go = match (kept, copies) {
+            (0, 1) => "The duplicate’s rating and edits are removed from its .negs file; the photograph stays.".to_string(),
+            (0, _) => "The duplicates’ ratings and edits are removed from their .negs files; the photographs stay.".to_string(),
+            (_, 1) => match self.renamed.first() {
+                Some((next, _)) => format!("Its rating and edits are removed from its .negs file; the file stays, and its duplicate “{}” takes its place.", name(next)),
+                None => "Its rating and edits are removed from its .negs file; the file stays for its duplicates.".to_string(),
+            },
+            _ => "Their ratings and edits are removed from their .negs files; the files stay, and the first duplicate left takes each photograph’s place.".to_string(),
+        };
+        // What leaves the sidecars, counted: "1 photograph and 2 duplicates".
+        let removals = match (kept, copies - kept) {
+            (0, d) => count(d, "duplicate"),
+            (k, 0) => count(k, "photograph"),
+            (k, d) => format!("{} and {}", count(k, "photograph"), count(d, "duplicate")),
         };
         if photos == 0 {
-            let message = if copies == 1 { format!("Remove the duplicate “{}”?", name(&self.duplicates[0])) } else { format!("Remove {copies} duplicates?") };
+            let message = match (copies, kept) {
+                (1, 0) => format!("Remove the duplicate “{}”?", name(&self.duplicates[0])),
+                (1, _) => format!("Remove “{}”?", name(&self.duplicates[0])),
+                (_, 0) => format!("Remove {copies} duplicates?"),
+                _ => format!("Remove {removals}?"),
+            };
             return Question {
                 message,
                 information: format!("{copies_go} You can put {} back with Undo.", if copies == 1 { "it" } else { "them" }),
@@ -172,7 +225,7 @@ impl DeletePlan {
             };
         }
         let what = if photos == 1 && copies == 0 { format!("“{}”", name(&Item::photo(&self.files[0]))) } else { count(photos, "photograph") };
-        let and_copies = if copies == 0 { String::new() } else { format!(" and remove {}", count(copies, "duplicate")) };
+        let and_copies = if copies == 0 { String::new() } else { format!(" and remove {removals}") };
         if permanent {
             let back = if copies == 0 { "" } else { " The duplicates can be put back with Undo." };
             let also = if copies == 0 { String::new() } else { format!(" {copies_go}") };
@@ -208,26 +261,49 @@ mod tests {
     fn plans_and_their_questions() {
         let a = Item::photo("/p/a.CR3");
         let a2 = Item::duplicate("/p/a.CR3", "d1");
+        let a3 = Item::duplicate("/p/a.CR3", "d3");
         let b2 = Item::duplicate("/p/b.CR3", "d2");
         let ids = |p: &Path| if p == Path::new("/p/a.CR3") { vec!["d1".to_string(), "d3".to_string()] } else { vec!["d2".to_string()] };
         let jpeg = |p: &Path| (p == Path::new("/p/a.CR3")).then(|| PathBuf::from("/p/a.JPG"));
-        let plan = DeletePlan::new(&[a.clone(), a2.clone(), b2.clone(), a.clone()], ids, jpeg);
+        let plan = DeletePlan::new(&[a.clone(), a2.clone(), a3.clone(), b2.clone(), a.clone()], ids, jpeg);
         assert_eq!(plan.items, [a.clone(), b2.clone()], "a duplicate of a photograph that goes goes with it");
-        assert_eq!(plan.files, [PathBuf::from("/p/a.CR3")]);
+        assert_eq!(plan.files, [PathBuf::from("/p/a.CR3")], "with all its duplicates, the file goes");
         assert_eq!(plan.duplicates, [b2.clone()]);
-        assert_eq!(plan.following, 1, "d3 follows unchosen");
+        assert_eq!(plan.following, 2);
+        assert!(plan.renamed.is_empty());
         assert_eq!(plan.action_name("Recycle Bin"), "Move to Recycle Bin");
         let name = |i: &Item| match &i.variant {
             None => i.file_name(),
-            Some(_) => format!("{} (2)", i.file_name()),
+            Some(id) => format!("{} ({id})", i.file_name()),
         };
         let q = plan.question(name, false, "Recycle Bin");
         assert_eq!(q.message, "Move 1 photograph to the Recycle Bin and remove 1 duplicate?");
         assert_eq!(
             q.information,
-            "The photograph’s file, its camera JPEG and its Negs rating and edits are moved to the Recycle Bin, with its duplicate. The duplicate’s rating and edits are removed from its .negs file; the photograph stays. You can put them back with Undo or from the Recycle Bin."
+            "The photograph’s file, its camera JPEG and its Negs rating and edits are moved to the Recycle Bin, with its 2 duplicates. The duplicate’s rating and edits are removed from its .negs file; the photograph stays. You can put them back with Undo or from the Recycle Bin."
         );
         assert_eq!(q.button, "Delete");
+
+        // A photograph whose duplicates stay leaves its sidecar; the first left takes its place.
+        let kept = DeletePlan::new(&[a.clone()], ids, jpeg);
+        assert!(kept.files.is_empty() && kept.companions.is_empty());
+        assert_eq!(kept.duplicates, [a.clone()]);
+        assert_eq!(kept.renamed, [(a2.clone(), a.clone())]);
+        assert_eq!(kept.after(&a2), a);
+        assert_eq!(kept.after(&a3), a3);
+        assert_eq!(kept.action_name("Trash"), "Remove Photograph");
+        let q = kept.question(name, false, "Trash");
+        assert_eq!(q.message, "Remove “a.CR3”?");
+        assert_eq!(
+            q.information,
+            "Its rating and edits are removed from its .negs file; the file stays, and its duplicate “a.CR3 (d1)” takes its place. You can put it back with Undo."
+        );
+        assert_eq!(q.button, "Remove");
+        assert!(!DeletePlan::new(&[a.clone()], ids, jpeg).question(name, true, "Trash").message.contains("permanently"));
+        let some = DeletePlan::new(&[a.clone(), a2.clone()], ids, jpeg);
+        assert_eq!(some.renamed, [(a3.clone(), a.clone())]);
+        assert_eq!(some.question(name, false, "Trash").message, "Remove 1 photograph and 1 duplicate?");
+        assert_eq!(some.action_name("Trash"), "Remove Photographs");
         let one = DeletePlan::new(&[Item::photo("/p/c.jpg")], |_| vec![], |_| None);
         let q = one.question(name, false, "Trash");
         assert_eq!(q.message, "Move “c.jpg” to the Trash?");
@@ -239,7 +315,7 @@ mod tests {
         let copies = DeletePlan::new(&[b2.clone()], ids, jpeg);
         assert_eq!(copies.action_name("Trash"), "Remove Duplicate");
         let q = copies.question(name, false, "Trash");
-        assert_eq!(q.message, "Remove the duplicate “b.CR3 (2)”?");
+        assert_eq!(q.message, "Remove the duplicate “b.CR3 (d2)”?");
         assert_eq!(q.button, "Remove");
         assert_eq!(plan.without_files().items, [b2]);
     }

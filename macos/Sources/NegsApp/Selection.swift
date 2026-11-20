@@ -91,6 +91,16 @@ struct LibrarySelection: Equatable, Sendable {
         if let lead, !selected.contains(lead) { self.lead = current }
     }
 
+    /// `from` is now called `to`: a duplicate that took its photograph's
+    /// place when the photograph was deleted.
+    mutating func rename(_ from: URL, to: URL) {
+        if current == from { current = to }
+        if anchor == from { anchor = to }
+        if lead == from { lead = to }
+        if selected.remove(from) != nil { selected.insert(to) }
+        if base.remove(from) != nil { base.insert(to) }
+    }
+
     /// The selected photographs in `order`.
     func ordered(_ order: [URL]) -> [URL] { order.filter { selected.contains($0) } }
 }

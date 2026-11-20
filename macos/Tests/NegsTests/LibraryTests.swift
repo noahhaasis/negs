@@ -1020,9 +1020,25 @@ final class LibraryFormatTests: XCTestCase {
         defer { watching.cancel() }
         try await waitUntil { model.library.summariesLoaded && model.library.items.count == 6 }
 
-        // In the edit view it's the open photograph alone, with its duplicate; the next one opens.
+        // In the edit view it's the open photograph alone. Its duplicate
+        // stays, takes its place and opens; the file stays.
         XCTAssertEqual(model.deleteTargets, [b])
-        let plan = model.deletePlan(model.deleteTargets)
+        step { model.delete(model.deletePlan(model.deleteTargets)) }
+        await model.flushSidecars()
+        XCTAssertEqual(model.sourceItem, b)
+        XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "c.png", "c.png (2)", "d.png"])
+        XCTAssertTrue(exists(b))
+        XCTAssertEqual(try variants(b).map(\.id), ["b2"])
+        XCTAssertEqual(model.library.summary(for: b).rating, 1, "the duplicate's own rating")
+        XCTAssertEqual(undo.undoActionName, "Remove Photograph")
+        undo.undo()
+        try await waitUntil { model.library.items.count == 6 && model.source == b }
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(b).map(\.rating), [3, 1])
+        XCTAssertEqual(model.library.summary(for: b).rating, 3)
+
+        // With its duplicate, it goes to the Trash; the next one opens.
+        let plan = model.deletePlan([b, b.variant("b2")])
         XCTAssertEqual(plan.following, 1)
         step { model.delete(plan) }
         XCTAssertEqual(model.source, c)
@@ -1053,11 +1069,13 @@ final class LibraryFormatTests: XCTestCase {
         await model.flushSidecars()
         XCTAssertEqual(try variants(c).map(\.id), ["c1", "c2"])
 
-        // Delete Rejected Photographs: c, and its duplicate goes with it.
+        // Delete Rejected Photographs: c, and its duplicate takes its place.
         XCTAssertEqual(model.rejected, [c])
         step { model.delete(model.deletePlan(model.rejected)) }
-        try await waitUntil { !exists(c) && !exists(PhotoSidecar.url(for: c)) }
-        XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "b.png (2)", "d.png"])
+        await model.flushSidecars()
+        XCTAssertTrue(exists(c))
+        XCTAssertEqual(try variants(c).map(\.id), ["c2"])
+        XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "b.png (2)", "c.png", "d.png"])
 
         // With everything gone there's no photograph; undo opens one again.
         model.selectAll()

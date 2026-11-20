@@ -148,6 +148,24 @@ impl Selection {
         }
     }
 
+    /// `from` is now called `to`: a duplicate that took its photograph's
+    /// place when the photograph was deleted.
+    pub fn rename(&mut self, from: &Item, to: &Item) {
+        let swap = |i: &mut Option<Item>| {
+            if i.as_ref() == Some(from) {
+                *i = Some(to.clone());
+            }
+        };
+        swap(&mut self.current);
+        swap(&mut self.anchor);
+        swap(&mut self.lead);
+        for set in [&mut self.selected, &mut self.base] {
+            if set.remove(from) {
+                set.insert(to.clone());
+            }
+        }
+    }
+
     /// The selected items in `order`.
     pub fn ordered(&self, order: &[Item]) -> Vec<Item> {
         order.iter().filter(|i| self.selected.contains(*i)).cloned().collect()
