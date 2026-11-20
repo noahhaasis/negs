@@ -34,7 +34,8 @@ use super::{App, with_app};
 use crate::model::dirty;
 use crate::sheet_rules::{self as rules, Part, Rect, SheetLayout, ThumbSize};
 
-const TIMER_FLIGHT: usize = 1;
+/// The flight's next frame, posted as soon as a frame is presented.
+const WM_FLIGHT_FRAME: u32 = WM_APP + 1;
 /// A wheel's glide and the scroll bar's fade.
 const TIMER_SCROLL: usize = 2;
 const SENTENCE: TextStyle = TextStyle::serif(17.0, 400).italic();
@@ -342,20 +343,34 @@ fn start_flight(app: &mut App, opening: bool) {
     }
     grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current });
     crate::trace::event("grid_flight_start", || serde_json::json!({"opening": opening, "length_ms": rules::flight_length(longest)}));
+    // The window stands where the sheet will, the whole flight: resizing a
+    // flip-model swap chain's window every frame stalls its presents for
+    // two or three refreshes. A region is the sheet's growing edge.
+    set_mask(grid, opening.then(|| pixels(&grid.band)));
+    let r = grid.rect;
     unsafe {
-        let _ = ShowWindow(grid.hwnd, SW_SHOWNA);
-        SetTimer(grid.hwnd, TIMER_FLIGHT, 8, None);
+        let _ = SetWindowPos(grid.hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
     tick(app);
+}
+
+/// Clips the window to `mask` (main window pixels), or not at all.
+fn set_mask(grid: &Grid, mask: Option<Rect>) {
+    unsafe {
+        let region = mask.map(|m| {
+            let (x, y) = (m.x - grid.rect.left as f64, m.y - grid.rect.top as f64);
+            CreateRectRgn(x.round() as i32, y.round() as i32, (x + m.w).round() as i32, (y + m.h).round() as i32)
+        });
+        // The system owns the region from here.
+        SetWindowRgn(grid.hwnd, region.unwrap_or_default(), true);
+    }
 }
 
 fn finish_flight(app: &mut App, opening: bool) {
     let grid = app.grid.as_mut().unwrap();
     grid.flight = None;
-    unsafe {
-        let _ = KillTimer(grid.hwnd, TIMER_FLIGHT);
-    }
     if opening {
+        set_mask(grid, None);
         let r = grid.rect;
         unsafe {
             let _ = SetWindowPos(grid.hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -367,6 +382,8 @@ fn finish_flight(app: &mut App, opening: bool) {
         unsafe {
             let _ = ShowWindow(grid.hwnd, SW_HIDE);
         }
+        // Hidden first, so the whole sheet never shows for a frame.
+        set_mask(grid, None);
     }
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
 }
@@ -375,8 +392,9 @@ fn pixels(r: &RECT) -> Rect {
     Rect::new(r.left as f64, r.top as f64, (r.right - r.left) as f64, (r.bottom - r.top) as f64)
 }
 
-/// One frame of the flight: the window moved to the sheet's growing edge
-/// (its swap chain stays the whole window's), then painted.
+/// One frame of the flight: the window's region set to the sheet's growing
+/// edge, the frame painted and presented, and the next one asked for. The
+/// present waits for the display, which paces the flight at its refresh.
 fn tick(app: &mut App) {
     let grid = app.grid.as_mut().unwrap();
     let Some(flight) = &grid.flight else { return };
@@ -388,12 +406,26 @@ fn tick(app: &mut App) {
     }
     let along = if opening { elapsed } else { length - elapsed };
     let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
-    let moving = Instant::now();
-    unsafe {
-        let _ = SetWindowPos(grid.hwnd, HWND_TOP, mask.x.round() as i32, mask.y.round() as i32, mask.w.round().max(1.0) as i32, mask.h.round().max(1.0) as i32, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    let started = Instant::now();
+    set_mask(grid, Some(mask));
+    let hwnd = grid.hwnd;
+    let masked = started.elapsed().as_secs_f64() * 1000.0;
+    paint(app, hwnd);
+    let (draw, present, vblank) = app.grid.as_ref().map_or((0.0, 0.0, 0), |g| g.surface.timing);
+    let took = started.elapsed();
+    crate::trace::event("grid_flight_paint", || {
+        serde_json::json!({"at_ms": elapsed, "mask_ms": masked, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "present_ms": present, "vblank": vblank})
+    });
+    // A present that didn't wait (no GPU, or a display that let it through)
+    // waits for the compositor instead, so the flight never spins.
+    if took < std::time::Duration::from_millis(4) {
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+        }
     }
-    crate::trace::event("grid_flight_tick", || serde_json::json!({"at_ms": elapsed, "move_ms": moving.elapsed().as_secs_f64() * 1000.0}));
-    invalidate(grid.hwnd);
+    unsafe {
+        let _ = PostMessageW(hwnd, WM_FLIGHT_FRAME, WPARAM(0), LPARAM(0));
+    }
 }
 
 // MARK: Painting
@@ -849,17 +881,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
     unsafe {
         match msg {
             WM_PAINT => {
-                let started = Instant::now();
-                let painted = with_app(|app| {
-                    let flight = app.grid.as_ref().and_then(|g| g.flight.as_ref()).map(|f| f.started.elapsed().as_secs_f64() * 1000.0);
-                    paint(app, hwnd);
-                    flight.zip(app.grid.as_ref().map(|g| g.surface.timing))
-                });
-                if let Some(Some((at, (draw, present, vblank)))) = painted {
-                    let ms = started.elapsed().as_secs_f64() * 1000.0;
-                    crate::trace::event("grid_flight_paint", || serde_json::json!({"at_ms": at, "paint_ms": ms, "draw_ms": draw, "present_ms": present, "vblank": vblank}));
-                }
-                if painted.is_none() {
+                if with_app(|app| paint(app, hwnd)).is_none() {
                     let mut ps = PAINTSTRUCT::default();
                     BeginPaint(hwnd, &mut ps);
                     let _ = EndPaint(hwnd, &ps);
@@ -867,7 +889,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
-            WM_TIMER if wparam.0 == TIMER_FLIGHT => {
+            WM_FLIGHT_FRAME => {
                 with_app(tick);
                 LRESULT(0)
             }
