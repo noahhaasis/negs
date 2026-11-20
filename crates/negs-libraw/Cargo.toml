@@ -1,0 +1,13 @@
+[package]
+name = "negs-libraw"
+version.workspace = true
+edition.workspace = true
+# LibRaw itself is LGPL-2.1 or CDDL-1.0 (vendor/libraw); this wrapper is the
+# workspace's licence.
+license.workspace = true
+links = "negs_libraw"
+
+[dependencies]
+
+[build-dependencies]
+cc = { version = "1", features = ["parallel"] }

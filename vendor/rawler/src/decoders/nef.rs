@@ -9,6 +9,7 @@ use crate::RawLoader;
 use crate::RawlerError;
 use crate::Result;
 use crate::alloc_image_ok;
+use crate::alloc_image_plain;
 use crate::analyze::FormatDump;
 use crate::bits::BEu16;
 use crate::bits::BEu32;
@@ -202,7 +203,10 @@ impl<'a> Decoder for NefDecoder<'a> {
     };
     debug!("TIFF compression flag: {}, NEF compression mode: {:?}", compression, nef_compression);
 
-    if matches!(nef_compression, Some(NefCompression::HighEfficency)) || matches!(nef_compression, Some(NefCompression::HighEfficencyStar)) {
+    // HE/HE* can't be decompressed here, but a dummy decode (metadata only)
+    // still works: Negs takes the pixels from LibRaw (vendor/README.md).
+    let high_efficiency = matches!(nef_compression, Some(NefCompression::HighEfficency | NefCompression::HighEfficencyStar));
+    if high_efficiency && !dummy {
       return Err(RawlerError::DecoderFailed(format!("NEF compression {:?} is not supported", nef_compression)));
     }
 
@@ -233,7 +237,9 @@ impl<'a> Decoder for NefDecoder<'a> {
       return Err(RawlerError::DecoderFailed("NEF: TIFF and makernote endianness mismatch".to_string()));
     }
 
-    let image = if self.camera.model == "NIKON D100" {
+    let image = if high_efficiency {
+      alloc_image_plain!(width, height, true)
+    } else if self.camera.model == "NIKON D100" {
       width = 3040;
       decompress_12be_wcontrol(&src, width, height, dummy)?
     } else if self.camera.find_hint("coolpixsplit") {
