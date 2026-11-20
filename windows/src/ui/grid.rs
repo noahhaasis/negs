@@ -388,9 +388,11 @@ fn tick(app: &mut App) {
     }
     let along = if opening { elapsed } else { length - elapsed };
     let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
+    let moving = Instant::now();
     unsafe {
         let _ = SetWindowPos(grid.hwnd, HWND_TOP, mask.x.round() as i32, mask.y.round() as i32, mask.w.round().max(1.0) as i32, mask.h.round().max(1.0) as i32, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
+    crate::trace::event("grid_flight_tick", || serde_json::json!({"at_ms": elapsed, "move_ms": moving.elapsed().as_secs_f64() * 1000.0}));
     invalidate(grid.hwnd);
 }
 
@@ -851,10 +853,11 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 let painted = with_app(|app| {
                     let flight = app.grid.as_ref().and_then(|g| g.flight.as_ref()).map(|f| f.started.elapsed().as_secs_f64() * 1000.0);
                     paint(app, hwnd);
-                    flight
+                    flight.zip(app.grid.as_ref().map(|g| g.surface.timing))
                 });
-                if let Some(Some(at)) = painted {
-                    crate::trace::event("grid_flight_paint", || serde_json::json!({"at_ms": at, "paint_ms": started.elapsed().as_secs_f64() * 1000.0}));
+                if let Some(Some((at, (draw, present, vblank)))) = painted {
+                    let ms = started.elapsed().as_secs_f64() * 1000.0;
+                    crate::trace::event("grid_flight_paint", || serde_json::json!({"at_ms": at, "paint_ms": ms, "draw_ms": draw, "present_ms": present, "vblank": vblank}));
                 }
                 if painted.is_none() {
                     let mut ps = PAINTSTRUCT::default();
