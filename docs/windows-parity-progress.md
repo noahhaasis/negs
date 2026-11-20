@@ -18,6 +18,62 @@ decisions made with their reasons, and what was carried over. See
 | 7 | Strip and grid | done, merged `f9b8f47` |
 | 8 | Remaining features, Flip added (Open in Lightroom last) | done: 8c `1396397`, 8b `4a15d7f`, 8a `ee752ee`; follow-ups `563cfb5`, `68cfbee` |
 | 9 | Validation and release | done, merged `f05ff8f` |
+| – | Findings from using the build | first three fixed (branch `win-findings-1`, see log) |
+
+## 2026-11-20: findings from Noah's first use, first three (branch `win-findings-1`, tip `af03fb7`)
+
+Noah's reports on the `66c8630` portable build. All three were bugs, not differences
+from the Mac:
+
+- **A double click on the photograph didn't open the grid.** The canvas only fitted
+  the photograph. Now as `EditorModel.doubleClickPhotograph`: a zoomed photograph
+  fits, a fitted one shows the grid (`683a9d5`). Cropping keeps its own double click.
+- **The boxes in the grid were covered by the photographs beside them.** Each cell
+  drew its pick and selection boxes straight after its own thumbnail, so the next
+  thumbnail covered the part of the box reaching over the gap. Now all thumbnails
+  first, then every pick box, then every selection box (`LibraryGrid`), and the same
+  in the strip (`PhotoBrowser`, `683a9d5`).
+- **The flight to and from the grid wasn't smooth.** Traced with `NEGS_RENDER_TRACE`
+  (new events `grid_open`, `grid_flight_start`, `grid_flight_paint`): the 672 ms
+  flight drew 20 to 26 frames (about 30 a second), with gaps up to 150 ms.
+  Drawing took about 1 ms; each `Present` waited 15 to 50 ms. What was ruled out, in
+  order:
+  - The 8 ms `WM_TIMER` (really 15.6 ms) did cost a frame now and then, but wasn't
+    the main cause.
+  - A full-size window clipped by `SetWindowRgn` instead of moving it: no better.
+  - The thumbnails developing alongside (the helper shares the GPU): holding the
+    pump during the flight helped little on its own.
+  - A topmost DirectComposition visual with a composition swap chain, clipped by the
+    compositor: still 24 to 27 frames.
+  - Hiding the Vulkan canvas under the sheet: no change.
+  - A **still** mask (window or clip) gave 38 to 40 frames. So it wasn't the drawing
+    but the swap chain's geometry changing every frame. The likely reason is that DWM
+    lifts a still swap chain onto an overlay plane and drops it back to composition
+    when it moves, losing two or three refreshes each time.
+
+  **The fix** (`963e52d`, `af03fb7`): the sheet flies in a topmost DirectComposition
+  visual over the main window whose content is an `IDCompositionSurface`, which DWM
+  composes and never lifts onto an overlay. Each frame is drawn in a D2D bitmap,
+  copied into the surface (wherever its atlas puts it), committed with the visual's
+  clip set to the growing edge, then `DwmFlush` paces the next frame (posted, not a
+  timer). The grid's own window stays hidden while unfolding and is shown, painted
+  and flushed under the layer before the layer goes; folding hides it once the layer
+  is on screen. Each frame first repaints what the fold uncovers (outside the app
+  borrow). Thumbnail developing waits for the flight (`Thumbs::held`) and resumes
+  when it lands. G pressed mid-flight keeps the one chain of frames. With no
+  DirectComposition or no GPU the flight lands at once (as with animations off).
+- **Result** on the PC (3440×1440 at 59 Hz, GTX 1660 SUPER), 5 opens and 5 folds
+  per run: **38 to 41 frames per flight, gaps at a median of 16.6 ms**. The first
+  open after launch can still have one 30 to 75 ms gap (`Commit` waits once, likely
+  the GPU clocking up). Screenshots mid-unfold and mid-fold show the sheet in
+  place, with the inspector beside it while folding.
+- **Checks:** Mac cross-check plain and `--tests`, only `finish_rgb`'s warning.
+  `test-parity.cmd` at `af03fb7`: 277 of 277 (128.6 s). On the PC with goat copies
+  (`C:\Users\Noah\.negs\flight-roll`), all checked by screenshot: a double click
+  fitted opens the grid; at 100 % it fits; picks and the selection draw over their
+  neighbours in the grid and the strip; G mid-unfold folds back cleanly.
+- The `WIP experiment` commits on the branch are the measurements above. Their code
+  is gone by the tip.
 
 ## 2026-11-19: phase 9 merged, validation and release (`f05ff8f`, branch tip `a750b1f`)
 
