@@ -380,18 +380,31 @@ fn release(buffer: &wgpu::Buffer) {
 /// what Metal recommends this process keeps on the GPU at most (on Apple
 /// silicon, memory it shares with the system: about 2/3 of RAM on a 16 GB
 /// Mac, so ~1.3 GB, and ~0.7 GB on an 8 GB one, which then keeps no 60 MP
-/// frame). None elsewhere for now. `SPEKTRAFILM_FILM_CACHE=0` (or `off`)
-/// turns the cache off; a number sets the budget in MiB, on any platform.
+/// frame). On Windows, an eighth of the Vulkan admission budget
+/// (`capacity::vulkan_limits`: 80% of a discrete GPU's VRAM; ~600 MB on a
+/// 6 GB card, which keeps 24 and 33 MP frames but not 60 MP ones). None on
+/// shared-memory GPUs there, which have no admission budget. None on Linux
+/// (its app doesn't send `release_film_cache` yet) nor on the web.
+/// `SPEKTRAFILM_FILM_CACHE=0` (or `off`) turns the cache off; a number sets
+/// the budget in MiB, on any platform.
 #[cfg(feature = "wgpu-backend")]
-fn film_cache_budget(device: &wgpu::Device) -> u64 {
+fn film_cache_budget(device: &wgpu::Device, admission: Option<u64>) -> u64 {
     if let Ok(value) = std::env::var("SPEKTRAFILM_FILM_CACHE") {
         return value.trim().parse::<u64>().map_or(0, |mib| mib << 20);
     }
     #[cfg(target_os = "macos")]
-    return metal_threadgroups::raw_device(device).map_or(0, |raw| raw.recommended_max_working_set_size() / 8);
-    #[cfg(not(target_os = "macos"))]
-    {
+    return {
+        let _ = admission;
+        metal_threadgroups::raw_device(device).map_or(0, |raw| raw.recommended_max_working_set_size() / 8)
+    };
+    #[cfg(target_os = "windows")]
+    return {
         let _ = device;
+        admission.map_or(0, |bytes| bytes / 8)
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (device, admission);
         0
     }
 }
@@ -805,7 +818,10 @@ impl WgpuBackend {
                 || std::env::var_os("SPEKTRAFILM_WGPU_PROBE_WORKGROUPS").is_some()
         });
 
-        let film_cache_budget = film_cache_budget(&device);
+        #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
+        let film_cache_budget = film_cache_budget(&device, capacity.memory_budget);
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_arch = "wasm32")))]
+        let film_cache_budget = film_cache_budget(&device, None);
         tracing::info!(
             adapter = adapter_info.name,
             backend = ?adapter_info.backend,
@@ -2473,6 +2489,22 @@ impl WgpuBackend {
         self.film_cache.lock().unwrap().iter().map(|e| e.buffer.size()).sum()
     }
 
+    /// Admits a working set of `bytes` (`capacity`), first letting the kept
+    /// film sides go if it fits only without them, so they never send a
+    /// large render or export to the CPU. A side this render keeps is at
+    /// most `film_cache_budget`, an eighth of the admission budget, which
+    /// leaves a fifth of the VRAM besides.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
+    fn admit(&self, bytes: u64) -> Result<(), String> {
+        self.capacity.working_set(bytes)?;
+        let kept = self.film_cache_bytes();
+        if kept > 0 && self.capacity.working_set(bytes.saturating_add(kept)).is_err() {
+            tracing::debug!(bytes, kept, "film cache released to admit a render");
+            crate::ComputeBackend::release_film_cache(self);
+        }
+        Ok(())
+    }
+
     /// The input with `key` on the GPU, uploaded from `data` if it isn't
     /// there. The last two keys stay: a slider's interactive frames and the
     /// settled frame after it.
@@ -4040,7 +4072,8 @@ impl ComputeBackend for WgpuBackend {
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
     fn image_capacity(&self, width: u32, height: u32) -> Result<(), String> {
-        self.capacity.image(width, height).map(|_| ())
+        let bytes = self.capacity.image(width, height)?;
+        self.admit(bytes)
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
@@ -4070,7 +4103,7 @@ impl ComputeBackend for WgpuBackend {
             self.capacity.buffer(grid / 2, "colour noise grid")?;
             bytes = bytes.checked_add(grid).ok_or("colour noise working-set overflow")?;
         }
-        self.capacity.working_set(bytes)
+        self.admit(bytes)
     }
 
     fn release_film_cache(&self) -> u64 {
