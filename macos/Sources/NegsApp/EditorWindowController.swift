@@ -390,14 +390,16 @@ final class EdgeSplitView: NSSplitView {
     private func update() {
         guard let window else { return }
         let grid = model.mode == .grid
-        // The file name, in the grid too; "Negs" with no photograph (§3).
-        // Comparing, both names, or the one with its original.
+        // The file name, in the grid the selected one's (else the open
+        // photograph's); "Negs" with no photograph (§3). Comparing, both
+        // names, or the one with its original.
         let title: String
         if let comparison = model.comparison {
             let first = model.library.name(of: comparison.first.item)
             title = comparison.againstOriginal ? "\(first) with its \(model.originalPhrase)" : "\(first) and \(model.library.name(of: comparison.second.item))"
         } else {
-            title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
+            let named = grid ? model.selection.current ?? model.sourceItem : model.sourceItem
+            title = named.map { model.library.name(of: $0) } ?? "Negs"
         }
         if window.title != title { window.title = title }
         editorFrame.band.title = title

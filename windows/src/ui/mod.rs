@@ -683,8 +683,14 @@ impl App {
 
     fn update_chrome(&mut self) {
         let model = &self.model;
-        let title = match &model.source {
-            Some(path) => format!("{} - Negs", crate::model::file_name(path)),
+        // In the grid the selected photograph's name (else the open one's),
+        // as on the Mac (`EditorWindowController.update`).
+        let selected = model.shelf.in_grid.then(|| model.shelf.selection.current()).flatten();
+        let file = selected
+            .map(|item| model.shelf.library.as_ref().map_or_else(|| item.file_name(), |library| library.name(item)))
+            .or_else(|| model.source.as_deref().map(crate::model::file_name));
+        let title = match &file {
+            Some(name) => format!("{name} - Negs"),
             None => "Negs".into(),
         };
         // Only a new title: setting it hides the window for a moment (see
@@ -697,7 +703,7 @@ impl App {
             }
         }
         // The band says the file's name alone (`TitleBar.swift`).
-        let name = model.compare_title().or_else(|| model.source.as_deref().map(crate::model::file_name)).unwrap_or_else(|| "Negs".into());
+        let name = model.compare_title().or(file).unwrap_or_else(|| "Negs".into());
         titlebar::set_title(self.main, &name);
         panes::sync(self.panes, model.pane() == crate::model::Pane::Presets);
         self.update_taskbar();
