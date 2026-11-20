@@ -1725,6 +1725,7 @@ fn pre_translate(msg: &MSG) -> bool {
     if titlebar::keys(main, msg) {
         return true;
     }
+    leave_field_on_click(main, msg);
     let mut accelerators = None;
     let handled = with_app(|app| {
         if matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MOUSEWHEEL) {
@@ -1790,6 +1791,39 @@ fn pre_translate(msg: &MSG) -> bool {
         }
     }
     unsafe { IsDialogMessageW(main, msg).as_bool() }
+}
+
+/// A press outside the text field being typed in ends the typing, as on the
+/// Mac (`EditorWindow.sendEvent`), even where nothing takes the focus: the
+/// inspector's empty space, labels, the title bar. The fields apply their
+/// value when they lose the focus; that runs before the press is dispatched,
+/// so the clicked control sees the typed value.
+fn leave_field_on_click(main: HWND, msg: &MSG) {
+    if !matches!(
+        msg.message,
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_NCLBUTTONDOWN | WM_NCRBUTTONDOWN | WM_NCMBUTTONDOWN
+    ) {
+        return;
+    }
+    unsafe {
+        let focus = GetFocus();
+        if focus.0.is_null() || focused_class().as_deref() != Some("Edit") || msg.hwnd == focus {
+            return;
+        }
+        // Only the main window's fields, and only for presses inside it.
+        if !IsChild(main, focus).as_bool() || !(msg.hwnd == main || IsChild(main, msg.hwnd).as_bool()) {
+            return;
+        }
+        // An editable combo box's arrow belongs to its field.
+        if let Ok(parent) = GetParent(focus) {
+            if parent == msg.hwnd && draw::class_of(parent) == "ComboBox" {
+                return;
+            }
+        }
+        let _ = SetFocus(main);
+    }
+    // The commit was posted from WM_KILLFOCUS; apply it before the press.
+    drain();
 }
 
 extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
