@@ -24,6 +24,9 @@
 //!   Vulkan present or the software blit (`frame`: the render's request id,
 //!   revision, generation and kind; `canvas` vulkan or software).
 //! - `composited`: DWM finished composing after that present (`DwmFlush`).
+//! - `compare_sync`, `compare_paint`, `compare_split_move`: Compare's view
+//!   brought up to date with the model and drawn (`ms`; `pictures_ms`, the
+//!   photographs before the words), and each move of a slider drag.
 //! - `bench_*`: the benchmark's steps, below.
 //!
 //! `NEGS_RENDER_BENCH=<film>,<film>[,…]` drives the app for the trace: once

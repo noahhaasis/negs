@@ -259,6 +259,7 @@ fn make_bitmap(i: usize, key: usize, shown: crate::model::compare::Shown, color:
 
 /// Brings the pictures and words up to date with the model.
 pub fn sync(app: &mut App) {
+    let started = std::time::Instant::now();
     let Some(comparison) = app.model.comparison().cloned() else {
         VIEW.with(|v| {
             let mut v = v.borrow_mut();
@@ -324,6 +325,7 @@ pub fn sync(app: &mut App) {
     });
     super::status::set_fitting(app.model.fit_image);
     sync_note(app);
+    crate::trace::event("compare_sync", || serde_json::json!({"ms": started.elapsed().as_secs_f64() * 1000.0}));
     let hwnd = hwnd();
     if !hwnd.is_invalid() {
         unsafe {
@@ -583,6 +585,8 @@ fn draw_part(c: &mut Canvas, frame: RECT, x0: i32, x1: i32, image: &Bitmap, rela
 }
 
 fn paint(hwnd: HWND, dc: HDC) {
+    let started = std::time::Instant::now();
+    let mut pictures_ms = 0.0;
     let t = theme::tokens();
     let ink = super::sheet::ink();
     let s = draw::dpi_of(hwnd);
@@ -657,6 +661,7 @@ fn paint(hwnd: HWND, dc: HDC) {
                 }
             }
         }
+        pictures_ms = started.elapsed().as_secs_f64() * 1000.0;
         let words = v.words.clone();
         let mut targets = Vec::new();
         let edited = |i: usize| comparison.active_first == (i == 0) && !matches!(if i == 0 { &comparison.first } else { &comparison.second }, Side::Original(_));
@@ -704,6 +709,7 @@ fn paint(hwnd: HWND, dc: HDC) {
         v.targets = targets;
     });
     c.present(dc);
+    crate::trace::event("compare_paint", || serde_json::json!({"ms": started.elapsed().as_secs_f64() * 1000.0, "pictures_ms": pictures_ms, "width": client.right, "height": client.bottom}));
 }
 
 fn at(lparam: LPARAM, hwnd: HWND) -> (f32, f32) {
@@ -860,6 +866,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                         let p = at(lparam, hwnd);
                         let frame = VIEW.with(|v| v.borrow().frames[0]);
                         let split = ((p.0 - frame.x) / frame.w.max(1.0)) as f64;
+                        crate::trace::event("compare_split_move", || serde_json::json!({"split": split}));
                         with_app(|app| app.model.move_split(split));
                     }
                     Drag::Pan => {
