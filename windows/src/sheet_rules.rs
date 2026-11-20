@@ -109,6 +109,18 @@ impl Rect {
 
 // MARK: The strip
 
+/// A photograph's shape as its frames keep it: the one already `known`
+/// (its header's, or its embedded preview's) unless a thumbnail's differs
+/// by more than a thumbnail's rounding and a lens correction's trim, so
+/// frames don't move as previews and developed thumbnails arrive. The
+/// picture fills its frame, so what's left over is cut from its edges.
+pub fn kept_ratio(known: Option<f64>, thumbnail: f64) -> f64 {
+    match known {
+        Some(k) if (k - thumbnail).abs() / k < 0.01 => k,
+        _ => thumbnail,
+    }
+}
+
 /// A frame's width: the picture's height at its photograph's proportions.
 pub fn frame_width(ratio: Option<f64>) -> f64 {
     (PICTURE * ratio.unwrap_or(FALLBACK_RATIO).clamp(0.1, 10.0)).round()
@@ -814,6 +826,18 @@ mod tests {
         assert_eq!(frame_width(Some(1.5)), 210.0);
         assert_eq!(frame_width(Some(2.0 / 3.0)), 93.0);
         assert_eq!(frame_width(None), 210.0);
+    }
+
+    #[test]
+    fn a_thumbnail_keeps_the_known_shape_unless_it_really_differs() {
+        // 6016 × 4016 developed at 512 × 342, or trimmed to 512 × 340.
+        let header = 6016.0 / 4016.0;
+        assert_eq!(kept_ratio(Some(header), 512.0 / 342.0), header);
+        assert_eq!(kept_ratio(Some(header), 512.0 / 340.0), header);
+        // Cropped square, or turned: the thumbnail's.
+        assert_eq!(kept_ratio(Some(header), 1.0), 1.0);
+        assert_eq!(kept_ratio(Some(header), 342.0 / 512.0), 342.0 / 512.0);
+        assert_eq!(kept_ratio(None, 512.0 / 342.0), 512.0 / 342.0);
         let layout = StripLayout::new(vec![210.0, 93.0, 210.0]);
         assert_eq!(layout.xs, vec![0.0, 215.0, 313.0]);
         assert_eq!(layout.width, 523.0);
