@@ -79,6 +79,7 @@ pub struct Grid {
     bar_hover: bool,
     /// Dragging the knob: where in it the pointer took it.
     bar_drag: Option<f64>,
+    last_mask: Option<(f64, f64, f64, f64)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -369,6 +370,7 @@ fn set_mask(grid: &Grid, mask: Option<Rect>) {
 fn finish_flight(app: &mut App, opening: bool) {
     let grid = app.grid.as_mut().unwrap();
     grid.flight = None;
+    grid.last_mask = None;
     if opening {
         set_mask(grid, None);
         let r = grid.rect;
@@ -407,7 +409,14 @@ fn tick(app: &mut App) {
     let along = if opening { elapsed } else { length - elapsed };
     let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
     let started = Instant::now();
-    set_mask(grid, Some(mask));
+    // EXPERIMENT: hold the mask still at half way.
+    let hold = std::env::var_os("NEGS_FLIGHT_HOLD").is_some();
+    let mask = if hold { rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), 60.0) } else { mask };
+    let prior = grid.last_mask;
+    grid.last_mask = Some((mask.x, mask.y, mask.w, mask.h));
+    if prior != grid.last_mask {
+        set_mask(grid, Some(mask));
+    }
     let hwnd = grid.hwnd;
     let masked = started.elapsed().as_secs_f64() * 1000.0;
     paint(app, hwnd);
