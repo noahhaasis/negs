@@ -232,7 +232,10 @@ pub struct Surface {
 struct Layer {
     device: IDCompositionDevice,
     _target: IDCompositionTarget,
+    /// Placed and clipped (`place`); its child shows the surface and
+    /// carries the grid's fade (`animate`), clipped by it.
     visual: IDCompositionVisual,
+    content: IDCompositionVisual,
     surface: IDCompositionSurface,
     drawn: Option<ID2D1Bitmap1>,
 }
@@ -265,6 +268,43 @@ impl Surface {
             let _ = layer.visual.SetClip2(&rect);
             let _ = layer.device.Commit();
         }
+    }
+
+    /// Runs a layer's fade on the compositor from the next commit, over
+    /// `length` seconds: `look(t)` gives its opacity, how far down it is
+    /// (pixels) and its scale `about` a point (pixels in the layer), as
+    /// cubic pieces (`sheet_rules::cubic_pieces`). It holds the last values.
+    /// False without a layer, or if the compositor refused it.
+    pub fn animate(&self, length: f64, about: (f32, f32), look: impl Fn(f64) -> (f64, f64, f64)) -> bool {
+        let Some(layer) = &self.layer else { return false };
+        let pieces = ((length * 1000.0 / 10.0).ceil() as usize).clamp(4, 32);
+        let made = (|| -> windows::core::Result<()> {
+            let animation = |value: &dyn Fn(f64) -> f64| -> windows::core::Result<IDCompositionAnimation> {
+                let a = unsafe { layer.device.CreateAnimation()? };
+                for [begin, c0, c1, c2, c3] in crate::sheet_rules::cubic_pieces(value, length, pieces) {
+                    unsafe { a.AddCubic(begin, c0 as f32, c1 as f32, c2 as f32, c3 as f32)? };
+                }
+                unsafe { a.End(length, value(length) as f32)? };
+                Ok(a)
+            };
+            let (cx, cy) = (about.0 as f64, about.1 as f64);
+            let fade = unsafe { layer.device.CreateEffectGroup()? };
+            unsafe { fade.SetOpacity(&animation(&|t| look(t).0)?)? };
+            // Scaled about the point, then moved down: x' = k·x + (1 − k)·cx, y' = k·y + (1 − k)·cy + dy.
+            let matrix = unsafe { layer.device.CreateMatrixTransform()? };
+            let scale = animation(&|t| look(t).2)?;
+            unsafe {
+                matrix.SetMatrixElement(0, 0, &scale)?;
+                matrix.SetMatrixElement(1, 1, &animation(&|t| look(t).2)?)?;
+                matrix.SetMatrixElement(2, 0, &animation(&|t| (1.0 - look(t).2) * cx)?)?;
+                matrix.SetMatrixElement(2, 1, &animation(&|t| (1.0 - look(t).2) * cy + look(t).1)?)?;
+                layer.content.SetEffect(&fade)?;
+                layer.content.SetTransform(&matrix)?;
+                layer.device.Commit()?;
+            }
+            Ok(())
+        })();
+        made.is_ok()
     }
 
     /// Paints `hwnd` through the GPU (or, layered, a visual over its
@@ -441,7 +481,7 @@ impl Surface {
     pub fn release(&mut self) {
         if let Some(layer) = self.layer.take() {
             unsafe {
-                let _ = layer.visual.SetContent(None::<&windows::core::IUnknown>);
+                let _ = layer.content.SetContent(None::<&windows::core::IUnknown>);
                 let _ = layer.device.Commit();
             }
         }
@@ -460,10 +500,12 @@ fn make_layer(gpu: &Gpu, hwnd: HWND, (w, h): (u32, u32)) -> Option<Layer> {
         let surface = device.CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED).ok()?;
         let target = device.CreateTargetForHwnd(hwnd, true).ok()?;
         let visual = device.CreateVisual().ok()?;
+        let content = device.CreateVisual().ok()?;
         // Nothing shows until it's placed.
         visual.SetClip2(&D2D_RECT_F::default()).ok()?;
-        visual.SetContent(&surface).ok()?;
+        content.SetContent(&surface).ok()?;
+        visual.AddVisual(&content, FALSE, None::<&IDCompositionVisual>).ok()?;
         target.SetRoot(&visual).ok()?;
-        Some(Layer { device, _target: target, visual, surface, drawn: None })
+        Some(Layer { device, _target: target, visual, content, surface, drawn: None })
     }
 }
