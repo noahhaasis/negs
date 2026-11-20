@@ -1,0 +1,383 @@
+{
+ "stock": "fujifilm_sensia_400",
+ "source": {
+  "file": "ProfessionalFilmDataGuide.pdf",
+  "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+  "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+  "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+ },
+ "panels": {
+  "sensitivity": {
+   "page": 27,
+   "page_rotation": 0,
+   "frame_pdf": [
+    337.239013671875,
+    89.42520141601562,
+    433.822998046875,
+    173.50820922851562
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.511814604554727,
+     "offset": -803.5464596955024,
+     "span": 339.18504689421053,
+     "gridline_pdf": [
+      342.739,
+      371.239,
+      399.489,
+      428.239
+     ],
+     "gridline_residual": [
+      0.089414,
+      0.17613,
+      -0.615107,
+      0.349563
+     ],
+     "frame_pdf": [
+      337.239013671875,
+      433.822998046875
+     ],
+     "frame_value": [
+      380.77443374301936,
+      719.9594806372301
+     ],
+     "worst_over_span": 0.0018134853793855868,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.035087719298245605,
+     "offset": 5.1036558987801515,
+     "span": 2.950280975877192,
+     "gridline_pdf": [
+      116.9542,
+      145.4542
+     ],
+     "gridline_residual": [
+      -0.0,
+      -0.0
+     ],
+     "frame_pdf": [
+      89.42520141601562,
+      173.50820922851562
+     ],
+     "frame_value": [
+      1.96592953330592,
+      -0.9843514425712723
+     ],
+     "worst_over_span": 3.0104875669885905e-16,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Sensitivity (log) labelled at 1.0 steps; only the two interior gridlines are drawn and the plot frame is not at its labels (2-3 % of a unit off), so the axis is fitted through the two gridlines, which fix the scale. The offset does not reach the profile: D5 rescales every channel."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      "30.0"
+     ],
+     "points": 442,
+     "x_range": [
+      383.69615889406225,
+      508.36557735575514
+     ],
+     "y_range": [
+      -0.42814127604166696,
+      1.9502407380163338
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      "30.1"
+     ],
+     "points": 442,
+     "x_range": [
+      460.0781265431275,
+      600.5507107253167
+     ],
+     "y_range": [
+      -0.3228781181469307,
+      1.5718587239583321
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      "30.2"
+     ],
+     "points": 316,
+     "x_range": [
+      570.7002865866015,
+      677.8106320255207
+     ],
+     "y_range": [
+      -0.3404219777960531,
+      1.5719673000372572
+     ]
+    }
+   }
+  },
+  "dye_density": {
+   "page": 27,
+   "page_rotation": 0,
+   "frame_pdf": [
+    470.1929931640625,
+    89.81820678710938,
+    564.844970703125,
+    171.48519897460938
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.6216623930190583,
+     "offset": -1324.3524227207813,
+     "span": 342.79750747810726,
+     "gridline_pdf": [
+      476.073,
+      503.758,
+      531.443,
+      558.883
+     ],
+     "gridline_residual": [
+      -0.176749,
+      0.088965,
+      0.35468,
+      -0.266895
+     ],
+     "frame_pdf": [
+      470.1929931640625,
+      564.844970703125
+     ],
+     "frame_value": [
+      378.52785808257113,
+      721.3253655606784
+     ],
+     "worst_over_span": 0.0010346622926101139,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.018522305608078455,
+     "offset": 3.1730872774757217,
+     "span": 1.5126609873894306,
+     "gridline_pdf": [
+      117.5032,
+      143.9632
+     ],
+     "gridline_residual": [
+      -0.003343,
+      0.006557
+     ],
+     "frame_pdf": [
+      89.81820678710938,
+      171.48519897460938
+     ],
+     "frame_value": [
+      1.5094470021952955,
+      -0.0032139851941352937
+     ],
+     "frame_residual": [
+      null,
+      -0.003214
+     ],
+     "worst_over_span": 0.004334724431103734,
+     "gate": 0.005,
+     "pass": 1.0,
+     "gate_reason": "Only two gridlines (1.0, 0.5) are drawn; 0.0 is printed at the plot's bottom edge, which is taken as the zero tick. It sits 1.06 pt from where the gridlines' spacing alone would put 0.0; with that zero the lowest dye value would be +0.017 D (a dye density cannot be negative). Worst position 0.43 % of the span (0.007 D); gate rounded up to the next 0.1 %. Only the zero matters: the dye scale is renormalised later (densitometer normalisation). See docs/adding-film-stocks.md D11."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_y": {
+     "paths": [
+      "34.0"
+     ],
+     "points": 191,
+     "x_range": [
+      378.19827442607743,
+      658.5873149999686
+     ],
+     "y_range": [
+      0.03308957552604408,
+      0.9974862831778326
+     ]
+    },
+    "dye_density_m": {
+     "paths": [
+      "34.1"
+     ],
+     "points": 253,
+     "x_range": [
+      379.382542997281,
+      720.1084923017934
+     ],
+     "y_range": [
+      0.03914629258508251,
+      0.992129227716636
+     ]
+    },
+    "dye_density_c": {
+     "paths": [
+      "34.2"
+     ],
+     "points": 127,
+     "x_range": [
+      378.19827442607743,
+      720.1084923017934
+     ],
+     "y_range": [
+      0.11069923244744118,
+      0.9991276000649023
+     ]
+    }
+   }
+  },
+  "characteristic": {
+   "page": 27,
+   "page_rotation": 0,
+   "frame_pdf": [
+    339.7139892578125,
+    250.15420532226562,
+    480.61395263671875,
+    362.9542236328125
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 0.035430968103296996,
+     "offset": -16.036432293032906,
+     "span": 4.992222108233742,
+     "gridline_pdf": [
+      354.049,
+      367.679,
+      382.111,
+      396.211,
+      410.214,
+      424.218,
+      438.649,
+      452.515,
+      466.827
+     ],
+     "gridline_residual": [
+      0.007867,
+      -0.00921,
+      0.00213,
+      0.001707,
+      -0.002154,
+      -0.005978,
+      0.005326,
+      -0.003388,
+      0.0037
+     ],
+     "frame_pdf": [
+      339.7139892578125,
+      480.61395263671875
+     ],
+     "frame_value": [
+      -4.000036775395573,
+      0.9921853328381687
+     ],
+     "worst_over_span": 0.0018448462306519505,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.03595280459910865,
+     "offset": 13.038381242339021,
+     "span": 4.05547701709497,
+     "gridline_pdf": [
+      265.4292,
+      279.0592,
+      293.1592,
+      307.0242,
+      320.8892,
+      334.7542,
+      348.8542
+     ],
+     "gridline_residual": [
+      -0.004543,
+      0.00542,
+      -0.001515,
+      0.0,
+      0.001514,
+      0.003028,
+      -0.003905
+     ],
+     "frame_pdf": [
+      250.15420532226562,
+      362.9542236328125
+     ],
+     "frame_value": [
+      4.044635978742301,
+      -0.010841038352669585
+     ],
+     "worst_over_span": 0.0013365149574063274,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "density_curve_r": {
+     "paths": [
+      40
+     ],
+     "points": 190,
+     "x_range": [
+      -3.9870334543991657,
+      -0.018765026829903775
+     ],
+     "y_range": [
+      0.10688053684777543,
+      3.0801280015889017
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      "part0:39",
+      "part1:40"
+     ],
+     "points": 246,
+     "x_range": [
+      -3.9870334543991657,
+      -0.018765026829903775
+     ],
+     "y_range": [
+      0.10688053684777543,
+      3.2365484384309138
+     ],
+     "joins_pt": [
+      0.4878
+     ]
+    },
+    "density_curve_b": {
+     "paths": [
+      "part0:38.0",
+      "part1:39",
+      "part2:40",
+      "part3:38.1"
+     ],
+     "points": 290,
+     "x_range": [
+      -3.9781757123733428,
+      -0.027622768855728452
+     ],
+     "y_range": [
+      0.14109343828990184,
+      3.308178413342711
+     ],
+     "joins_pt": [
+      0.332,
+      0.4878,
+      0.3259
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}

@@ -18,10 +18,14 @@ the earlier recipes extract exactly as before:
     area) instead of a stroked one;
   * panel "grid_crossing": true also takes gridlines that run past the frame (ticks drawn
     as one line with the gridline), using the part inside it;
+  * panel "grid_ignore": [{"pdf": "x"|"y", "at": <pdf coordinate>, "reason": ...}] drops
+    one stray full-height line found as a gridline (e.g. a second 400 nm line drawn as its
+    own path 0.3-0.5 pt beside the grid's own);
   * axis "relative_reason": a relative axis (e.g. "Relative Sensitivity (log)" with a
     one-unit scale bar) may be fitted through two gridlines; its offset is arbitrary and
     the reason must say what fixes the scale and why the offset does not matter;
-  * curve "color": "any"; "dashes": the exact dash string, instead of "dashed";
+  * curve "color": "any"; "dashes": the exact dash string, instead of "dashed"; "width":
+    the stroke width (to 0.005 pt), where a chart repeats a line in another weight;
   * curve "select": {"sort": "x_mid"|"y_mid", "index": k, "of": n}: the paths are split
     into their connected subpaths (one PDF path may hold all three curves), those
     matching the style are sorted by the mean of their PDF x or y, there must be n of
@@ -149,15 +153,19 @@ def gridlines(drawings, frame, min_frac=0.3, crossing=False):
 
 def fit_axis(spec, grid, frame):
     """spec: {"pdf": "x"|"y", "gridlines": [values in increasing PDF coordinate],
-    "frame": [value at lower PDF edge, value at upper PDF edge] or null}."""
+    "frame": [value at lower PDF edge, value at upper PDF edge] or null; either value may
+    be null when only one edge carries a label}."""
     pos = np.array(grid[spec["pdf"]])
     vals = np.array(spec["gridlines"], float)
     if pos.size != vals.size:
         raise ValueError(f"axis on pdf {spec['pdf']}: found {pos.size} gridlines {np.round(pos, 2).tolist()}, spec lists {vals.size}")
     edges = (frame.x0, frame.x1) if spec["pdf"] == "x" else (frame.y0, frame.y1)
     fit_pos, fit_vals = pos, vals
-    if spec.get("frame") is not None:  # labelled frame edges are ticks too
-        fit_pos, fit_vals = np.concatenate([pos, edges]), np.concatenate([vals, spec["frame"]])
+    # labelled frame edges are ticks too; an entry may be null where only one edge is labelled
+    fr_edges = [(e, v) for e, v in zip(edges, spec["frame"]) if v is not None] if spec.get("frame") is not None else []
+    if fr_edges:
+        fit_pos = np.concatenate([pos, [e for e, _ in fr_edges]])
+        fit_vals = np.concatenate([vals, [v for _, v in fr_edges]])
     if fit_pos.size < (2 if spec.get("relative_reason") else 3):
         raise ValueError(f"axis on pdf {spec['pdf']}: fewer than 3 labelled positions")
     A = np.column_stack([fit_pos, np.ones_like(fit_pos)])
@@ -167,7 +175,11 @@ def fit_axis(spec, grid, frame):
            "gridline_pdf": pos.round(4).tolist(), "gridline_residual": (a * pos + b - vals).round(6).tolist(),
            "frame_pdf": list(edges), "frame_value": [a * e + b for e in edges]}
     worst = float(np.max(np.abs(a * pos + b - vals))) / span
-    if spec.get("frame") is not None:
+    if spec.get("frame") is not None and None in spec["frame"]:
+        fres = [None if v is None else round(a * e + b - v, 6) for e, v in zip(edges, spec["frame"])]
+        res["frame_residual"] = fres
+        worst = max([worst] + [abs(r) / span for r in fres if r is not None])
+    elif spec.get("frame") is not None:
         fr = np.array(spec["frame"], float)
         res["frame_residual"] = (np.array(res["frame_value"]) - fr).round(6).tolist()
         worst = max(worst, float(np.max(np.abs(np.array(res["frame_value"]) - fr))) / span)
@@ -199,6 +211,8 @@ def style_match(d, cs):
         style = (d.get("dashes") or "").strip() == want or (want in ("[] 0", "") and not dashed)
     else:
         style = dashed == cs.get("dashed", False)
+    if "width" in cs and abs((d.get("width") or 0) - cs["width"]) > 0.005:
+        return False
     return colour_match(d.get("color"), cs["color"]) and style
 
 
@@ -207,6 +221,8 @@ def select_subpath(drawings, frame, name, cs):
     cands = []
     for i, d in enumerate(drawings):
         if d["type"] not in ("s", "fs") or not style_match(d, cs):
+            continue
+        if any(it[0] not in ("l", "c") for it in d["items"]):  # rectangles and quads are never curves
             continue
         for j, run in enumerate(split_subpaths(d["items"])):
             if not any(it[0] == "c" for it in run):
@@ -256,7 +272,10 @@ def join_parts(drawings, frame, name, cs, k):
     for n in range(1, len(parts)):
         end = out[-1][1][-1]
         p = parts[n]
-        gap = float(np.min(np.hypot(*(p - end).T)))
+        if cs["parts"][n - 1].get("until_next"):  # this part starts on the previous one's line
+            gap = float(np.min(np.hypot(*(parts[n - 1] - p[0]).T)))
+        else:  # the previous part ends on this one's line
+            gap = float(np.min(np.hypot(*(p - end).T)))
         if gap > tol:
             raise ValueError(f"{name}: part {n} starts {gap:.3f} pt from the end of part {n - 1}, over {tol} pt")
         keep = p[:, k] > end[k]
@@ -274,6 +293,13 @@ def join_parts(drawings, frame, name, cs, k):
 def extract_panel(page, drawings, panel):
     frame = find_frame(drawings, panel["frame"], kinds=("f", "fs") if panel.get("frame_kind") == "fill" else ("s", "fs"))
     grid = gridlines(drawings, frame, crossing=panel.get("grid_crossing", False))
+    for ign in panel.get("grid_ignore", []):  # a stray line drawn next to a gridline
+        if not ign.get("reason"):
+            raise ValueError("grid_ignore needs a reason")
+        hits = [g for g in grid[ign["pdf"]] if abs(g - ign["at"]) <= 0.05]
+        if len(hits) != 1:
+            raise ValueError(f"grid_ignore: no single line at pdf {ign['pdf']} {ign['at']} in {grid[ign['pdf']]}")
+        grid[ign["pdf"]] = [g for g in grid[ign["pdf"]] if g not in hits]
     axes = {k: fit_axis(panel["axes"][k], grid, frame) for k in ("x", "y")}
     curves = {}
     for name, cs in panel["curves"].items():

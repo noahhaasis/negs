@@ -1,0 +1,372 @@
+{
+ "stock": "fujifilm_velvia_100",
+ "source": {
+  "file": "ProfessionalFilmDataGuide.pdf",
+  "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+  "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+  "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+ },
+ "panels": {
+  "sensitivity": {
+   "page": 23,
+   "page_rotation": 0,
+   "frame_pdf": [
+    338.2749938964844,
+    89.3092041015625,
+    432.71197509765625,
+    172.93521118164062
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.6164194627905806,
+     "offset": -843.6152394253668,
+     "span": 341.52373682310616,
+     "gridline_pdf": [
+      343.798,
+      371.64,
+      399.215,
+      426.778
+     ],
+     "gridline_residual": [
+      -0.297446,
+      0.390832,
+      0.113643,
+      -0.20703
+     ],
+     "frame_pdf": [
+      338.2749938964844,
+      432.71197509765625
+     ],
+     "frame_value": [
+      379.7290322772442,
+      721.2527691003504
+     ],
+     "worst_over_span": 0.001144378251102594,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.03591694644573708,
+     "offset": 5.202218064356307,
+     "span": 3.003590817765996,
+     "gridline_pdf": [
+      116.9982,
+      144.8402
+     ],
+     "gridline_residual": [
+      0.0,
+      0.0
+     ],
+     "frame_pdf": [
+      89.3092041015625,
+      172.93521118164062
+     ],
+     "frame_value": [
+      1.9945041635290846,
+      -1.0090866542369108
+     ],
+     "worst_over_span": 2.9570553167449507e-16,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Sensitivity (log) labelled at 1.0 steps; only the two interior gridlines are drawn and the plot frame is not at its labels (2-3 % of a unit off), so the axis is fitted through the two gridlines, which fix the scale. The offset does not reach the profile: D5 rescales every channel."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      "38.0"
+     ],
+     "points": 505,
+     "x_range": [
+      394.97951111717316,
+      521.5541923148435
+     ],
+     "y_range": [
+      -0.70178126921597,
+      1.0580164750365109
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      "38.1"
+     ],
+     "points": 505,
+     "x_range": [
+      482.60892609139137,
+      601.9906098986999
+     ],
+     "y_range": [
+      -0.70178126921597,
+      1.0201840664277952
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      "38.2"
+     ],
+     "points": 442,
+     "x_range": [
+      550.3445023606298,
+      688.9943692963018
+     ],
+     "y_range": [
+      -0.70178126921597,
+      1.0458686035959506
+     ]
+    }
+   }
+  },
+  "dye_density": {
+   "page": 23,
+   "page_rotation": 0,
+   "frame_pdf": [
+    468.0799865722656,
+    88.15921020507812,
+    565.4140014648438,
+    172.74322509765625
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.4750961615383416,
+     "offset": -1246.2511755539283,
+     "span": 338.245061540314,
+     "gridline_pdf": [
+      473.58,
+      502.58,
+      531.58,
+      559.83
+     ],
+     "gridline_residual": [
+      -0.515182,
+      0.262713,
+      1.040501,
+      -0.788032
+     ],
+     "frame_pdf": [
+      468.0799865722656,
+      565.4140014648438
+     ],
+     "frame_value": [
+      380.3717890762705,
+      718.6168506165845
+     ],
+     "worst_over_span": 0.003076176133172618,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "Hand-drafted chart (Professional Film Data Guide; plot about 95 x 85 pt, characteristic curves 140 x 113 pt) whose own gridlines are unevenly spaced by up to 1.6 pt, so no straight axis reproduces them within 0.2 %. Worst gridline 0.31 % of the span (1.04 nm); gate rounded up to the next 0.1 %. The error is bounded by the calibration against spektrafilm's own digitisations of Provia 100F and Velvia 100 and by the charts the guide repeats for other films (docs/adding-film-stocks.md D11)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.017830379189081053,
+     "offset": 3.0798279102802586,
+     "span": 1.5081650588695468,
+     "gridline_pdf": [
+      116.6592,
+      144.6592
+     ],
+     "gridline_residual": [
+      -0.00025,
+      0.000499
+     ],
+     "frame_pdf": [
+      88.15921020507812,
+      172.74322509765625
+     ],
+     "frame_value": [
+      1.5079157633138116,
+      -0.0002492955557351628
+     ],
+     "frame_residual": [
+      null,
+      -0.000249
+     ],
+     "worst_over_span": 0.00033109050484583606,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_y": {
+     "paths": [
+      "42.2"
+     ],
+     "points": 316,
+     "x_range": [
+      396.84031729688104,
+      704.8657865086223
+     ],
+     "y_range": [
+      0.008353702172312794,
+      1.0016936244689285
+     ]
+    },
+    "dye_density_m": {
+     "paths": [
+      "42.1"
+     ],
+     "points": 442,
+     "x_range": [
+      390.54340232839036,
+      706.2281243165787
+     ],
+     "y_range": [
+      0.006116598186118427,
+      1.0001781945970536
+     ]
+    },
+    "dye_density_c": {
+     "paths": [
+      "42.0"
+     ],
+     "points": 442,
+     "x_range": [
+      391.6867437504345,
+      704.0979735139463
+     ],
+     "y_range": [
+      0.026541382908972455,
+      1.0014435575830292
+     ]
+    }
+   }
+  },
+  "characteristic": {
+   "page": 23,
+   "page_rotation": 0,
+   "frame_pdf": [
+    341.0530090332031,
+    250.78521728515625,
+    482.11798095703125,
+    363.5862121582031
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 0.03550826335466736,
+     "offset": -15.618874424716111,
+     "span": 5.008972173190046,
+     "gridline_pdf": [
+      355.363,
+      369.489,
+      383.794,
+      397.548,
+      411.671,
+      425.609,
+      439.732,
+      453.671,
+      468.454
+     ],
+     "gridline_residual": [
+      -0.000551,
+      0.001039,
+      0.008984,
+      -0.002635,
+      -0.001152,
+      -0.006238,
+      -0.004755,
+      -0.009805,
+      0.015114
+     ],
+     "frame_pdf": [
+      341.0530090332031,
+      482.11798095703125
+     ],
+     "frame_value": [
+      -3.5086743620633882,
+      1.5002978111266607
+     ],
+     "worst_over_span": 0.00301737197533751,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "Hand-drafted chart (Professional Film Data Guide; plot about 95 x 85 pt, characteristic curves 140 x 113 pt) whose own gridlines are unevenly spaced by up to 1.6 pt, so no straight axis reproduces them within 0.2 %. Worst gridline 0.30 % of the span (0.0151 log H); gate rounded up to the next 0.1 %. The error is bounded by the calibration against spektrafilm's own digitisations of Provia 100F and Velvia 100 and by the charts the guide repeats for other films (docs/adding-film-stocks.md D11)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.0353425075884966,
+     "offset": 12.863319912136223,
+     "span": 3.9866700172906255,
+     "gridline_pdf": [
+      264.7882,
+      279.1562,
+      293.3632,
+      307.3882,
+      321.4552,
+      335.6672,
+      349.7902
+     ],
+     "gridline_residual": [
+      0.005041,
+      -0.002761,
+      -0.004872,
+      -0.00055,
+      0.002287,
+      -1e-06,
+      0.000856
+     ],
+     "frame_pdf": [
+      250.78521728515625,
+      363.5862121582031
+     ],
+     "frame_value": [
+      3.9999414671528193,
+      0.013271449862193307
+     ],
+     "worst_over_span": 0.0012643788559953857,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "density_curve_r": {
+     "paths": [
+      48
+     ],
+     "points": 253,
+     "x_range": [
+      -3.387946483382759,
+      1.0013713847794286
+     ],
+     "y_range": [
+      0.13923198296530082,
+      3.3879870348756906
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      47
+     ],
+     "points": 253,
+     "x_range": [
+      -3.3814837367199395,
+      0.9884112154153613
+     ],
+     "y_range": [
+      0.1362883363693168,
+      3.8212917242655546
+     ]
+    },
+    "density_curve_b": {
+     "paths": [
+      49
+     ],
+     "points": 253,
+     "x_range": [
+      -3.382300790875501,
+      0.9884112154153613
+     ],
+     "y_range": [
+      0.13923179313855272,
+      3.69193637535202
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}
