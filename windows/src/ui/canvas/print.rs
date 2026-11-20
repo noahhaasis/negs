@@ -486,14 +486,16 @@ impl View {
 
     /// The pencil through a name (`m`, `size` DIPs, its baseline at
     /// `baseline`): as CSS places it, `left at / width 6px` over the name
-    /// and the 5 DIPs below it. That box is Newsreader's: Plain's system
-    /// font has a taller line with its baseline lower in it, so there the
-    /// pencil keeps the height over the baseline it has in Newsreader,
-    /// scaled by the two x-heights.
+    /// and the 5 DIPs below it. Original's strike (`at` 0.34) is placed for
+    /// Newsreader's 1 em line: Plain's system font has a taller line with
+    /// its baseline lower in it, where that strike ran along the capitals'
+    /// tops, so there it keeps the height over the baseline it has in
+    /// Newsreader, scaled by the two x-heights. Scanning's lower strike
+    /// sits as the Mac's Plain draws it.
     #[allow(clippy::too_many_arguments)]
     fn strike(&mut self, items: &mut Vec<Draw>, x: f64, baseline: f64, m: &TextMetrics, size: f32, at: f64, part: f64, ink: &SheetInk) {
         let w = (m.width as f64 * part * 10.0).round().max(10.0) as u32;
-        let y = if super::super::theme::tokens().plain {
+        let y = if super::super::theme::tokens().plain && at < 0.5 {
             let size = size as f64;
             let over = NEWSREADER_ASCENT * size - ((size + 5.0 - 6.0) * at + 3.0);
             baseline - over * SYSTEM_X_HEIGHT / NEWSREADER_X_HEIGHT - 3.0
