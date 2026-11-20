@@ -223,9 +223,8 @@ pub struct Surface {
     /// of in a window of its own (`Surface::layer`).
     layered: bool,
     layer: Option<Layer>,
-    /// The last paint's drawing and present times (ms), and the vblank its
-    /// last shown present reached (`PresentRefreshCount`), for traces.
-    pub timing: (f64, f64, u32),
+    /// A layer's last drawing and commit times (ms), for traces.
+    pub timing: (f64, f64),
 }
 
 /// A layered surface's visual over every child of its window, its
@@ -313,7 +312,6 @@ impl Surface {
             self.size = (w, h);
         }
         let swap = self.swap.clone().expect("swap chain");
-        let drawing = std::time::Instant::now();
         let painted = with_context(&gpu, |c| {
             if self.target.is_none() {
                 let surface: IDXGISurface = unsafe { swap.GetBuffer(0) }.ok()?;
@@ -349,12 +347,7 @@ impl Surface {
             }
             _ => return false,
         }
-        let drawn = drawing.elapsed().as_secs_f64() * 1000.0;
-        let presenting = std::time::Instant::now();
         let presented = unsafe { swap.Present(1, DXGI_PRESENT(0)) };
-        let mut stats = DXGI_FRAME_STATISTICS::default();
-        let refresh = if crate::trace::enabled() && unsafe { swap.GetFrameStatistics(&mut stats) }.is_ok() { stats.PresentRefreshCount } else { 0 };
-        self.timing = (drawn, presenting.elapsed().as_secs_f64() * 1000.0, refresh);
         if presented == DXGI_ERROR_DEVICE_REMOVED || presented == DXGI_ERROR_DEVICE_RESET {
             self.release();
             lose(gpu.generation);
@@ -435,7 +428,7 @@ impl Surface {
         unsafe {
             let _ = layer.device.Commit();
         }
-        self.timing = (drawn, committing.elapsed().as_secs_f64() * 1000.0, 0);
+        self.timing = (drawn, committing.elapsed().as_secs_f64() * 1000.0);
         true
     }
 

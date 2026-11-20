@@ -6,8 +6,11 @@
 //! G shows it and hides it, E, Enter, Esc and a double click go back to the
 //! photograph; click, Ctrl, Shift, a band and the arrows select; Ctrl+plus,
 //! minus and the wheel change the size. It unfolds out of the strip and
-//! folds back into it: the window grows from the strip's band as the
-//! frames fly to their places.
+//! folds back into it: the sheet grows from the strip's band as the
+//! frames fly to their places, drawn in a DirectComposition layer over the
+//! window (`Surface::layer`) whose clip is the growing edge; the grid's own
+//! window shows once it has landed. The flight is paced by the compositor
+//! and holds the thumbnails' developing, which shares the GPU.
 //!
 //! Made on first use; only the rows in view are painted, through Direct2D
 //! on the GPU (`surface.rs`), with the strip's frames and marks. A wheel's
@@ -34,7 +37,7 @@ use super::{App, with_app};
 use crate::model::dirty;
 use crate::sheet_rules::{self as rules, Part, Rect, SheetLayout, ThumbSize};
 
-/// The flight's next frame, posted as soon as a frame is presented.
+/// The flight's next frame, posted once the compositor has shown one.
 const WM_FLIGHT_FRAME: u32 = WM_APP + 1;
 /// A wheel's glide and the scroll bar's fade.
 const TIMER_SCROLL: usize = 2;
@@ -315,7 +318,7 @@ pub fn close_for_compare(app: &mut App) {
 
 fn start_flight(app: &mut App, opening: bool) {
     // The thumbnails' developing waits for the flight: it shares the GPU,
-    // and a present waiting behind it drops two to seven frames.
+    // and a frame waiting behind it is late.
     app.thumbs.held = true;
     let reduce = !unsafe {
         let mut on = BOOL(1);
@@ -345,13 +348,17 @@ fn start_flight(app: &mut App, opening: bool) {
         finish_flight(app, opening);
         return;
     }
+    // Folding before it has unfolded: the frames already coming carry on.
+    let running = grid.flight.is_some();
     grid.flight = Some(Flight { opening, started: Instant::now(), from, longest, current });
     crate::trace::event("grid_flight_start", || serde_json::json!({"opening": opening, "length_ms": rules::flight_length(longest)}));
     // The sheet flies in a layer over the whole window, clipped to its
     // growing edge by the compositor; the grid's own window shows only once
     // it has landed. Resizing (or reshaping) a swap chain's window every
     // frame stalls its presents for two or three refreshes.
-    tick(app);
+    if !running {
+        tick(app);
+    }
 }
 
 fn finish_flight(app: &mut App, opening: bool) {
@@ -390,8 +397,8 @@ fn pixels(r: &RECT) -> Rect {
 }
 
 /// One frame of the flight: the layer clipped to the sheet's growing edge,
-/// the frame painted and presented, and the next one asked for. The present
-/// waits for the display, which paces the flight at its refresh.
+/// the frame painted and committed, and, once the compositor has shown it,
+/// the next one asked for, which paces the flight at the display's refresh.
 fn tick(app: &mut App) {
     let grid = app.grid.as_mut().unwrap();
     let Some(flight) = &grid.flight else { return };
@@ -409,11 +416,6 @@ fn tick(app: &mut App) {
         grid.layer.place((r.left as f32, r.top as f32), (x, y, x + mask.w as f32, y + mask.h as f32));
     };
     let started = Instant::now();
-    // Windows the grid's window uncovers paint now: the frames posted
-    // back to back would keep their WM_PAINT waiting.
-    unsafe {
-        let _ = RedrawWindow(model_main(hwnd), None, None, RDW_UPDATENOW | RDW_ALLCHILDREN);
-    }
     let made = grid.layer.made();
     place(grid);
     if !paint(app, hwnd) {
@@ -432,14 +434,10 @@ fn tick(app: &mut App) {
             let _ = ShowWindow(hwnd, SW_HIDE);
         }
     }
-    let (draw, present, vblank) = grid.layer.timing;
+    let (draw, commit) = grid.layer.timing;
     let took = started.elapsed();
     crate::trace::event("grid_flight_paint", || {
-        let mut dwm = windows::Win32::Graphics::Dwm::DWM_TIMING_INFO { cbSize: std::mem::size_of::<windows::Win32::Graphics::Dwm::DWM_TIMING_INFO>() as u32, ..Default::default() };
-        let _ = unsafe { windows::Win32::Graphics::Dwm::DwmGetCompositionTimingInfo(HWND::default(), &mut dwm) };
-        let (refresh, frame, dropped, missed, late) = (dwm.cRefresh, dwm.cFrame, dwm.cFramesDropped, dwm.cFramesMissed, dwm.cFramesLate);
-        serde_json::json!({"at_ms": elapsed, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "present_ms": present, "vblank": vblank,
-            "dwm_refresh": refresh, "dwm_frame": frame, "dwm_dropped": dropped, "dwm_missed": missed, "dwm_late": late})
+        serde_json::json!({"at_ms": elapsed, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "commit_ms": commit})
     });
     // The frame waits for the compositor to show it (a layer isn't
     // presented), which paces the flight at the display's refresh.
@@ -913,6 +911,9 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             WM_ERASEBKGND => LRESULT(1),
             WM_FLIGHT_FRAME => {
+                // What the fold uncovers paints first: frames posted back to
+                // back would keep the editor's WM_PAINT waiting.
+                let _ = RedrawWindow(model_main(hwnd), None, None, RDW_UPDATENOW | RDW_ALLCHILDREN);
                 with_app(tick);
                 LRESULT(0)
             }
