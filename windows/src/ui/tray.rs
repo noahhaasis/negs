@@ -98,11 +98,6 @@ struct Shown {
 thread_local! {
     static HWND_: Cell<isize> = const { Cell::new(0) };
     static SEARCH_FIELD: Cell<isize> = const { Cell::new(0) };
-    /// Search's colour key as last set (see `key_search`).
-    static SEARCH_KEY: Cell<Option<u32>> = const { Cell::new(None) };
-    /// When and where a click was last passed on to Search (a second one
-    /// soon after, nearby, is its double click).
-    static SEARCH_CLICK: Cell<Option<(i32, POINT)>> = const { Cell::new(None) };
     /// The open visit's kind as last synced; None while closed. A tray
     /// closes (a sync) before another opens, unless it's the other kind.
     static OPEN: Cell<Option<bool>> = const { Cell::new(None) };
@@ -330,8 +325,9 @@ fn same(a: &Shown, b: &Shown) -> bool {
 fn sync_search(app: &App, tray: HWND, paper: bool, opened: bool) {
     let mut field = search_field();
     if field.is_invalid() && !paper {
-        field = super::create(w!("EDIT"), "", WS_CHILD | WS_TABSTOP | WINDOW_STYLE(ES_AUTOHSCROLL as u32), WS_EX_LAYERED, tray, SEARCH_ID, app.fonts.ui);
-        key_search(field);
+        field = super::create(w!("EDIT"), "", WS_CHILD | WS_TABSTOP | WINDOW_STYLE(ES_AUTOHSCROLL as u32), super::draw::keyed::STYLE, tray, SEARCH_ID, app.fonts.ui);
+        // Keyed out, so the rule and the pencil under it show (`draw/keyed.rs`).
+        super::draw::keyed::key(field, theme::gdi(theme::tokens().hex.film));
         super::accessible_name(field, "Search films");
         let prompt = wide("Search films");
         unsafe {
@@ -1104,58 +1100,6 @@ fn set_offset(offset: f64) {
     }
 }
 
-/// Search's background: the film one step off, keyed out, so the rule, the
-/// pencil and Light table's highlighter painted under it show through, as
-/// on the Mac (an opaque box hid the parts its rounded height covered).
-/// The text's antialiasing is against the film colour, as before.
-fn search_key(t: &Tokens) -> u32 {
-    theme::gdi(t.hex.film) ^ 0x0001_0000
-}
-
-/// Keys Search out in the theme's film colour, when that changed.
-fn key_search(field: HWND) -> u32 {
-    let key = search_key(&theme::tokens());
-    if SEARCH_KEY.with(Cell::get) != Some(key) {
-        unsafe {
-            let _ = SetLayeredWindowAttributes(field, COLORREF(key), 0, LWA_COLORKEY);
-        }
-        SEARCH_KEY.with(|k| k.set(Some(key)));
-    }
-    key
-}
-
-/// `at` (in the tray) mapped into Search, if it's in Search's box. Its
-/// keyed-out pixels let the pointer through to the tray, which passes
-/// clicks there on.
-fn in_search(tray: HWND, at: POINT) -> Option<(HWND, POINT)> {
-    let field = search_field();
-    if field.is_invalid() || !unsafe { IsWindowVisible(field) }.as_bool() {
-        return None;
-    }
-    let mut p = at;
-    let mut r = RECT::default();
-    unsafe {
-        let _ = MapWindowPoints(tray, field, std::slice::from_mut(&mut p));
-        let _ = GetClientRect(field, &mut r);
-    }
-    (p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom).then_some((field, p))
-}
-
-/// A press in Search's box that came through to the tray: Search's own.
-fn press_search(field: HWND, at: POINT, wparam: WPARAM) {
-    let time = unsafe { GetMessageTime() };
-    let (cx, cy) = unsafe { (GetSystemMetrics(SM_CXDOUBLECLK), GetSystemMetrics(SM_CYDOUBLECLK)) };
-    let double = SEARCH_CLICK.with(Cell::get).is_some_and(|(then, p)| {
-        (time.wrapping_sub(then) as u32) <= unsafe { GetDoubleClickTime() } && (p.x - at.x).abs() <= cx / 2 && (p.y - at.y).abs() <= cy / 2
-    });
-    SEARCH_CLICK.with(|c| c.set(if double { None } else { Some((time, at)) }));
-    let lparam = LPARAM(((at.y as u16 as isize) << 16) | at.x as u16 as isize);
-    unsafe {
-        let _ = SetFocus(field);
-        SendMessageW(field, if double { WM_LBUTTONDBLCLK } else { WM_LBUTTONDOWN }, wparam, lparam);
-    }
-}
-
 /// Return in Search tries the first match (with nothing typed it keeps);
 /// Esc clears it, and in an empty Search goes back, as anywhere in the tray.
 extern "system" fn search_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
@@ -1187,6 +1131,10 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
         ((lparam.0 & 0xffff) as i16 as f32 / s, ((lparam.0 >> 16) & 0xffff) as i16 as f32 / s)
     };
     unsafe {
+        // Search's keyed-out pixels let the pointer through to the tray.
+        if let Some(done) = super::draw::keyed::pass_on(search_field(), hwnd, msg, wparam, lparam) {
+            return done;
+        }
         match msg {
             WM_PAINT => {
                 paint(hwnd);
@@ -1224,22 +1172,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 set_hot(hwnd, None, None);
                 LRESULT(0)
             }
-            WM_SETCURSOR if (lparam.0 & 0xffff) as u32 == HTCLIENT => {
-                let mut at = POINT::default();
-                let _ = GetCursorPos(&mut at);
-                let _ = ScreenToClient(hwnd, &mut at);
-                if in_search(hwnd, at).is_some() {
-                    SetCursor(LoadCursorW(None, IDC_IBEAM).unwrap_or_default());
-                    return LRESULT(1);
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            }
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
-                let at = POINT { x: (lparam.0 & 0xffff) as i16 as i32, y: ((lparam.0 >> 16) & 0xffff) as i16 as i32 };
-                if let Some((field, inside)) = in_search(hwnd, at) {
-                    press_search(field, inside, wparam);
-                    return LRESULT(0);
-                }
                 let (x, y) = point();
                 click(x, y);
                 LRESULT(0)
@@ -1266,10 +1199,7 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 // Search on the film: `paper` words on the keyed-out film.
                 let dc = HDC(wparam.0 as *mut _);
                 let t = theme::tokens();
-                let key = key_search(HWND(lparam.0 as *mut _));
-                SetTextColor(dc, COLORREF(theme::gdi(t.film.paper)));
-                SetBkColor(dc, COLORREF(key));
-                LRESULT(theme::brush(key).0 as isize)
+                super::draw::keyed::color(dc, HWND(lparam.0 as *mut _), theme::gdi(t.film.paper), theme::gdi(t.hex.film))
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }

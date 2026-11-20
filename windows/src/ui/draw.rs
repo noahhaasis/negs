@@ -4,6 +4,8 @@
 //! The controls stay the real Win32 ones, with their focus, keys and
 //! accessible names; only their painting is ours.
 
+pub mod keyed;
+
 use std::cell::Cell;
 
 use windows::Win32::Foundation::*;
