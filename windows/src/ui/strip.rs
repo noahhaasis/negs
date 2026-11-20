@@ -384,20 +384,17 @@ fn paint(app: &mut App, hwnd: HWND) {
             if cell.open {
                 let pencil = RectF::new(r.x, r.y + r.h + rules::PENCIL_DROP as f32, r.w, rules::PENCIL_WIDTH as f32 + 2.0);
                 p.underline(pencil, &t, true);
+            } else if cell.selected && selecting {
+                // Selected: a plain rule under it, as on the Mac. The grid's
+                // yellow box, 8 out, ran into the canvas over the strip's 6.
+                p.fill_rect(RectF::new(r.x, r.y + r.h + rules::PENCIL_DROP as f32, r.w, 1.5), Ink::hex(t.film.label));
             }
         }
-        // A box reaches past its frame, over the gap and the frames beside
-        // it, so the boxes are drawn above every frame (PhotoBrowser): the
-        // pick boxes, then the selection's.
+        // A pick's box reaches past its frame, over the gap and the frames
+        // beside it, so the boxes are drawn above every frame (PhotoBrowser).
         for i in range.clone() {
             if cells[i].summary.flag == Some(Flag::Pick) {
                 p.pick_box(BoxInk::Strip, &cells[i].name, rect(i), Ink::hex(t.film.paper), true);
-            }
-        }
-        for i in range.clone() {
-            let cell = &cells[i];
-            if selecting && cell.selected && !cell.open {
-                p.pick_box(BoxInk::Selection, &cell.name, rect(i), Ink::hex(t.film.accent), false);
             }
         }
     });
