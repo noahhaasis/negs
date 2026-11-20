@@ -1810,6 +1810,10 @@ fn leave_field_on_click(main: HWND, msg: &MSG) {
         if focus.0.is_null() || focused_class().as_deref() != Some("Edit") || msg.hwnd == focus {
             return;
         }
+        // A keyed-out field's own box: the window under it hands the press on.
+        if draw::keyed::covers(focus, msg.pt) {
+            return;
+        }
         // Only the main window's fields, and only for presses inside it.
         if !IsChild(main, focus).as_bool() || !(msg.hwnd == main || IsChild(main, msg.hwnd).as_bool()) {
             return;

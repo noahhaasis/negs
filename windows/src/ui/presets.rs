@@ -188,7 +188,9 @@ fn build(app: &mut App) {
     super::dialogs::tooltip(empty_import, "Import presets (Ctrl+Shift+O)");
     let foot = drawn(foot_words(false), FOOT);
     let rename_font = rename_font(app.dpi);
-    let rename = create(w!("EDIT"), "", WS_CHILD | WINDOW_STYLE(ES_AUTOHSCROLL as u32), WINDOW_EX_STYLE(0), tiles_view, RENAME, rename_font);
+    let rename = create(w!("EDIT"), "", WS_CHILD | WINDOW_STYLE(ES_AUTOHSCROLL as u32), super::draw::keyed::STYLE, tiles_view, RENAME, rename_font);
+    // Keyed out, so the pencil (or highlighter) under it shows (`draw/keyed.rs`).
+    super::draw::keyed::key(rename, theme::gdi(theme::tokens().hex.panel));
     super::accessible_name(rename, "Preset name");
     unsafe {
         SendMessageW(rename, EM_SETLIMITTEXT, WPARAM(name::MAX_LENGTH + 20), LPARAM(0));
@@ -502,13 +504,12 @@ fn start_rename(app: &mut App, index: usize) {
     let name = p.files[index].name();
     VIEW.with(|v| v.borrow_mut().editing = Some((index, name.clone())));
     reveal(p, index);
+    // Placed first: a name set in a box too narrow for it stays scrolled.
+    place_rename(p);
     let text = wide(&name);
     unsafe {
         let _ = SetWindowTextW(p.rename, pcwstr(&text));
         SendMessageW(p.rename, EM_SETSEL, WPARAM(0), LPARAM(-1));
-    }
-    place_rename(p);
-    unsafe {
         let _ = ShowWindow(p.rename, SW_SHOW);
         let _ = SetFocus(p.rename);
         let _ = InvalidateRect(p.tiles_view, None, false);
@@ -521,8 +522,21 @@ fn place_rename(p: &Panel) {
     let Some(r) = VIEW.with(|v| v.borrow().rects.get(index).copied()) else { return };
     let px = |dip: f64| px(p.window, dip);
     let top = name_top(p.window, r) - p.scroll;
+    let (w, h) = (r.right - r.left + px(1.0), px(NAME_LINE));
     unsafe {
-        let _ = MoveWindow(p.rename, r.left - px(1.0), top, r.right - r.left + px(1.0), px(NAME_LINE), true);
+        let mut now = RECT::default();
+        let _ = GetClientRect(p.rename, &mut now);
+        let _ = MoveWindow(p.rename, r.left - px(1.0), top, w, h, true);
+        if now.right != w {
+            // Its text stays scrolled as it was in the old width (a name set
+            // before the tile was laid out showed its end): from the start
+            // again, then the selection back, scrolled only if it must be.
+            let mut from = 0u32;
+            let mut to = 0u32;
+            SendMessageW(p.rename, EM_GETSEL, WPARAM(&mut from as *mut u32 as usize), LPARAM(&mut to as *mut u32 as isize));
+            SendMessageW(p.rename, EM_SETSEL, WPARAM(0), LPARAM(0));
+            SendMessageW(p.rename, EM_SETSEL, WPARAM(from as usize), LPARAM(to as isize));
+        }
     }
 }
 
@@ -804,6 +818,11 @@ fn step_focus(app: &mut App, index: usize, step: isize) {
 extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
     unsafe {
         let Some(index) = tile_index(hwnd) else { return DefSubclassProc(hwnd, msg, wparam, lparam) };
+        // The name being typed, over the tile: the pointer comes through its
+        // keyed-out pixels.
+        if let Some(done) = super::draw::keyed::pass_on(rename_field(hwnd), hwnd, msg, wparam, lparam) {
+            return done;
+        }
         match msg {
             // The view paints the tile: its own paint only asks the view to.
             // The view paints the tile (it isn't WS_CLIPCHILDREN): whatever
@@ -899,6 +918,14 @@ extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
             }
             _ => DefSubclassProc(hwnd, msg, wparam, lparam),
         }
+    }
+}
+
+/// The rename field, from the tile view or a tile on it.
+fn rename_field(hwnd: HWND) -> HWND {
+    unsafe {
+        let view = if draw::class_of(hwnd) == "NegsPresetTiles" { hwnd } else { GetParent(hwnd).unwrap_or_default() };
+        GetDlgItem(view, RENAME as i32).unwrap_or_default()
     }
 }
 
@@ -1063,18 +1090,6 @@ fn paint_tiles(hwnd: HWND, dc: HDC, dirty: RECT) {
                 p.ring(RectF::new(9.0, 9.0, w - 18.0, h - 18.0), DROP_RING, 0.0, Ink::hex(t.hex.accent));
             }
         });
-        unsafe {
-            // The name field paints itself.
-            if let Ok(field) = GetDlgItem(hwnd, RENAME as i32)
-                && IsWindowVisible(field).as_bool()
-            {
-                let mut r = RECT::default();
-                let _ = GetWindowRect(field, &mut r);
-                let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
-                let _ = MapWindowPoints(None, hwnd, &mut corners);
-                let _ = ExcludeClipRect(dc, corners[0].x, corners[0].y, corners[1].x, corners[1].y);
-            }
-        }
         c.present(dc);
     });
 }
@@ -1160,6 +1175,9 @@ fn paint_drawn(item: &DRAWITEMSTRUCT) {
 
 extern "system" fn tiles_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
+        if let Some(done) = super::draw::keyed::pass_on(rename_field(hwnd), hwnd, msg, wparam, lparam) {
+            return done;
+        }
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
@@ -1197,11 +1215,10 @@ extern "system" fn tiles_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 LRESULT(0)
             }
             WM_CTLCOLOREDIT => {
+                // The name being typed: `paper` words on the keyed-out panel.
                 let dc = HDC(wparam.0 as *mut _);
                 let t = theme::tokens();
-                SetTextColor(dc, COLORREF(theme::gdi(t.hex.paper)));
-                SetBkColor(dc, COLORREF(theme::gdi(t.hex.panel)));
-                LRESULT(theme::brush(theme::gdi(t.hex.panel)).0 as isize)
+                super::draw::keyed::color(dc, HWND(lparam.0 as *mut _), theme::gdi(t.hex.paper), theme::gdi(t.hex.panel))
             }
             WM_CTLCOLORBTN => draw::button_brush(),
             WM_ERASEBKGND => LRESULT(1),
