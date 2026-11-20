@@ -41,3 +41,12 @@ that an action undone at once leaves the files as they were, and that each
 thumbnail shows the edits it's filed under. Run it with
 `NEGS_LIBRARY_SEEDS=25` when changing sidecar writes, library undo or
 thumbnail filing.
+
+# Windows PC
+
+All Windows work happens in `C:\Users\Noah\Projects\negs`, which stays on
+main. `C:\Users\Noah\.negs\build-main.cmd` pulls GitHub's main and builds it:
+the app is `C:\Users\Noah\Projects\negs\windows\target\release\Negs.exe`. A
+branch gets a worktree under `negs\worktrees\<name>` with
+`C:\Users\Noah\.negs\wt.cmd <name> <mac-branch> [build]`; remove it when done.
+Don't clone the repo into `.negs` or make other `Projects\negs-*` folders.
