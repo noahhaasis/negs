@@ -18,7 +18,41 @@ decisions made with their reasons, and what was carried over. See
 | 7 | Strip and grid | done, merged `f9b8f47` |
 | 8 | Remaining features, Flip added (Open in Lightroom last) | done: 8c `1396397`, 8b `4a15d7f`, 8a `ee752ee`; follow-ups `563cfb5`, `68cfbee` |
 | 9 | Validation and release | done, merged `f05ff8f` |
-| – | Findings from using the build | first three fixed (branch `win-findings-1`, see log) |
+| – | Findings from using the build | first three fixed (`win-findings-1`); faster flight (`win-findings-2`), see log |
+
+## 2026-11-20: a faster grid flight (branch `win-findings-2`, tip `3aacab6`)
+
+Noah: switching between the photograph and the grid takes too long; he likes the
+animation, open to another if it looked better or cost less. Kept it (the sheet
+unfolding from the strip says where the grid comes from, and since `win-findings-1`
+it runs at the display's rate), only shorter:
+
+- `FLIGHT_MS` 480 → 300, `STAGGER_MS` 16 → 8 (12 steps), `FOLD_FADE_MS` 180 → 110:
+  672 ms in all → 396 ms, opening and folding. Same curve, mask and boxes fade.
+  **Windows now differs from the Mac's `SheetFlight`** (still 480, 16, 180); the
+  Mac is unchanged until Noah says. The sheet-rules tests use the constants.
+- At the shorter length the first frame's wait showed: the second frame came 23 to
+  90 ms after the first (the layer being made, the editor painting what the fold
+  uncovers, `RedrawWindow` 18 to 105 ms on the first frame only). At 672 ms it was
+  hidden; at 396 ms it was a jump on the fastest stretch of the curve. The first
+  frame is the sheet where the strip is, so it looks still: the clock now starts a
+  refresh before the second frame (`Flight::frames`), and that wait reads as a
+  moment's latency rather than a jump.
+
+Measured on the PC (59 Hz, about 24 frames is ideal), on the goat roll copies, with a
+warmed profile (`keep_profile`, thumbnails developed first): 24 or 25 frames in every
+flight, median gap 16.6 ms, at most one gap over 20 ms (≤ 34 ms). With an empty
+profile the helper is still developing thumbnails; a job already on the GPU when G is
+pressed can't be held, and commits then stall for 30 to 320 ms. `held` stops new
+jobs; the first visit to a roll can still stutter, as it could at 672 ms.
+
+Checks: `cargo test` on the PC (scratch `NEGS_PROFILE_DIR`) 277/277 at `3aacab6`;
+sheet-rules tests and the Mac cross-check (plain and `--tests`) show only the
+`finish_rgb` warning. PC builds now use this session's own clone,
+`C:\Users\Noah\.negs\flight-src` (`flight-build.cmd`, `flight-test.cmd`), target
+`C:\Users\Noah\.negs\flight-target`: a checkout in `negs-parity` was switched
+under another session's build once (the LibRaw session, warned, now in its own
+worktree).
 
 ## 2026-11-20: findings from Noah's first use, first three (branch `win-findings-1`, tip `af03fb7`)
 
