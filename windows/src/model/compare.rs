@@ -125,6 +125,10 @@ pub struct Memory {
     shown: Option<Shown>,
     /// What the picture being made off the UI thread is made from.
     making: Option<(u64, u64, String)>,
+    /// The original as shown, with what it was made from: the decode's id
+    /// and the crop and turn; and what the one being made is made from.
+    original_shown: Option<((u64, String), Shown)>,
+    making_original: Option<(u64, String)>,
     /// What the last context menu offered.
     offered: Option<rules::Offer>,
     /// The other photograph's develop, once the edited one has settled.
@@ -224,8 +228,14 @@ impl Model {
         }
         self.compare.other = None;
         self.compare.kept = None;
+        self.compare.original_shown = None;
+        self.compare.making_original = None;
         self.compare.request += 1;
         self.stop_compare_engine();
+        // Holding Original needs only the texture.
+        if let Some((_, picture)) = &self.original_cache {
+            picture.release_kept();
+        }
         self.mark(dirty::LAYOUT | dirty::CANVAS | dirty::CHROME | dirty::STATUS | dirty::COMPARE);
     }
 
@@ -556,12 +566,41 @@ impl Model {
         }
     }
 
-    /// The original as shown beside the open photograph.
-    pub fn compared_original(&self) -> Option<Shown> {
+    /// The original as shown beside the open photograph: cropped, mirrored
+    /// and turned from the decode's pixels off the UI thread, once for each
+    /// crop and turn, like `compared_open`. Until it's made, the last one
+    /// made from the same decode shows.
+    pub fn compared_original(&mut self) -> Option<Shown> {
         let (_, picture) = self.original_cache.as_ref()?;
-        let crop = self.state.crop;
+        let (crop, orientation) = (self.state.crop, self.state.orientation());
+        let key = (picture.id, format!("{crop:?}{orientation:?}"));
+        let last = self.compare.original_shown.as_ref().filter(|((id, _), _)| *id == picture.id);
+        if last.is_some_and(|(made, _)| *made == key) || self.compare.making_original.as_ref() == Some(&key) {
+            return last.map(|(_, shown)| shown.clone());
+        }
+        let last = last.map(|(_, shown)| shown.clone());
+        self.compare.making_original = Some(key.clone());
+        let picture = picture.clone();
         let pixels = crop.cropped().then(|| (crop.pixels(Size::new(picture.width as f64, picture.height as f64)), crop.angle));
-        picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, pixels, self.state.orientation(), picture.wide)).flatten()
+        #[cfg(test)]
+        let background = ui::testing::background();
+        std::thread::spawn(move || {
+            #[cfg(test)]
+            let _background = background;
+            let shown = picture.with_pixels(|rgba| Shown::of(rgba, picture.width, picture.height, pixels, orientation, picture.wide)).flatten();
+            ui::post(move |app: &mut App| app.model.compared_original_made(key, shown));
+        });
+        last
+    }
+
+    fn compared_original_made(&mut self, key: (u64, String), shown: Option<Shown>) {
+        if self.compare.making_original.as_ref() == Some(&key) {
+            self.compare.making_original = None;
+        }
+        if shown.is_some() && self.comparison().is_some_and(|c| c.against_original()) {
+            self.compare.original_shown = shown.map(|shown| (key, shown));
+            self.mark(dirty::COMPARE);
+        }
     }
 
     /// The other photograph's develop, once in.
@@ -609,6 +648,8 @@ impl Model {
         // The original decodes again, from the other file.
         self.original_cache = None;
         self.original = None;
+        self.compare.original_shown = None;
+        self.compare.making_original = None;
         self.mark(dirty::STATUS | dirty::CANVAS | dirty::COMPARE);
         if self.comparison().is_some_and(|c| c.against_original()) {
             self.prepare_original();
