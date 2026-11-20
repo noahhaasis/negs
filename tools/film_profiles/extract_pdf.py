@@ -25,7 +25,15 @@ the earlier recipes extract exactly as before:
   * curve "select": {"sort": "x_mid"|"y_mid", "index": k, "of": n}: the paths are split
     into their connected subpaths (one PDF path may hold all three curves), those
     matching the style are sorted by the mean of their PDF x or y, there must be n of
-    them, and the k-th is taken.
+    them, and the k-th is taken. "sort": "x_at_min_y" orders them by the PDF x of their
+    highest point on an unrotated page (a dye curve's peak);
+  * curve "parts": [spec, ...] for a curve drawn in pieces, as where the PFDG draws one
+    solid line once the three characteristic curves coincide: each part is selected like
+    a curve (style, "select" or "paths"), parts after the first keep only their points
+    beyond the end of the curve so far along the exposure axis's PDF coordinate, and a
+    part with "until_next": true also stops where the next part starts. Each join (the
+    distance from the end so far to the next part's path) must be within "join_tol" pt
+    (default 0.5) and is reported.
 
 Writes, per stock, <out>/<stock>/<curve>.csv (two columns, no header, as spektrafilm's
 loader reads them), trace/<curve>.csv (data x, data y, pdf x, pdf y), extraction.json
@@ -210,10 +218,57 @@ def select_subpath(drawings, frame, name, cs):
             cands.append(((i, j), pts))
     if len(cands) != sel["of"]:
         raise ValueError(f"{name}: found {len(cands)} matching subpaths {[k for k, _ in cands]}, expected {sel['of']}")
-    axis = {"x_mid": 0, "y_mid": 1}[sel["sort"]]
-    cands.sort(key=lambda c: c[1][:, axis].mean())
+    if sel["sort"] == "x_at_min_y":
+        cands.sort(key=lambda c: c[1][np.argmin(c[1][:, 1]), 0])
+    else:
+        axis = {"x_mid": 0, "y_mid": 1}[sel["sort"]]
+        cands.sort(key=lambda c: c[1][:, axis].mean())
     key, pts = cands[sel["index"]]
     return [(f"{key[0]}.{key[1]}", pts)]
+
+
+def select_paths(drawings, frame, name, cs):
+    if "select" in cs:
+        return select_subpath(drawings, frame, name, cs)
+    paths = []
+    for i, d in enumerate(drawings):
+        if d["type"] not in ("s", "fs") or not any(it[0] == "c" for it in d["items"]):
+            continue
+        r = d["rect"]
+        if not (r.x0 >= frame.x0 - 1 and r.x1 <= frame.x1 + 1 and r.y0 >= frame.y0 - 1 and r.y1 <= frame.y1 + 1):
+            continue
+        if style_match(d, cs):
+            paths.append((i, sample_items(d["items"])))
+    if len(paths) != cs.get("paths", 1):
+        raise ValueError(f"{name}: found {len(paths)} matching paths (indices {[i for i, _ in paths]}), expected {cs.get('paths', 1)}")
+    return paths
+
+
+def join_parts(drawings, frame, name, cs, k):
+    """A curve drawn in pieces (curve "parts", see the module docstring). k is the PDF
+    coordinate (0 x, 1 y) along which the exposure axis runs."""
+    sel = [select_paths(drawings, frame, f"{name} part {n}", ps) for n, ps in enumerate(cs["parts"])]
+    ids = [f"part{n}:" + "+".join(str(i) for i, _ in s) for n, s in enumerate(sel)]
+    parts = [np.concatenate([p for _, p in s]) for s in sel]
+    parts = [p[np.argsort(p[:, k], kind="stable")] for p in parts]
+    tol = cs.get("join_tol", 0.5)
+    out, joins = [(ids[0], parts[0])], []
+    for n in range(1, len(parts)):
+        end = out[-1][1][-1]
+        p = parts[n]
+        gap = float(np.min(np.hypot(*(p - end).T)))
+        if gap > tol:
+            raise ValueError(f"{name}: part {n} starts {gap:.3f} pt from the end of part {n - 1}, over {tol} pt")
+        keep = p[:, k] > end[k]
+        if cs["parts"][n].get("until_next"):
+            if n + 1 == len(parts):
+                raise ValueError(f"{name}: part {n} has until_next but is the last part")
+            keep &= p[:, k] < parts[n + 1][:, k].min()
+        if not keep.any():
+            raise ValueError(f"{name}: part {n} has no points beyond the end of part {n - 1}")
+        out.append((ids[n], p[keep]))
+        joins.append(round(gap, 4))
+    return out, joins
 
 
 def extract_panel(page, drawings, panel):
@@ -222,20 +277,11 @@ def extract_panel(page, drawings, panel):
     axes = {k: fit_axis(panel["axes"][k], grid, frame) for k in ("x", "y")}
     curves = {}
     for name, cs in panel["curves"].items():
-        if "select" in cs:
-            paths = select_subpath(drawings, frame, name, cs)
+        joins = None
+        if "parts" in cs:
+            paths, joins = join_parts(drawings, frame, name, cs, 0 if axes["x"]["pdf"] == "x" else 1)
         else:
-            paths = []
-            for i, d in enumerate(drawings):
-                if d["type"] not in ("s", "fs") or not any(it[0] == "c" for it in d["items"]):
-                    continue
-                r = d["rect"]
-                if not (r.x0 >= frame.x0 - 1 and r.x1 <= frame.x1 + 1 and r.y0 >= frame.y0 - 1 and r.y1 <= frame.y1 + 1):
-                    continue
-                if style_match(d, cs):
-                    paths.append((i, sample_items(d["items"])))
-            if len(paths) != cs.get("paths", 1):
-                raise ValueError(f"{name}: found {len(paths)} matching paths (indices {[i for i, _ in paths]}), expected {cs.get('paths', 1)}")
+            paths = select_paths(drawings, frame, name, cs)
         pdf = np.concatenate([p for _, p in paths])
         x = axes["x"]["slope"] * pdf[:, 0 if axes["x"]["pdf"] == "x" else 1] + axes["x"]["offset"]
         y = axes["y"]["slope"] * pdf[:, 0 if axes["y"]["pdf"] == "x" else 1] + axes["y"]["offset"]
@@ -244,6 +290,8 @@ def extract_panel(page, drawings, panel):
         keep = np.concatenate([[True], np.diff(x) > 1e-9])
         x, y, pdf = x[keep], y[keep], pdf[keep]
         curves[name] = {"x": x, "y": y, "pdf": pdf, "paths": [i for i, _ in paths]}
+        if joins is not None:
+            curves[name]["joins_pt"] = joins
     return frame, axes, curves
 
 
@@ -319,6 +367,8 @@ def main():
                           header=["x", "y", "pdf_x_pt", "pdf_y_pt"])
                 rep["curves"][name] = {"paths": c["paths"], "points": int(x.size), "x_range": [float(x[0]), float(x[-1])],
                                        "y_range": [float(np.min(y)), float(np.max(y))]}
+                if "joins_pt" in c:
+                    rep["curves"][name]["joins_pt"] = c["joins_pt"]
             report["panels"][pname] = rep
             if a.overlays:
                 Path(a.overlays).mkdir(parents=True, exist_ok=True)
