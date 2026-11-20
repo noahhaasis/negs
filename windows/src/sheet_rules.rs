@@ -629,14 +629,15 @@ pub fn size_at(fraction: f64) -> f64 {
 
 // MARK: The fold flight (SheetFlight)
 
-/// Each flyer's flight; each step from the current photograph starts 16 ms
+/// Each flyer's flight; each step from the current photograph starts 8 ms
 /// later, up to 12 steps; the grid's boxes fade in from 35 % of a flight;
-/// a fold's last 180 ms fade the sheet off the strip.
-pub const FLIGHT_MS: f64 = 480.0;
-pub const STAGGER_MS: f64 = 16.0;
+/// a fold's last 110 ms fade the sheet off the strip. Shorter than the
+/// Mac's (480, 16, 180: 672 ms in all), 396 ms in all, at Noah's asking.
+pub const FLIGHT_MS: f64 = 300.0;
+pub const STAGGER_MS: f64 = 8.0;
 pub const STAGGER_STEPS: usize = 12;
 pub const BOXES_FROM: f64 = 0.35;
-pub const FOLD_FADE_MS: f64 = 180.0;
+pub const FOLD_FADE_MS: f64 = 110.0;
 /// How far past the window's top the sheet's growing edge is aimed.
 pub const MASK_REACH: f64 = 0.25;
 
@@ -682,7 +683,7 @@ pub fn cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, t: f64) -> f64 {
     ((ay * s + by) * s + cy) * s
 }
 
-/// A flyer's delay: 16 ms a step from the current photograph, up to 12.
+/// A flyer's delay: 8 ms a step from the current photograph, up to 12.
 pub fn flight_delay(index: usize, current: Option<usize>) -> f64 {
     let steps = current.map_or(0, |c| index.abs_diff(c)).min(STAGGER_STEPS);
     steps as f64 * STAGGER_MS
@@ -1057,19 +1058,19 @@ mod tests {
         }
         assert!((cubic_bezier(0.25, 0.25, 0.75, 0.75, 0.3) - 0.3).abs() < 1e-6, "linear stays linear");
         assert_eq!(flight_delay(10, Some(10)), 0.0);
-        assert_eq!(flight_delay(12, Some(10)), 32.0);
-        assert_eq!(flight_delay(40, Some(10)), 12.0 * 16.0);
+        assert_eq!(flight_delay(12, Some(10)), 2.0 * STAGGER_MS);
+        assert_eq!(flight_delay(40, Some(10)), 12.0 * STAGGER_MS);
         let (a, b) = (Rect::new(0.0, 500.0, 210.0, 140.0), Rect::new(16.0, 24.0, 264.0, 176.0));
         assert_eq!(flyer_at(&a, &b, 0.0, 0.0), a);
         assert_eq!(flyer_at(&a, &b, FLIGHT_MS, 0.0), b);
-        assert_eq!(flyer_at(&a, &b, 16.0, 32.0), a, "waiting for its turn");
+        assert_eq!(flyer_at(&a, &b, STAGGER_MS, 2.0 * STAGGER_MS), a, "waiting for its turn");
         let window = Rect::new(0.0, 38.0, 1400.0, 900.0);
         let band = Rect::new(0.0, 752.0, 1000.0, 186.0);
         assert_eq!(mask_at(&band, &window, 0.0), band);
         assert_eq!(mask_at(&band, &window, FLIGHT_MS), window);
         let mid = mask_at(&band, &window, FLIGHT_MS / 2.0);
         assert!(mid.y >= window.y && mid.y < band.y && mid.max_y() <= window.max_y() + 1e-9);
-        assert_eq!(flight_length(192.0), 672.0);
+        assert_eq!(flight_length(12.0 * STAGGER_MS), 396.0);
     }
 
     #[test]
