@@ -393,7 +393,6 @@ fn pixels(r: &RECT) -> Rect {
 /// the frame painted and presented, and the next one asked for. The present
 /// waits for the display, which paces the flight at its refresh.
 fn tick(app: &mut App) {
-    let canvas = app.canvas;
     let grid = app.grid.as_mut().unwrap();
     let Some(flight) = &grid.flight else { return };
     let elapsed = flight.started.elapsed().as_secs_f64() * 1000.0;
@@ -416,12 +415,6 @@ fn tick(app: &mut App) {
         let _ = RedrawWindow(model_main(hwnd), None, None, RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
     let made = grid.layer.made();
-    // EXPERIMENT: the canvas hidden while the sheet flies.
-    if std::env::var_os("NEGS_FLIGHT_NO_CANVAS").is_some() {
-        unsafe {
-            let _ = ShowWindow(canvas, SW_HIDE);
-        }
-    }
     place(grid);
     if !paint(app, hwnd) {
         // No layer (no GPU, or no DirectComposition): it lands at once.
@@ -448,12 +441,10 @@ fn tick(app: &mut App) {
         serde_json::json!({"at_ms": elapsed, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "present_ms": present, "vblank": vblank,
             "dwm_refresh": refresh, "dwm_frame": frame, "dwm_dropped": dropped, "dwm_missed": missed, "dwm_late": late})
     });
-    // A present that didn't wait (no GPU, or a display that let it through)
-    // waits for the compositor instead, so the flight never spins.
-    if took < std::time::Duration::from_millis(4) {
-        unsafe {
-            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
-        }
+    // The frame waits for the compositor to show it (a layer isn't
+    // presented), which paces the flight at the display's refresh.
+    unsafe {
+        let _ = windows::Win32::Graphics::Dwm::DwmFlush();
     }
     unsafe {
         let _ = PostMessageW(hwnd, WM_FLIGHT_FRAME, WPARAM(0), LPARAM(0));

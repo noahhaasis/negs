@@ -228,30 +228,35 @@ pub struct Surface {
     pub timing: (f64, f64, u32),
 }
 
-/// A layered surface's visual, over every child of its window.
+/// A layered surface's visual over every child of its window, its
+/// DirectComposition surface, and the bitmap it's drawn in first.
 struct Layer {
     device: IDCompositionDevice,
     _target: IDCompositionTarget,
     visual: IDCompositionVisual,
+    surface: IDCompositionSurface,
+    drawn: Option<ID2D1Bitmap1>,
 }
 
 impl Surface {
     /// A surface shown above every child of the window it paints, through
-    /// DirectComposition, placed and clipped by `place`: the compositor
-    /// moves it, so no window changes shape (the grid's flight; resizing a
-    /// swap chain's window every frame stalls its presents).
+    /// DirectComposition, placed and clipped by `place` (the grid's
+    /// flight). The compositor moves it, so no window changes shape, and
+    /// its content is a composition surface, which the compositor never
+    /// lifts onto an overlay plane: a swap chain that moved or changed
+    /// shape every frame dropped two or three refreshes each time.
+    /// It isn't presented: the caller waits for the compositor.
     pub fn layer() -> Self {
         Self { layered: true, ..Default::default() }
     }
 
-    /// It has a swap chain (it has painted since it was released).
+    /// A layer that has painted since it was released.
     pub fn made(&self) -> bool {
-        self.swap.is_some()
+        self.layer.is_some()
     }
 
     /// Where a layered surface stands in its window's client area and the
-    /// part of it shown (left, top, right, bottom), in pixels; shown when
-    /// the next present is.
+    /// part of it shown (left, top, right, bottom), in pixels.
     pub fn place(&self, at: (f32, f32), clip: (f32, f32, f32, f32)) {
         let Some(layer) = &self.layer else { return };
         let rect = D2D_RECT_F { left: clip.0, top: clip.1, right: clip.2, bottom: clip.3 };
@@ -273,6 +278,9 @@ impl Surface {
         if self.generation != gpu.generation {
             self.release();
         }
+        if self.layered {
+            return self.paint_layer(&gpu, hwnd, (w, h), scale, plain, draw);
+        }
         if self.swap.is_none() {
             let desc = DXGI_SWAP_CHAIN_DESC1 {
                 Width: w,
@@ -282,24 +290,16 @@ impl Surface {
                 SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
                 BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
                 BufferCount: 2,
-                // A composition swap chain must stretch; it's never resized.
-                Scaling: if self.layered { DXGI_SCALING_STRETCH } else { DXGI_SCALING_NONE },
+                Scaling: DXGI_SCALING_NONE,
                 SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
                 AlphaMode: DXGI_ALPHA_MODE_IGNORE,
                 Flags: 0,
             };
-            let swap = if self.layered {
-                let Some((swap, layer)) = make_layer(&gpu, hwnd, &desc) else { return false };
-                self.layer = Some(layer);
-                swap
-            } else {
-                let Ok(swap) = (unsafe { gpu.dxgi.CreateSwapChainForHwnd(&gpu.d3d, hwnd, &desc, None, None) }) else { return false };
-                // Alt+Enter is the app's own (F11), not DXGI's.
-                unsafe {
-                    let _ = gpu.dxgi.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
-                }
-                swap
-            };
+            let Ok(swap) = (unsafe { gpu.dxgi.CreateSwapChainForHwnd(&gpu.d3d, hwnd, &desc, None, None) }) else { return false };
+            // Alt+Enter is the app's own (F11), not DXGI's.
+            unsafe {
+                let _ = gpu.dxgi.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+            }
             self.swap = Some(swap);
             self.size = (w, h);
             self.generation = gpu.generation;
@@ -363,6 +363,82 @@ impl Surface {
         true
     }
 
+    /// A layer's frame: drawn in its bitmap, copied into the composition
+    /// surface where the compositor placed it, and committed.
+    fn paint_layer(&mut self, gpu: &Gpu, hwnd: HWND, (w, h): (u32, u32), scale: f32, plain: bool, draw: impl FnOnce(&mut Painter)) -> bool {
+        if self.layer.is_none() || self.size != (w, h) {
+            self.release();
+            let Some(layer) = make_layer(gpu, hwnd, (w, h)) else { return false };
+            self.layer = Some(layer);
+            self.size = (w, h);
+            self.generation = gpu.generation;
+        }
+        let layer = self.layer.as_mut().expect("layer");
+        let drawing = std::time::Instant::now();
+        let painted = with_context(gpu, |c| {
+            if layer.drawn.is_none() {
+                let props = D2D1_BITMAP_PROPERTIES1 {
+                    pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+                    dpiX: 96.0,
+                    dpiY: 96.0,
+                    bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET,
+                    colorContext: std::mem::ManuallyDrop::new(None),
+                };
+                layer.drawn = unsafe { c.context.CreateBitmap(D2D_SIZE_U { width: w, height: h }, None, 0, &props) }.ok();
+            }
+            let drawn = layer.drawn.as_ref()?;
+            unsafe {
+                c.context.SetTarget(drawn);
+                c.context.SetDpi(96.0 * scale, 96.0 * scale);
+                c.context.BeginDraw();
+                c.context.SetTransform(&windows::Foundation::Numerics::Matrix3x2::identity());
+                c.context.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            }
+            d2d::paint_context(&c.context, &c.brush, &mut c.halos, plain, draw);
+            let ended = unsafe { c.context.EndDraw(None, None) };
+            unsafe { c.context.SetTarget(None::<&ID2D1Image>) };
+            if let Err(e) = ended {
+                return Some(Err(e));
+            }
+            // Into the composition surface, wherever in its atlas it is.
+            let copied = (|| -> windows::core::Result<()> {
+                let mut offset = POINT::default();
+                let dxgi: IDXGISurface = unsafe { layer.surface.BeginDraw(None, &mut offset)? };
+                let props = D2D1_BITMAP_PROPERTIES1 {
+                    pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+                    dpiX: 96.0,
+                    dpiY: 96.0,
+                    bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                    colorContext: std::mem::ManuallyDrop::new(None),
+                };
+                let copied = unsafe { c.context.CreateBitmapFromDxgiSurface(&dxgi, Some(&props)) }.and_then(|target| {
+                    let at = D2D_POINT_2U { x: offset.x.max(0) as u32, y: offset.y.max(0) as u32 };
+                    unsafe { target.CopyFromBitmap(Some(&at), drawn, None) }
+                });
+                unsafe { layer.surface.EndDraw()? };
+                copied
+            })();
+            Some(copied)
+        })
+        .flatten();
+        match painted {
+            Some(Ok(())) => {}
+            Some(Err(e)) if e.code() == D2DERR_RECREATE_TARGET => {
+                self.release();
+                lose(gpu.generation);
+                return false;
+            }
+            _ => return false,
+        }
+        let drawn = drawing.elapsed().as_secs_f64() * 1000.0;
+        let committing = std::time::Instant::now();
+        unsafe {
+            let _ = layer.device.Commit();
+        }
+        self.timing = (drawn, committing.elapsed().as_secs_f64() * 1000.0, 0);
+        true
+    }
+
     /// Lets the swap chain go (the window hides, or the device was lost);
     /// a layer leaves its window.
     pub fn release(&mut self) {
@@ -378,19 +454,18 @@ impl Surface {
     }
 }
 
-/// A composition swap chain on a visual over every child of `hwnd`.
-fn make_layer(gpu: &Gpu, hwnd: HWND, desc: &DXGI_SWAP_CHAIN_DESC1) -> Option<(IDXGISwapChain1, Layer)> {
+/// A composition surface `size` pixels on a visual over every child of `hwnd`.
+fn make_layer(gpu: &Gpu, hwnd: HWND, (w, h): (u32, u32)) -> Option<Layer> {
     unsafe {
-        let swap = gpu.dxgi.CreateSwapChainForComposition(&gpu.d3d, desc, None).ok()?;
         let dxgi_device: IDXGIDevice = gpu.d3d.cast().ok()?;
         let device: IDCompositionDevice = DCompositionCreateDevice(&dxgi_device).ok()?;
+        let surface = device.CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE).ok()?;
         let target = device.CreateTargetForHwnd(hwnd, true).ok()?;
         let visual = device.CreateVisual().ok()?;
         // Nothing shows until it's placed.
         visual.SetClip2(&D2D_RECT_F::default()).ok()?;
-        visual.SetContent(&swap).ok()?;
+        visual.SetContent(&surface).ok()?;
         target.SetRoot(&visual).ok()?;
-        device.Commit().ok()?;
-        Some((swap, Layer { device, _target: target, visual }))
+        Some(Layer { device, _target: target, visual, surface, drawn: None })
     }
 }
