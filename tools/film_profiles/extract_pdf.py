@@ -15,7 +15,7 @@ For each stock in the recipe's "extraction" block:
 Options for charts drawn in one ink (the Fujifilm Professional Data Guide), all opt-in so
 the earlier recipes extract exactly as before:
   * panel "frame_kind": "fill" takes the frame from a filled rectangle (the grey plot
-    area) instead of a stroked one;
+    area, a 're' or four closing lines) instead of a stroked one;
   * panel "grid_crossing": true also takes gridlines that run past the frame (ticks drawn
     as one line with the gridline), using the part inside it;
   * axis "relative_reason": a relative axis (e.g. "Relative Sensitivity (log)" with a
@@ -73,8 +73,11 @@ def split_subpaths(items, tol=1e-3):
     """A drawing's items cut into runs where each item starts where the last one ended."""
     runs = []
     for it in items:
+        if it[0] not in ("l", "c"):  # rectangles and quads stand alone
+            runs.append([it])
+            continue
         start = it[1]
-        if runs:
+        if runs and runs[-1][-1][0] in ("l", "c"):
             prev = runs[-1][-1]
             end = prev[2] if prev[0] == "l" else prev[4]
             if abs(end.x - start.x) <= tol and abs(end.y - start.y) <= tol:
@@ -84,12 +87,28 @@ def split_subpaths(items, tol=1e-3):
     return runs
 
 
-def find_frame(drawings, rect, tol=3.0, kinds=("s", "fs")):
+def quad_rect(items):
+    """Four nearly axis-parallel lines closing a rectangle (a plot area filled as a polygon;
+    the Data Guide's are hand-drafted, one corner up to 0.25 pt off). Its bounding box."""
+    if len(items) != 4 or any(it[0] != "l" for it in items):
+        return None
+    if not all(abs(it[1].x - it[2].x) < 0.5 or abs(it[1].y - it[2].y) < 0.5 for it in items):
+        return None
+    xs, ys = [it[1].x for it in items], [it[1].y for it in items]
+    return pymupdf.Rect(min(xs), min(ys), max(xs), max(ys))
+
+
+def find_frame(drawings, rect, tol=3.0, kinds=("s", "fs"), quads=False):
     best = None
     for d in drawings:
-        if d["type"] not in kinds or len(d["items"]) != 1 or d["items"][0][0] != "re":
+        if d["type"] not in kinds:
             continue
-        r = d["items"][0][1]
+        if len(d["items"]) == 1 and d["items"][0][0] == "re":
+            r = d["items"][0][1]
+        elif quads and quad_rect(d["items"]) is not None:
+            r = quad_rect(d["items"])
+        else:
+            continue
         err = max(abs(r.x0 - rect[0]), abs(r.y0 - rect[1]), abs(r.x1 - rect[2]), abs(r.y1 - rect[3]))
         if err < tol and (best is None or err < best[0]):
             best = (err, r)
@@ -217,7 +236,8 @@ def select_subpath(drawings, frame, name, cs):
 
 
 def extract_panel(page, drawings, panel):
-    frame = find_frame(drawings, panel["frame"], kinds=("f", "fs") if panel.get("frame_kind") == "fill" else ("s", "fs"))
+    fill = panel.get("frame_kind") == "fill"
+    frame = find_frame(drawings, panel["frame"], kinds=("f", "fs") if fill else ("s", "fs"), quads=fill)
     grid = gridlines(drawings, frame, crossing=panel.get("grid_crossing", False))
     axes = {k: fit_axis(panel["axes"][k], grid, frame) for k in ("x", "y")}
     curves = {}

@@ -32,18 +32,33 @@ def gate_exceptions(extraction):
     return out
 
 
-def metadata(recipe, extraction, report, stock, created):
+def relative_axes(extraction):
+    out = []
+    for pname, panel in extraction["panels"].items():
+        for ax, spec in panel["axes"].items():
+            if spec.get("relative_reason"):
+                out.append(f"{pname} {ax} axis: {spec['relative_reason']}")
+    return out
+
+
+STILL_PRECEDENT = "the shipped Fujifilm still negatives (C200, X-TRA 400, Superia 200, Reala 100, Pro 160NS)"
+
+
+def metadata(recipe, extraction, report, stock, created, packet="data/profile-sources/fujifilm-cine"):
     src = extraction["source"]
+    pages = sorted({p["page"] for p in extraction["panels"].values()})
+    page = "page 1" if pages == [0] else ", ".join(f"PDF page {i + 1}" for i in pages)
+    rms = recipe.get("rms_granularity_brochure", recipe.get("rms_granularity"))
     variant = report["chosen_variant"]
     v = report["variants"]
     errs = ", ".join(f"{k} {v[k]['ramp_final']['mean_neutrality_error']:.3f}" for k in v)
     w = report["window"]["params"]
     lines = [
-        f"Prepared for Negs from the manufacturer's datasheet: {src['document']}, {src['edition']}, page 1 "
+        f"Prepared for Negs from the manufacturer's datasheet: {src['document']}, {src['edition']}, {page} "
         f"(spectral sensitivity, characteristic curves, minimum and midscale-neutral spectral density; RMS "
-        f"granularity {recipe['rms_granularity_brochure']}). PDF sha256 {src['sha256']}. Data (c) FUJIFILM "
+        f"granularity {rms}). PDF sha256 {src['sha256']}. Data (c) FUJIFILM "
         f"Corporation. The curves were read from the PDF's vector paths (tools/film_profiles/extract_pdf.py); "
-        f"the points and axis calibration are in data/profile-sources/fujifilm-cine/{stock}/.",
+        f"the points and axis calibration are in {packet}/{stock}/.",
         "Method: spektrafilm's public-era profile creator by Andrea Volpato (commit b2c7fe6), steps 1-8: "
         "D-min removed, log E zero where green is 0.2 over D-min plus 3 stops, dye spectra reconstructed "
         "(dmid_dmin) from spektrafilm's generic_a dye set (Giorgianni, Madden & Kriss 2009, p. 112, via "
@@ -53,16 +68,18 @@ def metadata(recipe, extraction, report, stock, created):
         f"shipped films' range{'; outside it: ' + ', '.join(repr(k) for k in v if not v[k]['check8_target_print_pass']) if any(not v[k]['check8_target_print_pass'] for k in v) else ''}), "
         "densitometer normalisation. Then Negs's steps: sensitivity scaled so an "
         f"18.4 % grey gives raw exposure 1 per channel under the reference illuminant, and spektrafilm's "
-        f"grey-ramp refinement run on spektrafilm 28bf883 through kodak_2383 at data_trustability "
+        f"grey-ramp refinement run on spektrafilm 28bf883 through {recipe['target_print']} at data_trustability "
         f"{report['trust']}. hanatos2025 adaptation window {[round(x, 1) for x in w]} fitted on the "
         f"reflectance corpus ({CORPUS}) with a weak prior toward the median of spektrafilm's stored windows. "
         "Tools and procedure: tools/film_profiles, docs/adding-film-stocks.md.",
         f"Negs choices: reference illuminant {ILLUMINANT[recipe['reference_illuminant']]}; viewing illuminant "
         f"{recipe['viewing_illuminant']}; target print {recipe['target_print']}; "
         f"log_sensitivity_density_over_min {recipe['log_sensitivity_density_over_min']} as printed; spectra "
-        "left empty (null) outside the published wavelength range; characteristic curves converted from "
-        "stops (log10 H = 0.30103 x stops); use 'cine' and antihalation 'strong' as the Vision3 and Eterna "
-        "profiles.",
+        "left empty (null) outside the published wavelength range; characteristic curves "
+        + ("converted from stops (log10 H = 0.30103 x stops); use 'cine' and antihalation 'strong' as the "
+           "Vision3 and Eterna profiles." if recipe["use"] == "cine" else
+           f"in log10 H as printed; use '{recipe['use']}' and antihalation '{recipe['antihalation']}' as "
+           f"{STILL_PRECEDENT}."),
     ]
     lines += [f"Note: {n}" for n in recipe.get("notes", [])]
     c = v[variant]
@@ -76,6 +93,9 @@ def metadata(recipe, extraction, report, stock, created):
             f"{', the chart' + chr(39) + 's blue edge' if c['check6_worst_nm'] < 420 else ''}), over the 0.03 D criterion; the §D3 flat extension made it worse. Weighted per "
             f"{recipe['target_print']} print channel the residual is R/G/B {pw} D, within the 0.01 D the method "
             "accepts for this case (approved by Noah 2026-11-14).")
+    rel = relative_axes(extraction)
+    if rel:
+        lines.append("Relative axes: " + " ".join(rel))
     ex = gate_exceptions(extraction)
     if ex:
         lines.append("Recorded extraction exceptions: " + " ".join(ex))
@@ -125,7 +145,8 @@ def main():
     build = Path(a.build)
     p = json.loads((build / f"{a.stock}.json").read_text())
     report = json.loads((build / "report.json").read_text())
-    p["metadata"] = metadata(r["stocks"][a.stock], r["extraction"][a.stock], report, a.stock, a.created)
+    packet = Path(a.recipe).resolve().parent.relative_to(TOOL.parents[1]).as_posix()
+    p["metadata"] = metadata(r["stocks"][a.stock], r["extraction"][a.stock], report, a.stock, a.created, packet)
     check_shape(p, a.stock)
     out = Path(a.negs_data) / "profiles" / f"{a.stock}.json"
     out.write_text(json.dumps(p, indent=4) + "\n")
