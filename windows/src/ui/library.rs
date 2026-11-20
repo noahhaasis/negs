@@ -24,8 +24,8 @@ const LOWER: u16 = 20007;
 const PICK: u16 = 20008;
 const REJECT: u16 = 20009;
 const UNFLAG: u16 = 20010;
-const COPY_EDITS: u16 = 20011;
-const COPY_EDITS_CHOOSING: u16 = 20012;
+pub const COPY_EDITS: u16 = 20011;
+pub const COPY_EDITS_CHOOSING: u16 = 20012;
 const PASTE_EDITS: u16 = 20013;
 const PASTE_PREVIOUS: u16 = 20014;
 pub const DUPLICATE: u16 = 20015;
@@ -192,8 +192,8 @@ pub fn command(app: &mut App, command: u16) -> bool {
         PICK => model.library_key(LibraryKey::Pick),
         REJECT => model.library_key(LibraryKey::Reject),
         UNFLAG => model.library_key(LibraryKey::Unflag),
-        COPY_EDITS => model.copy_edits(None),
-        COPY_EDITS_CHOOSING => copy_edits_choosing(app),
+        COPY_EDITS => model.copy_edits(None, None),
+        COPY_EDITS_CHOOSING => copy_edits_choosing(app, None),
         PASTE_EDITS => model.paste_edits(),
         PASTE_PREVIOUS => model.paste_from_previous(),
         DUPLICATE => model.duplicate_photos(),
@@ -283,14 +283,15 @@ thread_local! {
 }
 
 /// Copy Edits…: the groups Paste Edits applies, chosen in a small dialog
-/// (`copyEditsChoosing`); the choice is remembered.
-fn copy_edits_choosing(app: &mut App) {
+/// (`copyEditsChoosing`); the choice is remembered. Of `from`, else the
+/// open photograph.
+pub fn copy_edits_choosing(app: &mut App, from: Option<Item>) {
     if !app.model.can_change_library() {
         return;
     }
     let chosen = app.model.prefs.library.copy_groups();
     let Some(groups) = choose_groups(app, &chosen) else { return };
-    app.model.copy_edits(Some(groups));
+    app.model.copy_edits(from, Some(groups));
 }
 
 fn choose_groups(app: &App, chosen: &BTreeSet<EditGroup>) -> Option<BTreeSet<EditGroup>> {

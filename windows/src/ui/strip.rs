@@ -31,7 +31,7 @@ use super::d2d::{BoxInk, Ink, Painter, RectF};
 use super::surface::Surface;
 use super::theme::{self, Tokens};
 use super::thumbs::{self, Thumbs, Want};
-use super::{App, post, with_app};
+use super::{App, library, post, with_app};
 use crate::model::{dirty, is_photo};
 use crate::platform::{pcwstr, wide};
 use crate::sheet_rules::{self as rules, StripLayout, ThumbSize};
@@ -496,8 +496,16 @@ pub fn context_menu(app: &mut App, hwnd: HWND, item: &Item, screen: POINT) {
         super::batch::export_items(app, menu);
         let command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, 0, hwnd, None);
         let _ = DestroyMenu(menu);
-        if command.0 != 0 {
-            let _ = PostMessageW(app.main, WM_COMMAND, WPARAM(command.0 as usize), LPARAM(0));
+        // Copy Edits copies the photograph clicked, not the open one
+        // (`copyEdits(from: item)`); the menu bar's copies the open one.
+        let from = item.clone();
+        match command.0 as u16 {
+            library::COPY_EDITS => post(move |app: &mut App| app.model.copy_edits(Some(from), None)),
+            library::COPY_EDITS_CHOOSING => post(move |app: &mut App| library::copy_edits_choosing(app, Some(from))),
+            _ if command.0 != 0 => {
+                let _ = PostMessageW(app.main, WM_COMMAND, WPARAM(command.0 as usize), LPARAM(0));
+            }
+            _ => {}
         }
     }
 }

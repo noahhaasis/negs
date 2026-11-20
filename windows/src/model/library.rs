@@ -673,9 +673,10 @@ impl Model {
         }
     }
 
-    /// Copy Edits, or Copy Edits… with the groups chosen (remembered).
-    pub fn copy_edits(&mut self, groups: Option<BTreeSet<EditGroup>>) {
-        let Some(item) = self.library_item().filter(|_| self.can_change_library()) else { return };
+    /// Copy Edits, or Copy Edits… with the groups chosen (remembered): of
+    /// `from` (the photograph right-clicked, as on the Mac), else the open one.
+    pub fn copy_edits(&mut self, from: Option<Item>, groups: Option<BTreeSet<EditGroup>>) {
+        let Some(item) = from.or_else(|| self.library_item()).filter(|_| self.can_change_library()) else { return };
         if let Some(groups) = &groups {
             self.prefs.library.set_copy_groups(groups);
             self.prefs.save();
