@@ -414,6 +414,9 @@ impl ThumbSize {
 
 /// How far either side of the middle of the view thumbnails are read ahead.
 pub const PREFETCH_REACH: usize = 32;
+/// Photographs' shapes are read from their headers this many at a time
+/// (`PhotoAspects.batch`).
+pub const HEADER_BATCH: usize = 48;
 /// The developed thumbnail's long side, border included, and the cache's size.
 pub const EDITED_LONG_SIDE: u32 = 512;
 pub const EDITED_LIMIT: u64 = 1 << 30;
