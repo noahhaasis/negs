@@ -1164,7 +1164,13 @@ import UserNotifications
             apply(next, action: "Change Image Size")
         case .longestSide:
             guard imageSizeMode != .longestSide else { return }
-            _ = setLongestSide(ImageSize.remembered ?? nativeLongestSide)
+            // The remembered value is the app's, but whether it fits depends
+            // on this photograph and its crop. One that doesn't (a smaller
+            // crop needs a larger frame) gives way to the crop's own longest
+            // side, which always fits, so the choice is never refused (#20).
+            let remembered = ImageSize.remembered
+            if let remembered, setLongestSide(remembered) == nil { return }
+            setLongestSide(nativeLongestSide, remember: remembered == nil)
         }
     }
 
@@ -1176,7 +1182,9 @@ import UserNotifications
     }
 
     /// Sets a Longest side target; returns why it can't be used, changing nothing.
-    @discardableResult func setLongestSide(_ pixels: Int) -> String? {
+    /// `remember` keeps `pixels` as the value offered next time; a fallback
+    /// the person didn't type leaves their remembered value alone.
+    @discardableResult func setLongestSide(_ pixels: Int, remember: Bool = true) -> String? {
         guard ImageSize.range.contains(pixels) else {
             return "Enter a whole number from \(ImageSize.range.lowerBound) to \(ImageSize.range.upperBound.formatted()) px."
         }
@@ -1184,7 +1192,7 @@ import UserNotifications
             let working = ImageSize.working(source: sourceSize, target: pixels, crop: crop)
             if ImageSize.exceedsLimit(working: working, source: sourceSize) { return ImageSize.limitMessage(working: working) }
         }
-        ImageSize.remembered = pixels
+        if remember { ImageSize.remembered = pixels }
         var next = state; next.params[ImageSize.targetPath] = .number(Double(pixels))
         apply(next, action: "Change Image Size")
         return nil

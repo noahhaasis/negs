@@ -208,6 +208,16 @@ import XCTest
         XCTAssertEqual(model.state.params[ImageSize.targetPath], .null)
         model.chooseImageSize(.longestSide)
         XCTAssertEqual(ImageSize.target(of: model.state.params), 192)
+
+        // #20: a remembered value too large for the crop (20000 px on the
+        // 48 px half crop needs over 1000 MP) gives way to the crop's own
+        // longest side instead of refusing the switch, and stays remembered.
+        model.chooseImageSize(.original)
+        ImageSize.remembered = 20000
+        model.chooseImageSize(.longestSide)
+        XCTAssertEqual(model.imageSizeMode, .longestSide)
+        XCTAssertEqual(ImageSize.target(of: model.state.params), 48)
+        XCTAssertEqual(ImageSize.remembered, 20000)
     }
 
     func testCancelExportPreservesExistingDestinationAndRemovesStaging() async throws {

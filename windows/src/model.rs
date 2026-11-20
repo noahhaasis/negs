@@ -1379,9 +1379,16 @@ impl Model {
                 json::set(&mut next.params, state::SIZE_TARGET, Value::Null);
                 self.apply(next, "Change Image Size");
             }
+            // The remembered value is the app's, but whether it fits depends
+            // on this photograph and its crop. One that doesn't (a smaller
+            // crop needs a larger frame) gives way to the crop's own longest
+            // side, which always fits, so the choice is never refused (#20).
             state::SizeMode::LongestSide if self.size_mode() != state::SizeMode::LongestSide => {
-                let pixels = self.prefs.image_size_long_side.filter(|p| PHOTO_LONG_SIDE_RANGE.contains(p)).unwrap_or_else(|| self.native_long_side());
-                let _ = self.set_longest_side(pixels);
+                let remembered = self.prefs.image_size_long_side.filter(|p| PHOTO_LONG_SIDE_RANGE.contains(p));
+                if !remembered.is_some_and(|pixels| self.apply_longest_side(pixels, true).is_ok()) {
+                    let native = self.native_long_side();
+                    let _ = self.apply_longest_side(native, remembered.is_none());
+                }
             }
             _ => {}
         }
@@ -1399,6 +1406,12 @@ impl Model {
     /// Sets a Longest side target, or explains why it can't be used and
     /// changes nothing.
     pub fn set_longest_side(&mut self, pixels: u32) -> std::result::Result<(), String> {
+        self.apply_longest_side(pixels, true)
+    }
+
+    /// `remember` keeps `pixels` as the value offered next time; a fallback
+    /// the person didn't type leaves their remembered value alone.
+    fn apply_longest_side(&mut self, pixels: u32, remember: bool) -> std::result::Result<(), String> {
         let mut next = self.state.clone();
         json::set(&mut next.params, state::SIZE_TARGET, json::num(pixels as f64));
         let checked = if !PHOTO_LONG_SIDE_RANGE.contains(&pixels) {
@@ -1411,8 +1424,10 @@ impl Model {
         self.size_error = checked.clone().err();
         self.mark(dirty::INSPECTOR);
         checked?;
-        self.prefs.image_size_long_side = Some(pixels);
-        self.prefs.save();
+        if remember {
+            self.prefs.image_size_long_side = Some(pixels);
+            self.prefs.save();
+        }
         self.apply(next, "Change Image Size");
         Ok(())
     }
@@ -4426,6 +4441,38 @@ mod tests {
         old.result["film_histogram"] = json!({"stops": [-8, 8], "ev": 0, "counts": [[9, 9], [9, 9], [9, 9]]});
         model.render_finished(Ok(old), model.revision, generation, FrameKind::Settled);
         assert!(model.film_histogram.is_none());
+    }
+
+    /// #20: a remembered Longest side too large for the crop gives way to
+    /// the crop's own longest side instead of refusing the switch, and stays
+    /// remembered; one that fits is still used. In a child process with a
+    /// profile of its own, since choosing a size saves the preferences.
+    #[test]
+    fn longest_side_falls_back_to_the_crop_when_the_remembered_one_does_not_fit() {
+        super::harness::isolated(concat!(module_path!(), "::longest_side_falls_back_to_the_crop_when_the_remembered_one_does_not_fit"), || {
+            let cropped = |remembered: Option<u32>, side: f64| {
+                let mut model = catalog_model(Preferences { image_size_long_side: remembered, ..Preferences::default() });
+                model.source_size = (6000, 4000);
+                let mut next = model.state.clone();
+                next.crop.rect = crate::crop::Rect { x: 0.1, y: 0.1, width: side, height: side };
+                model.apply(next, "Crop");
+                model.choose_image_size(state::SizeMode::LongestSide);
+                model
+            };
+            // 6000 px on a 20% crop needs a 30000 × 20000 px frame, over the limit.
+            let model = cropped(Some(6000), 0.2);
+            assert_eq!(model.size_mode(), state::SizeMode::LongestSide);
+            assert_eq!(state::size_target(&model.state.params), Some(1200));
+            assert_eq!(model.size_error, None);
+            assert_eq!(model.prefs.image_size_long_side, Some(6000));
+            // A remembered value that fits is used as before.
+            let model = cropped(Some(6000), 0.5);
+            assert_eq!(state::size_target(&model.state.params), Some(6000));
+            // Without one, the crop's own side is used, and remembered.
+            let model = cropped(None, 0.5);
+            assert_eq!(state::size_target(&model.state.params), Some(3000));
+            assert_eq!(model.prefs.image_size_long_side, Some(3000));
+        });
     }
 
     /// A catalog with two films and two papers, and defaults for what the
