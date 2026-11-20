@@ -630,23 +630,22 @@ pub fn size_at(fraction: f64) -> f64 {
     clamp_size(GRID_SIZES.0 + fraction.clamp(0.0, 1.0) * (GRID_SIZES.1 - GRID_SIZES.0))
 }
 
-// MARK: The fold flight (SheetFlight)
+// MARK: The grid's fade
 
-/// Each flyer's flight; each step from the current photograph starts 8 ms
-/// later, up to 12 steps; the grid's boxes fade in from 35 % of a flight;
-/// a fold's last 110 ms fade the sheet off the strip. Shorter than the
-/// Mac's (480, 16, 180: 672 ms in all), 396 ms in all, at Noah's asking.
-pub const FLIGHT_MS: f64 = 300.0;
-pub const STAGGER_MS: f64 = 8.0;
-pub const STAGGER_STEPS: usize = 12;
-pub const BOXES_FROM: f64 = 0.35;
-pub const FOLD_FADE_MS: f64 = 110.0;
-/// How far past the window's top the sheet's growing edge is aimed.
-pub const MASK_REACH: f64 = 0.25;
+/// The grid fades in over the photograph as it rises a little, and out
+/// again. Windows only: the Mac's grid flies out of the strip
+/// (`SheetFlight`), which here, painted a frame at a time at 59 Hz, felt
+/// slow (Noah, 2026-11-20); a fade the compositor runs doesn't.
+pub const FADE_MS: f64 = 150.0;
+/// How far below its place the fading sheet starts (DIPs).
+pub const FADE_RISE: f64 = 14.0;
 
-/// `cubic-bezier(.22, .8, .24, 1)` at `t`.
-pub fn flight_curve(t: f64) -> f64 {
-    cubic_bezier(0.22, 0.8, 0.24, 1.0, t)
+/// The sheet `along` ms into its fade (closing plays it backwards): its
+/// opacity, and how far below its place it is (DIPs), settling on
+/// `cubic-bezier(.22, .8, .24, 1)`.
+pub fn sheet_look(along: f64) -> (f64, f64) {
+    let p = (along / FADE_MS).clamp(0.0, 1.0);
+    (p, FADE_RISE * (1.0 - cubic_bezier(0.22, 0.8, 0.24, 1.0, p)))
 }
 
 /// A CSS cubic Bézier timing function at `t` (0…1).
@@ -684,95 +683,6 @@ pub fn cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, t: f64) -> f64 {
         }
     }
     ((ay * s + by) * s + cy) * s
-}
-
-/// A flyer's delay: 8 ms a step from the current photograph, up to 12.
-pub fn flight_delay(index: usize, current: Option<usize>) -> f64 {
-    let steps = current.map_or(0, |c| index.abs_diff(c)).min(STAGGER_STEPS);
-    steps as f64 * STAGGER_MS
-}
-
-/// Where a flyer is `elapsed` ms into the flight: `from` → `to`, after its
-/// delay, on the curve. Folding plays it backwards.
-pub fn flyer_at(from: &Rect, to: &Rect, elapsed: f64, delay: f64) -> Rect {
-    let t = ((elapsed - delay) / FLIGHT_MS).clamp(0.0, 1.0);
-    from.lerp(to, flight_curve(t))
-}
-
-/// The whole flight's length with `flyers` staggered as `flight_delay` does.
-pub fn flight_length(longest_delay: f64) -> f64 {
-    longest_delay + FLIGHT_MS
-}
-
-/// The sheet's growing edge: from the strip's `band` towards `window`,
-/// aimed `MASK_REACH` past its top so the sentence isn't left for the end,
-/// and never past the window.
-pub fn mask_at(band: &Rect, window: &Rect, elapsed: f64) -> Rect {
-    let reach = window.h * MASK_REACH;
-    let aimed = Rect::new(window.x, window.y - reach, window.w, window.h + reach);
-    let t = flight_curve((elapsed / FLIGHT_MS).clamp(0.0, 1.0));
-    let r = band.lerp(&aimed, t);
-    let top = r.y.max(window.y);
-    Rect::new(r.x.max(window.x), top, r.w.min(window.w), (r.max_y() - top).max(0.0))
-}
-
-// MARK: The grid's fade (Windows only)
-
-/// How the grid opens and closes. Windows fades it (Noah, 2026-11-20: the
-/// flight felt slow at 59 Hz, drawn a frame at a time); the Mac keeps the
-/// flight. `NEGS_GRID_TRANSITION=flight|fade|zoom` picks another to compare.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Transition {
-    /// The strip's frames fly to their places (`SheetFlight`).
-    Flight,
-    /// The sheet fades in over the photograph as it rises a little.
-    Fade,
-    /// The sheet fades in as it settles from a little larger, about the open photograph.
-    Zoom,
-}
-
-pub const FADE_MS: f64 = 150.0;
-pub const ZOOM_MS: f64 = 180.0;
-/// How far below its place the fading sheet starts (DIPs).
-pub const FADE_RISE: f64 = 14.0;
-/// How much larger the zooming sheet starts.
-pub const ZOOM_FROM: f64 = 0.1;
-
-impl Transition {
-    pub fn named(name: &str) -> Option<Self> {
-        match name.trim().to_ascii_lowercase().as_str() {
-            "flight" => Some(Self::Flight),
-            "fade" => Some(Self::Fade),
-            "zoom" => Some(Self::Zoom),
-            _ => None,
-        }
-    }
-
-    pub fn chosen() -> Self {
-        static CHOSEN: std::sync::OnceLock<Transition> = std::sync::OnceLock::new();
-        *CHOSEN.get_or_init(|| std::env::var("NEGS_GRID_TRANSITION").ok().and_then(|n| Self::named(&n)).unwrap_or(Self::Fade))
-    }
-
-    /// A fade's or a zoom's length; a flight's depends on its flyers.
-    pub fn length(self) -> f64 {
-        match self {
-            Self::Flight => FLIGHT_MS,
-            Self::Fade => FADE_MS,
-            Self::Zoom => ZOOM_MS,
-        }
-    }
-}
-
-/// The sheet `along` ms into a fade or zoom (closing plays it backwards):
-/// its opacity, how far below its place it is (DIPs) and its scale.
-pub fn sheet_look(kind: Transition, along: f64) -> (f64, f64, f64) {
-    let p = (along / kind.length()).clamp(0.0, 1.0);
-    let settled = flight_curve(p);
-    match kind {
-        Transition::Flight => (1.0, 0.0, 1.0),
-        Transition::Fade => (p, FADE_RISE * (1.0 - settled), 1.0),
-        Transition::Zoom => ((p * 1.5).min(1.0), 0.0, 1.0 + ZOOM_FROM * (1.0 - settled)),
-    }
 }
 
 /// `f` over `0…length` as `pieces` cubics, for the compositor's
@@ -1129,58 +1039,25 @@ mod tests {
 
     #[test]
     fn the_fade_runs_from_nothing_to_the_sheet() {
-        assert_eq!(Transition::named(" Zoom"), Some(Transition::Zoom));
-        assert_eq!(Transition::named("slide"), None);
-        for kind in [Transition::Fade, Transition::Zoom] {
-            assert_eq!(sheet_look(kind, 0.0).0, 0.0);
-            assert_eq!(sheet_look(kind, kind.length()), (1.0, 0.0, 1.0));
-            assert_eq!(sheet_look(kind, kind.length() * 2.0), (1.0, 0.0, 1.0));
-        }
-        assert_eq!(sheet_look(Transition::Fade, 0.0), (0.0, FADE_RISE, 1.0));
-        assert!((sheet_look(Transition::Zoom, 0.0).2 - (1.0 + ZOOM_FROM)).abs() < 1e-12);
-        // The compositor's cubics follow the look closely, kink and all.
-        let look = |t: f64| sheet_look(Transition::Zoom, t * 1000.0);
-        let length = ZOOM_MS / 1000.0;
-        for channel in [0, 2] {
-            let value = |t: f64| if channel == 0 { look(t).0 } else { look(t).2 };
-            let pieces = cubic_pieces(value, length, 16);
+        assert_eq!(sheet_look(0.0), (0.0, FADE_RISE));
+        assert_eq!(sheet_look(FADE_MS), (1.0, 0.0));
+        assert_eq!(sheet_look(FADE_MS * 2.0), (1.0, 0.0));
+        // Quick off the mark, as cubic-bezier(.22,.8,.24,1).
+        assert!(sheet_look(FADE_MS / 4.0).1 < FADE_RISE * 0.4);
+        assert!((cubic_bezier(0.25, 0.25, 0.75, 0.75, 0.3) - 0.3).abs() < 1e-6, "linear stays linear");
+        // The compositor's cubics follow the look closely.
+        let length = FADE_MS / 1000.0;
+        for channel in [0, 1] {
+            let value = |t: f64| if channel == 0 { sheet_look(t * 1000.0).0 } else { sheet_look(t * 1000.0).1 };
+            let pieces = cubic_pieces(value, length, 15);
             for k in 0..=200 {
                 let t = length * k as f64 / 200.0;
                 let p = pieces.iter().rev().find(|p| p[0] <= t).unwrap();
                 let u = t - p[0];
                 let at = p[1] + p[2] * u + p[3] * u * u + p[4] * u * u * u;
-                assert!((at - value(t)).abs() < 0.01, "channel {channel} at {t}: {at} vs {}", value(t));
+                assert!((at - value(t)).abs() < 0.02, "channel {channel} at {t}: {at} vs {}", value(t));
             }
         }
-    }
-
-    #[test]
-    fn the_flight_eases_and_staggers() {
-        assert_eq!(flight_curve(0.0), 0.0);
-        assert_eq!(flight_curve(1.0), 1.0);
-        // Fast out of the start, as cubic-bezier(.22,.8,.24,1).
-        assert!(flight_curve(0.25) > 0.6, "{}", flight_curve(0.25));
-        let mut last = 0.0;
-        for i in 1..=100 {
-            let v = flight_curve(i as f64 / 100.0);
-            assert!(v >= last - 1e-9, "monotonic");
-            last = v;
-        }
-        assert!((cubic_bezier(0.25, 0.25, 0.75, 0.75, 0.3) - 0.3).abs() < 1e-6, "linear stays linear");
-        assert_eq!(flight_delay(10, Some(10)), 0.0);
-        assert_eq!(flight_delay(12, Some(10)), 2.0 * STAGGER_MS);
-        assert_eq!(flight_delay(40, Some(10)), 12.0 * STAGGER_MS);
-        let (a, b) = (Rect::new(0.0, 500.0, 210.0, 140.0), Rect::new(16.0, 24.0, 264.0, 176.0));
-        assert_eq!(flyer_at(&a, &b, 0.0, 0.0), a);
-        assert_eq!(flyer_at(&a, &b, FLIGHT_MS, 0.0), b);
-        assert_eq!(flyer_at(&a, &b, STAGGER_MS, 2.0 * STAGGER_MS), a, "waiting for its turn");
-        let window = Rect::new(0.0, 38.0, 1400.0, 900.0);
-        let band = Rect::new(0.0, 752.0, 1000.0, 186.0);
-        assert_eq!(mask_at(&band, &window, 0.0), band);
-        assert_eq!(mask_at(&band, &window, FLIGHT_MS), window);
-        let mid = mask_at(&band, &window, FLIGHT_MS / 2.0);
-        assert!(mid.y >= window.y && mid.y < band.y && mid.max_y() <= window.max_y() + 1e-9);
-        assert_eq!(flight_length(12.0 * STAGGER_MS), 396.0);
     }
 
     #[test]

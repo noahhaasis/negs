@@ -242,12 +242,9 @@ struct Layer {
 
 impl Surface {
     /// A surface shown above every child of the window it paints, through
-    /// DirectComposition, placed and clipped by `place` (the grid's
-    /// flight). The compositor moves it, so no window changes shape, and
-    /// its content is a composition surface, which the compositor never
-    /// lifts onto an overlay plane: a swap chain that moved or changed
-    /// shape every frame dropped two or three refreshes each time.
-    /// It isn't presented: the caller waits for the compositor.
+    /// DirectComposition, placed and clipped by `place` and faded by
+    /// `animate` (the grid's fade). It isn't presented: the compositor
+    /// shows it at its next commit.
     pub fn layer() -> Self {
         Self { layered: true, ..Default::default() }
     }
@@ -271,11 +268,10 @@ impl Surface {
     }
 
     /// Runs a layer's fade on the compositor from the next commit, over
-    /// `length` seconds: `look(t)` gives its opacity, how far down it is
-    /// (pixels) and its scale `about` a point (pixels in the layer), as
-    /// cubic pieces (`sheet_rules::cubic_pieces`). It holds the last values.
-    /// False without a layer, or if the compositor refused it.
-    pub fn animate(&self, length: f64, about: (f32, f32), look: impl Fn(f64) -> (f64, f64, f64)) -> bool {
+    /// `length` seconds: `look(t)` gives its opacity and how far down it is
+    /// (pixels), as cubic pieces (`sheet_rules::cubic_pieces`). It holds
+    /// the last values. False without a layer, or if the compositor refused it.
+    pub fn animate(&self, length: f64, look: impl Fn(f64) -> (f64, f64)) -> bool {
         let Some(layer) = &self.layer else { return false };
         let pieces = ((length * 1000.0 / 10.0).ceil() as usize).clamp(4, 32);
         let made = (|| -> windows::core::Result<()> {
@@ -287,19 +283,13 @@ impl Surface {
                 unsafe { a.End(length, value(length) as f32)? };
                 Ok(a)
             };
-            let (cx, cy) = (about.0 as f64, about.1 as f64);
             let fade = unsafe { layer.device.CreateEffectGroup()? };
-            unsafe { fade.SetOpacity(&animation(&|t| look(t).0)?)? };
-            // Scaled about the point, then moved down: x' = k·x + (1 − k)·cx, y' = k·y + (1 − k)·cy + dy.
-            let matrix = unsafe { layer.device.CreateMatrixTransform()? };
-            let scale = animation(&|t| look(t).2)?;
+            let rise = unsafe { layer.device.CreateTranslateTransform()? };
             unsafe {
-                matrix.SetMatrixElement(0, 0, &scale)?;
-                matrix.SetMatrixElement(1, 1, &animation(&|t| look(t).2)?)?;
-                matrix.SetMatrixElement(2, 0, &animation(&|t| (1.0 - look(t).2) * cx)?)?;
-                matrix.SetMatrixElement(2, 1, &animation(&|t| (1.0 - look(t).2) * cy + look(t).1)?)?;
+                fade.SetOpacity(&animation(&|t| look(t).0)?)?;
+                rise.SetOffsetY(&animation(&|t| look(t).1)?)?;
                 layer.content.SetEffect(&fade)?;
-                layer.content.SetTransform(&matrix)?;
+                layer.content.SetTransform(&rise)?;
                 layer.device.Commit()?;
             }
             Ok(())
@@ -492,7 +482,7 @@ impl Surface {
 }
 
 /// A composition surface `size` pixels on a visual over every child of `hwnd`,
-/// with alpha: a fold's sheet fades off the strip under it.
+/// with alpha: the grid fades in over the photograph.
 fn make_layer(gpu: &Gpu, hwnd: HWND, (w, h): (u32, u32)) -> Option<Layer> {
     unsafe {
         let dxgi_device: IDXGIDevice = gpu.d3d.cast().ok()?;
