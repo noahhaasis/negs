@@ -1340,14 +1340,17 @@ fn layout_in(shared: &Shared, caches: &mut Caches, plain: bool, text: &str, styl
 /// The size of `text` in `style`, wrapped at `width` (0: one line), without
 /// painting: for laying out rows whose height follows their words. The
 /// layout is cached for the paint that follows. Zero when Direct2D isn't there.
+/// Called while a paint holds the device (inside `Canvas::d2d`), it measures
+/// uncached rather than giving no width.
 pub fn measure_text(text: &str, style: &TextStyle, width: f32, plain: bool) -> TextMetrics {
     if text.is_empty() {
         return TextMetrics::default();
     }
     let Some(shared) = shared() else { return TextMetrics::default() };
-    DEVICE.with(|cell| {
-        let Ok(mut device) = cell.try_borrow_mut() else { return TextMetrics::default() };
-        layout_in(shared, &mut device.caches, plain, text, style, width, Align::Leading).map_or_else(TextMetrics::default, |l| metrics(&l))
+    let measure = |caches: &mut Caches| layout_in(shared, caches, plain, text, style, width, Align::Leading).map_or_else(TextMetrics::default, |l| metrics(&l));
+    DEVICE.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut device) => measure(&mut device.caches),
+        Err(_) => measure(&mut Caches::default()),
     })
 }
 

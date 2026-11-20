@@ -87,10 +87,12 @@ impl Model {
         self.shelf.blocked.is_some() && self.shelf.blocked == self.library_item()
     }
 
-    /// What the strip lists: the filter's photographs, the open one always.
+    /// What the strip and the grid list: the filter's photographs, and the
+    /// current one always: the open one in the edit view, the grid's
+    /// current one in the grid (`shownPhotos`).
     pub fn shown_items(&self) -> Vec<Item> {
         let Some(library) = &self.shelf.library else { return vec![] };
-        library.shown(library.open_item())
+        library.shown(if self.shelf.in_grid { self.shelf.selection.current() } else { library.open_item() })
     }
 
     pub fn library_filter(&self) -> Filter {
@@ -321,7 +323,11 @@ impl Model {
         if !self.shelf.selection.contains(&item) {
             self.shelf.selection.select(&item);
         }
+        // Opened as saved (the Mac's `adoptEdits`): a negative keeps its
+        // stored base, balance and crop, never found again over them.
+        self.negative.opening = true;
         self.show_library_state();
+        self.negative.opening = false;
         if self.shelf.library.as_ref().is_some_and(Library::unsaved) {
             self.library_edited();
         }
@@ -619,13 +625,24 @@ impl Model {
     }
 
     /// After rating or flagging: a photograph the filter now leaves out goes
-    /// from the strip, and the next one shown opens (or the one before at
-    /// the end). Advance After Rating opens the next one anyway (`moveOn`).
+    /// from the strip and the grid, and the next one shown opens (in the
+    /// grid, becomes current), or the one before at the end. Advance After
+    /// Rating opens the next one anyway (`moveOn`).
     fn move_on(&mut self, targets: &[Item], order: &[Item]) {
         let Some(library) = &self.shelf.library else { return };
         let filter = library.filter().clone();
         let dropped: HashSet<Item> = if filter.active() { targets.iter().filter(|i| !filter.includes(&library.summary(i))).cloned().collect() } else { HashSet::new() };
-        if let Some(current) = self.library_item() {
+        if self.shelf.in_grid {
+            if let Some(current) = self.shelf.selection.current().cloned().filter(|c| dropped.contains(c)) {
+                // With none left the grid shows that nothing matches.
+                match selection::next_after(&current, order, &dropped) {
+                    Some(next) => self.shelf.selection.select(&next),
+                    None => self.shelf.selection = Default::default(),
+                }
+                self.mark(dirty::STRIP | dirty::CHROME);
+                return;
+            }
+        } else if let Some(current) = self.library_item() {
             if dropped.contains(&current) {
                 // With none left the photograph stays, as the strip's only one.
                 if let Some(next) = selection::next_after(&current, order, &dropped) {
@@ -789,8 +806,42 @@ impl Model {
         if let Some(library) = self.shelf.library.as_mut() {
             library.set_filter(filter);
         }
+        self.filter_changed();
         self.prune_selection();
         self.mark(dirty::STRIP | dirty::CHROME);
+    }
+
+    /// In the grid (`filterChanged`): one left empty by a rating finds the
+    /// open photograph again once a filter shows it; a filter that leaves
+    /// out the current photograph takes it away too: the nearest selected
+    /// one still shown becomes current, or else the next one shown (the
+    /// one before at the end).
+    fn filter_changed(&mut self) {
+        let Some(library) = &self.shelf.library else { return };
+        if !self.shelf.in_grid {
+            return;
+        }
+        let filter = library.filter().clone();
+        if self.shelf.selection.current().is_none()
+            && let Some(open) = library.open_item().cloned()
+            && library.shown(None).contains(&open)
+        {
+            self.shelf.selection.select(&open);
+        }
+        let Some(current) = self.shelf.selection.current().cloned() else { return };
+        if filter.includes(&library.summary(&current)) {
+            return;
+        }
+        let order = library.items();
+        let gone: HashSet<Item> = order.iter().filter(|i| !filter.includes(&library.summary(i))).cloned().collect();
+        if self.shelf.selection.selected().iter().any(|i| *i != current && !gone.contains(i)) {
+            let kept: Vec<Item> = order.iter().filter(|i| !gone.contains(*i) || **i == current).cloned().collect();
+            self.shelf.selection.toggle(&current, Some(&kept));
+        } else if let Some(next) = selection::next_after(&current, &order, &gone) {
+            self.shelf.selection.select(&next);
+        } else {
+            self.shelf.selection = Default::default();
+        }
     }
 
     pub fn toggle_advance_after_rating(&mut self) {

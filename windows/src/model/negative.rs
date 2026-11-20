@@ -43,6 +43,8 @@ pub struct Memory {
     crop_pending: Option<u64>,
     /// The next `replace_state` is Undo or Redo putting an edit back.
     pub(super) undoing: bool,
+    /// The next `replace_state` is a photograph opening with its saved edits.
+    pub(super) opening: bool,
     /// Prep's "Backlight…" was clicked: the Backlight row shows, until
     /// another photograph opens.
     pub backlight_shown: bool,
@@ -53,6 +55,8 @@ pub struct Memory {
     /// for its source generation; asked when the film tray opens.
     looks: Option<(u64, bool)>,
     checking: Option<u64>,
+    /// Surveys running unasked, by source generation and reading.
+    surveying: Vec<(u64, String)>,
 }
 
 /// What `negative_base` read along the film's edge for one reading.
@@ -628,6 +632,10 @@ impl Model {
     /// a new paper prints it as Auto does there. Both are part of that edit.
     /// Entering also crops to the picture, as a step of its own.
     pub(super) fn follow_negative(&mut self, old: &EditState, undoing: bool) {
+        // Opening isn't an edit: what's saved is what shows.
+        if self.negative.opening {
+            return;
+        }
         let Some(key) = neg::key(&self.state) else {
             if neg::key(old).is_some() {
                 self.negative.pick = None;
@@ -805,6 +813,38 @@ impl Model {
                     tray.opens_on_scan = true;
                     model.mark(dirty::TRAY);
                 }
+            });
+        });
+    }
+
+    /// A negative shown without its survey (opened again, at launch, or put
+    /// back by undo with another reading) is surveyed once its preview is
+    /// in, so Prep's warning and Film base line are there unasked
+    /// (`surveyNegativeIfNeeded`). Not while a detection that answers it runs.
+    pub(super) fn survey_negative_if_needed(&mut self) {
+        if !self.is_negative() || self.negative_survey().is_some() || (self.negative.detecting && self.negative_busy()) {
+            return;
+        }
+        let snapshot = self.render_state();
+        let (Some(engine), Some(source), Some(key)) = (self.engine.clone(), self.source.clone(), neg::key(&snapshot)) else { return };
+        let generation = self.source_generation;
+        let tag = (generation, key.clone());
+        if self.negative.surveying.contains(&tag) {
+            return;
+        }
+        self.negative.surveying.push(tag.clone());
+        let command = json!({"command": "negative_base", "input": source, "source_generation": generation, "film": snapshot.film, "paper": snapshot.paper, "params": snapshot.params});
+        engine.request(command, engine::timeout_for("negative_base"), move |result| {
+            ui::post(move |app: &mut App| {
+                let model = &mut app.model;
+                model.negative.surveying.retain(|t| *t != tag);
+                let Ok((_, reply)) = result else { return };
+                if generation != model.source_generation {
+                    return;
+                }
+                model.note_flat_field(&reply["flat_field"]);
+                model.keep_survey(Survey::of(generation, Some(key), &reply));
+                model.mark(dirty::INSPECTOR);
             });
         });
     }

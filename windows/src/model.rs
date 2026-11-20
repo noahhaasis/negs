@@ -3087,6 +3087,7 @@ impl Model {
             self.render_id = rendered.id;
             self.preview_current = true;
             self.hide_activity();
+            self.survey_negative_if_needed();
             self.render_at_export_size = json::boolean(&result["export_resolution"]);
             self.render_on_gpu = ExportEngine::ran_on_gpu(json::string(&result["backend"]));
             self.showing_cached_preview = false;
