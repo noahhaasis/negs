@@ -4466,6 +4466,27 @@ mod tests {
         assert!(model.film_histogram.is_none());
     }
 
+    /// Ctrl+O's Open Folder and a dropped folder open its first photograph in
+    /// name order, a RAW for its camera JPEG; a folder without one says so.
+    #[test]
+    fn a_folder_opens_on_its_first_photograph() {
+        let folder = std::env::temp_dir().join(format!("negs-open-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut model = Model::new(Preferences::default());
+        assert!(!model.open_folder(&folder));
+        assert_eq!(model.error.as_deref(), Some(format!("“{}” has no photographs Negs can open.", file_name(&folder)).as_str()));
+        model.error = None;
+        for name in ["notes.txt", "IMG_10.NEF", "IMG_2.JPG", "IMG_2.NEF", "z.png"] {
+            std::fs::write(folder.join(name), b"not a photograph").unwrap();
+        }
+        assert!(model.open_folder(&folder));
+        let opened = model.source.clone();
+        let _ = std::fs::remove_dir_all(&folder);
+        assert_eq!(opened.as_deref().and_then(|p| p.file_name()).and_then(|n| n.to_str()), Some("IMG_2.NEF"));
+        assert!(model.error.is_none());
+    }
+
     /// #20: a remembered Longest side too large for the crop gives way to
     /// the crop's own longest side instead of refusing the switch, and stays
     /// remembered; one that fits is still used. In a child process with a

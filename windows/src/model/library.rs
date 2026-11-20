@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use negs_library::{selection, Config, EditGroup, Filter, Flag, Item, Library, Note, Outcome, Selection};
 
 use super::library_map::{self as map, LibraryKey, Step};
-use super::{Model, dirty};
+use super::{Model, dirty, file_name};
 use crate::session::{EditorSession, same_path};
 use crate::ui;
 
@@ -134,6 +134,21 @@ impl Model {
         let photo = item.photo.clone();
         self.shelf.opening = Some(item);
         self.open(&photo);
+    }
+
+    /// A folder opens on its first photograph in the strip's order (Mac
+    /// `open(_:)` with a folder); true if it opened it. Says so when the
+    /// folder has none Negs can open.
+    pub fn open_folder(&mut self, folder: &Path) -> bool {
+        let pairing = !self.prefs.library.separate_camera_jpegs;
+        let first = negs_library::folder::listing(folder, pairing).ok().and_then(|l| l.photos.into_iter().next()).map(|f| f.path);
+        let Some(first) = first else {
+            self.error = Some(format!("“{}” has no photographs Negs can open.", file_name(folder)));
+            self.mark(dirty::ERROR | dirty::CHROME);
+            return false;
+        };
+        self.open(&first);
+        self.source.as_deref().is_some_and(|s| same_path(s, &first))
     }
 
     /// `open_restoring`'s first step: the photograph's folder becomes the

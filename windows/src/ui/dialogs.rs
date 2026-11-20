@@ -256,7 +256,79 @@ pub fn choose_light_frame(owner: HWND, photo: Option<&std::path::Path>) -> Optio
     }
 }
 
-/// Starts in the current photograph's folder with it selected.
+/// Ctrl+O's Open Folder button. Windows' open dialog picks files or
+/// folders, never either (the Mac's picks either), so the button opens the
+/// folder selected in it, else the one it shows.
+const OPEN_FOLDER: u32 = 1;
+
+#[implement(IFileDialogEvents, IFileDialogControlEvents)]
+struct OpenEvents {
+    folder: Rc<RefCell<Option<PathBuf>>>,
+}
+
+/// The folder an item is, if it is one on disk (not a zip file).
+fn folder_path(item: &IShellItem) -> Option<PathBuf> {
+    unsafe {
+        let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = PathBuf::from(name.to_string().ok()?);
+        CoTaskMemFree(Some(name.0 as *const _));
+        path.is_dir().then_some(path)
+    }
+}
+
+impl IFileDialogEvents_Impl for OpenEvents_Impl {
+    fn OnFileOk(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnFolderChanging(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnFolderChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnSelectionChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnShareViolation(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<FDE_SHAREVIOLATION_RESPONSE> {
+        Ok(FDESVR_DEFAULT)
+    }
+    fn OnTypeChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnOverwrite(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<FDE_OVERWRITE_RESPONSE> {
+        Ok(FDEOR_DEFAULT)
+    }
+}
+
+impl IFileDialogControlEvents_Impl for OpenEvents_Impl {
+    fn OnItemSelected(&self, _: Option<&IFileDialogCustomize>, _: u32, _: u32) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnButtonClicked(&self, customize: Option<&IFileDialogCustomize>, control: u32) -> windows::core::Result<()> {
+        if control != OPEN_FOLDER {
+            return Ok(());
+        }
+        let Some(dialog) = customize.and_then(|c| c.cast::<IFileDialog>().ok()) else { return Ok(()) };
+        unsafe {
+            let selected = dialog.GetCurrentSelection().ok().and_then(|item| folder_path(&item));
+            let folder = selected.or_else(|| dialog.GetFolder().ok().and_then(|item| folder_path(&item)));
+            if folder.is_some() {
+                *self.folder.borrow_mut() = folder;
+                let _ = dialog.Close(windows::core::HRESULT::from_win32(ERROR_CANCELLED.0));
+            }
+        }
+        Ok(())
+    }
+    fn OnCheckButtonToggled(&self, _: Option<&IFileDialogCustomize>, _: u32, _: BOOL) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnControlActivating(&self, _: Option<&IFileDialogCustomize>, _: u32) -> windows::core::Result<()> {
+        Ok(())
+    }
+}
+
+/// Starts in the current photograph's folder with it selected. Opens a
+/// photograph, or a folder with the Open Folder button.
 pub fn open(app: &mut App) {
     let photos: String = RAW_EXTENSIONS.iter().chain(IMAGE_EXTENSIONS).map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
     let raw: String = RAW_EXTENSIONS.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
@@ -270,14 +342,19 @@ pub fn open(app: &mut App) {
     ];
     let wide_filters: Vec<(Vec<u16>, Vec<u16>)> = filters.iter().map(|(n, p)| (wide(n), wide(p))).collect();
     let specs: Vec<COMDLG_FILTERSPEC> = wide_filters.iter().map(|(n, p)| COMDLG_FILTERSPEC { pszName: pcwstr(n), pszSpec: pcwstr(p) }).collect();
+    let folder = Rc::new(RefCell::new(None));
+    let events: IFileDialogEvents = OpenEvents { folder: folder.clone() }.into();
     let chosen = unsafe {
         (|| -> Option<PathBuf> {
             let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
             dialog.SetClientGuid(&OPEN_GUID).ok()?;
             dialog.SetFileTypes(&specs).ok()?;
-            let title = wide("Open Photograph");
+            let title = wide("Open Photograph or Folder");
             let _ = dialog.SetTitle(pcwstr(&title));
             let _ = dialog.SetOptions(FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+            if let Ok(customize) = dialog.cast::<IFileDialogCustomize>() {
+                let _ = customize.AddPushButton(OPEN_FOLDER, w!("Open Folder"));
+            }
             if let Some(source) = &app.model.source {
                 if let Some(folder) = source.parent().and_then(shell_item) {
                     let _ = dialog.SetFolder(&folder);
@@ -285,12 +362,32 @@ pub fn open(app: &mut App) {
                 let name = wide(source.file_name().unwrap_or_default());
                 let _ = dialog.SetFileName(pcwstr(&name));
             }
-            dialog.Show(app.main).ok()?;
+            let cookie = dialog.Advise(&events).ok();
+            let shown = dialog.Show(app.main);
+            if let Some(cookie) = cookie {
+                let _ = dialog.Unadvise(cookie);
+            }
+            if let Some(folder) = folder.borrow_mut().take() {
+                return Some(folder);
+            }
+            shown.ok()?;
             result_path(&dialog.cast().ok()?)
         })()
     };
     if let Some(path) = chosen {
-        app.model.open(&path);
+        open_path(app, &path);
+    }
+}
+
+/// Opens a photograph, or a folder on its first photograph in the grid
+/// (Mac `open(_:)`): from Ctrl+O and from a drop.
+pub fn open_path(app: &mut App, path: &std::path::Path) {
+    if path.is_dir() {
+        if app.model.open_folder(path) {
+            super::grid::open(app);
+        }
+    } else {
+        app.model.open(path);
     }
 }
 
