@@ -463,7 +463,10 @@ pub fn sync(app: &mut App) {
         let shown = bitmaps[i].as_ref().is_some_and(|(key, _)| wanted[i] == Some(*key));
         if !shown {
             aspects[i] = aspects[1 - i];
-            loading = app.model.compared_original_loading().map(|title| (i, title));
+            // Only over the split line: the Mac's side by side shows the empty frame alone.
+            if comparison.layout == Layout::Slider {
+                loading = app.model.compared_original_loading().map(|title| (i, title));
+            }
         }
     }
     VIEW.with(|v| {
