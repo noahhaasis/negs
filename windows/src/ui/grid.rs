@@ -478,7 +478,7 @@ fn paint(app: &mut App, hwnd: HWND) -> bool {
     let Grid { cells, layout, scroll, surface, layer, flight, .. } = grid;
     let flying = flight.is_some();
     let (surface, target) = if flying { (layer, model_main(hwnd)) } else { (surface, hwnd) };
-    // A fold's last 180 ms fade the sheet off the strip.
+    // A fold's last FOLD_FADE_MS fade the sheet off the strip.
     let fade = match (&*flight, elapsed) {
         (Some(f), Some(e)) if !f.opening => (e / rules::FOLD_FADE_MS).clamp(0.0, 1.0) as f32,
         _ => 1.0,
