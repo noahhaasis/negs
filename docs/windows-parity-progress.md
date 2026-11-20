@@ -19,6 +19,44 @@ decisions made with their reasons, and what was carried over. See
 | 8 | Remaining features, Flip added (Open in Lightroom last) | done: 8c `1396397`, 8b `4a15d7f`, 8a `ee752ee`; follow-ups `563cfb5`, `68cfbee` |
 | 9 | Validation and release | done, merged `f05ff8f` |
 | – | Findings from using the build | first three fixed (`win-findings-1`); faster flight (`win-findings-2`), see log |
+| – | Phase 9's differences from the Mac | five of seven settled (`win-mac-diffs`), see log |
+
+## 2026-11-20: phase 9's differences from the Mac (branch `win-mac-diffs`)
+
+Noah chose five of the seven differences the side-by-side found; border tiles and
+the export dialogs' theme stay as they are.
+
+- **Grid filter:** the grid keeps its current photograph in view, not the open one
+  (`shown_items`), and a filter that leaves it out moves current to the nearest
+  selected one still shown, else the next shown (`filter_changed`, the Mac's
+  `filterChanged`). Rating it out in the grid moves current the same way without
+  opening anything. "Showing 4 of 8" on the side-by-side roll, as on the Mac.
+- **Your negative opened again:** opening went through `replace_state`, so
+  `follow_negative` took the saved edit for one just entering negative mode: it
+  found the base again over the stored one and folded that in (the sidecar too).
+  Opening now sets the saved edit as it is (the Mac's `adoptEdits`). And a
+  negative shown without its survey is surveyed once its preview is in
+  (`survey_negative_if_needed`, the Mac's `surveyNegativeIfNeeded`), so Prep says
+  where the base came from and gives the not-a-colour-negative hint. On the
+  side-by-side roll `_NHA9810`'s stored base is what Windows' own detection
+  finds there (an earlier Windows run wrote it), so Windows rightly says "No
+  clear film found"; the Mac's decode reads a different base, hence "as picked or
+  set in Lab". Not a difference in the apps.
+- **Compare, stacked:** the film semibold 16, "on"/"scanned" italic 13, the paper
+  plain 15, each marked when it differs, as `CompareCaption.stocks`. Still
+  missing: the open photograph's names there don't open the tray (no `⌄`).
+- **Color Filter's names:** measured inside the paint, where `measure_text`
+  couldn't take the device and gave every name no width, so they crowded at 34
+  DIPs each (and clicks were measured differently). Measured before the paint
+  now, and `measure_text` measures uncached when a paint holds the device.
+- **Keys after launch:** not the app. `shot.ps1`'s Alt tap (to take the
+  foreground) gave the menu bar the keyboard when Negs was in front already, as
+  Alt does in any Windows app: `f` then opened File and `g` picked File › Open in
+  Li**g**htroom (it started Lightroom once, 2026-11-20 20:12). The tap now happens
+  only when Negs isn't in front. Arrows "going to the menu bar" in other runs are
+  the same thing.
+- Tests: 279 pass on the PC, new `a_filter_in_the_grid_moves_off_the_current_photograph`
+  and `a_negative_opened_again_keeps_its_saved_base`.
 
 ## 2026-11-20: a faster grid flight (branch `win-findings-2`, tip `3aacab6`)
 
