@@ -242,7 +242,9 @@ pub struct Preferences {
     /// custom background when that was on, else the theme's own.
     pub viewer_sheet: String,
     /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
-    /// Old settings files lack it: Darkroom.
+    /// Old settings files lack it: Darkroom. Empty for a new user until
+    /// launch picks Plain or Plain dark, as Windows is (`ui::theme`).
+    #[serde(default = "darkroom")]
     pub app_theme: String,
     /// The library's: its filter, Copy Edits…'s groups, Advance After
     /// Rating, New photographs' film and paper, under the Mac's keys.
@@ -265,6 +267,10 @@ pub struct Preferences {
     pub batch_naming: String,
     pub batch_custom_name: String,
     pub batch_existing: String,
+}
+
+fn darkroom() -> String {
+    "darkroom".into()
 }
 
 /// Starred for new users, as on the web and the Mac; once they change the
@@ -319,7 +325,7 @@ impl Default for Preferences {
             // A neutral dark grey, near the dark theme's.
             viewer_background: "#242424".into(),
             viewer_sheet: String::new(),
-            app_theme: "darkroom".into(),
+            app_theme: String::new(),
             library: Default::default(),
             fotufilm_films: "all".into(),
             filter_shift_link: "separate".into(),

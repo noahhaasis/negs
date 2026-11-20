@@ -1540,7 +1540,12 @@ pub fn run() {
         presets::register();
         status::register();
 
-        // View › Theme, unless NEGS_THEME forces one.
+        // View › Theme, unless NEGS_THEME forces one. A new user starts on
+        // Plain or Plain dark, as Windows is, kept from then on.
+        if model.prefs.app_theme.is_empty() {
+            model.prefs.app_theme = theme::first_launch_theme().key().to_string();
+            model.prefs.save();
+        }
         if let Some(chosen) = theme::ThemeName::parse(&model.prefs.app_theme) {
             theme::set_chosen(chosen);
         }

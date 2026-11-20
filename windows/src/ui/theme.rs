@@ -1,7 +1,8 @@
 //! The colours every owner-draw and `WM_CTLCOLOR*` handler uses, one palette
 //! for the whole window, made from the chosen theme's tokens (the macOS
-//! app's five themes, below). The theme doesn't follow the system's light or
-//! dark mode, except Plain, which on Windows does (switching live). High
+//! app's themes, below). The theme doesn't follow the system's light or dark
+//! mode: Plain is always light and Plain dark always dark. A new user starts
+//! on whichever of the two matches Windows (`first_launch_theme`). High
 //! contrast keeps the system colours.
 //!
 //! Dark common controls use the `DarkMode_Explorer` and `DarkMode_CFD`
@@ -175,23 +176,20 @@ fn detect() -> Theme {
 }
 
 /// `NEGS_THEME`, for tests and screenshots: a theme's name, or light and
-/// dark for Plain with Windows' light or dark forced.
-fn forced() -> Option<(ThemeName, Option<bool>)> {
+/// dark for Plain and Plain dark.
+fn forced() -> Option<ThemeName> {
     let value = std::env::var("NEGS_THEME").ok()?;
     match value.to_ascii_lowercase().as_str() {
-        "light" => Some((ThemeName::Plain, Some(false))),
-        "dark" => Some((ThemeName::Plain, Some(true))),
-        other => ThemeName::parse(other).map(|t| (t, None)),
+        "light" => Some(ThemeName::Plain),
+        "dark" => Some(ThemeName::PlainDark),
+        other => ThemeName::parse(other),
     }
 }
 
-/// Whether Windows' apps are dark (or `NEGS_THEME=light|dark` says so).
-/// Only Plain follows it.
-pub fn system_dark() -> bool {
-    match forced() {
-        Some((_, Some(dark))) => dark,
-        _ => apps_use_dark(),
-    }
+/// The theme a new user starts on: Plain, or Plain dark when Windows'
+/// apps are dark. It's stored at once, so it stays when Windows changes.
+pub fn first_launch_theme() -> ThemeName {
+    if apps_use_dark() { ThemeName::PlainDark } else { ThemeName::Plain }
 }
 
 /// The theme chosen, whatever `NEGS_THEME` forces.
@@ -209,10 +207,9 @@ pub fn forced_by_environment() -> bool {
     forced().is_some()
 }
 
-/// The theme the window shows: `NEGS_THEME`'s or the chosen one, Plain as
-/// Windows' light or dark.
+/// The theme the window shows: `NEGS_THEME`'s or the chosen one.
 pub fn shown() -> ThemeName {
-    forced().map_or_else(chosen, |(theme, _)| theme).resolved()
+    forced().unwrap_or_else(chosen)
 }
 
 /// The tokens the window is drawn with now.
@@ -573,21 +570,12 @@ impl ThemeName {
     /// The line under the swatches in Settings › Look.
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Darkroom => "Warm black, cream ink and the yellow pencil. The default.",
+            Self::Darkroom => "Warm black, cream ink and the yellow pencil.",
             Self::ContactSheet => "Ivory paper and the red grease pencil; the strip stays black film.",
             Self::LightTable => "Lit white, graphite type and a yellow highlighter.",
             Self::Daylight => "Soft grey with an amber pencil, the calmest of the light ones.",
-            Self::Plain => "Black on light grey in the system font, with plain blue marks. The easiest to read.",
-            Self::PlainDark => "Plain in dark greys: light words in the system font, blue marks.",
-        }
-    }
-
-    /// Plain follows Windows' app mode (or `NEGS_THEME=light|dark`): Plain
-    /// dark when apps are dark. Plain dark chosen is dark always.
-    pub fn resolved(self) -> Self {
-        match self {
-            Self::Plain if system_dark() => Self::PlainDark,
-            other => other,
+            Self::Plain => "Black on light grey in the system font, with plain blue marks. The easiest to read. The default when Windows is light.",
+            Self::PlainDark => "Plain in dark greys: light words in the system font, blue marks. The default when Windows is dark.",
         }
     }
 

@@ -23,7 +23,7 @@ thread_local! {
 /// Runs the sampler if `NEGS_DRAW_SAMPLER` names a theme; true if it ran.
 pub fn run_if_asked() -> bool {
     let Some(name) = std::env::var_os("NEGS_DRAW_SAMPLER") else { return false };
-    let theme = ThemeName::parse(&name.to_string_lossy()).unwrap_or(ThemeName::Darkroom).resolved();
+    let theme = ThemeName::parse(&name.to_string_lossy()).unwrap_or(ThemeName::Darkroom);
     THEME.with(|t| t.set(theme));
     let report = std::env::var_os("NEGS_STARTUP_REPORT");
     let stamp = |line: String| {
