@@ -442,7 +442,10 @@ fn tick(app: &mut App) {
     let (draw, present, vblank) = grid.layer.timing;
     let took = started.elapsed();
     crate::trace::event("grid_flight_paint", || {
-        serde_json::json!({"at_ms": elapsed, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "present_ms": present, "vblank": vblank})
+        let mut dwm = windows::Win32::Graphics::Dwm::DWM_TIMING_INFO { cbSize: std::mem::size_of::<windows::Win32::Graphics::Dwm::DWM_TIMING_INFO>() as u32, ..Default::default() };
+        let _ = unsafe { windows::Win32::Graphics::Dwm::DwmGetCompositionTimingInfo(HWND::default(), &mut dwm) };
+        serde_json::json!({"at_ms": elapsed, "paint_ms": took.as_secs_f64() * 1000.0, "draw_ms": draw, "present_ms": present, "vblank": vblank,
+            "dwm_refresh": dwm.cRefresh, "dwm_frame": dwm.cFrame, "dwm_dropped": dwm.cFramesDropped, "dwm_missed": dwm.cFramesMissed, "dwm_late": dwm.cFramesLate})
     });
     // A present that didn't wait (no GPU, or a display that let it through)
     // waits for the compositor instead, so the flight never spins.
