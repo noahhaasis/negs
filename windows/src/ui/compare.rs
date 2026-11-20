@@ -762,8 +762,8 @@ pub fn add_offer(app: &mut App, menu: HMENU, item: &negs_library::Item) {
     let offer = app.model.compare_offer(item, grid_shown(app));
     let text = super::wide(&offer.title);
     unsafe {
+        // No separator: `library::add_menu`, which follows, starts with one.
         let _ = AppendMenuW(menu, if offer.enabled { MF_STRING } else { MF_STRING | MF_GRAYED }, super::id::COMPARE_OFFER as usize, super::pcwstr(&text));
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
     }
     app.model.offer_compare(offer);
 }
