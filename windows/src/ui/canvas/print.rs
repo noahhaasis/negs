@@ -41,6 +41,12 @@ const MARK_LENGTH: f64 = 18.0;
 const MARK_REACH: f64 = 26.0;
 const MARK_WEIGHT: f64 = 1.5;
 
+/// Newsreader's ascent and x-height, in ems (its line is 1 em tall), and
+/// Segoe UI's x-height.
+const NEWSREADER_ASCENT: f64 = 0.735;
+const NEWSREADER_X_HEIGHT: f64 = 0.426;
+const SYSTEM_X_HEIGHT: f64 = 0.5;
+
 /// The straightening dial: 362 wide, 61 ticks a degree apart.
 pub(super) const DIAL_WIDTH: f64 = 362.0;
 const DIAL_SPACING: f64 = (DIAL_WIDTH - 2.0) / 60.0;
@@ -397,7 +403,7 @@ impl View {
             }
         }
         if original {
-            self.strike(items, left, film_baseline - fm.baseline as f64, fm.width as f64, fm.height as f64, 0.34, 1.0, ink);
+            self.strike(items, left, film_baseline, &fm, FILM.size, 0.34, 1.0, ink);
         }
         if words.negative {
             // "read as" and the film, which opens the colour negatives.
@@ -418,7 +424,7 @@ impl View {
                 }
             }
             if original {
-                self.strike(items, x, top, nm.width as f64, nm.height as f64, 0.34, 1.0, ink);
+                self.strike(items, x, film_baseline, &nm, PAPER.size, 0.34, 1.0, ink);
             }
         }
         // The canvas waits for a click (Prep's pickers): the prompt takes the paper's row.
@@ -455,12 +461,11 @@ impl View {
                 items.push(Draw::Fill(QuadInstance::fill(rect(x * s, (paper_baseline - pm.baseline as f64 + pm.height as f64 + 4.0) * s, pm.width as f64 * s, 1.5 * s), hex(ink.track, 1.0))));
             }
         }
-        let paper_top = paper_baseline - pm.baseline as f64;
         if original {
-            self.strike(items, x, paper_top, pm.width as f64, pm.height as f64, 0.34, 1.0, ink);
+            self.strike(items, x, paper_baseline, &pm, PAPER.size, 0.34, 1.0, ink);
             self.word(items, "the original", THE_ORIGINAL, ink.paper, x + pm.width as f64 + 6.0, paper_baseline);
         } else if scanning {
-            self.strike(items, x, paper_top, pm.width as f64, pm.height as f64, 0.54, 0.88, ink);
+            self.strike(items, x, paper_baseline, &pm, PAPER.size, 0.54, 0.88, ink);
         }
     }
 
@@ -479,12 +484,22 @@ impl View {
         }
     }
 
-    /// The pencil through a name: as CSS places it, `left at / width 6px`
-    /// over the name and the 5 DIPs below it.
+    /// The pencil through a name (`m`, `size` DIPs, its baseline at
+    /// `baseline`): as CSS places it, `left at / width 6px` over the name
+    /// and the 5 DIPs below it. That box is Newsreader's: Plain's system
+    /// font has a taller line with its baseline lower in it, so there the
+    /// pencil keeps the height over the baseline it has in Newsreader,
+    /// scaled by the two x-heights.
     #[allow(clippy::too_many_arguments)]
-    fn strike(&mut self, items: &mut Vec<Draw>, x: f64, top: f64, width: f64, height: f64, at: f64, part: f64, ink: &SheetInk) {
-        let w = (width * part * 10.0).round().max(10.0) as u32;
-        let y = top + (height + 5.0 - 6.0) * at;
+    fn strike(&mut self, items: &mut Vec<Draw>, x: f64, baseline: f64, m: &TextMetrics, size: f32, at: f64, part: f64, ink: &SheetInk) {
+        let w = (m.width as f64 * part * 10.0).round().max(10.0) as u32;
+        let y = if super::super::theme::tokens().plain {
+            let size = size as f64;
+            let over = NEWSREADER_ASCENT * size - ((size + 5.0 - 6.0) * at + 3.0);
+            baseline - over * SYSTEM_X_HEIGHT / NEWSREADER_X_HEIGHT - 3.0
+        } else {
+            baseline - m.baseline as f64 + (m.height as f64 + 5.0 - 6.0) * at
+        };
         self.glyph(items, Glyph::Strike(w), ink.accent, 1.0, x, y);
     }
 
