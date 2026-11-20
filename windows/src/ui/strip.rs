@@ -370,7 +370,6 @@ fn paint(app: &mut App, hwnd: HWND) {
     let (w, h) = (client.right as f64 / s, client.bottom as f64 / s);
     let App { strip_view: strip, thumbs, .. } = app;
     let range = strip.layout.indices(strip.scroll - rules::STRIP_MARGIN, strip.scroll + w + rules::STRIP_MARGIN);
-    let selecting = strip.cells.iter().filter(|c| c.selected).count() > 1;
     let Strip { cells, layout, scroll, hover, pressed, surface, .. } = strip;
     let painted = surface.paint(hwnd, (client.right.max(1) as u32, client.bottom.max(1) as u32), s as f32, t.plain, |p| {
         p.fill_rect(RectF::new(0.0, 0.0, w as f32, h as f32), Ink::hex(t.film.film));
@@ -379,14 +378,16 @@ fn paint(app: &mut App, hwnd: HWND) {
             let cell = &cells[i];
             let r = rect(i);
             let rejected = cell.summary.flag == Some(Flag::Reject);
-            let opacity = rules::strip_opacity(cell.open, cell.selected && selecting, rejected, *hover == Some(i), *pressed == Some(i));
+            let opacity = rules::strip_opacity(cell.open, cell.selected, rejected, *hover == Some(i), *pressed == Some(i));
             paint_frame(p, thumbs, cell, r, opacity as f32, &t, true);
             if cell.open {
                 let pencil = RectF::new(r.x, r.y + r.h + rules::PENCIL_DROP as f32, r.w, rules::PENCIL_WIDTH as f32 + 2.0);
                 p.underline(pencil, &t, true);
-            } else if cell.selected && selecting {
-                // Selected: a plain rule under it, as on the Mac. The grid's
-                // yellow box, 8 out, ran into the canvas over the strip's 6.
+            } else if cell.selected {
+                // Selected: at full strength with a plain rule under it, as
+                // on the Mac, even alone (Ctrl took the open one out, or a
+                // right click chose it). The grid's yellow box, 8 out, ran
+                // into the canvas over the strip's 6.
                 p.fill_rect(RectF::new(r.x, r.y + r.h + rules::PENCIL_DROP as f32, r.w, 1.5), Ink::hex(t.film.label));
             }
         }
