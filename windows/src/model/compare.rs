@@ -9,6 +9,10 @@ use super::*;
 use crate::compare::{self as rules, Comparison, Layout, Origin, OriginalMode, OriginalReference, Side};
 use negs_library::Item;
 
+/// What the open photograph's picture is made from: its develop's
+/// generation and revision, and the crop and turn.
+pub type OpenKey = (u64, u64, String);
+
 /// The longest side a picture in the view keeps.
 const MAX_SHOWN: u32 = 3072;
 
@@ -221,6 +225,7 @@ impl Model {
     }
 
     fn begin_compare(&mut self, comparison: Comparison, edited: Item) {
+        crate::trace::event("compare_begin", || json!({"developed": self.image.is_some(), "kept": self.kept.as_ref().is_some_and(|k| k.generation == self.source_generation)}));
         self.end_tray(true);
         self.hold_original(false);
         let original = comparison.against_original();
@@ -242,9 +247,12 @@ impl Model {
         }
         self.compare.other = None;
         self.compare.kept = None;
-        // The next comparison's open photograph never starts on this one's picture.
-        self.compare.shown = None;
-        self.compare.shown_key = None;
+        // The open photograph's own picture stays, for comparing it again at
+        // once; never another's (`open_picture` checks).
+        if self.compare.shown.as_ref().is_some_and(|(item, _)| Some(item) != self.library_item().as_ref()) {
+            self.compare.shown = None;
+            self.compare.shown_key = None;
+        }
         self.compare.making = None;
         self.compare.original_shown = None;
         self.compare.making_original = None;
@@ -385,7 +393,9 @@ impl Model {
     /// of the photograph open before it.
     fn prepare_open_stand_in(&mut self) {
         let Some(open) = self.library_item() else { return };
-        if self.open_picture().is_some() {
+        // Developed, it shows its develop (`compared_open`), made ahead
+        // while compare is offered (`prepare_compared_open`).
+        if self.open_picture().is_some() || self.open_developed() {
             return;
         }
         let state = self.state.clone();
@@ -568,7 +578,9 @@ impl Model {
             std::thread::spawn(move || {
                 #[cfg(test)]
                 let _background = background;
+                let started = std::time::Instant::now();
                 let shown = job();
+                crate::trace::event("compare_open_made", || json!({"ms": started.elapsed().as_secs_f64() * 1000.0, "size": shown.as_ref().map(|s| [s.width, s.height])}));
                 ui::post(move |app: &mut App| app.model.compared_open_made(key, shown));
             });
         }
@@ -581,6 +593,47 @@ impl Model {
         self.compare.shown.as_ref().filter(|(item, _)| *item == open).map(|(_, shown)| shown.clone())
     }
 
+    /// The open photograph has a settled develop to show.
+    fn open_developed(&self) -> bool {
+        self.kept.as_ref().is_some_and(|k| k.generation == self.source_generation)
+    }
+
+    /// Compare is offered on the open photograph, developed: two selected
+    /// with it the one to edit, or the context menu's Compare. Its picture
+    /// is then made ahead (`open_job_ahead`), so compare opens on its
+    /// develop at once, as the Mac's does. `in_grid` as for `compare_offer`.
+    pub fn compare_likely(&self, in_grid: bool) -> bool {
+        if self.comparison().is_some() || !self.open_developed() {
+            return false;
+        }
+        let Some(open) = self.library_item() else { return false };
+        // The one `compare` edits: the current photograph if it's the second.
+        let current = if in_grid { self.shelf.selection.current() } else { Some(&open) };
+        let edits_open = |first: &Item, second: &Item| *(if current == Some(second) { second } else { first }) == open;
+        let offered = self.compare.offered.as_ref().filter(|o| o.enabled).is_some_and(|o| match &o.pair {
+            Some((first, second)) => edits_open(first, second),
+            None => o.with_original,
+        });
+        // Two selected, counted before they are put in order.
+        offered || self.shelf.selection.selected().len() == 2 && self.compare_word().0 && matches!(self.compare_selection().as_slice(), [first, second] if edits_open(first, second))
+    }
+
+    /// The open photograph's picture to make ahead of compare, and what
+    /// it's made from; None once it's made or being made.
+    pub fn open_job_ahead(&mut self) -> Option<(OpenKey, impl FnOnce() -> Option<Shown> + Send + 'static + use<>)> {
+        let (key, job) = self.open_shown_job()?;
+        if self.compare.making.as_ref() == Some(&key) {
+            return None;
+        }
+        self.compare.making = Some(key.clone());
+        Some((key, job))
+    }
+
+    /// The id of the open photograph's picture, made or being shown.
+    pub fn open_picture_id(&self) -> Option<u64> {
+        self.open_picture().map(|s| s.id)
+    }
+
     /// `compared_open` at once, for a photograph about to be closed.
     fn compared_open_now(&mut self) -> Option<Shown> {
         if let Some((key, job)) = self.open_shown_job() {
@@ -591,7 +644,7 @@ impl Model {
 
     /// What the open photograph's picture would be made from now, and the
     /// making; None while the one shown is current.
-    fn open_shown_job(&self) -> Option<((u64, u64, String), impl FnOnce() -> Option<Shown> + Send + 'static)> {
+    fn open_shown_job(&self) -> Option<((u64, u64, String), impl FnOnce() -> Option<Shown> + Send + 'static + use<>)> {
         let orientation = self.state.orientation();
         let crop = self.state.crop;
         let cropped_render = self.size_mode() == state::SizeMode::LongestSide && crop.cropped();
@@ -605,12 +658,13 @@ impl Model {
         Some((key, move || Shown::of(&rgba, width, height, pixels, orientation, wide)))
     }
 
-    fn compared_open_made(&mut self, key: (u64, u64, String), shown: Option<Shown>) {
+    pub fn compared_open_made(&mut self, key: OpenKey, shown: Option<Shown>) {
         if self.compare.making.as_ref() == Some(&key) {
             self.compare.making = None;
         }
-        // Made from a develop of the photograph still open, in this comparison.
-        let current = key.0 == self.source_generation && self.compare.comparison.is_some();
+        // Made from a develop of the photograph still open: in this
+        // comparison, or ahead of one (`prepare_compared_open`).
+        let current = key.0 == self.source_generation;
         if let (Some(shown), Some(open), true) = (shown, self.library_item(), current) {
             self.compare.shown_key = Some(key);
             self.compare.shown = Some((open, shown));
