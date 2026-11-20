@@ -3316,19 +3316,20 @@ impl Model {
         }
     }
 
-    /// The badge at the top of the canvas.
+    /// The tag at the top of the canvas (`DevelopTagTitle`): Developing,
+    /// Loading original while a held original is still being decoded, or
+    /// Updating. A held original once in shows no tag, as on the Mac: the
+    /// tag's running line says something is on its way, and the caption
+    /// under the print already says Original.
     pub fn badge(&self) -> Option<&'static str> {
-        if self.original.is_some() {
-            return Some("Original");
-        }
-        if self.holding_original {
-            return Some("Loading Original");
-        }
         if self.source.is_none() || self.render_failed {
             return None;
         }
         if self.image.is_none() {
             return Some("Developing");
+        }
+        if self.holding_original && self.original.is_none() {
+            return Some(if self.shows_camera_jpeg() { "Loading camera JPEG" } else { "Loading original" });
         }
         self.shows_activity.then_some("Updating")
     }
