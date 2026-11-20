@@ -3,6 +3,7 @@
 package negs_core
 
 import "../marks"
+import "../theme"
 
 @(private)
 layout_table := [?]struct {
@@ -38,6 +39,19 @@ layout_table := [?]struct {
 	{"negs_strokes_t.tilt", i64(offset_of(Strokes, tilt))},
 	{"negs_marks_constants_t", size_of(Marks_Constants)},
 	{"negs_marks_constants_t.reach", i64(offset_of(Marks_Constants, reach))},
+	{"negs_theme_hex_t", size_of(theme.Hex)},
+	{"negs_theme_hex_t.on_fill", i64(offset_of(theme.Hex, on_fill))},
+	{"negs_theme_hex_t.blank", i64(offset_of(theme.Hex, blank))},
+	{"negs_theme_t", size_of(Theme)},
+	{"negs_theme_t.film", i64(offset_of(Theme, film))},
+	{"negs_theme_t.dark", i64(offset_of(Theme, dark))},
+	{"negs_theme_t.plain", i64(offset_of(Theme, plain))},
+	{"negs_theme_t.id", i64(offset_of(Theme, id))},
+	{"negs_theme_t.key", i64(offset_of(Theme, key))},
+	{"negs_theme_t.title", i64(offset_of(Theme, title))},
+	{"negs_theme_constants_t", size_of(Theme_Constants)},
+	{"negs_theme_constants_t.highlighter_opacity", i64(offset_of(Theme_Constants, highlighter_opacity))},
+	{"negs_theme_constants_t.dimming_light", i64(offset_of(Theme_Constants, dimming_light))},
 }
 
 @(export, link_name = "negs_core_layout")

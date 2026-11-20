@@ -179,6 +179,82 @@ negs_strokes_t negs_marks_pick_box_selection(double w, double h, const char *nam
 /* Frees the block and zeroes *strokes; a zeroed one is fine. */
 void negs_strokes_free(negs_strokes_t *strokes);
 
+/* ------------------------------------------------------------------ */
+/* Theme: the built-in themes' tokens (core/src/theme)                  */
+/* ------------------------------------------------------------------ */
+/* Ids are the order themes are offered in; keys are the stored names (the
+ * macOS app's AppTheme raw values). Colours are 0xRRGGBB, sRGB. */
+
+#define NEGS_THEME_DARKROOM 0u
+#define NEGS_THEME_CONTACT_SHEET 1u
+#define NEGS_THEME_LIGHT_TABLE 2u
+#define NEGS_THEME_DAYLIGHT 3u
+#define NEGS_THEME_PLAIN 4u
+#define NEGS_THEME_PLAIN_DARK 5u
+
+#define NEGS_PLATFORM_MACOS 0u
+#define NEGS_PLATFORM_WINDOWS 1u
+#define NEGS_PLATFORM_LINUX 2u
+
+typedef struct negs_theme_hex_t {
+    uint32_t bg;      /* the sheet the photograph lies on, the title band */
+    uint32_t panel;   /* the inspector, Settings, the alert */
+    uint32_t film;    /* the strip, the tray, the leader */
+    uint32_t grid;    /* behind the grid */
+    uint32_t line;    /* rules between sections and modules */
+    uint32_t track;   /* slider tracks, outlines, separators */
+    uint32_t dim;     /* values at their default, hints */
+    uint32_t label;   /* control labels */
+    uint32_t paper;   /* what's being read */
+    uint32_t accent;  /* the pencil's thin marks; never words */
+    uint32_t fill;    /* the Export and Done buttons */
+    uint32_t on_fill; /* the words on them */
+    uint32_t warn;    /* errors and warnings, as words */
+    uint32_t blank;   /* a tile not yet developed */
+} negs_theme_hex_t;
+
+typedef struct negs_theme_t {
+    negs_theme_hex_t hex;
+    negs_theme_hex_t film; /* the inks on the film: hex, but Contact sheet's */
+    uint8_t dark;          /* light ink on dark: menus drawn dark */
+    uint8_t highlighter;   /* the mark under a word is a highlighter */
+    uint8_t plain;         /* the system font and upright marks */
+    uint8_t reserved;
+    uint32_t id;
+    const char *key;       /* static */
+    const char *title;     /* static */
+} negs_theme_t;
+
+typedef struct negs_theme_constants_t {
+    uint32_t highlighter_ink;   /* Light table's highlighter */
+    uint32_t crop_shade;        /* outside the crop box */
+    double highlighter_opacity;
+    double selection_opacity;   /* text selection: the pencil at this */
+    double crop_shade_opacity;
+    double disabled_opacity;
+    double strip_dim;           /* strip frames other than the current one */
+    double shadow_dark;         /* shadows under alerts and tags */
+    double shadow_light;
+    double dimming_dark[4];     /* under an alert: sRGB red, green, blue, opacity */
+    double dimming_light[4];
+} negs_theme_constants_t;
+
+/* NEGS_THEME_* ids run 0 ..< negs_theme_count(). */
+uint32_t negs_theme_count(void);
+/* 0 for an unknown id. */
+uint8_t negs_theme_get(uint32_t id, negs_theme_t *out);
+/* The line under the swatches in Settings > Look; static. */
+const char *negs_theme_hint(uint32_t id, uint32_t platform);
+/* A stored key or a title, any case, spaces and punctuation ignored: its id,
+ * or -1. */
+int32_t negs_theme_parse(const char *text, size_t len);
+/* WCAG 2: relative luminance 0..1, contrast ratio 1..21. */
+double negs_theme_luminance(uint32_t rgb);
+double negs_theme_contrast(uint32_t a, uint32_t b);
+/* a moved towards b by t, each channel rounded half away from zero. */
+uint32_t negs_theme_mix(uint32_t a, uint32_t b, double t);
+void negs_theme_constants(negs_theme_constants_t *out);
+
 #ifdef __cplusplus
 }
 #endif

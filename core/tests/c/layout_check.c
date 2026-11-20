@@ -48,6 +48,19 @@ int main(void) {
     FIELD(negs_strokes_t, tilt);
     SIZE(negs_marks_constants_t);
     FIELD(negs_marks_constants_t, reach);
+    SIZE(negs_theme_hex_t);
+    FIELD(negs_theme_hex_t, on_fill);
+    FIELD(negs_theme_hex_t, blank);
+    SIZE(negs_theme_t);
+    FIELD(negs_theme_t, film);
+    FIELD(negs_theme_t, dark);
+    FIELD(negs_theme_t, plain);
+    FIELD(negs_theme_t, id);
+    FIELD(negs_theme_t, key);
+    FIELD(negs_theme_t, title);
+    SIZE(negs_theme_constants_t);
+    FIELD(negs_theme_constants_t, highlighter_opacity);
+    FIELD(negs_theme_constants_t, dimming_light);
 
     /* The smoke test: the version, and a block out and back. */
     if (negs_core_abi_version() != NEGS_CORE_ABI_VERSION) {
