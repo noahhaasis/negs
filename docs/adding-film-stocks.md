@@ -472,6 +472,53 @@ The full checklist is in `negs-stock-integration.md` §3; the touch points are:
 - Negs expects mid-grey to view at Y 0.18 (`tools/fotufilm_port/slide_neutral.py`).
 - Steep slides fold, so run the fold check.
 
+The full slide procedure is §D11.
+
+### D11. Procedure: colour reversal (slides)
+
+Worked example: `data/profile-sources/fujifilm-reversal/` (Fujifilm Professional Data Guide AF3-207U 2005 and the Provia 400X bulletin AF3-0213E). Tools: `tools/film_profiles/build_positive.py`, `refine_positive.py`, `creator/upstream_positive.py`, `check_slide_port.py`. Where a step is as for negatives, only the difference is given.
+
+**What a slide datasheet gives.** Spectral sensitivity (Fuji: "1.0 above minimum density"), per-dye spectral density for yellow, magenta and cyan (normalised to peak 1.0), and status-A characteristic curves including D-min. No D-min or D-mid spectra. The dyes are the film's own, so `generic_a` is never used and the reconstruction step (D4 step 3) does not exist.
+
+**D1 extraction.** As for negatives. The Data Guide's charts are black only: curves are told apart by dash pattern (`dashes`), per-dye curves by their order along the wavelength axis (`select` with `sort: "x_at_min_y"`), and dashed curves that merge into a shared solid tail by `parts`. Its plot areas are grey fills drawn by hand: use gridlines only (`frame_kind: "fill"`, `grid_crossing`), and where a stray single line duplicates a gridline drop it with `grid_ignore` (a reason is required). The dye charts draw only the 1.0 and 0.5 gridlines; the printed 0.0 sits at the plot's bottom edge, so that edge is the zero tick (`frame: [null, 0.0]`) and the deviation is recorded as a gate exception: taken from the gridline spacing alone, the zero would make some dye negative. Only the zero matters there, since the dye scale is renormalised (step 8).
+
+**D3 axes.** Record `log_sensitivity_density_over_min` as printed (Fuji 1.0; the shipped spektrafilm slides say 0.2). Nothing reads it. Spectra stay NaN outside the plotted range, as for negatives; at runtime a NaN density passes no light.
+
+**D4 processing, in order** (`build_positive.py`):
+
+1. Load: sensitivities, curves and the film's own C/M/Y dyes (the original loader's `type='positive'` branch).
+2. `remove_density_min`. Its positive branch synthesises the base spectrum from the three channel D-mins placed at 445/530/610 nm, smoothed with σ 20 nm.
+3. `adjust_log_exposure`. log E 0 is where green is 0.735 (an 18.4 % transmittance) over D-min, curves descending.
+4. `balance_metameric_neutral`. It solves the three dye amounts whose sum, plus the base, viewed under `viewing_illuminant` (D50), is an sRGB grey of 0.184. It then scales the dyes so that equal amounts give that neutral, and stores it as `midscale_neutral_density`.
+5. `unmix_density` with status A.
+6. `replace_fitted_density_curves` (positive bounds: amplitudes 0.25–5, σ 0.05–1), `balance_sensitivity`, refit.
+   Steps 2–6 are `process_paper_profile`'s order (b2c7fe6 `factory.py:524`) plus the film steps of `process_negative_profile`. That is what the public creator offers for positives. It has no `process_positive_profile`.
+7. No alignment variants. The alignment is fixed by the neutral (step 9).
+8. `densitometer_normalization`, then the curve model refitted. The metameric amounts become `d_green × diag(M)` per channel.
+9. §D5 normalisation (raw midgray 1 per channel under the reference illuminant). Then each channel is shifted so log E 0 develops its metameric amount. That is `align_midscale_neutral_exposures` with the 3-vector, which is what the shipped Velvia 100 and Provia 100F show: their curves at log E 0 equal their metameric amounts, and that mid viewed under D50 is Y 0.184 at D50's chromaticity.
+10. Grey-ramp refinement on 28bf883 (`refine_positive.py`). The film is scanned directly (route `input > film > scan`, viewing illuminant, scanner white/black correction off as by default). EV −1…+2, hanatos2025, 5 parameters (density scale per channel, log E shift for R and B), `data_trustability` 1 as upstream's slides (`profile_summary.csv`). The residual is upstream's verbatim. It divides by (mean RGB − 0.184), which is zero at EV 0, so it pins EV 0. Because step 9 already makes EV 0 neutral, at trustability 1 the refinement moves nothing measurable (≤ 0.0004 log E). It is kept as the check it is upstream. `--residual relative` (divide by the mean RGB instead) is a Negs variant for diagnosis only. It trades EV 0 neutrality for the shadows and was not better. Upstream's `stretch_curves` option fits stretch 1.000 under its bias of 100.
+
+**D6 for slides.**
+
+- Window: as for negatives, with the reference illuminant.
+- Neutral print filters: upstream stores C0 M50 Y50 for every slide on every paper. New slides get the same.
+- Grain: `rms_granularity = [r, r, r]` with r the datasheet's diffuse RMS granularity, as upstream's Velvia 100 and Provia 100F (8, 8, 8).
+- Couplers: `defaults.color.positive` unless the fold check fails. The DIR pre-correction cancels on a neutral exposure: the ramp moves less than 0.001 with couplers off.
+- Tungsten slides: `reference_illuminant` `BB<K>` at the datasheet's colour temperature (64T Type II: `BB3100`). There is no tungsten coupler branch for positives, so `T` buys nothing.
+
+**D8 differences.**
+
+| # | Check for slides |
+|---|---|
+| 3 | `check_slide_port.py`: steps 1–6 on the public Velvia 100 and Provia 100F raw data equal the same sequence of the original b2c7fe6 functions (both 0.0 difference, 2026-11-20). |
+| 4 | As for negatives, against the unmixed curves before the first fit. |
+| 6 | Instead of the reconstruction, `check_metameric_neutral`: base + amounts × dyes viewed under D50 is Y 0.184 at the white point. |
+| 7 | Grey ramp scanned directly, EV −1…+2: EV 0 \|R−G\|, \|B−G\| ≤ 0.005 and the level within 1 % of 0.184. Proposed: mean neutrality error (mean over EV of max(\|R−G\|, \|B−G\|)/G) not worse than the worst shipped upstream slide (Velvia 100, 0.024; Provia 100F 0.006, Ektachrome 100 0.011, Kodachrome 64 0.020). |
+| 8 | Filters C0 M50 Y50 as upstream. Not solved, since slides are not printed by default. |
+| 2 | Extraction precedent: the shipped spektrafilm Velvia 100 and Provia 100F (their raw data at b2c7fe6), the extraction compared with the author's traces. |
+
+**Calibration result (2026-11-20).** On the author's own raw data, the port reproduces the shipped slides' log S shape exactly (offset-free difference 0.000), dyes within 0.03 D, base and mid-grey spectra within 0.002 D. The unmixed curves differ by up to 0.34 D (Velvia green and blue D-max). Put back through the status-A densitometer, though, both reproduce the datasheet's curves about equally well: ours within 0.07–0.14 D, the shipped within 0.09–0.18 D. The grey ramp is the difference. The shipped slides are more neutral off mid-grey (Velvia 100: mean 0.024, worst 3.7 % at EV −1) than the public method gives on the same data (0.044, worst 12 %). The private creator's slide "neutralisation" (#552, [U]) and its later curve-unmixing changes (non-linear unmixing 2026-04-22, regularised fits 2026-05-23) are the only steps that differ. The public method has no step that reaches it: neither trustability 0.1 nor `stretch_curves` gets there. **Open decision for Noah** (2026-11-20): whether slides ship datasheet-faithful by the public method, with check 7's gate set accordingly, or with a Negs [N] neutralisation step.
+
 ---
 
 ## E. Fuji plan

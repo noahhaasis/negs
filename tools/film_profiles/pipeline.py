@@ -96,10 +96,12 @@ def model_from_params(params):
             "amplitudes": params[:, 3:6].tolist(), "sigmas": params[:, 6:9].tolist(), "alphas": None}
 
 
-def eval_model(model, le):
+def eval_model(model, le, positive=False):
+    """positive: upstream's sign-flipped CDFs for reversal films (density falls with exposure)."""
     from scipy.stats import norm
     c, a, s = (np.asarray(model[k], float) for k in ("centers", "amplitudes", "sigmas"))
-    layers = np.stack([np.stack([a[ch, i] * norm.cdf((le - c[ch, i]) / s[ch, i]) for i in range(c.shape[1])], 1)
+    sign = -1.0 if positive else 1.0
+    layers = np.stack([np.stack([a[ch, i] * norm.cdf(sign * (le - c[ch, i]) / s[ch, i]) for i in range(c.shape[1])], 1)
                        for ch in range(3)], 2)  # (n, layer, channel)
     return layers.sum(1), layers
 
@@ -223,7 +225,7 @@ def r6(v):
 
 def negs_profile(recipe, log_sensitivity, dye_density, model, window, metadata):
     le = np.linspace(-3, 4, 256)
-    dc, layers = eval_model(model, le)
+    dc, layers = eval_model(model, le, positive=recipe["type"] == "positive")
     info = {k: recipe[k] for k in ("stock", "name", "type", "support", "stage", "use", "antihalation",
                                    "target_print", "channel_model", "densitometer",
                                    "log_sensitivity_density_over_min", "reference_illuminant",
