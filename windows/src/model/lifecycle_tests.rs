@@ -2368,6 +2368,55 @@ lifecycle_test! {
     }
 }
 
+lifecycle_test! {
+    /// The Mac's `openPicture`: compare opens on the open photograph's
+    /// develop at once. Two selected with it the one to edit, its picture
+    /// is made ahead; compare shows that, never its stand-in, and shows it
+    /// again at once when compared once more.
+    fn compare_opens_on_the_develop_made_ahead() {
+        use crate::compare::{Origin, Side};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-ahead-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        let items = h.model().shown_items();
+        assert!(!h.model().compare_likely(false), "one selected");
+        h.edit(|m| m.shelf.selection.select_all_of(&items));
+        assert!(h.model().compare_likely(false), "two selected, the open one edited");
+        let (key, job) = h.edit(|m| m.open_job_ahead()).expect("a develop to make it from");
+        assert!(h.edit(|m| m.open_job_ahead()).is_none(), "made once");
+        let ahead = job().expect("made");
+        let id = ahead.id;
+        h.edit(|m| m.compared_open_made(key, Some(ahead)));
+        let first = Side::Photo(items[0].clone());
+        let at_once = h.edit(|m| {
+            m.compare(items[0].clone(), items[1].clone(), Origin::Photo);
+            m.compared_side(&first)
+        });
+        let shown = at_once.expect("the develop at once");
+        assert_eq!((shown.id, shown.width, shown.height), (id, 480, 320));
+        h.edit(|m| m.compared_side(&first));
+        h.idle();
+        assert_eq!(h.edit(|m| m.compared_side(&first)).map(|s| s.id), Some(id), "no stand-in over it, nothing made again");
+        h.edit(|m| m.leave_compare());
+        let again = h.edit(|m| {
+            m.compare(items[0].clone(), items[1].clone(), Origin::Photo);
+            m.compared_side(&first)
+        });
+        assert_eq!(again.map(|s| s.id), Some(id), "compared again at once");
+        h.idle();
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 // MARK: The film side's release (ticket 41)
 
 lifecycle_test! {

@@ -102,6 +102,9 @@ struct View {
     column: bool,
     /// Each side's picture as last drawn, scaled to its frame.
     scaled: [Scaled; 2],
+    /// The open photograph's picture outside compare: made ahead, or kept
+    /// from the comparison left, by its `Shown::id`.
+    ahead: Option<(usize, Arc<Bitmap>)>,
 }
 
 impl Default for View {
@@ -126,6 +129,7 @@ impl Default for View {
             open: 0,
             column: false,
             scaled: Default::default(),
+            ahead: None,
         }
     }
 }
@@ -304,6 +308,49 @@ fn ensure(app: &App) -> HWND {
     }
 }
 
+/// The open photograph's picture made ahead of compare, with what it was
+/// made from, left here by its thread: the context menu's loop holds the
+/// UI thread until its Compare is chosen.
+static AHEAD: std::sync::Mutex<Option<(crate::model::compare::OpenKey, crate::model::compare::Shown, Arc<Bitmap>)>> = std::sync::Mutex::new(None);
+
+/// While compare is offered on the open photograph, developed: its
+/// picture made ahead, from the develop to the bitmap (about 50 and 120 ms
+/// for a 24 MP develop), so compare opens on it at once, as on the Mac.
+pub fn prepare(app: &mut App) {
+    if !app.model.compare_likely(grid_shown(app)) {
+        return;
+    }
+    let Some((key, job)) = app.model.open_job_ahead() else { return };
+    let color = app.model.previews.color.clone();
+    #[cfg(test)]
+    let background = super::testing::background();
+    std::thread::spawn(move || {
+        #[cfg(test)]
+        let _background = background;
+        let started = std::time::Instant::now();
+        let shown = job();
+        let made = started.elapsed();
+        let bitmap = shown.as_ref().and_then(|s| Bitmap::from_rgba(&s.rgba, s.width, s.height, s.wide, color.as_deref(), 0, false).ok()).map(Arc::new);
+        crate::trace::event("compare_ahead", || {
+            serde_json::json!({"made_ms": made.as_secs_f64() * 1000.0, "ms": started.elapsed().as_secs_f64() * 1000.0, "size": shown.as_ref().map(|s| [s.width, s.height])})
+        });
+        if let (Some(shown), Some(bitmap)) = (&shown, bitmap) {
+            *AHEAD.lock().unwrap() = Some((key.clone(), shown.clone(), bitmap));
+        }
+        post(move |app: &mut App| app.model.compared_open_made(key, shown));
+    });
+}
+
+/// The picture made ahead, into the model and the view, once compare is on.
+fn take_ahead(app: &mut App) {
+    let Some((key, shown, bitmap)) = AHEAD.lock().unwrap().take() else { return };
+    let id = shown.id;
+    app.model.compared_open_made(key, Some(shown));
+    if app.model.open_picture_id() == Some(id) {
+        VIEW.with(|v| v.borrow_mut().ahead = Some((id as usize, bitmap)));
+    }
+}
+
 /// Makes side `i`'s picture off the UI thread (a few hundred milliseconds
 /// for a large one), then shows it if it's still the one wanted.
 fn make_bitmap(i: usize, key: usize, shown: crate::model::compare::Shown, color: Option<Arc<crate::icc::Transform>>) {
@@ -313,8 +360,9 @@ fn make_bitmap(i: usize, key: usize, shown: crate::model::compare::Shown, color:
     std::thread::spawn(move || {
         #[cfg(test)]
         let _background = background;
+        let started = std::time::Instant::now();
         let bitmap = Bitmap::from_rgba(&shown.rgba, shown.width, shown.height, shown.wide, color.as_deref(), 0, false).ok().map(Arc::new);
-        crate::trace::event("compare_picture", || serde_json::json!({"side": i, "width": shown.width, "height": shown.height}));
+        crate::trace::event("compare_picture", || serde_json::json!({"side": i, "width": shown.width, "height": shown.height, "ms": started.elapsed().as_secs_f64() * 1000.0}));
         post(move |app: &mut App| {
             let wanted = VIEW.with(|v| {
                 let mut v = v.borrow_mut();
@@ -339,13 +387,21 @@ pub fn sync(app: &mut App) {
         VIEW.with(|v| {
             let mut v = v.borrow_mut();
             v.comparison = None;
+            // The open photograph's stays, to compare it again at once; the
+            // next comparison takes it only by its id (`ahead`).
+            let open = v.open;
+            if let Some(bitmap) = v.bitmaps[open].take() {
+                v.ahead = Some(bitmap);
+            }
             v.bitmaps = [None, None];
             // A picture made for the comparison left is never shown in the next.
             v.wanted = [None; 2];
             v.scaled = Default::default();
         });
+        prepare(app);
         return;
     };
+    take_ahead(app);
     let color = app.model.previews.color.clone();
     let (mut bitmaps, making) = VIEW.with(|v| {
         let v = v.borrow();
@@ -359,8 +415,13 @@ pub fn sync(app: &mut App) {
         if let Some(shown) = &shown {
             let key = shown.id as usize;
             wanted[i] = Some(key);
-            if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) && making[i] != Some(key) {
-                make_bitmap(i, key, shown.clone(), color.clone());
+            if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) {
+                // Made ahead, or kept from the comparison left.
+                if let Some(ahead) = VIEW.with(|v| v.borrow_mut().ahead.take_if(|(k, _)| *k == key)) {
+                    bitmaps[i] = Some(ahead);
+                } else if making[i] != Some(key) {
+                    make_bitmap(i, key, shown.clone(), color.clone());
+                }
             }
             // The picture drawn sets the frame's shape until the next is made.
             aspects[i] = bitmaps[i].as_ref().map_or(shown.aspect(), |(_, b)| b.width as f64 / b.height.max(1) as f64);
@@ -891,6 +952,8 @@ pub fn add_offer(app: &mut App, menu: HMENU, item: &negs_library::Item) {
         let _ = AppendMenuW(menu, if offer.enabled { MF_STRING } else { MF_STRING | MF_GRAYED }, super::id::COMPARE_OFFER as usize, super::pcwstr(&text));
     }
     app.model.offer_compare(offer);
+    // Made while the menu is up.
+    prepare(app);
 }
 
 fn grid_shown(app: &App) -> bool {
