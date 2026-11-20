@@ -419,6 +419,7 @@ fn tick(app: &mut App) {
     let along = if opening { elapsed } else { length - elapsed };
     let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
     let started = Instant::now();
+    let mask = if std::env::var_os("NEGS_FLIGHT_HOLD").is_some() { rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), 60.0) } else { mask };
     let prior = grid.last_mask;
     grid.last_mask = Some((mask.x, mask.y, mask.w, mask.h));
     if prior != grid.last_mask {
