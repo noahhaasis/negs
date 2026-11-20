@@ -282,8 +282,15 @@ fn request(app: &mut App) {
 // MARK: Showing and hiding
 
 /// G: the grid, unfolding out of the strip (made the first time).
+/// The grid is fading out: still shown until it's gone, but G (or another
+/// way in) turns it round.
+fn fading_out(app: &App) -> bool {
+    app.grid.as_ref().and_then(|g| g.flight.as_ref()).is_some_and(|f| !f.opening && f.kind != rules::Transition::Flight)
+}
+
 pub fn open(app: &mut App) {
-    if shown(app) || app.model.shelf.library.is_none() || app.model.cropping() || app.model.source.is_none() {
+    let returning = fading_out(app);
+    if (shown(app) && !returning) || app.model.shelf.library.is_none() || app.model.cropping() || app.model.source.is_none() {
         return;
     }
     crate::trace::event("grid_open", || serde_json::json!({}));
@@ -315,10 +322,12 @@ pub fn open(app: &mut App) {
     grid.cells.clear();
     grid.layout = SheetLayout::default();
     sync(app);
-    // The open photograph's row in the middle.
+    // The open photograph's row in the middle, unless the sheet is still
+    // on screen, fading out.
     let grid = app.grid.as_mut().unwrap();
     let (_, viewport) = sheet_size(grid);
-    if let Some(row) = grid.cells.iter().position(|c| c.open).and_then(|i| grid.layout.row_of(i)) {
+    if !returning
+        && let Some(row) = grid.cells.iter().position(|c| c.open).and_then(|i| grid.layout.row_of(i)) {
         grid.scroll = grid.layout.centre_row(row, viewport);
         clamp(grid);
     }
@@ -349,7 +358,7 @@ pub fn close(app: &mut App, open_anchor: bool) {
 }
 
 pub fn toggle(app: &mut App) {
-    if shown(app) { close(app, true) } else { open(app) }
+    if shown(app) && !fading_out(app) { close(app, true) } else { open(app) }
 }
 
 /// Closes the grid for Compare, which has no strip to fold the sheet into:
