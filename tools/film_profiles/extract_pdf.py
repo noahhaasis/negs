@@ -12,6 +12,21 @@ For each stock in the recipe's "extraction" block:
   * curves are stroked paths inside the frame picked by colour and dash state; Bezier
     segments are sampled at 64 points each (de Casteljau), line segments at their ends.
 
+Options for charts drawn in one ink (the Fujifilm Professional Data Guide), all opt-in so
+the earlier recipes extract exactly as before:
+  * panel "frame_kind": "fill" takes the frame from a filled rectangle (the grey plot
+    area) instead of a stroked one;
+  * panel "grid_crossing": true also takes gridlines that run past the frame (ticks drawn
+    as one line with the gridline), using the part inside it;
+  * axis "relative_reason": a relative axis (e.g. "Relative Sensitivity (log)" with a
+    one-unit scale bar) may be fitted through two gridlines; its offset is arbitrary and
+    the reason must say what fixes the scale and why the offset does not matter;
+  * curve "color": "any"; "dashes": the exact dash string, instead of "dashed";
+  * curve "select": {"sort": "x_mid"|"y_mid", "index": k, "of": n}: the paths are split
+    into their connected subpaths (one PDF path may hold all three curves), those
+    matching the style are sorted by the mean of their PDF x or y, there must be n of
+    them, and the k-th is taken.
+
 Writes, per stock, <out>/<stock>/<curve>.csv (two columns, no header, as spektrafilm's
 loader reads them), trace/<curve>.csv (data x, data y, pdf x, pdf y), extraction.json
 (hashes, axis fits, residuals, point counts) and overlay PNGs of every panel with the
@@ -54,10 +69,25 @@ def sample_items(items):
     return np.concatenate(pts)
 
 
-def find_frame(drawings, rect, tol=3.0):
+def split_subpaths(items, tol=1e-3):
+    """A drawing's items cut into runs where each item starts where the last one ended."""
+    runs = []
+    for it in items:
+        start = it[1]
+        if runs:
+            prev = runs[-1][-1]
+            end = prev[2] if prev[0] == "l" else prev[4]
+            if abs(end.x - start.x) <= tol and abs(end.y - start.y) <= tol:
+                runs[-1].append(it)
+                continue
+        runs.append([it])
+    return runs
+
+
+def find_frame(drawings, rect, tol=3.0, kinds=("s", "fs")):
     best = None
     for d in drawings:
-        if d["type"] not in ("s", "fs") or len(d["items"]) != 1 or d["items"][0][0] != "re":
+        if d["type"] not in kinds or len(d["items"]) != 1 or d["items"][0][0] != "re":
             continue
         r = d["items"][0][1]
         err = max(abs(r.x0 - rect[0]), abs(r.y0 - rect[1]), abs(r.x1 - rect[2]), abs(r.y1 - rect[3]))
@@ -68,9 +98,10 @@ def find_frame(drawings, rect, tol=3.0):
     return best[1]
 
 
-def gridlines(drawings, frame, min_frac=0.3):
+def gridlines(drawings, frame, min_frac=0.3, crossing=False):
     """Axis-parallel stroked line segments inside the frame: {'x': [...], 'y': [...]}
-    holding the constant coordinate of each (deduplicated to 0.05 pt)."""
+    holding the constant coordinate of each (deduplicated to 0.05 pt). With crossing,
+    a segment may run past the frame; its part inside must still be min_frac long."""
     found = {"x": [], "y": []}
     for d in drawings:
         if d["type"] not in ("s", "fs"):
@@ -80,6 +111,16 @@ def gridlines(drawings, frame, min_frac=0.3):
                 continue
             a, b = it[1], it[2]
             inside = all(frame.x0 - 0.6 <= p.x <= frame.x1 + 0.6 and frame.y0 - 0.6 <= p.y <= frame.y1 + 0.6 for p in (a, b))
+            if crossing and not inside:
+                if abs(a.x - b.x) < 0.02 and frame.x0 < a.x < frame.x1:
+                    lo, hi = max(min(a.y, b.y), frame.y0), min(max(a.y, b.y), frame.y1)
+                    if hi - lo >= min_frac * frame.height:
+                        found["x"].append((a.x + b.x) / 2)
+                elif abs(a.y - b.y) < 0.02 and frame.y0 < a.y < frame.y1:
+                    lo, hi = max(min(a.x, b.x), frame.x0), min(max(a.x, b.x), frame.x1)
+                    if hi - lo >= min_frac * frame.width:
+                        found["y"].append((a.y + b.y) / 2)
+                continue
             if not inside:
                 continue
             if abs(a.x - b.x) < 0.02 and abs(a.y - b.y) >= min_frac * frame.height:
@@ -109,7 +150,7 @@ def fit_axis(spec, grid, frame):
     fit_pos, fit_vals = pos, vals
     if spec.get("frame") is not None:  # labelled frame edges are ticks too
         fit_pos, fit_vals = np.concatenate([pos, edges]), np.concatenate([vals, spec["frame"]])
-    if fit_pos.size < 3:
+    if fit_pos.size < (2 if spec.get("relative_reason") else 3):
         raise ValueError(f"axis on pdf {spec['pdf']}: fewer than 3 labelled positions")
     A = np.column_stack([fit_pos, np.ones_like(fit_pos)])
     (a, b), *_ = np.linalg.lstsq(A, fit_vals, rcond=None)
@@ -132,31 +173,69 @@ def fit_axis(spec, grid, frame):
     res["gate"], res["pass"] = gate, worst <= gate
     if spec.get("gate_reason"):
         res["gate_reason"] = spec["gate_reason"]
+    if spec.get("relative_reason"):
+        res["relative_reason"] = spec["relative_reason"]
     return res
 
 
 def colour_match(c, want, tol=0.08):
+    if want == "any":
+        return c is not None
     return c is not None and max(abs(a - b) for a, b in zip(c, want)) <= tol
 
 
+def style_match(d, cs):
+    dashed = bool(d.get("dashes")) and d["dashes"].strip() not in ("[] 0", "[]0")
+    if "dashes" in cs:
+        want = cs["dashes"]
+        style = (d.get("dashes") or "").strip() == want or (want in ("[] 0", "") and not dashed)
+    else:
+        style = dashed == cs.get("dashed", False)
+    return colour_match(d.get("color"), cs["color"]) and style
+
+
+def select_subpath(drawings, frame, name, cs):
+    sel = cs["select"]
+    cands = []
+    for i, d in enumerate(drawings):
+        if d["type"] not in ("s", "fs") or not style_match(d, cs):
+            continue
+        for j, run in enumerate(split_subpaths(d["items"])):
+            if not any(it[0] == "c" for it in run):
+                continue
+            pts = sample_items(run)
+            if not (pts[:, 0].min() >= frame.x0 - 1 and pts[:, 0].max() <= frame.x1 + 1
+                    and pts[:, 1].min() >= frame.y0 - 1 and pts[:, 1].max() <= frame.y1 + 1):
+                continue
+            cands.append(((i, j), pts))
+    if len(cands) != sel["of"]:
+        raise ValueError(f"{name}: found {len(cands)} matching subpaths {[k for k, _ in cands]}, expected {sel['of']}")
+    axis = {"x_mid": 0, "y_mid": 1}[sel["sort"]]
+    cands.sort(key=lambda c: c[1][:, axis].mean())
+    key, pts = cands[sel["index"]]
+    return [(f"{key[0]}.{key[1]}", pts)]
+
+
 def extract_panel(page, drawings, panel):
-    frame = find_frame(drawings, panel["frame"])
-    grid = gridlines(drawings, frame)
+    frame = find_frame(drawings, panel["frame"], kinds=("f", "fs") if panel.get("frame_kind") == "fill" else ("s", "fs"))
+    grid = gridlines(drawings, frame, crossing=panel.get("grid_crossing", False))
     axes = {k: fit_axis(panel["axes"][k], grid, frame) for k in ("x", "y")}
     curves = {}
     for name, cs in panel["curves"].items():
-        paths = []
-        for i, d in enumerate(drawings):
-            if d["type"] not in ("s", "fs") or not any(it[0] == "c" for it in d["items"]):
-                continue
-            r = d["rect"]
-            if not (r.x0 >= frame.x0 - 1 and r.x1 <= frame.x1 + 1 and r.y0 >= frame.y0 - 1 and r.y1 <= frame.y1 + 1):
-                continue
-            dashed = bool(d.get("dashes")) and d["dashes"].strip() not in ("[] 0", "[]0")
-            if colour_match(d.get("color"), cs["color"]) and dashed == cs.get("dashed", False):
-                paths.append((i, sample_items(d["items"])))
-        if len(paths) != cs.get("paths", 1):
-            raise ValueError(f"{name}: found {len(paths)} matching paths (indices {[i for i, _ in paths]}), expected {cs.get('paths', 1)}")
+        if "select" in cs:
+            paths = select_subpath(drawings, frame, name, cs)
+        else:
+            paths = []
+            for i, d in enumerate(drawings):
+                if d["type"] not in ("s", "fs") or not any(it[0] == "c" for it in d["items"]):
+                    continue
+                r = d["rect"]
+                if not (r.x0 >= frame.x0 - 1 and r.x1 <= frame.x1 + 1 and r.y0 >= frame.y0 - 1 and r.y1 <= frame.y1 + 1):
+                    continue
+                if style_match(d, cs):
+                    paths.append((i, sample_items(d["items"])))
+            if len(paths) != cs.get("paths", 1):
+                raise ValueError(f"{name}: found {len(paths)} matching paths (indices {[i for i, _ in paths]}), expected {cs.get('paths', 1)}")
         pdf = np.concatenate([p for _, p in paths])
         x = axes["x"]["slope"] * pdf[:, 0 if axes["x"]["pdf"] == "x" else 1] + axes["x"]["offset"]
         y = axes["y"]["slope"] * pdf[:, 0 if axes["y"]["pdf"] == "x" else 1] + axes["y"]["offset"]
