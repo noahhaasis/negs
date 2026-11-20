@@ -22,6 +22,7 @@ fn main() -> Result<()> {
             "--decoder" => decoder = args.next().context("missing decoder")?.parse()?,
             "--iterations" => iterations = args.next().context("missing iterations")?.parse()?,
             "--no-orient" => options.apply_orientation = false,
+            "--max-long-side" => options.max_long_side = args.next().context("missing size")?.parse()?,
             "--lens-correction" => options.lens_correction.enabled = true,
             "--wb" => {
                 options.white_balance =
@@ -43,7 +44,7 @@ fn main() -> Result<()> {
             }
             "--help" => {
                 println!(
-                    "raw_decoder_probe [--decoder auto|apple|apple9|apple8|rawler] [--iterations N] [--no-orient] [--lens-correction] [--wb as_shot|daylight|tungsten|custom] [--temperature K] [--tint T] [--output DIR] INPUT"
+                    "raw_decoder_probe [--decoder auto|apple|apple9|apple8|rawler|libraw|libraw-only] [--iterations N] [--no-orient] [--max-long-side PX] [--lens-correction] [--wb as_shot|daylight|tungsten|custom] [--temperature K] [--tint T] [--output DIR] INPUT"
                 );
                 return Ok(());
             }

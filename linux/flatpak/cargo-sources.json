@@ -1510,6 +1510,19 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
+    "url": "https://static.crates.io/crates/jobserver/jobserver-0.1.35.crate",
+    "sha256": "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3",
+    "dest": "cargo/vendor/jobserver-0.1.35"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": \"1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3\", \"files\": {}}",
+    "dest": "cargo/vendor/jobserver-0.1.35",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "archive",
+    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/js-sys/js-sys-0.3.98.crate",
     "sha256": "67df7112613f8bfd9150013a0314e196f4800d3201ae742489d999db2f979f08",
     "dest": "cargo/vendor/js-sys-0.3.98"

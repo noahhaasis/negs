@@ -41,6 +41,8 @@ def verify_prefix(prefix, native=True, check_script=ROOT / 'scripts/check_native
                 'share/negs/payload.json',
                 'share/licenses/negs/LICENSE', 'share/licenses/negs/THIRD-PARTY-RUST.txt',
                 'share/licenses/negs/OFL-BarlowCondensed.txt',
+                'share/licenses/negs/rawler-LICENSE.txt', 'share/licenses/negs/LibRaw-LICENSE.LGPL.txt',
+                'share/licenses/negs/LibRaw-LICENSE.CDDL.txt', 'share/licenses/negs/LibRaw-COPYRIGHT.txt',
                 f'share/metainfo/{APP_ID}.metainfo.xml',
                 f'share/icons/hicolor/256x256/apps/{APP_ID}.png']
     if native:

@@ -34,7 +34,7 @@ Negs 建立在两个开源项目之上：Andrea Volpato 的 [spektrafilm](https:
 挑一款胶片，配一张相纸，拨动滑块，即可实时见证光影流转。
 
 **打开与整理**
-- 打开大多数相机的 RAW 文件——包括 Nikon HE★（仅 Mac）和 6000 万像素中画幅——以及 JPEG、TIFF 和 PNG，并读取 JPEG、PNG、TIFF 的色彩描述文件
+- 打开大多数相机的 RAW 文件——包括 Nikon HE 与 HE★ 和 6000 万像素中画幅——以及 JPEG、TIFF 和 PNG，并读取 JPEG、PNG、TIFF 的色彩描述文件
 - **图库（Mac）：** 直接打开本地文件夹开始选片，省去导入等待。支持网格与胶片条双视图浏览，星标、旗标筛选；每张缩略图都是显影后的最终效果，告别灰蒙蒙的 RAW 原片。所有评分与调整均独立保存在原图旁的附属文件中，导出时自动将星级写入 xmp:Rating，无缝衔接 Bridge 与 Photo Mechanic 工作流。
 - 按评分、筛选结果或选区一次批量导出（Mac）
 
@@ -220,7 +220,7 @@ sudo pacman -S --needed gtk4 libadwaita vulkan-icd-loader
 每个未经 Apple 公证的应用都会触发这个提示。Negs 没有公证，因为公证需要付费开发者账号。全部源代码都在本仓库中，任何人都可以检查。按[安装步骤](#macos-暂无中文版本)操作：只需要首次打开选择允许就可以。
 
 **能打开哪些文件？**
-大多数相机的 RAW，以及 JPEG、TIFF 和 PNG。Mac 版使用 Apple 的 RAW 支持，rawl​er 兜底；Windows 和 Linux 版用 rawler 解码 RAW。
+大多数相机的 RAW，以及 JPEG、TIFF 和 PNG。Mac 版使用 Apple 的 RAW 支持，rawl​er 兜底；Windows 和 Linux 版用 rawler 解码 RAW。rawler 读不了的文件（例如 Nikon 的 High Efficiency NEF）由 LibRaw 解码。
 
 **Negs 会正确识别并保留照片的色彩配置文件吗？**
 会的。对于 JPEG、PNG 和 TIFF 文件，Negs 会自动读取其内嵌的 ICC 配置文件或色彩标签（未标记的文件默认按 sRGB 处理）；而 RAW 文件中超出 sRGB 色域的宽广色彩也会被完整保留。画面预览直接基于你设定的目标导出色彩空间进行显影——因此，只要使用广色域显示器，你在编辑时所见的就是原汁原味的 Display P3 或 Adobe RGB 色彩。
@@ -249,7 +249,7 @@ Negs 核心的胶片模型来自两个开源项目。Negs 在其上构建了快�
 - **[spektrafilm](https://github.com/andreavolpato/spektrafilm)**，Andrea Volpato 出品：胶片与放印的光谱模拟。物理和胶片数据都来自这里。
 - **[spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs)**，turbasvin 出品：Negs 起步所基于的 spektrafilm Rust 移植版。
 
-默认的光谱上采样表来自 [vkdt](https://github.com/hanatos/vkdt) 的作者 [Johannes Hanatos](https://github.com/hanatos)。可选的 Arctic 2026 表来自 Andrea Volpato（spektrafilm），Mallett 2019 表是 spektrafilm 对 Ian Mallett 与 Cem Yuksel（2019）光谱主色分解的表格化。来自 spektrafilm 的档案和表格采用 CC BY-SA 4.0（[许可](data/SPEKTRAFILM_LICENSE.txt)、[变更](data/CHANGELOG.txt)）。另有 29 个胶片档案（24 个彩色、5 个黑白）改编自 MUAStudio Inc. 的 [Fotufilm](https://fotufilm.com)，同样采用 CC BY-SA 4.0（[许可](data/FOTUFILM_LICENSE.txt)、[变更](data/CHANGELOG.txt))。部分数学代码移植自 numpy、scipy、scikit-image 和 colour-science。Apple 读不了的 RAW 用 [rawler](https://github.com/dnglab/dnglab) 解码；Windows 和 Linux 上 Sony、Fujifilm、OM/Olympus 与 Panasonic 的镜头校正移植自 [darktable](https://www.darktable.org) 的内嵌元数据镜头校正；更新由 [Sparkle](https://sparkle-project.org) 递送；Mac 应用的字体排版采用 Production Type 的 [Newsreader](https://github.com/productiontype/Newsreader)。
+默认的光谱上采样表来自 [vkdt](https://github.com/hanatos/vkdt) 的作者 [Johannes Hanatos](https://github.com/hanatos)。可选的 Arctic 2026 表来自 Andrea Volpato（spektrafilm），Mallett 2019 表是 spektrafilm 对 Ian Mallett 与 Cem Yuksel（2019）光谱主色分解的表格化。来自 spektrafilm 的档案和表格采用 CC BY-SA 4.0（[许可](data/SPEKTRAFILM_LICENSE.txt)、[变更](data/CHANGELOG.txt)）。另有 29 个胶片档案（24 个彩色、5 个黑白）改编自 MUAStudio Inc. 的 [Fotufilm](https://fotufilm.com)，同样采用 CC BY-SA 4.0（[许可](data/FOTUFILM_LICENSE.txt)、[变更](data/CHANGELOG.txt))。部分数学代码移植自 numpy、scipy、scikit-image 和 colour-science。Apple 读不了的 RAW 用 [rawler](https://github.com/dnglab/dnglab) 解码，rawler 也读不了的（例如 Nikon HE 与 HE★）用 LibRaw LLC 的 [LibRaw](https://www.libraw.org) 解码；Windows 和 Linux 上 Sony、Fujifilm、OM/Olympus 与 Panasonic 的镜头校正移植自 [darktable](https://www.darktable.org) 的内嵌元数据镜头校正；更新由 [Sparkle](https://sparkle-project.org) 递送；Mac 应用的字体排版采用 Production Type 的 [Newsreader](https://github.com/productiontype/Newsreader)。
 
 预处理标签页、相机亮度匹配、RGB 波形和 Apple RAW 9 → 8 回退来自 [yosoyelchris](https://github.com/yosoyelchris) 的 Negs 分支（[详情](docs/prep.md)）。
 
@@ -264,7 +264,7 @@ Negs 是**GNU 通用公共许可证第 3 版**下的自由软件（[全文](LICE
 - Copyright © 2026 Noah Haasis（Negs：应用与引擎改动）
 - Copyright © 2026 yosoyelchris（预处理控件、相机亮度匹配与示波器）
 
-第三方组件保留各自的许可证。Mac 应用内置的更新框架 Sparkle 采用 MIT 许可证；内置字体 Newsreader 采用 SIL Open Font License 1.1（[许可](macos/Fonts/OFL-Newsreader.txt)）。
+第三方组件保留各自的许可证。rawler 采用 LGPL-2.1，LibRaw 采用 LGPL-2.1 或 CDDL-1.0（[许可与改动](vendor/README.md)）。Mac 应用内置的更新框架 Sparkle 采用 MIT 许可证；内置字体 Newsreader 采用 SIL Open Font License 1.1（[许可](macos/Fonts/OFL-Newsreader.txt)）。
 
 ## 面向开发者
 

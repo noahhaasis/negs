@@ -48,6 +48,11 @@ for source, target in [
     (f'linux/{APP_ID}.metainfo.xml', f'share/metainfo/{APP_ID}.metainfo.xml'),
     ('LICENSE', 'share/licenses/negs/LICENSE'),
     ('crates/spektrafilm-io/fonts/OFL-BarlowCondensed.txt', 'share/licenses/negs/OFL-BarlowCondensed.txt'),
+    # The vendored RAW decoders compiled into the engine (vendor/README.md).
+    ('vendor/rawler/LICENSE', 'share/licenses/negs/rawler-LICENSE.txt'),
+    ('vendor/libraw/LICENSE.LGPL', 'share/licenses/negs/LibRaw-LICENSE.LGPL.txt'),
+    ('vendor/libraw/LICENSE.CDDL', 'share/licenses/negs/LibRaw-LICENSE.CDDL.txt'),
+    ('vendor/libraw/COPYRIGHT', 'share/licenses/negs/LibRaw-COPYRIGHT.txt'),
     ('docs/linux-app.md', 'share/doc/negs/linux-app.md'),
 ]:
     copy(root / source, target)
