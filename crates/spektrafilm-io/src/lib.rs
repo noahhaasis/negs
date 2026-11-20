@@ -23,6 +23,8 @@ pub mod film35;
 pub mod icc;
 pub mod image_size;
 pub mod lens;
+#[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
+mod libraw;
 pub mod metadata;
 pub mod raw;
 pub mod resize;
@@ -251,14 +253,36 @@ fn load_raw_impl(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Image
 pub(crate) struct RawlerImage {
     pub image: ImageBuf,
     pub lens: Option<lens::Source>,
+    /// LibRaw's version when it unpacked the sensor because rawler couldn't.
+    pub libraw: Option<String>,
+    /// The EXIF orientation (1 to 8), applied or not.
+    pub orientation: u16,
 }
 
 fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance, lens: LensCorrection) -> Result<RawlerImage> {
+    load_raw_rawler_with(path, orient, wb, lens, Unpacker::Rawler)
+}
+
+/// Who unpacks the sensor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Unpacker {
+    /// rawler, and LibRaw where rawler can't.
+    Rawler,
+    /// LibRaw even where rawler could, for comparing the two: with rawler's
+    /// metadata where it reads it, or only LibRaw's.
+    #[allow(dead_code)]
+    LibRaw,
+    #[allow(dead_code)]
+    LibRawOnly,
+}
+
+/// [`load_raw_rawler`], with the sensor unpacked as `unpacker` says.
+pub(crate) fn load_raw_rawler_with(path: &Path, orient: bool, wb: RawWhiteBalance, lens: LensCorrection, unpacker: Unpacker) -> Result<RawlerImage> {
     use rawler::rawsource::RawSource;
     wb.validate()?;
     let src =
         RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
-    develop_rawler(&src, orient, wb, lens, |_| XTransDemosaic::default())
+    develop_rawler_with(&src, orient, wb, lens, |_| XTransDemosaic::default(), unpacker)
 }
 
 /// [`load_raw_with_wb`] from the file's bytes, with rawler: for browsers,
@@ -285,8 +309,8 @@ pub fn load_raw_bytes_unoriented_with(
 ) -> Result<(ImageBuf, u16)> {
     wb.validate()?;
     let src = rawler::rawsource::RawSource::new_from_slice(bytes);
-    let image = develop_rawler(&src, false, wb, LensCorrection::default(), xtrans)?.image;
-    Ok((image, raw_exif_orientation(&src, &rawler::decoders::RawDecodeParams::default())))
+    let developed = develop_rawler(&src, false, wb, LensCorrection::default(), xtrans)?;
+    Ok((developed.image, developed.orientation))
 }
 
 fn develop_rawler(
@@ -296,25 +320,57 @@ fn develop_rawler(
     lens_correction: LensCorrection,
     xtrans: impl FnOnce(usize) -> XTransDemosaic,
 ) -> Result<RawlerImage> {
+    develop_rawler_with(src, orient, wb, lens_correction, xtrans, Unpacker::Rawler)
+}
+
+fn develop_rawler_with(
+    src: &rawler::rawsource::RawSource,
+    orient: bool,
+    wb: RawWhiteBalance,
+    lens_correction: LensCorrection,
+    xtrans: impl FnOnce(usize) -> XTransDemosaic,
+    unpacker: Unpacker,
+) -> Result<RawlerImage> {
     use rawler::decoders::RawDecodeParams;
     let decode_params = RawDecodeParams::default();
-    let raw = rawler::decode(src, &decode_params)
-        .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
+    let decoded = if unpacker == Unpacker::Rawler {
+        rawler::decode(src, &decode_params)
+    } else {
+        Err(rawler::RawlerError::DecoderFailed("LibRaw requested".into()))
+    };
+    let (raw, libraw) = match decoded {
+        Ok(raw) => (raw, None),
+        #[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
+        Err(e) => {
+            let metadata = if unpacker == Unpacker::LibRawOnly { libraw::Metadata::LibRaw } else { libraw::Metadata::Best };
+            match libraw::unpack(src, metadata) {
+                Ok(unpacked) => (unpacked.raw, Some((unpacked.version, unpacked.orientation))),
+                Err(other) => bail!("RAW decode failed: {e:?}; {other}"),
+            }
+        }
+        #[cfg(not(all(feature = "libraw", not(target_arch = "wasm32"))))]
+        Err(e) => bail!("RAW decode failed: {e:?}"),
+    };
     let area = lens_area(&raw);
     let xtrans = xtrans(raw.width * raw.height);
     let mut img = develop_decoded_with(raw, wb, xtrans)?;
     // Lens corrections are defined in sensor coordinates: before orientation.
-    let profile = lens::read_profile_from(src);
+    // Their placement is rawler's frame, so none for LibRaw's (Nikon carries
+    // none anyway).
+    let profile = if libraw.is_none() { lens::read_profile_from(src) } else { None };
     if lens_correction.enabled && let Some(profile) = &profile {
         let area = area.filter(|a| a.developed == (img.width as usize, img.height as usize)).map(|a| a.area);
         lens::apply(&mut img, profile, area);
     }
     let lens = profile.map(|p| p.source);
-    if !orient {
-        return Ok(RawlerImage { image: img, lens });
-    }
     // rawler still sets RawImage::orientation to Normal: read EXIF ourselves.
-    Ok(RawlerImage { image: img.oriented(raw_exif_orientation(src, &decode_params)), lens })
+    let (libraw, orientation) = match libraw {
+        Some((version, Some(orientation))) => (Some(version), orientation),
+        Some((version, None)) => (Some(version), raw_exif_orientation(src, &decode_params)),
+        None => (None, raw_exif_orientation(src, &decode_params)),
+    };
+    let image = if orient { img.oriented(orientation) } else { img };
+    Ok(RawlerImage { image, lens, libraw, orientation })
 }
 
 /// The active area (where DNG lens opcodes are defined) relative to the image

@@ -46,6 +46,11 @@ Copy-Item -LiteralPath LICENSE -Destination $stage
 # Newsreader (the interface) and Barlow Condensed (film borders).
 Copy-Item -LiteralPath macos/Fonts/OFL-Newsreader.txt -Destination $stage
 Copy-Item -LiteralPath crates/spektrafilm-io/fonts/OFL-BarlowCondensed.txt -Destination $stage
+# The vendored RAW decoders compiled into the engine (vendor/README.md).
+foreach ($pair in @(@('vendor/rawler/LICENSE', 'rawler-LICENSE.txt'), @('vendor/libraw/LICENSE.LGPL', 'LibRaw-LICENSE.LGPL.txt'),
+                    @('vendor/libraw/LICENSE.CDDL', 'LibRaw-LICENSE.CDDL.txt'), @('vendor/libraw/COPYRIGHT', 'LibRaw-COPYRIGHT.txt'))) {
+    Copy-Item -LiteralPath $pair[0] -Destination (Join-Path $stage $pair[1])
+}
 if ($WinSparkleDll) {
     Copy-Item -LiteralPath $WinSparkleDll -Destination (Join-Path $stage 'WinSparkle.dll')
     $license = Join-Path (Split-Path $WinSparkleDll -Parent) 'COPYING'

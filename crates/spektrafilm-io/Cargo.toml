@@ -5,9 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["apple-raw"]
+default = ["apple-raw", "libraw"]
 # Only compiled/linked on macOS. Disable for a portable rawler-only build.
 apple-raw = []
+# LibRaw (C++, vendor/libraw) for RAWs rawler can't decode. Never built for
+# the browser (wasm32): the dependency is native-only.
+libraw = ["dep:negs-libraw"]
 precision-f64 = ["spektrafilm-math/precision-f64"]
 
 [dependencies]
@@ -21,8 +24,15 @@ serde_json.workspace = true
 rawler = "0.8"
 ab_glyph = "0.2.32"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+negs-libraw = { workspace = true, optional = true }
+
 [build-dependencies]
 cc = "1"
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[[example]]
+name = "libraw_vs_rawler"
+required-features = ["libraw"]

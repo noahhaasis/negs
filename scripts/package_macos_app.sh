@@ -104,6 +104,11 @@ cp -R data "$APP_BUNDLE/Contents/Resources/data"
 mkdir -p "$APP_BUNDLE/Contents/Resources/Fonts"
 cp macos/Fonts/Newsreader-Negs.ttf macos/Fonts/Newsreader-Negs-Italic.ttf macos/Fonts/OFL-Newsreader.txt "$APP_BUNDLE/Contents/Resources/Fonts/"
 cp LICENSE "$APP_BUNDLE/Contents/Resources/LICENSE.txt"
+# The vendored RAW decoders compiled into the engine (vendor/README.md).
+cp vendor/rawler/LICENSE "$APP_BUNDLE/Contents/Resources/rawler-LICENSE.txt"
+cp vendor/libraw/LICENSE.LGPL "$APP_BUNDLE/Contents/Resources/LibRaw-LICENSE.LGPL.txt"
+cp vendor/libraw/LICENSE.CDDL "$APP_BUNDLE/Contents/Resources/LibRaw-LICENSE.CDDL.txt"
+cp vendor/libraw/COPYRIGHT "$APP_BUNDLE/Contents/Resources/LibRaw-COPYRIGHT.txt"
 # The app's accent colour, the warm grey of its outlines: menus, default
 # buttons and focus take it instead of the system blue (Info.plist names it).
 xcrun actool macos/Assets.xcassets --compile "$APP_BUNDLE/Contents/Resources" \
@@ -200,7 +205,7 @@ README
 if [[ $DEV != 1 ]]; then
     COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='.build' --exclude='.swiftpm' \
         -czf "$DIST_DIR/SOURCE.tar.gz" Cargo.toml Cargo.lock LICENSE README.md \
-        crates macos data assets scripts docs .github release
+        crates vendor macos data assets scripts docs .github release
 fi
 
 # Ad-hoc sign our own executables and the outer app. Do not recursively
