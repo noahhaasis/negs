@@ -1,0 +1,17 @@
+# The marks' geometry from the shared Odin core, with windows/marks's API:
+# a Cargo rename (`negs-marks = { package = "negs-core-marks", ... }`) moves
+# a front end onto the core unchanged.
+[package]
+name = "negs-core-marks"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace]
+
+[features]
+track = ["negs-core-sys/track"]
+
+[dependencies]
+negs-core-sys = { path = "../sys" }

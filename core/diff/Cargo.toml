@@ -1,7 +1,7 @@
 # The core's differential tests and benchmarks: the Rust oracles
 # (crates/negs-library, windows/marks, windows/src's pure modules) beside
 # the Odin core through its C ABI. Its own workspace, so the root
-# Cargo.lock stays as it is. Run through core/diff.py.
+# Cargo.lock stays as it is. Run with `python3 core/build.py diff`.
 [package]
 name = "negs-core-diff"
 version = "0.0.0"
@@ -11,6 +11,12 @@ publish = false
 
 [workspace]
 
+[features]
+# Count the core's allocations, so the differential tests check for leaks.
+track = ["negs-core-marks/track", "negs-core-sys/track"]
+
 [dependencies]
 negs-library = { path = "../../crates/negs-library" }
 negs-marks = { path = "../../windows/marks" }
+negs-core-marks = { path = "../rust/marks" }
+negs-core-sys = { path = "../rust/sys" }

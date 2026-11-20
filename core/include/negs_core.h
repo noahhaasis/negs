@@ -28,7 +28,7 @@ extern "C" {
 #endif
 
 /* Bumped on every change a host must be rebuilt for. */
-#define NEGS_CORE_ABI_VERSION 1u
+#define NEGS_CORE_ABI_VERSION 2u
 
 /* ------------------------------------------------------------------ */
 /* Basics                                                              */
@@ -65,6 +65,195 @@ void negs_buf_free(negs_buf_t buf);
  * "type.field" (e.g. "negs_buf_t.len"); -1 when it doesn't know the name.
  * core/tests/c/layout_check.c compares them with the C compiler's. */
 int64_t negs_core_layout(const char *name, size_t name_len);
+
+/* ------------------------------------------------------------------ */
+/* Marks: the pencil's geometry (core/src/marks; windows/marks)         */
+/* ------------------------------------------------------------------ */
+/* A photograph draws the same star, cross and box on every platform: the
+ * same hash, random numbers and floating-point steps as the Swift and the
+ * Rust they replace. Points are in the picture's coordinates, y down. */
+
+typedef struct negs_pt_t {
+    double x, y;
+} negs_pt_t;
+
+typedef struct negs_rect_t {
+    double x, y, w, h;
+} negs_rect_t;
+
+#define NEGS_SEG_MOVE 0u
+#define NEGS_SEG_LINE 1u
+#define NEGS_SEG_CUBIC 2u
+#define NEGS_SEG_CLOSE 3u
+
+/* One step of a path. Move and Line use p[0]; Cubic is p[0] and p[1] (the
+ * control points), then p[2] (the end); Close uses none. */
+typedef struct negs_seg_t {
+    uint32_t kind;
+    uint32_t reserved;
+    negs_pt_t p[3];
+} negs_seg_t;
+
+/* A ring's corner radii, CSS border-radius style: horizontal and vertical
+ * per corner, clockwise from the top left; relative: shares of the width
+ * and height rather than points. */
+typedef struct negs_radii_t {
+    double horizontal[4];
+    double vertical[4];
+    uint8_t relative;
+} negs_radii_t;
+
+#define NEGS_RADII_BOX 0u
+#define NEGS_RADII_NUMBER 1u
+
+#define NEGS_CROSS_LOOSE 1u
+#define NEGS_CROSS_TWICE 2u
+
+#define NEGS_BOX_FOUR 1u
+#define NEGS_BOX_LOOP 2u
+#define NEGS_BOX_TWO 3u
+
+/* Filled outlines, in one block: stroke i is counts[i] points of `points`,
+ * after the strokes before it, drawn at opacities[i] (1 unless a cross's).
+ * kind: NEGS_CROSS_* or NEGS_BOX_* (0 for a star); tilt: a box's turn round
+ * the picture's centre in degrees, clockwise. Free with negs_strokes_free. */
+typedef struct negs_strokes_t {
+    negs_pt_t *points;
+    uint32_t *counts;
+    double *opacities;
+    size_t stroke_count;
+    size_t point_count;
+    uint32_t kind;
+    uint32_t reserved;
+    double tilt;
+} negs_strokes_t;
+
+typedef struct negs_marks_constants_t {
+    double pencil_width;      /* the stroke under a word, not scaled */
+    double pencil_height;     /* the box it's stretched to */
+    double highlighter_width; /* Light table's band, less its round ends */
+    double ring_line_width;
+    double ring_outset_w;     /* how far a ring sits outside its picture */
+    double ring_outset_h;
+    double star_size;         /* the box each star is drawn in */
+    double star_gap;
+    double reach;             /* how far outside its picture a box may draw */
+} negs_marks_constants_t;
+
+void negs_marks_constants(negs_marks_constants_t *out);
+void negs_marks_radii(uint32_t which, negs_radii_t *out);
+
+/* Paths: write up to `cap` segments into `out` (NULL to ask) and return
+ * how many the path has: the pencil at most 3, a ring 10. */
+size_t negs_marks_pencil(negs_rect_t rect, uint8_t plain, negs_seg_t *out, size_t cap);
+/* radii NULL: NEGS_RADII_BOX. */
+size_t negs_marks_ring(negs_rect_t rect, const negs_radii_t *radii, uint8_t plain, negs_seg_t *out, size_t cap);
+double negs_marks_ring_tilt(double degrees, uint8_t plain);
+/* The box round the path itself (Bezier extremes, not control points):
+ * 0 when there are no points. */
+uint8_t negs_marks_path_bounds(const negs_seg_t *segs, size_t count, negs_rect_t *out);
+
+/* FNV-1a over the name's UTF-16 units, and the next mulberry32 number in
+ * [0, 1) from *state, as the mockup pages' scripts. */
+uint32_t negs_marks_hash(const char *name, size_t len);
+double negs_marks_random_next(uint32_t *state);
+
+uint32_t negs_marks_star_seed(const char *name, size_t len, uint32_t index);
+/* The index-th star in the name's row: three strokes round (0, 0). */
+negs_strokes_t negs_marks_star(const char *name, size_t len, uint32_t index);
+
+uint32_t negs_marks_cross_kind(const char *name, size_t len);
+/* A reject's cross over a w x h picture; no strokes when either is <= 0. */
+negs_strokes_t negs_marks_cross(double w, double h, const char *name, size_t len);
+
+uint32_t negs_marks_box_kind(const char *name, size_t len);
+/* A pick's box `outset` outside a w x h picture, the name used as given. */
+negs_strokes_t negs_marks_pick_box(double w, double h, double outset, const char *name, size_t len,
+                                   uint8_t tight, double weight);
+/* The grid's (3 pt out), the strip's (2 pt, tight) and the selection's
+ * (8 pt, the name + "\xC2\xB7second", weight 4 / 2.6). */
+negs_strokes_t negs_marks_pick_box_grid(double w, double h, const char *name, size_t len);
+negs_strokes_t negs_marks_pick_box_strip(double w, double h, const char *name, size_t len);
+negs_strokes_t negs_marks_pick_box_selection(double w, double h, const char *name, size_t len);
+
+/* Frees the block and zeroes *strokes; a zeroed one is fine. */
+void negs_strokes_free(negs_strokes_t *strokes);
+
+/* ------------------------------------------------------------------ */
+/* Theme: the built-in themes' tokens (core/src/theme)                  */
+/* ------------------------------------------------------------------ */
+/* Ids are the order themes are offered in; keys are the stored names (the
+ * macOS app's AppTheme raw values). Colours are 0xRRGGBB, sRGB. */
+
+#define NEGS_THEME_DARKROOM 0u
+#define NEGS_THEME_CONTACT_SHEET 1u
+#define NEGS_THEME_LIGHT_TABLE 2u
+#define NEGS_THEME_DAYLIGHT 3u
+#define NEGS_THEME_PLAIN 4u
+#define NEGS_THEME_PLAIN_DARK 5u
+
+#define NEGS_PLATFORM_MACOS 0u
+#define NEGS_PLATFORM_WINDOWS 1u
+#define NEGS_PLATFORM_LINUX 2u
+
+typedef struct negs_theme_hex_t {
+    uint32_t bg;      /* the sheet the photograph lies on, the title band */
+    uint32_t panel;   /* the inspector, Settings, the alert */
+    uint32_t film;    /* the strip, the tray, the leader */
+    uint32_t grid;    /* behind the grid */
+    uint32_t line;    /* rules between sections and modules */
+    uint32_t track;   /* slider tracks, outlines, separators */
+    uint32_t dim;     /* values at their default, hints */
+    uint32_t label;   /* control labels */
+    uint32_t paper;   /* what's being read */
+    uint32_t accent;  /* the pencil's thin marks; never words */
+    uint32_t fill;    /* the Export and Done buttons */
+    uint32_t on_fill; /* the words on them */
+    uint32_t warn;    /* errors and warnings, as words */
+    uint32_t blank;   /* a tile not yet developed */
+} negs_theme_hex_t;
+
+typedef struct negs_theme_t {
+    negs_theme_hex_t hex;
+    negs_theme_hex_t film; /* the inks on the film: hex, but Contact sheet's */
+    uint8_t dark;          /* light ink on dark: menus drawn dark */
+    uint8_t highlighter;   /* the mark under a word is a highlighter */
+    uint8_t plain;         /* the system font and upright marks */
+    uint8_t reserved;
+    uint32_t id;
+    const char *key;       /* static */
+    const char *title;     /* static */
+} negs_theme_t;
+
+typedef struct negs_theme_constants_t {
+    uint32_t highlighter_ink;   /* Light table's highlighter */
+    uint32_t crop_shade;        /* outside the crop box */
+    double highlighter_opacity;
+    double selection_opacity;   /* text selection: the pencil at this */
+    double crop_shade_opacity;
+    double disabled_opacity;
+    double strip_dim;           /* strip frames other than the current one */
+    double shadow_dark;         /* shadows under alerts and tags */
+    double shadow_light;
+    double dimming_dark[4];     /* under an alert: sRGB red, green, blue, opacity */
+    double dimming_light[4];
+} negs_theme_constants_t;
+
+/* NEGS_THEME_* ids run 0 ..< negs_theme_count(). */
+uint32_t negs_theme_count(void);
+/* 0 for an unknown id. */
+uint8_t negs_theme_get(uint32_t id, negs_theme_t *out);
+/* The line under the swatches in Settings > Look; static. */
+const char *negs_theme_hint(uint32_t id, uint32_t platform);
+/* A stored key or a title, any case, spaces and punctuation ignored: its id,
+ * or -1. */
+int32_t negs_theme_parse(const char *text, size_t len);
+/* WCAG 2: relative luminance 0..1, contrast ratio 1..21. */
+double negs_theme_luminance(uint32_t rgb);
+double negs_theme_contrast(uint32_t a, uint32_t b);
+/* a moved towards b by t, each channel rounded half away from zero. */
+uint32_t negs_theme_mix(uint32_t a, uint32_t b, double t);
+void negs_theme_constants(negs_theme_constants_t *out);
 
 #ifdef __cplusplus
 }

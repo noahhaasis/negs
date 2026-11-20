@@ -5,6 +5,7 @@
     python3 core/build.py lib --universal   # macOS arm64 + x86_64, lipo'd
     python3 core/build.py lib --track       # counts allocations (tests)
     python3 core/build.py test              # header, unit tests, leak check, layout
+    python3 core/build.py diff              # Rust wrappers + differential tests (tracked)
     python3 core/build.py odin              # which odin it uses
 
 Odin is pinned (core/ODIN_VERSION): $NEGS_ODIN, then ~/.negs/odin/<tag>/odin,
@@ -182,6 +183,29 @@ def test(_args: argparse.Namespace) -> None:
     log("all core tests passed")
 
 
+# The Rust crates over the core, each its own workspace (own Cargo.lock),
+# then the differential tests against the Rust oracles (core/diff).
+RUST_CRATES = ["rust/sys", "rust/marks", "diff"]
+
+
+def diff(args: argparse.Namespace) -> None:
+    """Every crate's tests with the core's allocations counted (--features
+    track), so the differential tests also check nothing leaks."""
+    target = REPO / "target" / "core-diff"
+    for crate in RUST_CRATES:
+        cmd = ["cargo", "test", "--release", "--manifest-path", str(CORE / crate / "Cargo.toml"),
+               "--target-dir", str(target), "--features", "track"]
+        if args.test:
+            cmd += ["--test", args.test]
+        if crate != "diff" and args.test:
+            continue
+        log(f"cargo test {crate}")
+        started = time.monotonic()
+        run(cmd)
+        log(f"{crate} passed in {time.monotonic() - started:.1f} s")
+    log("all Rust and differential tests passed")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -193,6 +217,9 @@ def main() -> None:
     lib.add_argument("--out", help=f"output path (default target/negs-core/{LIB_NAME})")
     lib.set_defaults(func=build_lib)
     sub.add_parser("test", help="header check, unit tests, leak check, layout check").set_defaults(func=test)
+    d = sub.add_parser("diff", help="Rust wrappers' tests and the differential tests, allocations tracked")
+    d.add_argument("--test", help="only this test of core/diff (e.g. marks, theme)")
+    d.set_defaults(func=diff)
     sub.add_parser("header", help="check negs_core.h is valid C99").set_defaults(func=lambda _a: check_header())
     sub.add_parser("odin", help="print the odin used").set_defaults(func=lambda _a: print(find_odin()))
     args = parser.parse_args()

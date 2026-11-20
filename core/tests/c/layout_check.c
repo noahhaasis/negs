@@ -28,6 +28,39 @@ int main(void) {
     FIELD(negs_alloc_stats_t, total_count);
     FIELD(negs_alloc_stats_t, bad_frees);
     FIELD(negs_alloc_stats_t, tracked);
+    SIZE(negs_pt_t);
+    FIELD(negs_pt_t, y);
+    SIZE(negs_rect_t);
+    FIELD(negs_rect_t, h);
+    SIZE(negs_seg_t);
+    FIELD(negs_seg_t, kind);
+    FIELD(negs_seg_t, p);
+    SIZE(negs_radii_t);
+    FIELD(negs_radii_t, vertical);
+    FIELD(negs_radii_t, relative);
+    SIZE(negs_strokes_t);
+    FIELD(negs_strokes_t, points);
+    FIELD(negs_strokes_t, counts);
+    FIELD(negs_strokes_t, opacities);
+    FIELD(negs_strokes_t, stroke_count);
+    FIELD(negs_strokes_t, point_count);
+    FIELD(negs_strokes_t, kind);
+    FIELD(negs_strokes_t, tilt);
+    SIZE(negs_marks_constants_t);
+    FIELD(negs_marks_constants_t, reach);
+    SIZE(negs_theme_hex_t);
+    FIELD(negs_theme_hex_t, on_fill);
+    FIELD(negs_theme_hex_t, blank);
+    SIZE(negs_theme_t);
+    FIELD(negs_theme_t, film);
+    FIELD(negs_theme_t, dark);
+    FIELD(negs_theme_t, plain);
+    FIELD(negs_theme_t, id);
+    FIELD(negs_theme_t, key);
+    FIELD(negs_theme_t, title);
+    SIZE(negs_theme_constants_t);
+    FIELD(negs_theme_constants_t, highlighter_opacity);
+    FIELD(negs_theme_constants_t, dimming_light);
 
     /* The smoke test: the version, and a block out and back. */
     if (negs_core_abi_version() != NEGS_CORE_ABI_VERSION) {
@@ -41,6 +74,12 @@ int main(void) {
         failures++;
     }
     negs_buf_free(buf);
+    negs_strokes_t star = negs_marks_star("DSC_6435.NEF", 12, 0);
+    if (star.stroke_count != 3 || star.point_count != 84) {
+        fprintf(stderr, "negs_marks_star: %zu strokes, %zu points\n", star.stroke_count, star.point_count);
+        failures++;
+    }
+    negs_strokes_free(&star);
     negs_alloc_stats_t stats;
     negs_core_alloc_stats(&stats);
     if (stats.tracked && (stats.live_count != 0 || stats.bad_frees != 0)) {

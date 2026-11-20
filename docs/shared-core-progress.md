@@ -9,7 +9,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | # | Phase | State | Notes |
 |---|---|---|---|
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
-| 1 | Pilot: `marks` + `theme` | not started | Mac-side + Swift `CNegsCore` wiring |
+| 1 | Pilot: `marks` + `theme` | done (Mac) | Bit for bit with `windows/marks` on Apple silicon; macOS draws marks and themes from the core; Windows wiring at the Phase 2 gate |
 | 2 | Pilot Go/No-Go: `library` | not started | Mac differential tests first → **ping Noah for Windows PC** → Go/No-Go review |
 | 3 | Pure Domain Rules & Media Helpers | not started | 3a (`sheet`/`tray`/`compare`), 3b (`crop`/`border`/`exact_fit`/`thumb_compose`), 3c (`embedded_preview`/`photo_facts`/`tone_graph`/`histogram`/`negative`/`help`) |
 | 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
@@ -42,6 +42,56 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-21: Phase 1, `marks` + `theme` (branch `core-p1-marks-theme`)
+
+- **marks** (`core/src/marks`, ~1,000 lines): hash, mulberry32, ribbon,
+  pencil, ring (CSS radii), star, cross, pick box (grid, strip, selection),
+  path bounds; `negs_marks_*` returns owned `negs_strokes_t` blocks or
+  writes `negs_seg_t` paths into the caller's array. The Rust wrapper
+  `core/rust/marks` (`negs-core-marks`) mirrors `negs-marks`' API, so the
+  Windows app can switch with a Cargo rename.
+- **Differential gate** (`core/diff/tests/marks.rs`, 10,000 seeded names,
+  sizes and edge sizes, every coordinate, count, kind, tilt and opacity):
+  **0 differences on arm64**, bit for bit; nothing leaks (tracked build).
+  Getting there took two fixes worth knowing for later phases:
+  1. Odin folds untyped constant expressions exactly (`1.0 - k`, `4.0/2.6`),
+     where Rust and Swift round each step in f64: 1.9% of values differed by
+     up to 1.2e-10 until those constants became typed `f64` variables.
+  2. LLVM fuses `sin(a)` and `cos(a)` of the same angle into one
+     `__sincos_stret` (Darwin) or `sincos` (glibc) call, whose results differ
+     in the last bit from separate calls (3,927 of 1e6 angles). The core calls
+     the same fused routine (`marks.sin_cos`); separate calls on MSVC.
+  Under Rosetta (x86_64) 3,062 of 200M values differ by ≤ 2.8e-14, inside
+  the plan's 1e-12 gate: Rust folds some sines of constant angles at compile
+  time there. The test demands exactness on aarch64-macos only.
+- **theme** (`core/src/theme`): the six themes' 14 tokens, film inks, flags,
+  keys, titles, hints per platform (macOS's and Windows' differ: their
+  defaults do), parse (Windows' rules), WCAG luminance and contrast, mix,
+  and the shared constants. `core/diff/tests/theme.rs` reads Windows'
+  tables from `windows/src/ui/theme.rs` (it links the Windows API, so it
+  can't build on the Mac) and holds copies of its maths to the source:
+  tables, names and hints equal, luminance/contrast/mix bit for bit over
+  200,000 colour pairs, parse equal over 50,000 fuzzed names.
+- **macOS wiring:** `AppTheme` titles, hints and palettes, `Theme.contrast`
+  /`luminance` and the constants, and `HandStar`, `RejectCross`, `PickBox`,
+  `PencilStroke` and `PencilRing` now call `CNegsCore` (`CoreMarks.swift`
+  turns blocks into `Path`s); −250 lines of Swift. **No visual change:**
+  before switching, a throwaway test drew 3,000 random names and sizes both
+  ways: all 23.7M coordinates equal once both go through SwiftUI's `Path`
+  (which stores Float32, so raw doubles differ by ~1e-6 either way); Plain
+  rings (`CGPath(roundedRect:)` before) are pixel-identical at 4×; the old
+  Swift tables and hints equal the core's. Full `swift test`: 490 tests,
+  0 failures (20 skipped, as on main).
+- **Tooling:** `build.py diff` runs `negs-core-sys`, `negs-core-marks` and
+  `core/diff` with allocations tracked (~30 s warm). `NEGS_CORE_ABI_VERSION`
+  is 2.
+- **Numbers** (on battery at 17%, load ~22, so indicative only; Phase 7
+  re-measures): the whole core (1,769 lines of Odin) builds in **0.57 s**
+  (`build.py lib`, 83 KB `.a`); there is no incremental build, it's always
+  the whole library. Marks, 1,000 names × (5 stars + cross + box): Rust
+  23.5 ms, core through the Rust wrapper 24.8 ms (+6%: the wrapper copies
+  each block into `Vec`s).
 
 ### 2026-11-21: Phase 0, foundation and baselines (branch `core-p0-foundation`)
 
