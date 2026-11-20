@@ -123,3 +123,20 @@ impl Job {
         }
     }
 }
+
+/// Puts `child`'s GPU work below the app's (`D3DKMTSetProcessSchedulingPriorityClass`,
+/// below normal), so the compositor and the app's own drawing go first.
+/// Best effort: nothing happens where gdi32 hasn't it.
+pub fn lower_gpu_priority(child: &std::process::Child) {
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    use windows::core::{PCSTR, w};
+    type SetPriority = unsafe extern "system" fn(HANDLE, i32) -> i32;
+    const BELOW_NORMAL: i32 = 1;
+    unsafe {
+        let Ok(gdi) = LoadLibraryW(w!("gdi32.dll")) else { return };
+        let Some(f) = GetProcAddress(gdi, PCSTR(c"D3DKMTSetProcessSchedulingPriorityClass".as_ptr() as *const u8)) else { return };
+        let set: SetPriority = std::mem::transmute(f);
+        let status = set(HANDLE(child.as_raw_handle()), BELOW_NORMAL);
+        crate::trace::event("helper_gpu_priority", || serde_json::json!({"status": status}));
+    }
+}
