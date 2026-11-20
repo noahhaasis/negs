@@ -21,9 +21,9 @@ Window coordinates: Windows job clicks are client pixels at 100 % scaling with a
 1440×900 window; macOS steps are window points with a 1440-point-wide window.
 
 **Drawing sampler:** `NEGS_DRAW_SAMPLER=<theme>` (darkroom, contactSheet, lightTable,
-daylight, plain) makes `Negs.exe` open a window of every Direct2D primitive in that theme
+daylight, plain, plainDark) makes `Negs.exe` open a window of every Direct2D primitive in that theme
 instead of the app: the type ramp, the pencil, rings, stars, crosses, pick boxes and every
-token, with what the fonts cost in the title band. Plain follows `NEGS_THEME`. In a
+token, with what the fonts cost in the title band (`plainDark` for Plain dark). In a
 `pc_shot.sh` job, pass it under `"env"` with `"width": 1900, "height": 1150` (the PC runs
 at 125 %). The marks' geometry is tested on the Mac:
 `cargo test --manifest-path windows/marks/Cargo.toml --target-dir target/marks`.

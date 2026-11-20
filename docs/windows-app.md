@@ -460,7 +460,7 @@ its painting changed.
   they are missing. **Risk:** these ordinals are not a public API and a Windows
   update could change them; the lookup fails safe to light menus. The canvas surround
   is `#2b2b2b` in dark (the photograph's pixels and colour management don't change).
-  `NEGS_THEME=light|dark` overrides the system, for tests and screenshots.
+  `NEGS_THEME=light|dark` forces Plain or Plain dark, for tests and screenshots.
 - **Windows 11** (build 22000 and later): `DWMWA_WINDOW_CORNER_PREFERENCE` = round.
   Mica is not used: it only shows where nothing paints opaquely, and the band's text,
   glyphs and toolbars are GDI, which paints opaque. Making them alpha-correct is more
@@ -819,8 +819,11 @@ Notes on the table:
 
 The window paints from the theme's tokens (`ui/theme.rs`): View › Theme
 chooses among the six themes, stored as `appTheme` in the Windows settings
-(Darkroom when missing); only Plain follows Windows' light or dark.
-`NEGS_THEME` still forces one (a theme's name, or `light`/`dark` for Plain).
+(Darkroom when an old settings file lacks it). None follows Windows' light or
+dark: a new user starts on Plain, or Plain dark when Windows is dark, stored
+at the first launch and kept when Windows changes (2026-11-20).
+`NEGS_THEME` still forces one (a theme's name, or `light`/`dark` for Plain
+and Plain dark).
 The old GDI palette is derived from the tokens, so the inspector's controls
 take `panel` and `bg` until phase 3 repaints them.
 
