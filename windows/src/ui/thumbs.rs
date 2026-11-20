@@ -117,6 +117,8 @@ pub struct Thumbs {
     generation: Arc<AtomicU64>,
     /// Counts arrivals: a view painted at an older one paints again.
     pub revision: u64,
+    /// No new developing while the grid flies (`grid::start_flight`).
+    pub held: bool,
 }
 
 impl Default for Thumbs {
@@ -140,6 +142,7 @@ impl Default for Thumbs {
             busy: 0,
             generation: Arc::default(),
             revision: 0,
+            held: false,
         }
     }
 }
@@ -272,7 +275,7 @@ impl Thumbs {
         if edited_store::thumbnails().engine().is_none() {
             return edited_store::read_stamp(paths.clone(), |app: &mut App| app.thumbnails_known());
         }
-        if !model.render_idle() {
+        if !model.render_idle() || self.held {
             return;
         }
         let low_power = low_power();

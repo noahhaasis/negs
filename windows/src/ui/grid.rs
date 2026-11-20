@@ -79,6 +79,7 @@ pub struct Grid {
     bar_hover: bool,
     /// Dragging the knob: where in it the pointer took it.
     bar_drag: Option<f64>,
+    /// The flight's region as last set, so a still mask isn't set again.
     last_mask: Option<(f64, f64, f64, f64)>,
 }
 
@@ -261,6 +262,8 @@ pub fn open(app: &mut App) {
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
     // The editor closed: its film side won't be used soon (ticket 41).
     app.model.release_film_cache(crate::film_cache_release::Reason::EditorClosed);
+    // Not before the flight lands (`start_flight`).
+    app.thumbs.held = true;
     let grid = app.grid.as_mut().unwrap();
     grid.shown = true;
     grid.cells.clear();
@@ -314,6 +317,9 @@ pub fn close_for_compare(app: &mut App) {
 }
 
 fn start_flight(app: &mut App, opening: bool) {
+    // The thumbnails' developing waits for the flight: it shares the GPU,
+    // and a present waiting behind it drops two to seven frames.
+    app.thumbs.held = true;
     let reduce = !unsafe {
         let mut on = BOOL(1);
         let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut on as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
@@ -387,6 +393,10 @@ fn finish_flight(app: &mut App, opening: bool) {
         // Hidden first, so the whole sheet never shows for a frame.
         set_mask(grid, None);
     }
+    app.thumbs.held = false;
+    if opening {
+        request(app);
+    }
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
 }
 
@@ -409,9 +419,6 @@ fn tick(app: &mut App) {
     let along = if opening { elapsed } else { length - elapsed };
     let mask = rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), along.min(rules::FLIGHT_MS));
     let started = Instant::now();
-    // EXPERIMENT: hold the mask still at half way.
-    let hold = std::env::var_os("NEGS_FLIGHT_HOLD").is_some();
-    let mask = if hold { rules::mask_at(&pixels(&grid.band), &pixels(&grid.rect), 60.0) } else { mask };
     let prior = grid.last_mask;
     grid.last_mask = Some((mask.x, mask.y, mask.w, mask.h));
     if prior != grid.last_mask {
