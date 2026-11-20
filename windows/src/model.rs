@@ -635,6 +635,9 @@ pub struct Model {
     /// The decoded original, with the `original_key` it was decoded for.
     original_cache: Option<(Value, Picture)>,
     original_loading: bool,
+    /// The last decode of the original failed: Compare's side stops saying
+    /// Loading original.
+    original_failed: bool,
     histogram_request: u64,
     tone_graph_shown: bool,
     /// A curve is being computed; `tone_curve_stale` asks again when it arrives.
@@ -824,6 +827,7 @@ impl Model {
             catalog_arrived: false,
             original_cache: None,
             original_loading: false,
+            original_failed: false,
             histogram_request: 0,
             tone_graph_shown: false,
             tone_curve_pending: false,
@@ -2214,6 +2218,7 @@ impl Model {
         self.original = None;
         self.original_cache = None;
         self.original_loading = false;
+        self.original_failed = false;
         self.holding_original = false;
         self.cancel_brightness_match();
         self.drop_held("open");
@@ -2493,6 +2498,7 @@ impl Model {
         let generation = self.source_generation;
         let key = self.original_key();
         self.original_loading = true;
+        self.original_failed = false;
         let name = file_name(&source);
         let finish = move |app: &mut App, picture: Result<Picture>| {
             let model = &mut app.model;
@@ -2510,6 +2516,8 @@ impl Model {
                     }
                 }
                 Err(_) => {
+                    model.original_failed = true;
+                    model.mark(dirty::COMPARE);
                     if model.holding_original {
                         model.holding_original = false;
                         model.status = format!("The original of {name} couldn’t be shown");
@@ -3316,6 +3324,11 @@ impl Model {
         }
     }
 
+    /// "Loading original", or "Loading camera JPEG" (`DevelopTagTitle`).
+    pub fn loading_original_title(&self) -> &'static str {
+        if self.shows_camera_jpeg() { "Loading camera JPEG" } else { "Loading original" }
+    }
+
     /// The tag at the top of the canvas (`DevelopTagTitle`): Developing,
     /// Loading original while a held original is still being decoded, or
     /// Updating. A held original once in shows no tag, as on the Mac: the
@@ -3329,7 +3342,7 @@ impl Model {
             return Some("Developing");
         }
         if self.holding_original && self.original.is_none() {
-            return Some(if self.shows_camera_jpeg() { "Loading camera JPEG" } else { "Loading original" });
+            return Some(self.loading_original_title());
         }
         self.shows_activity.then_some("Updating")
     }

@@ -2312,8 +2312,9 @@ lifecycle_test! {
     /// Original ⌄'s Split line and Side by side: the original's side shows
     /// once decoded, also after the decode is on the GPU (whose upload
     /// frees other pictures' pixels; the PC's split line stayed grey), and
-    /// it's made once for each crop, not at each refresh. Holding Original
-    /// says Loading original until it's in, then no tag, as on the Mac.
+    /// it's made once for each crop, not at each refresh; on a split line
+    /// it's left of the line. Holding Original says Loading original until
+    /// it's in, then no tag, as on the Mac.
     fn compare_with_the_original_shows_it_and_holding_it_ends_the_tag() {
         use crate::compare::{Layout, Side};
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
@@ -2328,11 +2329,17 @@ lifecycle_test! {
         h.open(&a);
         h.idle();
 
+        let item = h.model().library_item().unwrap();
         for layout in [Layout::Slider, Layout::SideBySide] {
             h.edit(|m| m.compare_with_original(layout));
+            let c = h.model().comparison().cloned().expect("comparing");
+            // On a split line the original is left of the line, as on the Mac.
+            let original = if layout == Layout::Slider { c.first.clone() } else { c.second.clone() };
+            assert!(matches!(original, Side::Original(_)), "{layout:?}");
+            assert_eq!(c.edited(), &item);
+            assert!(h.model().compare_summary().ends_with(" and Original"), "{}", h.model().compare_summary());
+            assert_eq!(h.model().compared_original_loading(), Some("Loading original"), "until its side shows it");
             h.idle();
-            let original = h.model().comparison().map(|c| c.second.clone()).expect("comparing");
-            assert!(matches!(original, Side::Original(_)));
             // What the canvas's upload leaves of it.
             h.model().original_cache.as_ref().expect("decoded").1.as_if_uploaded();
             assert!(h.edit(|m| m.compared_side(&original)).is_none(), "made off the UI thread");
