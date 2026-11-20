@@ -195,13 +195,17 @@ impl Model {
         self.begin_compare(Comparison::new(Side::Photo(first.clone()), Side::Photo(second), edited == first, origin), edited);
     }
 
-    /// The open photograph against its original: developed first.
+    /// The open photograph against its original: developed first, side by
+    /// side; on a split line the original is left of the line, as on the
+    /// Mac's (`startSplit`).
     pub fn compare_with_original(&mut self, layout: Layout) {
         let Some(item) = self.library_item() else { return };
         if !self.can_compare() || self.comparison().is_some() {
             return;
         }
-        let mut comparison = Comparison::new(Side::Photo(item.clone()), Side::Original(item.clone()), true, Origin::Photo);
+        let (photo, original) = (Side::Photo(item.clone()), Side::Original(item.clone()));
+        let mut comparison =
+            if layout == Layout::Slider { Comparison::new(original, photo, false, Origin::Photo) } else { Comparison::new(photo, original, true, Origin::Photo) };
         comparison.layout = layout;
         self.begin_compare(comparison, item);
     }
@@ -736,7 +740,9 @@ impl Model {
             Side::Original(_) => self.original_word().to_string(),
             Side::Photo(item) => self.frame_number(item),
         };
-        format!("Comparing {} and {}", name(&c.first), name(&c.second))
+        // The photograph first, wherever its original is.
+        let (a, b) = if c.first.is_original() { (&c.second, &c.first) } else { (&c.first, &c.second) };
+        format!("Comparing {} and {}", name(a), name(b))
     }
 }
 
