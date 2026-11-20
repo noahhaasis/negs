@@ -72,6 +72,13 @@ if [[ "${NEGS_PREBUILT_RUST:-}" == 1 ]]; then
 else
     cargo build --locked --release -p spektrafilm-native ${rust_targets[@]+"${rust_targets[@]}"} --target-dir "$BUILD_TARGET_DIR"
 fi
+# The shared app core (core/, Odin) into target/negs-core, where
+# macos/Package.swift links it: both architectures, or the host's for --dev.
+core_args=(--universal)
+if [[ $DEV == 1 ]]; then
+    core_args=()
+fi
+"$PYTHON" core/build.py lib ${core_args[@]+"${core_args[@]}"}
 swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c "$SWIFT_CONFIG" --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"}
 swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c "$SWIFT_CONFIG" --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"} --show-bin-path)"
 if [[ "${NEGS_PREBUILT_RUST:-}" != 1 ]]; then

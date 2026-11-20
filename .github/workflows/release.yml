@@ -89,6 +89,7 @@ jobs:
               - "windows/**"
             macos:
               - *shared
+              - "core/**"
               - "macos/**"
               - "scripts/**"
 
@@ -287,6 +288,10 @@ jobs:
           github-token: ${{ needs.changes.outputs.reuse != '' && github.token || '' }}
       - name: Restore executable bits lost in artifact upload
         run: chmod +x target/*-apple-darwin/release/spektrafilm*
+      - name: Install the shared core's pinned Odin
+        run: python core/install_odin.py
+      - name: Test the shared core
+        run: python core/build.py test
       - name: Package and verify app, update ZIP and installer
         env:
           BUILD_TARGET_DIR: target
