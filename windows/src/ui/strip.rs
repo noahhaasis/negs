@@ -417,6 +417,34 @@ fn paint(app: &mut App, hwnd: HWND) {
 
 // MARK: Input
 
+/// ← and → in the photograph view open the previous and next photograph
+/// wherever the keys are, not only once the strip has the focus
+/// (`EditorWindowController.arrowsToStep`): with no focus, or on the
+/// window, the strip or the canvas. The inspector's controls, the
+/// choosers and text keep their arrows (the tray, the grid and Compare
+/// take theirs first), and the focused canvas pans with them while the
+/// photograph is wider than the view (Windows only: the Mac's doesn't pan).
+pub fn arrows_to_step(app: &mut App, msg: &MSG) -> bool {
+    if msg.message != WM_KEYDOWN || super::modifier_down() {
+        return false;
+    }
+    let step = match VIRTUAL_KEY(msg.wParam.0 as u16) {
+        VK_LEFT => -1,
+        VK_RIGHT => 1,
+        _ => return false,
+    };
+    if app.model.source.is_none() || app.model.cropping() || super::grid::shown(app) || app.model.comparison().is_some() {
+        return false;
+    }
+    let focus = unsafe { GetFocus() };
+    let free = focus.0.is_null() || focus == app.main || focus == app.strip || (focus == app.canvas && !super::canvas::pans_sideways());
+    if !free {
+        return false;
+    }
+    open_neighbour(app, step);
+    true
+}
+
 fn open_neighbour(app: &mut App, step: isize) {
     if app.model.cropping() {
         return;
