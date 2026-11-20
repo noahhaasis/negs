@@ -40,6 +40,10 @@ const FACT: TextStyle = TextStyle::serif(15.0, 400).italic();
 const FILM: TextStyle = TextStyle::serif(24.0, 600).tracking(-0.01);
 const KIND: TextStyle = TextStyle::serif(14.0, 400).italic();
 const PAPER: TextStyle = TextStyle::serif(17.5, 400);
+/// Stacked, the film and paper in the caption (`CompareCaption.stocks`).
+const STACKED_FILM: TextStyle = TextStyle::serif(16.0, 600).tracking(-0.015);
+const STACKED_KIND: TextStyle = TextStyle::serif(13.0, 400).italic();
+const STACKED_PAPER: TextStyle = TextStyle::serif(15.0, 400);
 /// The number's ring, in DIPs.
 const RING: f32 = 26.0;
 
@@ -398,6 +402,48 @@ fn caption(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, ot
     }
 }
 
+/// Stacked, on the caption's right ending at `edge`: "Kodak Gold 200 on
+/// Portra Endura", the film semibold and the paper plain, each marked when
+/// it differs from the other photograph's (`CompareCaption.stocks`); the
+/// original keeps its one italic word. Never left of `start`. Returns its width.
+#[allow(clippy::too_many_arguments)]
+fn stocks(p: &mut Painter, t: &theme::Tokens, ink: &SheetInk, words: &Words, other: &Words, edge: f32, middle: f32, start: f32) -> f32 {
+    const GAP: f32 = 6.0;
+    if words.number.is_empty() {
+        let m = p.measure(&words.film, &FACT, 0.0);
+        p.text(&words.film, &FACT, (edge - m.width).max(start), middle - m.height / 2.0, Ink::hex(ink.dim));
+        return m.width;
+    }
+    // Marked only against another photograph, not its original.
+    let compared = !other.number.is_empty();
+    let film_marked = compared && words.film != other.film;
+    let paper_marked = compared && words.paper.is_some() && other.paper.is_some() && words.paper != other.paper;
+    // The open photograph's names in the print label's ink; the other's
+    // lighter, unless they differ.
+    let name_ink = |marked: bool| Ink::hex(if words.opens.is_some() || marked { ink.paper } else { ink.label });
+    let kind = if words.paper.is_some() { "on" } else { "scanned" };
+    let fm = p.measure(&words.film, &STACKED_FILM, 0.0);
+    let km = p.measure(kind, &STACKED_KIND, 0.0);
+    let pm = words.paper.as_ref().map(|paper| p.measure(paper, &STACKED_PAPER, 0.0));
+    let width = fm.width + GAP + km.width + pm.as_ref().map_or(0.0, |m| GAP + m.width);
+    let baseline = middle - fm.height / 2.0 + fm.baseline;
+    let mut x = (edge - width).max(start);
+    p.text(&words.film, &STACKED_FILM, x, baseline - fm.baseline, name_ink(film_marked));
+    if film_marked {
+        p.underline(RectF::new(x, baseline + 2.0, fm.width, 5.0), t, false);
+    }
+    x += fm.width + GAP;
+    p.text(kind, &STACKED_KIND, x, baseline - km.baseline, Ink::hex(ink.dim));
+    x += km.width + GAP;
+    if let (Some(paper), Some(pm)) = (&words.paper, pm) {
+        p.text(paper, &STACKED_PAPER, x, baseline - pm.baseline, name_ink(paper_marked));
+        if paper_marked {
+            p.underline(RectF::new(x, baseline + 2.0, pm.width, 5.0), t, false);
+        }
+    }
+    width
+}
+
 /// Under a photograph: its film, and on the next line (or after it, `inline`,
 /// when it ends before `limit`) "printed on" its paper. The open
 /// photograph's names keep their `⌄` and the paper its lock, as the print
@@ -636,20 +682,14 @@ fn paint(hwnd: HWND, dc: HDC) {
                     p.line(b, c2, 1.4, white);
                 }
             } else if column {
-                // Stacked: one line over each, the film on its right.
+                // Stacked: one line over each, the film and paper on its right.
                 for i in 0..2 {
                     let f = frames[i];
                     let middle = f.y - rules::STACKED_CAPTION as f32 / 2.0;
-                    let film = match &words[i].paper {
-                        Some(paper) => format!("{} on {}", words[i].film, paper),
-                        None => words[i].film.clone(),
-                    };
-                    let m = p.measure(&film, &FACT, 0.0);
                     // Never over the ring, even when the names fill the frame's width.
                     let ring = if words[i].number.is_empty() { 0.0 } else { RING + 12.0 };
-                    let x = (f.x + f.w - m.width).max(f.x + ring);
-                    p.text(&film, &FACT, x, middle - m.height / 2.0, Ink::hex(ink.paper));
-                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, middle, false, edited(i), true, f.w - m.width - 24.0);
+                    let width = stocks(p, &t, &ink, &words[i], &words[1 - i], f.x + f.w, middle, f.x + ring);
+                    caption(p, &t, &ink, &words[i], &words[1 - i], f.x, middle, false, edited(i), true, f.w - width - 24.0);
                 }
             } else {
                 for i in 0..2 {

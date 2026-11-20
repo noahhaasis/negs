@@ -263,6 +263,12 @@ pub fn open(app: &mut App) {
     }
     // The grid shows the open photograph as edited.
     app.model.file_open_thumbnail();
+    // The grid keeps its current photograph in view, filtered out or not.
+    if app.model.shelf.selection.current().is_none()
+        && let Some(open) = app.model.library_item()
+    {
+        app.model.shelf.selection.select(&open);
+    }
     app.model.shelf.in_grid = true;
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
     // The editor closed: its film side won't be used soon (ticket 41).

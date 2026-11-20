@@ -169,8 +169,11 @@ fn paint(hwnd: HWND, dc: HDC) {
         let view = v.borrow();
         let alpha = if view.enabled { 1.0 } else { theme::DISABLED_OPACITY };
         let chosen = view.chosen_index();
+        // Measured before drawing: inside `d2d` the device is taken, and
+        // `measure_text` would give every name no width, crowding them.
+        let centres = centres(&view, width, t.plain);
         c.d2d(s, t.plain, |p| {
-            for (i, (cx, w)) in centres(&view, width, t.plain).into_iter().enumerate() {
+            for (i, &(cx, w)) in centres.iter().enumerate() {
                 let selected = i == chosen;
                 let lit = selected || view.hovered == Some(i);
                 let (cy, r) = (8.0 + DISC / 2.0, DISC / 2.0);

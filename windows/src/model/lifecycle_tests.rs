@@ -2094,6 +2094,63 @@ lifecycle_test! {
 }
 
 lifecycle_test! {
+    /// The Mac's `adoptEdits` and `surveyNegativeIfNeeded`: a negative
+    /// opened again keeps the base saved with it, one set by hand too, never
+    /// found again over it; once its preview is in, Prep says where the base
+    /// came from, not "Reading the negative as …".
+    fn a_negative_opened_again_keeps_its_saved_base() {
+        fn nudged(value: &serde_json::Value) -> serde_json::Value {
+            let mut value = value.clone();
+            fn first(v: &mut serde_json::Value) -> bool {
+                match v {
+                    serde_json::Value::Number(n) => {
+                        *v = serde_json::json!(n.as_f64().unwrap_or(0.0) * 0.9 + 0.01);
+                        true
+                    }
+                    serde_json::Value::Array(items) => items.iter_mut().any(first),
+                    serde_json::Value::Object(map) => map.values_mut().any(first),
+                    _ => false,
+                }
+            }
+            assert!(first(&mut value), "a number in {value}");
+            value
+        }
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-reopen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let extension = h.photo.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+        let (negative, other) = (dir.join(format!("a.{extension}")), dir.join(format!("b.{extension}")));
+        std::fs::copy(&h.photo, &negative).unwrap();
+        std::fs::copy(&h.photo, &other).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&negative);
+        h.idle();
+        h.edit(|m| m.choose_negative());
+        h.idle();
+        let base = nudged(h.model().value("film_render.base"));
+        h.edit(|m| m.set("film_render.base", base.clone()));
+        h.idle();
+        assert_eq!(h.model().negative_sentence(), "Film base as picked or set in Lab.");
+        let filtration = ["enlarger.m_filter_shift", "enlarger.y_filter_shift"].map(|p| h.model().value(p).clone());
+        h.fire_timers(std::time::Duration::from_secs(3));
+
+        h.open(&other);
+        h.idle();
+        h.open(&negative);
+        h.idle();
+        let m = h.model();
+        assert!(m.is_negative());
+        assert!(crate::negative::same_base(m.value("film_render.base"), &base), "the saved base, not one found again");
+        assert_eq!(["enlarger.m_filter_shift", "enlarger.y_filter_shift"].map(|p| m.value(p).clone()), filtration);
+        assert_eq!(m.negative_sentence(), "Film base as picked or set in Lab.");
+        assert!(m.undo_title().is_none(), "opening is no edit");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
     /// Flip (`io.flip`) starts cropping like a turn: Cancel takes it back,
     /// Done keeps it with the crop as one undo step. It never develops again
     /// (the canvas mirrors the preview), and Save Preview mirrors the file
@@ -2223,6 +2280,67 @@ lifecycle_test! {
         h.idle();
         assert!(h.command_names().is_empty() && !engine.helper_running(), "no helper started for a release");
         assert_eq!(engine.helper_epoch(), epoch + 1);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+// MARK: Filter
+
+lifecycle_test! {
+    /// The Mac's `filterChanged`: in the grid, a filter that leaves out the
+    /// current photograph takes it away too, and the next one shown becomes
+    /// current ("Showing 2 of 4", not 3). The edit view keeps its open one.
+    /// Rating the current one out moves on the same way.
+    fn a_filter_in_the_grid_moves_off_the_current_photograph() {
+        use negs_library::{Filter, RatingFilter};
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-filter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(120, 80, image::imageops::FilterType::Triangle);
+        let photos: Vec<std::path::PathBuf> = ["a", "b", "c", "d"].iter().map(|n| dir.join(format!("{n}.png"))).collect();
+        for photo in &photos {
+            small.save(photo).unwrap();
+        }
+        // c and d rated, a and b not.
+        for photo in &photos[2..] {
+            let sidecar = r#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "v1", "rating": 3, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {}}}]}"#;
+            std::fs::write(negs_library::sidecar::sidecar_path(photo), sidecar).unwrap();
+        }
+        h.model().shelf.enabled = true;
+        h.open(&photos[0]);
+        h.idle();
+        let item = |i: usize| negs_library::Item::photo(&photos[i]);
+        let rated = Filter { rating: RatingFilter::AtLeast(1), ..Filter::default() };
+
+        // The edit view: the open photograph stays in the strip.
+        h.edit(|m| m.set_library_filter(rated.clone()));
+        assert_eq!(h.model().shown_items(), vec![item(0), item(2), item(3)]);
+        h.edit(|m| m.set_library_filter(Filter::default()));
+
+        // The grid, on b: it goes, and c (the next shown) becomes current.
+        h.edit(|m| {
+            m.shelf.in_grid = true;
+            m.shelf.selection.select(&item(1));
+            m.set_library_filter(rated.clone());
+        });
+        assert_eq!(h.model().shelf.selection.current(), Some(&item(2)));
+        assert_eq!(h.model().shown_items(), vec![item(2), item(3)]);
+
+        // Unrated only: c goes, and a, the open one, comes back as current
+        // only if it's the next shown: here b is.
+        h.edit(|m| m.set_library_filter(Filter { rating: RatingFilter::Unrated, ..Filter::default() }));
+        assert_eq!(h.model().shown_items(), vec![item(0), item(1)]);
+        assert_eq!(h.model().shelf.selection.current(), Some(&item(1)), "the one after c, or before it at the end");
+
+        // Rating the current one out of the filter moves on in the grid,
+        // without opening anything.
+        h.edit(|m| m.library_key(super::library_map::LibraryKey::Rate(2)));
+        h.idle();
+        assert_eq!(h.model().shelf.selection.current(), Some(&item(0)));
+        assert_eq!(h.model().shown_items(), vec![item(0)]);
+        assert_eq!(h.model().library_item(), Some(item(0)));
+        let _ = std::fs::remove_dir_all(&dir);
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
