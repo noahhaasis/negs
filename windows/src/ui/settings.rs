@@ -848,14 +848,7 @@ fn command(app: &mut App, id: u16, code: u32) {
                     }
                 }
                 Choice::Fotufilm => app.model.set_fotufilm_films(FotufilmFilms::ALL[index as usize]),
-                Choice::Sheet => {
-                    let sheet = ViewerSheet::ALL[index as usize];
-                    super::sheet::set_chosen(sheet);
-                    app.model.prefs.viewer_sheet = sheet.key().into();
-                    app.model.prefs.save();
-                    super::canvas::sheet_changed(app.canvas);
-                    super::empty::sheet_changed(app);
-                }
+                Choice::Sheet => app.choose_sheet(ViewerSheet::ALL[index as usize]),
             }
         }
         Item::CheckUpdates if code == BN_CLICKED && part == 1 => crate::updates::check(true),

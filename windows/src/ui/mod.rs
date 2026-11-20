@@ -153,6 +153,8 @@ pub mod id {
     pub const IMAGE_ONLY: u16 = 310;
     /// View › Theme, in `ThemeName::ALL`'s order.
     pub const THEME: u16 = 320; // ..325
+    /// View › Viewer Sheet, in `ViewerSheet::ALL`'s order.
+    pub const SHEET: u16 = 330; // ..337
     pub const ROTATE: u16 = 400;
     pub const CROP: u16 = 401;
     pub const CROP_DONE: u16 = 402;
@@ -1017,6 +1019,9 @@ impl App {
             c if (id::THEME..id::THEME + theme::ThemeName::ALL.len() as u16).contains(&c) => {
                 self.choose_theme(theme::ThemeName::ALL[(c - id::THEME) as usize]);
             }
+            c if (id::SHEET..id::SHEET + sheet::ViewerSheet::ALL.len() as u16).contains(&c) => {
+                self.choose_sheet(sheet::ViewerSheet::ALL[(c - id::SHEET) as usize]);
+            }
             _ => {}
         }
     }
@@ -1106,6 +1111,11 @@ impl App {
         unsafe {
             if let Some(i) = theme::ThemeName::ALL.iter().position(|&t| t == shown) {
                 let _ = CheckMenuRadioItem(menu, id::THEME as u32, id::THEME as u32 + count - 1, id::THEME as u32 + i as u32, MF_BYCOMMAND.0);
+            }
+            // View › Viewer Sheet, likewise.
+            let count = sheet::ViewerSheet::ALL.len() as u32;
+            if let Some(i) = sheet::ViewerSheet::ALL.iter().position(|&s| s == sheet::chosen()) {
+                let _ = CheckMenuRadioItem(menu, id::SHEET as u32, id::SHEET as u32 + count - 1, id::SHEET as u32 + i as u32, MF_BYCOMMAND.0);
             }
         }
         library::update_menu(self, menu);
@@ -1388,6 +1398,13 @@ fn build_menu() -> (HMENU, HMENU) {
         }
         let w = wide("T&heme");
         let _ = AppendMenuW(view, MF_POPUP, themes.0 as usize, pcwstr(&w));
+        // The same sheets as Settings › Look › Viewer.
+        let sheets = CreatePopupMenu().unwrap();
+        for (i, s) in sheet::ViewerSheet::ALL.into_iter().enumerate() {
+            add(sheets, id::SHEET + i as u16, s.title());
+        }
+        let w = wide("&Viewer Sheet");
+        let _ = AppendMenuW(view, MF_POPUP, sheets.0 as usize, pcwstr(&w));
         let help = popup("&Help");
         add(help, id::UPDATES, "Check for &Updates…");
         separator(help);
@@ -2101,6 +2118,16 @@ impl App {
         self.model.prefs.app_theme = name.key().to_string();
         self.model.prefs.save();
         self.retheme();
+    }
+
+    /// View › Viewer Sheet and Settings › Look › Viewer: shows `sheet`
+    /// behind the photograph and remembers it.
+    fn choose_sheet(&mut self, sheet: sheet::ViewerSheet) {
+        sheet::set_chosen(sheet);
+        self.model.prefs.viewer_sheet = sheet.key().into();
+        self.model.prefs.save();
+        canvas::sheet_changed(self.canvas);
+        empty::sheet_changed(self);
     }
 
     fn status_menu(&mut self) {

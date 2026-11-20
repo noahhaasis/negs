@@ -119,6 +119,14 @@ import SwiftUI
             item.target = self
             item.representedObject = appTheme.rawValue
         }
+        // And the sheets of Settings › Look › Viewer.
+        let sheet = NSMenu(title: "Viewer Sheet")
+        view.addItem(withTitle: "Viewer Sheet", action: nil, keyEquivalent: "").submenu = sheet
+        for viewerSheet in ViewerSheet.allCases {
+            let item = sheet.addItem(withTitle: viewerSheet.title, action: #selector(chooseSheet(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = viewerSheet.rawValue
+        }
         view.addItem(.separator())
 
         // Plain keys, as in Lightroom and Capture One. Disabled while text is
@@ -248,6 +256,12 @@ import SwiftUI
     @objc private func chooseTheme(_ item: NSMenuItem) {
         if let theme = (item.representedObject as? String).flatMap(AppTheme.init) { ThemeStore.shared.choose(theme) }
     }
+    /// Written where Settings' `@AppStorage(ViewerSheet.key)` reads it, so the views follow.
+    @objc private func chooseSheet(_ item: NSMenuItem) {
+        if let sheet = (item.representedObject as? String).flatMap(ViewerSheet.init) {
+            UserDefaults.standard.set(sheet.rawValue, forKey: ViewerSheet.key)
+        }
+    }
     @objc private func clearFilter() { model.library.filter = LibraryFilter() }
     @objc private func editPhotograph() { model.editCurrent() }
     @objc private func copyEdits() { model.copyEdits() }
@@ -375,6 +389,10 @@ import SwiftUI
         case #selector(toggleAdvance): item.state = model.advanceAfterRating ? .on : .off; return true
         case #selector(chooseTheme(_:)):
             item.state = item.representedObject as? String == ThemeStore.shared.theme.rawValue ? .on : .off
+            return true
+        case #selector(chooseSheet(_:)):
+            let chosen = UserDefaults.standard.string(forKey: ViewerSheet.key).flatMap(ViewerSheet.init) ?? .theme
+            item.state = item.representedObject as? String == chosen.rawValue ? .on : .off
             return true
         case #selector(clearFilter): return model.library.filter.active
         default: return true
