@@ -73,7 +73,7 @@ struct Opens {
 
 struct View {
     hwnd: HWND,
-    /// Each side's picture, by the pixels it was made from.
+    /// Each side's picture, by the pixels it was made from (`Shown::id`).
     bitmaps: [Option<(usize, Arc<Bitmap>)>; 2],
     /// The pixels each side shows next, and those being made into a picture.
     wanted: [Option<usize>; 2],
@@ -265,6 +265,8 @@ pub fn sync(app: &mut App) {
             let mut v = v.borrow_mut();
             v.comparison = None;
             v.bitmaps = [None, None];
+            // A picture made for the comparison left is never shown in the next.
+            v.wanted = [None; 2];
         });
         return;
     };
@@ -279,7 +281,7 @@ pub fn sync(app: &mut App) {
     for (i, side) in [&comparison.first, &comparison.second].into_iter().enumerate() {
         let shown = app.model.compared_side(side);
         if let Some(shown) = &shown {
-            let key = Arc::as_ptr(&shown.rgba) as usize;
+            let key = shown.id as usize;
             wanted[i] = Some(key);
             if bitmaps[i].as_ref().is_none_or(|(k, _)| *k != key) && making[i] != Some(key) {
                 make_bitmap(i, key, shown.clone(), color.clone());

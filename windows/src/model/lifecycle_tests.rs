@@ -2238,6 +2238,76 @@ lifecycle_test! {
     }
 }
 
+lifecycle_test! {
+    /// Noah's stale pair: A and B compared, then C and D, and one side
+    /// showed A until C developed. Each side shows only its own photograph,
+    /// from the first moment (its stand-in) to its develop, and the edited
+    /// one isn't blank meanwhile, as `openPicture` on the Mac.
+    fn a_new_comparison_shows_only_its_own_photographs() {
+        use crate::compare::{Origin, Side};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-pair-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A and B landscape, C and D portrait: each picture tells which pair it's of.
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let tall = small.rotate90();
+        let paths: Vec<_> = ["a", "b", "c", "d"].iter().map(|n| dir.join(format!("{n}.png"))).collect();
+        small.save(&paths[0]).unwrap();
+        small.fliph().save(&paths[1]).unwrap();
+        tall.save(&paths[2]).unwrap();
+        tall.fliph().save(&paths[3]).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&paths[0]);
+        let items = h.model().shown_items();
+        assert_eq!(items.len(), 4);
+        h.edit(|m| m.compare(items[0].clone(), items[1].clone(), Origin::Photo));
+        h.idle();
+        // The view asks for each side's picture as it syncs; the open one's is made then.
+        let first = Side::Photo(items[0].clone());
+        h.edit(|m| m.compared_side(&first));
+        h.idle();
+        let a = h.model().compared_side(&first).expect("A developed");
+        assert_eq!((a.width, a.height), (480, 320));
+        h.edit(|m| m.leave_compare());
+        // Whatever each side shows of the new pair is portrait: C or D.
+        let check = |m: &mut super::Model, when: &str| {
+            for side in [Side::Photo(items[2].clone()), Side::Photo(items[3].clone())] {
+                if let Some(shown) = m.compared_side(&side) {
+                    assert!(shown.height > shown.width, "{when}: a picture of the first pair ({} × {}) shown for {:?}", shown.width, shown.height, side.item().photo);
+                }
+            }
+        };
+        h.edit(|m| m.compare(items[2].clone(), items[3].clone(), Origin::Photo));
+        check(h.model(), "at once");
+        let mut open_shown = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            if !h.step() {
+                if h.quiescent() {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "not idle");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                continue;
+            }
+            check(h.model(), "while developing");
+            open_shown |= h.model().compared_side(&Side::Photo(items[2].clone())).is_some();
+        }
+        h.edit(|m| m.compared_side(&Side::Photo(items[2].clone())));
+        h.idle();
+        check(h.model(), "developed");
+        assert!(open_shown, "the edited one showed nothing until developed");
+        let m = h.model();
+        let c = m.compared_side(&Side::Photo(items[2].clone())).expect("C developed");
+        let d = m.compared_side(&Side::Photo(items[3].clone())).expect("D developed");
+        assert_eq!(((c.width, c.height), (d.width, d.height)), ((320, 480), (320, 480)));
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 // MARK: The film side's release (ticket 41)
 
 lifecycle_test! {
