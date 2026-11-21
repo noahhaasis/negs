@@ -2,6 +2,7 @@
 // Copy/Paste/Reset Edits and Duplicate, each one undo step (library.rs).
 package library
 
+import "base:runtime"
 import "core:fmt"
 import "core:strings"
 
@@ -91,6 +92,19 @@ read_only_photo :: proc(photo: string) -> bool {
 // or removes it once nothing is left; why not (temporary).
 @(private)
 write :: proc(lib: ^Library, photo: string, patch: ^Patch) -> (string, bool) {
+	// Its own scratch memory: an action on many photographs doesn't hold
+	// every file's parse until it returns.
+	outer := context.temp_allocator
+	scratch: runtime.Arena
+	_ = runtime.arena_init(&scratch, 16 * 1024, lib.allocator)
+	defer runtime.arena_destroy(&scratch)
+	context.temp_allocator = runtime.arena_allocator(&scratch)
+	reason, ok := write_in(lib, photo, patch)
+	return strings.clone(reason, outer), ok
+}
+
+@(private = "file")
+write_in :: proc(lib: ^Library, photo: string, patch: ^Patch) -> (string, bool) {
 	ta := context.temp_allocator
 	raw, problem := sidecar_read_raw(photo)
 	if p, bad := problem.?; bad {

@@ -91,11 +91,6 @@ library_refresh :: proc(lib: ^Library, interacting: bool) -> ([]string, Outcome)
 	for f, i in lib.files {
 		files[i] = photo_file_clone(f, ta)
 	}
-	// Each sidecar is read with its own scratch memory, so a listing of a
-	// large folder doesn't hold every parsed file at once.
-	scratch: runtime.Arena
-	_ = runtime.arena_init(&scratch, 32 * 1024, lib.allocator)
-	defer runtime.arena_destroy(&scratch)
 	for file in files {
 		now := Stamp{}
 		if s, ok := found.sidecars[file.name]; ok {
@@ -106,10 +101,7 @@ library_refresh :: proc(lib: ^Library, interacting: bool) -> ([]string, Outcome)
 			if has_known {
 				append(&changed, file.path)
 			}
-			mark := runtime.arena_temp_begin(&scratch)
-			context.temp_allocator = runtime.arena_allocator(&scratch)
 			reload(lib, file.path)
-			runtime.arena_temp_end(mark)
 		}
 	}
 	if lib.has_open {
@@ -130,6 +122,12 @@ reload :: proc(lib: ^Library, photo_in: string) {
 	if !lib.sidecars {
 		return
 	}
+	// Its own scratch memory: a listing of a large folder, or an action on
+	// many photographs, doesn't hold every parsed file at once.
+	scratch: runtime.Arena
+	_ = runtime.arena_init(&scratch, 16 * 1024, lib.allocator)
+	defer runtime.arena_destroy(&scratch)
+	context.temp_allocator = runtime.arena_allocator(&scratch)
 	ta := context.temp_allocator
 	a := lib.allocator
 	photo := strings.clone(photo_in, ta)
