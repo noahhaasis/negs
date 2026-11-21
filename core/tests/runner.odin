@@ -11,7 +11,7 @@ import core "../src/abi"
 
 @(test)
 abi_version_matches_the_header :: proc(t: ^testing.T) {
-	testing.expect_value(t, core.abi_version(), 2)
+	testing.expect_value(t, core.abi_version(), 3)
 	testing.expect_value(t, string(core.version()), "0.1.0 (odin dev-2026-11a)")
 }
 

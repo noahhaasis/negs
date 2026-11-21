@@ -6,10 +6,11 @@
 use std::os::raw::c_char;
 
 pub mod marks;
+pub mod library;
 pub mod theme;
 
 /// NEGS_CORE_ABI_VERSION of the header these declarations follow.
-pub const NEGS_CORE_ABI_VERSION: u32 = 2;
+pub const NEGS_CORE_ABI_VERSION: u32 = 3;
 
 #[repr(C)]
 #[derive(Debug)]
