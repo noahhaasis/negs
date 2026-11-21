@@ -124,10 +124,17 @@ fs_read :: proc(path: string, limit: int, allocator := context.temp_allocator) -
 		return nil, last_error()
 	}
 	defer posix.close(fd)
-	out := make([dynamic]u8, 0, 4096, allocator)
+	// Room for the whole file and the read that finds its end, so a
+	// sidecar is read into one block (it often lives as long as the call).
+	size := 4096
+	st: posix.stat_t
+	if posix.fstat(fd, &st) == .OK && st.st_size >= 0 {
+		size = int(st.st_size) + 1
+	}
+	out := make([dynamic]u8, 0, max(min(size, limit), 1), allocator)
 	for len(out) < limit {
-		if cap(out) - len(out) < 4096 {
-			reserve(&out, cap(out) * 2)
+		if cap(out) == len(out) {
+			reserve(&out, max(cap(out) * 2, 4096))
 		}
 		room := min(cap(out) - len(out), limit - len(out))
 		start := len(out)
