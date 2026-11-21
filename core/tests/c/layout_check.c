@@ -61,6 +61,26 @@ int main(void) {
     SIZE(negs_theme_constants_t);
     FIELD(negs_theme_constants_t, highlighter_opacity);
     FIELD(negs_theme_constants_t, dimming_light);
+    SIZE(negs_bin_t);
+    FIELD(negs_bin_t, user);
+    FIELD(negs_bin_t, name);
+    FIELD(negs_bin_t, available);
+    FIELD(negs_bin_t, trash);
+    FIELD(negs_bin_t, put_back);
+    FIELD(negs_bin_t, remove);
+    FIELD(negs_bin_t, release);
+    SIZE(negs_library_config_t);
+    FIELD(negs_library_config_t, folder);
+    FIELD(negs_library_config_t, folder_len);
+    FIELD(negs_library_config_t, data);
+    FIELD(negs_library_config_t, data_len);
+    FIELD(negs_library_config_t, app);
+    FIELD(negs_library_config_t, app_len);
+    FIELD(negs_library_config_t, bin);
+    FIELD(negs_library_config_t, pairing);
+    FIELD(negs_library_config_t, sidecars);
+    FIELD(negs_library_config_t, has_id_seed);
+    FIELD(negs_library_config_t, id_seed);
 
     /* The smoke test: the version, and a block out and back. */
     if (negs_core_abi_version() != NEGS_CORE_ABI_VERSION) {

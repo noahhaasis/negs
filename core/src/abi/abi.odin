@@ -5,7 +5,7 @@ package negs_core
 import "base:runtime"
 import "core:mem"
 
-ABI_VERSION :: 2
+ABI_VERSION :: 3
 VERSION: cstring : "0.1.0 (odin dev-2026-11a)"
 
 // negs_buf_t: an owned block, freed with negs_buf_free.

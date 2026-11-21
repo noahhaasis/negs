@@ -144,6 +144,7 @@ def odin_tests(odin: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         start = time.perf_counter()
         run([odin, "test", str(CORE / "tests"), *flags, f"-out:{Path(tmp) / 'tests'}"])
+        run([odin, "test", str(CORE / "tests" / "library"), *flags, f"-out:{Path(tmp) / 'library'}"])
         log(f"unit tests passed in {time.perf_counter() - start:.2f} s (tracking allocator, leaks fail)")
         leak = subprocess.run(
             [odin, "test", str(CORE / "tests" / "leakcheck"), *flags, f"-out:{Path(tmp) / 'leakcheck'}"],
