@@ -1,0 +1,22 @@
+# negs-library's API on the shared Odin core: the Library (and the
+# Selection) run in core/src/library through the C ABI; plain data types and
+# pure helpers are crates/negs-library's own. A Cargo rename
+# (`negs-library = { package = "negs-core-library", ... }`) moves a front
+# end or a test suite onto the core unchanged.
+[package]
+name = "negs-core-library"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace]
+
+[features]
+# Count the core's allocations; a process that made a library checks at
+# exit that nothing the core allocated is left.
+track = ["negs-core-sys/track"]
+
+[dependencies]
+negs-core-sys = { path = "../sys" }
+oracle = { package = "negs-library", path = "../../../crates/negs-library" }
