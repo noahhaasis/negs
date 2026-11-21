@@ -1,0 +1,51 @@
+{
+ "paper": "kodak_2383",
+ "ramp": "EV -2..+6, 18.4% grey, refine.py --evaluate-only, 28bf883 runtime",
+ "shipped": {
+  "fujifilm_c200": {
+   "filters": [
+    0.0,
+    79.7190709467372,
+    97.3652252960495
+   ],
+   "mean_neutrality_error": 0.2881084359483533,
+   "mean_abs_level_error": 0.02671072035323791
+  },
+  "fujifilm_eterna_500": {
+   "filters": [
+    0.0,
+    48.28569082486855,
+    69.92811810131738
+   ],
+   "mean_neutrality_error": 0.10279690778370895,
+   "mean_abs_level_error": 0.012068126640157899
+  },
+  "fujifilm_eterna_vivid_500": {
+   "filters": [
+    0.0,
+    45.36987568074567,
+    69.80860013453233
+   ],
+   "mean_neutrality_error": 0.14297011303222268,
+   "mean_abs_level_error": 0.012026492046568606
+  },
+  "kodak_vision3_250d": {
+   "filters": [
+    0.0,
+    51.216637636193354,
+    52.02787540414326
+   ],
+   "mean_neutrality_error": 0.07017966696128239,
+   "mean_abs_level_error": 0.009284636289418165
+  },
+  "kodak_vision3_500t": {
+   "filters": [
+    0.0,
+    45.65080530193886,
+    54.71678308125606
+   ],
+   "mean_neutrality_error": 0.060477798858530135,
+   "mean_abs_level_error": 0.008302250639805026
+  }
+ }
+}

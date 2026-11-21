@@ -194,6 +194,23 @@
    ]
   },
   {
+   "stock": "fujifilm_64t_type_ii",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_acros_100_ii",
    "use": "still",
    "antihalation": "strong",
@@ -262,7 +279,92 @@
    ]
   },
   {
+   "stock": "fujifilm_eterna_250",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_250d",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_400",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_eterna_500",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_vivid_160",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_vivid_250d",
    "use": "cine",
    "antihalation": "strong",
    "is_film": true,
@@ -313,7 +415,41 @@
    ]
   },
   {
+   "stock": "fujifilm_pro_160c",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_pro_160ns",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_pro_160s",
    "use": "still",
    "antihalation": "weak",
    "is_film": true,
@@ -347,7 +483,58 @@
    ]
   },
   {
+   "stock": "fujifilm_pro_800z",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_provia_100f",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_provia_400f",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_provia_400x",
    "use": "still",
    "antihalation": "strong",
    "is_film": true,
@@ -398,6 +585,74 @@
    ]
   },
   {
+   "stock": "fujifilm_sensia_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_sensia_200",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_sensia_400",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_superia_1600",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_superia_200",
    "use": "still",
    "antihalation": "weak",
@@ -415,7 +670,41 @@
    ]
   },
   {
+   "stock": "fujifilm_true_definition_400",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_velvia_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_velvia_100f",
    "use": "still",
    "antihalation": "strong",
    "is_film": true,

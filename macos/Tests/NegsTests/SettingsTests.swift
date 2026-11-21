@@ -73,4 +73,18 @@ import XCTest
         // A catalog cached before these fields lists everything.
         XCTAssertTrue(FotufilmFilms.off.lists(stock("old", [:])))
     }
+
+    func testNegsBuiltFilmsAreHiddenUntilShown() {
+        let stock = { (id: String, provenance: [String: JSONValue]) in
+            Stock(.object(["id": .string(id), "name": .string(id), "paper": .bool(false), "positive": .bool(false), "bw": .bool(false),
+                           "target_print": .string("endura"), "development_times": .array([])].merging(provenance) { $1 }))
+        }
+        let portra = stock("portra", ["negs_built": .bool(false)])
+        let eterna = stock("eterna", ["negs_built": .bool(true)])
+        let listed = { (shown: Bool) in [portra, eterna].filter { NegsBuiltFilms.lists($0, shown: shown) }.map(\.id) }
+        XCTAssertEqual(listed(false), ["portra"])
+        XCTAssertEqual(listed(true), ["portra", "eterna"])
+        // A catalog cached before the field lists the film.
+        XCTAssertTrue(NegsBuiltFilms.lists(stock("old", [:]), shown: false))
+    }
 }

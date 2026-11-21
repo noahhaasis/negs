@@ -1,0 +1,1699 @@
+{
+  "about": "Per-stock build recipe for tools/film_profiles/build.py; see README.md. Keys mirror spektrafilm's private profile.yaml (profile_summary.csv @ 03832c8). Marks: V = public spektrafilm code, F = author's forum posts, N = Negs choice (docs/adding-film-stocks.md section B).",
+  "stocks": {
+    "fujifilm_c200": {
+      "calibration_only": true,
+      "source": "public raw CSVs, spektrafilm 9428440 src/spectral_film_lab/data/film/negative/fujifilm_c200 (identical at b2c7fe6); not in this packet",
+      "stock": "fujifilm_c200",
+      "name": "Fujifilm C200 (re-derived, calibration)",
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "still",
+      "antihalation": "weak",
+      "channel_model": "color",
+      "target_print": "fujifilm_crystal_archive_typeii",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 1.0,
+      "reference_illuminant": "D55",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "notes": [
+        "upstream used reference_channel 'green' and target paper kodak_portra_endura_uc (b2c7fe6 scripts); here every variant is run and the grey ramp goes through C200's own target print"
+      ]
+    },
+    "fujifilm_eterna_500": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "calibration_only": true,
+      "stock": "fujifilm_eterna_500",
+      "name": "Fujifilm Eterna 500 (re-derived, calibration)",
+      "reference_illuminant": "T"
+    },
+    "fujifilm_eterna_250d": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_250d",
+      "name": "Fujifilm Eterna 250D",
+      "reference_illuminant": "D55",
+      "product_35mm": "8563",
+      "rms_granularity_brochure": 3.5
+    },
+    "fujifilm_eterna_vivid_250d": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_vivid_250d",
+      "name": "Fujifilm Eterna Vivid 250D",
+      "reference_illuminant": "D55",
+      "product_35mm": "8546",
+      "notes": [
+        "the brochure caption's '5400K tungsten' is a typo for daylight: D55 (docs/adding-film-stocks.md E)"
+      ],
+      "rms_granularity_brochure": 3.5
+    },
+    "fujifilm_eterna_250": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_250",
+      "name": "Fujifilm Eterna 250",
+      "reference_illuminant": "T",
+      "product_35mm": "8553",
+      "rms_granularity_brochure": 3.5
+    },
+    "fujifilm_eterna_400": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_400",
+      "name": "Fujifilm Eterna 400",
+      "reference_illuminant": "T",
+      "product_35mm": "8583",
+      "rms_granularity_brochure": 3.7
+    },
+    "fujifilm_eterna_vivid_160": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "fujifilm_eterna_vivid_160",
+      "name": "Fujifilm Eterna Vivid 160",
+      "reference_illuminant": "T",
+      "product_35mm": "8543",
+      "rms_granularity_brochure": 3.5
+    }
+  },
+  "extraction": {
+    "fujifilm_eterna_500": {
+      "calibration_only": true,
+      "info": "Fujifilm Eterna 500 KB-501E 2005 (calibration, not shipped)",
+      "source": {
+        "file": "eterna500.pdf",
+        "sha256": "8d8258a2f837e6c32117dcb7f6e2fa8d4cdbd7fd65361b5f81cd9e4a0ce43596",
+        "document": "FUJIFILM ETERNA 500 brochure, Ref. No. KB-501E",
+        "edition": "(c) 2005 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            91.6,
+            838.8,
+            284.0,
+            987.9
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            91.6,
+            572.6,
+            224.6,
+            757.7
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            362.8,
+            572.8,
+            466.4,
+            757.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_500_manual": {
+      "second_trace_of": "fujifilm_eterna_500",
+      "info": "Fujifilm Eterna 500, characteristic curves from the Motion Picture Film Manual KB-0707E p. 25 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 13,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_250d": {
+      "info": "Fujifilm Eterna 250D KB-0507ER 2005",
+      "source": {
+        "file": "eterna250d.pdf",
+        "sha256": "fa2280f6ca645249476415859ed088c1728151be054e88f1f41344628b4afe3b",
+        "document": "FUJIFILM ETERNA 250D brochure, Ref. No. KB-0507ER",
+        "edition": "(c) 2005 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            91.2,
+            837.9,
+            283.6,
+            987.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            91.2,
+            571.7,
+            224.2,
+            756.7
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            362.4,
+            571.9,
+            466.0,
+            756.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_250": {
+      "info": "Fujifilm Eterna 250 KB-0506ER 2005",
+      "source": {
+        "file": "eterna250.pdf",
+        "sha256": "ecbc4d988658caf8f9d37a345a7a48b2992aa236cb32eee02c46036c548efa59",
+        "document": "FUJIFILM ETERNA 250 brochure, Ref. No. KB-0506ER",
+        "edition": "(c) 2005 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            91.2,
+            837.9,
+            283.6,
+            987.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            91.2,
+            571.7,
+            224.2,
+            756.7
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            362.4,
+            571.9,
+            466.0,
+            756.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_400": {
+      "info": "Fujifilm Eterna 400 KB-0508E 2005",
+      "source": {
+        "file": "eterna400.pdf",
+        "sha256": "91f1461a4e40c370098d29abbbbe3b24f54ded18be17b17cbafa0aeea48f62ad",
+        "document": "FUJIFILM ETERNA 400 brochure, Ref. No. KB-0508E",
+        "edition": "(c) 2005 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            91.2,
+            837.9,
+            283.6,
+            987.0
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ]
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.13
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            91.2,
+            571.7,
+            224.2,
+            756.7
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            362.4,
+            571.9,
+            466.0,
+            756.6
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_vivid_160": {
+      "info": "Fujifilm Eterna Vivid 160 KB-0701E 2007",
+      "source": {
+        "file": "eterna_vivid160.pdf",
+        "sha256": "7c2b5c3527b2eff2ea56e8bbcfce6d624cf68759c7e5bd7b55cb82dc224727cb",
+        "document": "FUJIFILM ETERNA Vivid 160 brochure, Ref. No. KB-0701E",
+        "edition": "(c) 2007 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            73.2,
+            673.0,
+            227.5,
+            792.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ],
+              "gate": 0.004,
+              "gate_reason": "hand-drafted chart: its 500/600 nm gridlines sit unevenly against the 400/700 nm frame, so no straight line reproduces them (worst 0.39 % of span, ~1.2 nm). The tick labels are evenly spaced but sit up to 1.4 pt off the gridlines, so re-picking ticks does not help. Same layout and drafting as Vivid 250D (KB-1009E), whose identical-to-Eterna-250D dye chart shows this fit is accurate to ~0.4 nm. Exception approved by Noah 2026-11-14."
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.12,
+                0.12
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.12,
+                0.12
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            73.1,
+            459.4,
+            179.8,
+            607.9
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            290.7,
+            459.8,
+            373.6,
+            607.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ],
+              "gate": 0.004,
+              "gate_reason": "hand-drafted chart: the 1.0/2.0 gridlines sit unevenly against the 0/3 frame (worst 0.26 % of span, ~0.008 log units). Same layout as Vivid 250D, whose sensitivity axes pass. Exception approved by Noah 2026-11-14."
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.4,
+                0.7
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_vivid_250d": {
+      "info": "Fujifilm Eterna Vivid 250D KB-1009E 2010",
+      "source": {
+        "file": "eterna_vivid250d.pdf",
+        "sha256": "54394f704d56f13864e2dec3ab4b39a627b4844cd0b0148600af6dc43f3828af",
+        "document": "FUJIFILM ETERNA Vivid 250D brochure, Ref. No. KB-1009E",
+        "edition": "(c) 2010 FUJIFILM Corporation"
+      },
+      "panels": {
+        "spectral_density": {
+          "page": 0,
+          "frame": [
+            73.2,
+            673.0,
+            227.5,
+            792.4
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                600,
+                500
+              ],
+              "frame": [
+                700,
+                400
+              ],
+              "gate": 0.004,
+              "gate_reason": "hand-drafted chart: its 500/600 nm gridlines sit unevenly against the 400/700 nm frame, so no straight line reproduces them (worst 0.33 % of span, ~1.0 nm). Physical check: this chart is the same dye curve as Eterna 250D's (KB-0507ER, passes at 0.003 %); with this least-squares grid+frame fit every extremum lands +0.36-0.40 nm from 250D's. Exception approved by Noah 2026-11-14."
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                2.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "dye_density_mid": {
+              "color": [
+                0.14,
+                0.09,
+                0.08
+              ],
+              "dashed": false
+            },
+            "dye_density_min": {
+              "color": [
+                0.14,
+                0.09,
+                0.08
+              ],
+              "dashed": true
+            }
+          }
+        },
+        "characteristic": {
+          "page": 0,
+          "frame": [
+            73.1,
+            459.5,
+            179.8,
+            607.9
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1,
+                0,
+                -1,
+                -2,
+                -3,
+                -4,
+                -5,
+                -6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.36,
+                0.67
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.6,
+                0.27
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.9,
+                0.0,
+                0.07
+              ]
+            }
+          }
+        },
+        "sensitivity": {
+          "page": 0,
+          "frame": [
+            291.3,
+            459.8,
+            373.6,
+            607.5
+          ],
+          "axes": {
+            "x": {
+              "pdf": "y",
+              "gridlines": [
+                700,
+                650,
+                600,
+                550,
+                500,
+                450,
+                400
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "x",
+              "gridlines": [
+                2.0,
+                1.0
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "log_sensitivity_b": {
+              "color": [
+                0.0,
+                0.36,
+                0.67
+              ]
+            },
+            "log_sensitivity_g": {
+              "color": [
+                0.0,
+                0.6,
+                0.27
+              ]
+            },
+            "log_sensitivity_r": {
+              "color": [
+                0.9,
+                0.0,
+                0.07
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_vivid_160_manual": {
+      "second_trace_of": "fujifilm_eterna_vivid_160",
+      "info": "Fujifilm Eterna Vivid 160, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 8 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 7,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_250_manual": {
+      "second_trace_of": "fujifilm_eterna_250",
+      "info": "Fujifilm Eterna 250, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 10 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 9,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_400_manual": {
+      "second_trace_of": "fujifilm_eterna_400",
+      "info": "Fujifilm Eterna 400, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 12 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 11,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    },
+    "fujifilm_eterna_250d_manual": {
+      "second_trace_of": "fujifilm_eterna_250d",
+      "info": "Fujifilm Eterna 250D, characteristic curves from the Motion Picture Film Manual KB-0707E, PDF page 18 (second trace)",
+      "source": {
+        "file": "fujifilm_motion_picture_film_manual.pdf",
+        "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+        "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+        "edition": "2007 (layout stamp 07.11.13)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 17,
+          "frame": [
+            265.1,
+            83.7,
+            438.9,
+            208.5
+          ],
+          "conversion": "stops_to_log10H",
+          "axes": {
+            "x": {
+              "pdf": "x",
+              "gridlines": [
+                -6,
+                -5,
+                -4,
+                -3,
+                -2,
+                -1,
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "frame": null
+            },
+            "y": {
+              "pdf": "y",
+              "gridlines": [
+                2.5,
+                2.0,
+                1.5,
+                1.0,
+                0.5
+              ],
+              "frame": [
+                3.0,
+                0.0
+              ]
+            }
+          },
+          "curves": {
+            "density_curve_b": {
+              "color": [
+                0.0,
+                0.42,
+                0.72
+              ]
+            },
+            "density_curve_g": {
+              "color": [
+                0.0,
+                0.66,
+                0.31
+              ]
+            },
+            "density_curve_r": {
+              "color": [
+                0.93,
+                0.11,
+                0.14
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "manual": {
+    "file": "fujifilm_motion_picture_film_manual.pdf",
+    "sha256": "76c44cb30ce447eff57bc88743f10bcfdd62cfa55825323b82d1926c6fe3f44a",
+    "document": "FUJIFILM Motion Picture Film Manual, Ref. No. KB-0707E",
+    "edition": "2007 (layout stamp 07.11.13)"
+  }
+}

@@ -82,6 +82,8 @@ enum Tick {
     LimitPreview,
     LowMemory,
     AutoUpdates,
+    /// Settings › Films › Show Negs-built films.
+    NegsBuilt,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -214,6 +216,8 @@ fn items(tab: Tab) -> Vec<Item> {
             Item::Section("Films"),
             Item::Choice("Fotufilm films", Choice::Fotufilm),
             Item::Hint(Hint::Text("Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.")),
+            Item::Tick("Show Negs-built films", Tick::NegsBuilt),
+            Item::Hint(Hint::Text(crate::state::NEGS_BUILT_HINT)),
             Item::Section("RAW + JPEG"),
             Item::Tick("Show camera JPEGs separately", Tick::SeparateJpegs),
             Item::Hint(Hint::Pairing),
@@ -472,6 +476,7 @@ fn ticked(model: &Model, tick: Tick) -> bool {
         Tick::LimitPreview => prefs.limits_preview(),
         Tick::LowMemory => prefs.low_memory_export,
         Tick::AutoUpdates => crate::updates::automatic(),
+        Tick::NegsBuilt => prefs.show_negs_built_films,
     }
 }
 
@@ -824,6 +829,7 @@ fn command(app: &mut App, id: u16, code: u32) {
                 Tick::Previews => model.set_previews(on),
                 Tick::LimitPreview => model.set_limit_preview(on),
                 Tick::LowMemory => model.set_low_memory_export(on),
+                Tick::NegsBuilt => model.set_show_negs_built_films(on),
                 Tick::AutoUpdates => {
                     crate::updates::set_automatic(on);
                     model.prefs.check_for_updates = on;
@@ -1150,6 +1156,7 @@ mod tests {
         assert_eq!(choices, ["Film", "Paper", "Fotufilm films"]);
         assert_eq!(photographs[1..4], [Item::Choice("Film", Choice::NewFilm), Item::Choice("Paper", Choice::NewPaper), Item::Hint(Hint::NewPhotos)]);
         assert!(photographs.contains(&Item::Tick("Match to camera brightness", Tick::MatchNew)));
+        assert!(photographs.contains(&Item::Tick("Show Negs-built films", Tick::NegsBuilt)));
         // RAW + JPEG and Edits: the Mac's two switches, in its words.
         assert!(photographs.contains(&Item::Tick("Show camera JPEGs separately", Tick::SeparateJpegs)));
         assert!(photographs.contains(&Item::Tick("Save ratings and edits next to photos", Tick::Sidecars)));

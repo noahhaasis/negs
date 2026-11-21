@@ -134,6 +134,13 @@ import UserNotifications
             refreshUneditedLook()
         }
     }
+    /// Settings › Show Negs-built films, off by default.
+    var showNegsBuiltFilms = UserDefaults.standard.object(forKey: NegsBuiltFilms.key) as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(showNegsBuiltFilms, forKey: NegsBuiltFilms.key)
+            pumpPreviews()
+        }
+    }
     /// Settings › Fotufilm films.
     var fotufilmFilms = FotufilmFilms(rawValue: UserDefaults.standard.string(forKey: FotufilmFilms.key) ?? "") ?? .all {
         didSet {
@@ -427,12 +434,13 @@ import UserNotifications
     var hasCatalog: Bool { !stocks.isEmpty }
     var films: [Stock] { stocks.filter { !$0.paper } }
     var papers: [Stock] { stocks.filter(\.paper) }
-    /// The films the menus and the tray list (Settings › Fotufilm films).
+    /// The films the menus and the tray list (Settings › Fotufilm films and
+    /// Show Negs-built films).
     /// A hidden film in use stays listed, so a menu always shows its choice:
     /// the photograph's, and while the tray is open the one it opened on.
     var listedFilms: [Stock] { listedFilms(keeping: [film, tray?.before.film].compactMap { $0 }) }
     func listedFilms(keeping kept: [String]) -> [Stock] {
-        films.filter { fotufilmFilms.lists($0) || kept.contains($0.id) }
+        films.filter { (fotufilmFilms.lists($0) && NegsBuiltFilms.lists($0, shown: showNegsBuiltFilms)) || kept.contains($0.id) }
     }
     var filmGroups: [StockGroup] { StockGroup.films(listedFilms, papers: papers) }
     var paperGroups: [StockGroup] { StockGroup.papers(papers) }

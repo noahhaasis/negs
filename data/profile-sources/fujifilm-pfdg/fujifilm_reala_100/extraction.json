@@ -1,0 +1,361 @@
+{
+ "stock": "fujifilm_reala_100",
+ "source": {
+  "file": "ProfessionalFilmDataGuide.pdf",
+  "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+  "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+  "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+ },
+ "panels": {
+  "spectral_density": {
+   "page": 30,
+   "page_rotation": 0,
+   "frame_pdf": [
+    468.0480041503906,
+    89.0382080078125,
+    566.0480346679688,
+    171.5382080078125
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.4963336426722527,
+     "offset": -1256.024084941491,
+     "span": 342.6408036815159,
+     "gridline_pdf": [
+      473.548,
+      502.548,
+      530.548,
+      559.548
+     ],
+     "gridline_residual": [
+      -0.342267,
+      1.051302,
+      -1.051356,
+      0.34232
+     ],
+     "frame_pdf": [
+      468.0480041503906,
+      566.0480346679688
+     ],
+     "frame_value": [
+      380.4278983551219,
+      723.0687020366377
+     ],
+     "worst_over_span": 0.003068390180623887,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.31 %, 1.05 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.025838758137205826,
+     "offset": 4.4323843431162375,
+     "span": 2.1316975463194807,
+     "gridline_pdf": [
+      94.0382,
+      113.5382,
+      133.0382,
+      152.0382
+     ],
+     "gridline_residual": [
+      0.002554,
+      -0.001302,
+      -0.005158,
+      0.003906
+     ],
+     "frame_pdf": [
+      89.0382080078125,
+      171.5382080078125
+     ],
+     "frame_value": [
+      2.1317476214321474,
+      5.007511266619247e-05
+     ],
+     "worst_over_span": 0.002419544280010232,
+     "gate": 0.003,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.00516 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_mid": {
+     "paths": [
+      "45.0"
+     ],
+     "points": 379,
+     "x_range": [
+      400.82203980793565,
+      722.4846282341477
+     ],
+     "y_range": [
+      0.8822252408354028,
+      2.0154732098147212
+     ]
+    },
+    "dye_density_min": {
+     "paths": [
+      "45.1"
+     ],
+     "points": 253,
+     "x_range": [
+      399.6577333898192,
+      710.8313208880145
+     ],
+     "y_range": [
+      0.2714776989169998,
+      0.9088863340488729
+     ]
+    }
+   }
+  },
+  "characteristic": {
+   "page": 30,
+   "page_rotation": 0,
+   "frame_pdf": [
+    341.9010009765625,
+    250.92721557617188,
+    482.90203857421875,
+    363.3752136230469
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 0.03538911336347755,
+     "offset": -16.092677231648384,
+     "span": 4.989901703911418,
+     "gridline_pdf": [
+      355.531,
+      369.631,
+      384.671,
+      398.302,
+      412.637,
+      426.736,
+      440.132,
+      454.702,
+      468.802
+     ],
+     "gridline_residual": [
+      -0.01075,
+      -0.011763,
+      0.020488,
+      0.002877,
+      0.01018,
+      0.009131,
+      -0.016796,
+      -0.001177,
+      -0.00219
+     ],
+     "frame_pdf": [
+      341.9010009765625,
+      482.90203857421875
+     ],
+     "frame_value": [
+      -3.9931039490023643,
+      0.9967977549090534
+     ],
+     "worst_over_span": 0.004105900671570307,
+     "gate": 0.005,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 0.0205 log H); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.03636369280388668,
+     "offset": 13.167973084165375,
+     "span": 4.0890244573886125,
+     "gridline_pdf": [
+      265.4492,
+      279.9492,
+      293.8152,
+      306.9742,
+      320.6042,
+      334.7042,
+      348.3352
+     ],
+     "gridline_residual": [
+      0.015259,
+      -0.012014,
+      -0.016233,
+      0.005257,
+      0.009621,
+      -0.003108,
+      0.001219
+     ],
+     "frame_pdf": [
+      250.92721557617188,
+      363.3752136230469
+     ],
+     "frame_value": [
+      4.043332900818811,
+      -0.04569155656979973
+     ],
+     "worst_over_span": 0.0039699380816022745,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.40 %, 0.0162 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "density_curve_b": {
+     "paths": [
+      "51.0"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.616068628985163,
+      0.29821484273075427
+     ],
+     "y_range": [
+      0.9525791938490435,
+      2.723076057608166
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      "51.1"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.5939147934619378,
+      0.29821484273075427
+     ],
+     "y_range": [
+      0.47601611474331307,
+      2.3356575763226175
+     ]
+    },
+    "density_curve_r": {
+     "paths": [
+      "51.2"
+     ],
+     "points": 65,
+     "x_range": [
+      -3.6271806464228096,
+      0.4090898593699954
+     ],
+     "y_range": [
+      0.2733641144191843,
+      2.0508204864984236
+     ]
+    }
+   }
+  },
+  "sensitivity": {
+   "page": 30,
+   "page_rotation": 0,
+   "frame_pdf": [
+    338.7130126953125,
+    89.12222290039062,
+    434.25799560546875,
+    172.62222290039062
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.642541409500831,
+     "offset": -859.5569771387778,
+     "span": 348.02655672029334,
+     "gridline_pdf": [
+      345.503,
+      373.633,
+      400.793,
+      427.954
+     ],
+     "gridline_residual": [
+      -1.048026,
+      1.416681,
+      0.348119,
+      -0.716774
+     ],
+     "frame_pdf": [
+      338.7130126953125,
+      434.25799560546875
+     ],
+     "frame_value": [
+      374.2191975406787,
+      722.2457542609719
+     ],
+     "worst_over_span": 0.004070612666270195,
+     "gate": 0.005,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.41 %, 1.42 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.035714285714285775,
+     "offset": 5.165079389299673,
+     "span": 2.982142857142862,
+     "gridline_pdf": [
+      116.6222,
+      144.6222
+     ],
+     "gridline_residual": [
+      0.0,
+      -0.0
+     ],
+     "frame_pdf": [
+      89.12222290039062,
+      172.62222290039062
+     ],
+     "frame_value": [
+      1.9821428571428594,
+      -1.0000000000000027
+     ],
+     "worst_over_span": 2.978322844503409e-16,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      "35.0"
+     ],
+     "points": 190,
+     "x_range": [
+      388.3521648338466,
+      515.5534280955814
+     ],
+     "y_range": [
+      0.0833217075892847,
+      1.6452841228467645
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      "35.1"
+     ],
+     "points": 127,
+     "x_range": [
+      462.5508267210738,
+      588.5717767294492
+     ],
+     "y_range": [
+      -0.3452497209821441,
+      1.391526622208196
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      "35.2"
+     ],
+     "points": 127,
+     "x_range": [
+      555.5958164454217,
+      669.8368666824894
+     ],
+     "y_range": [
+      0.011893136160713524,
+      1.353970140294011
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}

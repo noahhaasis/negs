@@ -97,6 +97,8 @@ struct Stock: Identifiable, Sendable {
     /// data rather than modelled from sample photographs (Settings › Fotufilm films).
     let fotufilm: Bool
     let manufacturerData: Bool
+    /// Prepared by Negs itself from datasheets (Settings › Show Negs-built films).
+    let negsBuilt: Bool
     /// How many stops each camera colour filter takes on this film, by key;
     /// empty for colour films and papers.
     let filterStops: [String: Double]
@@ -121,8 +123,20 @@ struct Stock: Identifiable, Sendable {
         // A catalog from before these fields lists every film.
         fotufilm = value["fotufilm"].bool
         manufacturerData = value["manufacturer_data"] != .bool(false)
+        negsBuilt = value["negs_built"].bool
         filterStops = (value["color_filter_stops"].object ?? [:]).mapValues(\.double)
     }
+}
+
+/// Settings › Show Negs-built films: the films Negs prepared itself from
+/// datasheets (catalog `negs_built`) stay out of the film menus and the tray
+/// until shown. Only the lists, as for Fotufilm films: an edit, a preset or a
+/// thumbnail with one keeps it.
+enum NegsBuiltFilms {
+    static let key = "showNegsBuiltFilms"
+    static let hint = "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; and the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides. Photos already using one keep it."
+
+    static func lists(_ stock: Stock, shown: Bool) -> Bool { shown || !stock.negsBuilt }
 }
 
 /// A camera colour filter from the catalog: its params key, the colour it's

@@ -23,6 +23,6 @@ for (const brand of readdirSync(colored, { withFileTypes: true }).filter((d) => 
 }
 const out = JSON.parse(catalog(stocks));
 if (!out.profiles.length) throw new Error(`No profiles found in ${profiles}`);
-out.attribution = "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, and from Fotufilm film profiles by MUAStudio Inc. (https://fotufilm.com), both CC BY-SA 4.0. See data/profiles, SPEKTRAFILM_LICENSE.txt and FOTUFILM_LICENSE.txt.";
+out.attribution = "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, from Fotufilm film profiles by MUAStudio Inc. (https://fotufilm.com), and from Negs profiles prepared from Fujifilm datasheets with spektrafilm's method, all CC BY-SA 4.0. See data/profiles, SPEKTRAFILM_LICENSE.txt and FOTUFILM_LICENSE.txt.";
 writeFileSync(join(here, "catalog.json"), JSON.stringify(out) + "\n");
 console.error(`web/catalog.json: ${out.profiles.length} stocks`);

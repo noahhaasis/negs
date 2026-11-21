@@ -885,13 +885,25 @@ impl Model {
     pub fn films(&self) -> Vec<&Stock> {
         self.stocks.iter().filter(|s| !s.paper).collect()
     }
-    /// The films the menu and the tray list (Settings › Fotufilm films). The
-    /// photograph's film stays listed, so the menu always shows its choice,
-    /// and while the tray is open the one it opened on.
+    /// The films the menu and the tray list (Settings › Fotufilm films and
+    /// Show Negs-built films). The photograph's film stays listed, so the menu
+    /// always shows its choice, and while the tray is open the one it opened on.
     pub fn listed_films(&self) -> Vec<&Stock> {
-        let shown = self.fotufilm_films();
         let before = self.previews.tray.as_ref().map(|t| t.before.film.as_str());
-        self.stocks.iter().filter(|s| !s.paper && (shown.lists(s) || s.id == self.state.film || before == Some(s.id.as_str()))).collect()
+        self.stocks.iter().filter(|s| !s.paper && (self.lists_film(s) || s.id == self.state.film || before == Some(s.id.as_str()))).collect()
+    }
+    /// Whether the settings list `stock` (a film), before the film in use is kept.
+    pub fn lists_film(&self, stock: &Stock) -> bool {
+        self.fotufilm_films().lists(stock) && state::lists_negs_built(stock, self.prefs.show_negs_built_films)
+    }
+    /// Settings › Show Negs-built films: the film menu and grid list again.
+    pub fn set_show_negs_built_films(&mut self, on: bool) {
+        if self.prefs.show_negs_built_films == on {
+            return;
+        }
+        self.prefs.show_negs_built_films = on;
+        self.prefs.save();
+        self.mark(dirty::INSPECTOR | dirty::PREVIEWS);
     }
     pub fn fotufilm_films(&self) -> state::FotufilmFilms {
         state::FotufilmFilms::from_key(&self.prefs.fotufilm_films)
@@ -4216,7 +4228,7 @@ mod tests {
     #[test]
     fn fotufilm_films_filter_the_lists_but_keep_the_film_in_use() {
         let stock = |id: &str, fotufilm: bool, manufacturer_data: bool| Stock {
-            id: id.into(), name: id.into(), paper: false, positive: false, bw: false, target: String::new(), times: vec![], grain: Value::Null, fotufilm, manufacturer_data,
+            id: id.into(), name: id.into(), paper: false, positive: false, bw: false, target: String::new(), times: vec![], grain: Value::Null, fotufilm, manufacturer_data, negs_built: false,
         };
         let mut model = Model::new(Preferences::default());
         model.stocks = vec![stock("portra", false, true), stock("sheet", true, true), stock("sampled", true, false)];
@@ -4235,11 +4247,34 @@ mod tests {
         assert!(!old.fotufilm && old.manufacturer_data);
     }
 
+    /// Settings › Show Negs-built films: off by default they're hidden, on
+    /// they're listed; the photograph's film stays listed.
+    #[test]
+    fn negs_built_films_are_hidden_until_shown() {
+        let stock = |id: &str, negs_built: bool| Stock {
+            id: id.into(), name: id.into(), paper: false, positive: false, bw: false, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built,
+        };
+        let mut model = Model::new(Preferences::default());
+        assert!(!model.prefs.show_negs_built_films, "off by default");
+        model.stocks = vec![stock("portra", false), stock("eterna", true)];
+        model.state.film = "portra".into();
+        let listed = |m: &Model| m.listed_films().iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(listed(&model), ["portra"]);
+        model.state.film = "eterna".into();
+        assert_eq!(listed(&model), ["portra", "eterna"]);
+        model.state.film = "portra".into();
+        // Set directly: `set_show_negs_built_films` writes the settings file.
+        model.prefs.show_negs_built_films = true;
+        assert_eq!(listed(&model), ["portra", "eterna"]);
+        let old = Stock::new(&json!({"id": "x", "name": "X"}));
+        assert!(!old.negs_built, "an old catalog without the field lists the film");
+    }
+
     /// The paper lock, through the film menu.
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
         let stock = |id: &str, paper: bool, target: &str| Stock {
-            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
+            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
         };
         for keep in [false, true] {
             let mut model = Model::new(Preferences { keep_paper: keep, ..Preferences::default() });

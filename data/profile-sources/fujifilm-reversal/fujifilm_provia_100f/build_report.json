@@ -1,0 +1,657 @@
+{
+ "note": "build_positive.py gates (docs/adding-film-stocks.md D11), not shipped pending Noah's decision on slide neutrality (2026-11-20). 'trust_1' is the method as upstream (data_trustability 1); 'trust_0.1' the lowest trustability the method allows, for comparison.",
+ "trust_1": {
+  "stock": "fujifilm_provia_100f",
+  "trust": 1.0,
+  "residual": "upstream",
+  "check4_curve_fit_max_D": 0.013628038225388828,
+  "check4_pass": true,
+  "metameric_amounts_after_normalisation": [
+   0.481120369983728,
+   0.48398436925765453,
+   0.435366668473913
+  ],
+  "densitometer_normalisation_coefficients": [
+   0.9035575738683636,
+   0.9089362449805374,
+   0.8176308367960922
+  ],
+  "check_metameric_neutral": {
+   "Y": 0.18399245158591973,
+   "xy": [
+    0.34569,
+    0.35851
+   ],
+   "white_xy": [
+    0.34567,
+    0.35851
+   ]
+  },
+  "crosstalk_matrix": [
+   [
+    0.996,
+    0.2277,
+    0.0405
+   ],
+   [
+    0.2066,
+    0.9968,
+    0.1157
+   ],
+   [
+    0.1696,
+    0.2296,
+    0.9792
+   ]
+  ],
+  "density_max": [
+   2.4783,
+   2.6652,
+   2.4667
+  ],
+  "normalisation": {
+   "raw_before": [
+    16.070811292159767,
+    16.584785850515864,
+    17.07322747036477
+   ],
+   "log10_correction": [
+    -1.2060378015184523,
+    -1.2197098681051417,
+    -1.2323156265674369
+   ]
+  },
+  "align_log_exposure": [
+   -0.9643837634499401,
+   -1.1543078928943524,
+   -1.2885896934650225
+  ],
+  "check5_raw_midgray": [
+   1.0,
+   1.0,
+   0.9999999999999999
+  ],
+  "check5_pass": true,
+  "window": {
+   "params": [
+    420.4444980836285,
+    28.444699367218536,
+    598.9894339792892,
+    38.74000123538397
+   ],
+   "prior_median": [
+    419.7342725,
+    27.852366,
+    598.335296,
+    50.2831825
+   ],
+   "prior_weight": 0.002,
+   "prior_stocks": [
+    "fujifilm_c200",
+    "fujifilm_pro_400h",
+    "fujifilm_provia_100f",
+    "fujifilm_velvia_100",
+    "fujifilm_xtra_400",
+    "kodak_ektachrome_100",
+    "kodak_ektar_100",
+    "kodak_gold_200",
+    "kodak_kodachrome_64",
+    "kodak_portra_160",
+    "kodak_portra_400",
+    "kodak_portra_800",
+    "kodak_ultramax_400",
+    "kodak_verita_200d",
+    "kodak_vision3_200t",
+    "kodak_vision3_250d",
+    "kodak_vision3_500t",
+    "kodak_vision3_50d"
+   ],
+   "loss_fitted": 0.03081872514889284,
+   "loss_none": 0.04657161074311844,
+   "loss_prior_median": 0.03213547927574631,
+   "rho_fitted": {
+    "otsu": {
+     "median_rho": 0.0568,
+     "share_below_0.035": 0.314
+    },
+    "munsell": {
+     "median_rho": 0.0573,
+     "share_below_0.035": 0.314
+    },
+    "forest": {
+     "median_rho": 0.0895,
+     "share_below_0.035": 0.063
+    },
+    "skin": {
+     "median_rho": 0.0917,
+     "share_below_0.035": 0.0
+    }
+   },
+   "rho_none": {
+    "otsu": {
+     "median_rho": 0.1175,
+     "share_below_0.035": 0.089
+    },
+    "munsell": {
+     "median_rho": 0.118,
+     "share_below_0.035": 0.085
+    },
+    "forest": {
+     "median_rho": 0.103,
+     "share_below_0.035": 0.047
+    },
+    "skin": {
+     "median_rho": 0.0564,
+     "share_below_0.035": 0.02
+    }
+   }
+  },
+  "refine_density_scale": [
+   0.9998686649714936,
+   1.0000683268096382,
+   1.0000494724758173
+  ],
+  "refine_log_exposure_shift": [
+   0.00026847013535643454,
+   0.0,
+   -3.5485600040908816e-05
+  ],
+  "ramp_stage9": {
+   "ev": [
+    -3,
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3
+   ],
+   "rgb": [
+    [
+     0.004626,
+     0.004091,
+     0.002157
+    ],
+    [
+     0.019289,
+     0.0218,
+     0.021551
+    ],
+    [
+     0.065571,
+     0.068193,
+     0.067214
+    ],
+    [
+     0.183954,
+     0.183879,
+     0.183854
+    ],
+    [
+     0.407476,
+     0.400614,
+     0.402762
+    ],
+    [
+     0.639342,
+     0.633503,
+     0.62969
+    ],
+    [
+     0.7465,
+     0.744845,
+     0.740878
+    ]
+   ],
+   "ev0_rgb": [
+    0.183954,
+    0.183879,
+    0.183854
+   ],
+   "ev0_level_error": -0.0005651860046239632,
+   "mean_neutrality_error": 0.09405298940583652,
+   "mean_neutrality_error_ev_fit": 0.01630134175640229,
+   "max_neutrality_error_ev_fit": 0.03845359986801372,
+   "mean_abs_neutrality_error_upstream": 0.0015959057256574947,
+   "rel_r_minus_g": [
+    0.1308,
+    -0.11517,
+    -0.03845,
+    0.00041,
+    0.01713,
+    0.00922,
+    0.00222
+   ],
+   "rel_b_minus_g": [
+    -0.47267,
+    -0.01142,
+    -0.01435,
+    -0.00014,
+    0.00536,
+    -0.00602,
+    -0.00533
+   ],
+   "expected_level": [
+    0.023,
+    0.046,
+    0.092,
+    0.184,
+    0.368,
+    0.736,
+    1.472
+   ]
+  },
+  "ramp_final": {
+   "ev": [
+    -3,
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3
+   ],
+   "rgb": [
+    [
+     0.00462,
+     0.004088,
+     0.002164
+    ],
+    [
+     0.019276,
+     0.021793,
+     0.021548
+    ],
+    [
+     0.065528,
+     0.068177,
+     0.067208
+    ],
+    [
+     0.183846,
+     0.183846,
+     0.183845
+    ],
+    [
+     0.407296,
+     0.400566,
+     0.402752
+    ],
+    [
+     0.639214,
+     0.633472,
+     0.629686
+    ],
+    [
+     0.746464,
+     0.744836,
+     0.740877
+    ]
+   ],
+   "ev0_rgb": [
+    0.183846,
+    0.183846,
+    0.183845
+   ],
+   "ev0_level_error": -0.0008393320576947083,
+   "mean_neutrality_error": 0.09373675711530659,
+   "mean_neutrality_error_ev_fit": 0.016180229188655464,
+   "max_neutrality_error_ev_fit": 0.038853613350551854,
+   "mean_abs_neutrality_error_upstream": 0.0015742495550243253,
+   "rel_r_minus_g": [
+    0.13022,
+    -0.1155,
+    -0.03885,
+    0.0,
+    0.0168,
+    0.00907,
+    0.00219
+   ],
+   "rel_b_minus_g": [
+    -0.47062,
+    -0.01127,
+    -0.01421,
+    -0.0,
+    0.00546,
+    -0.00598,
+    -0.00531
+   ],
+   "expected_level": [
+    0.023,
+    0.046,
+    0.092,
+    0.184,
+    0.368,
+    0.736,
+    1.472
+   ]
+  }
+ },
+ "trust_0.1": {
+  "stock": "fujifilm_provia_100f",
+  "trust": 0.1,
+  "residual": "upstream",
+  "check4_curve_fit_max_D": 0.013628038225388828,
+  "check4_pass": true,
+  "metameric_amounts_after_normalisation": [
+   0.481120369983728,
+   0.48398436925765453,
+   0.435366668473913
+  ],
+  "densitometer_normalisation_coefficients": [
+   0.9035575738683636,
+   0.9089362449805374,
+   0.8176308367960922
+  ],
+  "check_metameric_neutral": {
+   "Y": 0.18399245158591973,
+   "xy": [
+    0.34569,
+    0.35851
+   ],
+   "white_xy": [
+    0.34567,
+    0.35851
+   ]
+  },
+  "crosstalk_matrix": [
+   [
+    0.996,
+    0.2277,
+    0.0405
+   ],
+   [
+    0.2066,
+    0.9968,
+    0.1157
+   ],
+   [
+    0.1696,
+    0.2296,
+    0.9792
+   ]
+  ],
+  "density_max": [
+   2.4783,
+   2.6652,
+   2.4667
+  ],
+  "normalisation": {
+   "raw_before": [
+    16.070811292159767,
+    16.584785850515864,
+    17.07322747036477
+   ],
+   "log10_correction": [
+    -1.2060378015184523,
+    -1.2197098681051417,
+    -1.2323156265674369
+   ]
+  },
+  "align_log_exposure": [
+   -0.9643837634499401,
+   -1.1543078928943524,
+   -1.2885896934650225
+  ],
+  "check5_raw_midgray": [
+   1.0,
+   1.0,
+   0.9999999999999999
+  ],
+  "check5_pass": true,
+  "window": {
+   "params": [
+    420.4444980836285,
+    28.444699367218536,
+    598.9894339792892,
+    38.74000123538397
+   ],
+   "prior_median": [
+    419.7342725,
+    27.852366,
+    598.335296,
+    50.2831825
+   ],
+   "prior_weight": 0.002,
+   "prior_stocks": [
+    "fujifilm_c200",
+    "fujifilm_pro_400h",
+    "fujifilm_provia_100f",
+    "fujifilm_velvia_100",
+    "fujifilm_xtra_400",
+    "kodak_ektachrome_100",
+    "kodak_ektar_100",
+    "kodak_gold_200",
+    "kodak_kodachrome_64",
+    "kodak_portra_160",
+    "kodak_portra_400",
+    "kodak_portra_800",
+    "kodak_ultramax_400",
+    "kodak_verita_200d",
+    "kodak_vision3_200t",
+    "kodak_vision3_250d",
+    "kodak_vision3_500t",
+    "kodak_vision3_50d"
+   ],
+   "loss_fitted": 0.03081872514889284,
+   "loss_none": 0.04657161074311844,
+   "loss_prior_median": 0.03213547927574631,
+   "rho_fitted": {
+    "otsu": {
+     "median_rho": 0.0568,
+     "share_below_0.035": 0.314
+    },
+    "munsell": {
+     "median_rho": 0.0573,
+     "share_below_0.035": 0.314
+    },
+    "forest": {
+     "median_rho": 0.0895,
+     "share_below_0.035": 0.063
+    },
+    "skin": {
+     "median_rho": 0.0917,
+     "share_below_0.035": 0.0
+    }
+   },
+   "rho_none": {
+    "otsu": {
+     "median_rho": 0.1175,
+     "share_below_0.035": 0.089
+    },
+    "munsell": {
+     "median_rho": 0.118,
+     "share_below_0.035": 0.085
+    },
+    "forest": {
+     "median_rho": 0.103,
+     "share_below_0.035": 0.047
+    },
+    "skin": {
+     "median_rho": 0.0564,
+     "share_below_0.035": 0.02
+    }
+   }
+  },
+  "refine_density_scale": [
+   0.9904298460119894,
+   1.0056712994390595,
+   1.0033568729996856
+  ],
+  "refine_log_exposure_shift": [
+   0.007279512461081209,
+   0.0,
+   0.0010410322962061424
+  ],
+  "ramp_stage9": {
+   "ev": [
+    -3,
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3
+   ],
+   "rgb": [
+    [
+     0.004626,
+     0.004091,
+     0.002157
+    ],
+    [
+     0.019289,
+     0.0218,
+     0.021551
+    ],
+    [
+     0.065571,
+     0.068193,
+     0.067214
+    ],
+    [
+     0.183954,
+     0.183879,
+     0.183854
+    ],
+    [
+     0.407476,
+     0.400614,
+     0.402762
+    ],
+    [
+     0.639342,
+     0.633503,
+     0.62969
+    ],
+    [
+     0.7465,
+     0.744845,
+     0.740878
+    ]
+   ],
+   "ev0_rgb": [
+    0.183954,
+    0.183879,
+    0.183854
+   ],
+   "ev0_level_error": -0.0005651860046239632,
+   "mean_neutrality_error": 0.09405298940583652,
+   "mean_neutrality_error_ev_fit": 0.01630134175640229,
+   "max_neutrality_error_ev_fit": 0.03845359986801372,
+   "mean_abs_neutrality_error_upstream": 0.0015959057256574947,
+   "rel_r_minus_g": [
+    0.1308,
+    -0.11517,
+    -0.03845,
+    0.00041,
+    0.01713,
+    0.00922,
+    0.00222
+   ],
+   "rel_b_minus_g": [
+    -0.47267,
+    -0.01142,
+    -0.01435,
+    -0.00014,
+    0.00536,
+    -0.00602,
+    -0.00533
+   ],
+   "expected_level": [
+    0.023,
+    0.046,
+    0.092,
+    0.184,
+    0.368,
+    0.736,
+    1.472
+   ]
+  },
+  "ramp_final": {
+   "ev": [
+    -3,
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3
+   ],
+   "rgb": [
+    [
+     0.004606,
+     0.003985,
+     0.002415
+    ],
+    [
+     0.019351,
+     0.021468,
+     0.021222
+    ],
+    [
+     0.065281,
+     0.067403,
+     0.066452
+    ],
+    [
+     0.182382,
+     0.182382,
+     0.182382
+    ],
+    [
+     0.403877,
+     0.398686,
+     0.400867
+    ],
+    [
+     0.636452,
+     0.632301,
+     0.628507
+    ],
+    [
+     0.745576,
+     0.744524,
+     0.740533
+    ]
+   ],
+   "ev0_rgb": [
+    0.182382,
+    0.182382,
+    0.182382
+   ],
+   "ev0_level_error": -0.008793033420303242,
+   "mean_neutrality_error": 0.07841050526761063,
+   "mean_neutrality_error_ev_fit": 0.012768307121555768,
+   "max_neutrality_error_ev_fit": 0.03148665702659067,
+   "mean_abs_neutrality_error_upstream": 0.0012816835942927086,
+   "rel_r_minus_g": [
+    0.15582,
+    -0.09861,
+    -0.03149,
+    -0.0,
+    0.01302,
+    0.00657,
+    0.00141
+   ],
+   "rel_b_minus_g": [
+    -0.39383,
+    -0.01146,
+    -0.01412,
+    -0.0,
+    0.00547,
+    -0.006,
+    -0.00536
+   ],
+   "expected_level": [
+    0.023,
+    0.046,
+    0.092,
+    0.184,
+    0.368,
+    0.736,
+    1.472
+   ]
+  }
+ }
+}

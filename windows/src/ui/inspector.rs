@@ -4091,7 +4091,7 @@ mod tests {
     fn a_search_shows_each_match_once_under_its_group() {
         use crate::session::Preferences;
         let stock = |id: &str, name: &str, bw: bool| state::Stock {
-            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
+            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
         };
         let mut model = Model::new(Preferences { previews: true, favorite_films: vec!["gold".into()], ..Preferences::default() });
         model.stocks = vec![stock("gold", "Gold 200", false), stock("portra", "Portra 400", false), stock("trix", "Tri-X 400", true)];

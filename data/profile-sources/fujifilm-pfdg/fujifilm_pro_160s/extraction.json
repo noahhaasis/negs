@@ -1,0 +1,358 @@
+{
+ "stock": "fujifilm_pro_160s",
+ "source": {
+  "file": "ProfessionalFilmDataGuide.pdf",
+  "sha256": "64c6455651b9f13f5cd190219e4928d1fdf13ecf33859c4691d830bced8d3d36",
+  "document": "FUJIFILM Professional Film Data Guide (US), Ref. No. AF3-207U",
+  "edition": "(c) 2005 Fuji Photo Film Co., Ltd."
+ },
+ "panels": {
+  "spectral_density": {
+   "page": 28,
+   "page_rotation": 0,
+   "frame_pdf": [
+    176.99900817871094,
+    89.87319946289062,
+    272.6309814453125,
+    171.54019165039062
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.5611543301232413,
+     "offset": -250.0916959785566,
+     "span": 340.5602156965882,
+     "gridline_pdf": [
+      182.79,
+      210.352,
+      238.561,
+      266.985
+     ],
+     "gridline_residual": [
+      0.851734,
+      -0.995688,
+      -0.539087,
+      0.683041
+     ],
+     "frame_pdf": [
+      176.99900817871094,
+      272.6309814453125
+     ],
+     "frame_value": [
+      380.2290884245789,
+      720.7893041211671
+     ],
+     "worst_over_span": 0.002923677283833788,
+     "gate": 0.003,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.29 %, 0.996 nm); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.03670516665647119,
+     "offset": 6.2940783616584275,
+     "span": 2.997600558574918,
+     "gridline_pdf": [
+      116.7962,
+      144.2322
+     ],
+     "gridline_residual": [
+      0.007054,
+      1.1e-05
+     ],
+     "frame_pdf": [
+      89.87319946289062,
+      171.54019165039062
+     ],
+     "frame_value": [
+      2.9952675974227505,
+      -0.002332961152167634
+     ],
+     "frame_residual": [
+      -0.004732,
+      -0.002333
+     ],
+     "worst_over_span": 0.0023532965957115196,
+     "gate": 0.003,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid: no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.00705 D); the Data Guide reuses the same uneven grid on several spreads. The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: X-TRA 400 from this guide matches spektrafilm's independent trace of datasheet AF3-151E within 0.007 D (curves) and 0.016 D (D-min, D-mid)."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_mid": {
+     "paths": [
+      "17.0"
+     ],
+     "points": 505,
+     "x_range": [
+      399.3988208729311,
+      720.1875551121982
+     ],
+     "y_range": [
+      0.9819520172426435,
+      2.338609679256536
+     ]
+    },
+    "dye_density_min": {
+     "paths": [
+      "17.1"
+     ],
+     "points": 442,
+     "x_range": [
+      399.3988208729311,
+      720.2837349700523
+     ],
+     "y_range": [
+      0.25438253534329736,
+      1.1292868339996112
+     ]
+    }
+   }
+  },
+  "characteristic": {
+   "page": 28,
+   "page_rotation": 0,
+   "frame_pdf": [
+    52.33700942993164,
+    251.9962158203125,
+    193.2320098876953,
+    365.3302001953125
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 0.03546240485718237,
+     "offset": -5.8528726933031665,
+     "span": 4.996475548586111,
+     "gridline_pdf": [
+      66.185,
+      80.519,
+      94.675,
+      108.648,
+      122.803,
+      136.777,
+      150.932,
+      165.088,
+      179.088
+     ],
+     "gridline_residual": [
+      -0.005793,
+      0.002525,
+      0.004531,
+      4.7e-05,
+      0.002017,
+      -0.002431,
+      -0.000461,
+      0.001545,
+      -0.001981
+     ],
+     "frame_pdf": [
+      52.33700942993164,
+      193.2320098876953
+     ],
+     "frame_value": [
+      -3.9968764758847595,
+      0.9995990727013515
+     ],
+     "worst_over_span": 0.0011594119172607725,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.03549137211220054,
+     "offset": 12.955119366569695,
+     "span": 4.022378612411447,
+     "gridline_pdf": [
+      266.4062,
+      280.4942,
+      294.5822,
+      308.6692,
+      322.7572,
+      336.8472,
+      350.9332
+     ],
+     "gridline_residual": [
+      -3e-06,
+      -5e-06,
+      -8e-06,
+      2.5e-05,
+      2.3e-05,
+      -5.1e-05,
+      1.8e-05
+     ],
+     "frame_pdf": [
+      251.9962158203125,
+      365.3302001953125
+     ],
+     "frame_value": [
+      4.011427900024588,
+      -0.010950712386859962
+     ],
+     "worst_over_span": 1.2674831607137464e-05,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "density_curve_b": {
+     "paths": [
+      "26.0"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.6066482507566477,
+      0.48511065887399596
+     ],
+     "y_range": [
+      1.0006942449998046,
+      2.538181780162434
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      "26.1"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.6114000376867827,
+      0.48454303096421825
+     ],
+     "y_range": [
+      0.7527894236282258,
+      2.2685175376844438
+     ]
+    },
+    "density_curve_r": {
+     "paths": [
+      "26.2"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.6053714937946646,
+      0.4899336022103613
+     ],
+     "y_range": [
+      0.2052620160000327,
+      1.748427265358373
+     ]
+    }
+   }
+  },
+  "sensitivity": {
+   "page": 28,
+   "page_rotation": 0,
+   "frame_pdf": [
+    43.58201217651367,
+    90.47921752929688,
+    139.45301818847656,
+    172.772216796875
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 3.5576388363941374,
+     "offset": 225.14307321630133,
+     "span": 341.074414272335,
+     "gridline_pdf": [
+      49.046,
+      77.439,
+      105.318,
+      133.447
+     ],
+     "gridline_residual": [
+      -0.36894,
+      0.643105,
+      -0.17349,
+      -0.100675
+     ],
+     "frame_pdf": [
+      43.58201217651367,
+      139.45301818847656
+     ],
+     "frame_value": [
+      380.1921323036686,
+      721.2665465760035
+     ],
+     "worst_over_span": 0.0018855265110996563,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.03645510586198727,
+     "offset": 5.298429453340291,
+     "span": 3.0000000000000013,
+     "gridline_pdf": [
+      117.9102,
+      145.3412
+     ],
+     "gridline_residual": [
+      -0.0,
+      -0.0
+     ],
+     "frame_pdf": [
+      90.47921752929688,
+      172.772216796875
+     ],
+     "frame_value": [
+      1.9999999999999996,
+      -1.0000000000000018
+     ],
+     "worst_over_span": 5.921189464667499e-16,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Relative Sensitivity (log): no tick values, a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      "11.0"
+     ],
+     "points": 568,
+     "x_range": [
+      381.5618037129865,
+      510.09221444537116
+     ],
+     "y_range": [
+      -0.8763076300064876,
+      1.2313444044060295
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      "11.1"
+     ],
+     "points": 442,
+     "x_range": [
+      479.8700356162258,
+      589.9647782925647
+     ],
+     "y_range": [
+      -0.7249090235509703,
+      1.24139772591532
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      "11.2"
+     ],
+     "points": 505,
+     "x_range": [
+      557.3340710226671,
+      680.1011106400615
+     ],
+     "y_range": [
+      -0.6466397955630434,
+      1.0913821186189647
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}

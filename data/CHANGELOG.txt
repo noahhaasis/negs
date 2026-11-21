@@ -100,3 +100,94 @@ see FOTUFILM_LICENSE.txt):
 - borders/35mm/: edge-print strips for the 24 ported colour films (product
   codes or names) and the 5 B&W films (Fotufilm's edge texts),
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-14: Fujifilm Eterna negatives prepared from Fujifilm's datasheets
+(CC BY-SA 4.0; method and generic dye spectra from spektrafilm by Andrea
+Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: 5 new colour negatives, fujifilm_eterna_250d,
+  fujifilm_eterna_vivid_250d, fujifilm_eterna_250, fujifilm_eterna_400 and
+  fujifilm_eterna_vivid_160, built by tools/film_profiles from the curves
+  in Fujifilm's brochures KB-0507ER, KB-1009E, KB-0506ER, KB-0508E and
+  KB-0701E (document, edition and SHA-256 in each profile's datasource and
+  in profile-sources/fujifilm-cine/recipe.json). Method: spektrafilm's
+  public-era profile creator (b2c7fe6, steps 1-8) with its generic_a dye
+  set, then Negs' exposure convention, spektrafilm's grey-ramp refinement
+  run on the 28bf883 runtime through kodak_2383, and a fitted hanatos2025
+  adaptation window (docs/adding-film-stocks.md). The extracted points,
+  axis calibration and calibration reports are in
+  profile-sources/fujifilm-cine/. No existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 5 new films
+  on every colour paper, from upstream's solver
+  (crates/spektrafilm-cli/src/bin/solve_neutral_filters.rs). Existing
+  entries unchanged.
+- presets/grain.toml: grain sections for the 5 new films, in a third
+  Negs-only block at the end ([3.5, 5.5, 7.0] x the brochure's RMS
+  granularity / 3.5). Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 5 new films (Fujifilm 35 mm
+  product codes 8563, 8546, 8553, 8583, 8543),
+  crates/spektrafilm-io/src/film35.rs.
+
+2026-11-20: Fujifilm still negatives prepared from Fujifilm's Professional
+Film Data Guide (CC BY-SA 4.0; method and generic dye spectra from
+spektrafilm by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: 4 new colour negatives, fujifilm_pro_160s, fujifilm_pro_160c,
+  fujifilm_pro_800z and fujifilm_superia_1600, built by tools/film_profiles
+  from the curves in the FUJIFILM Professional Film Data Guide (US),
+  AF3-207U, 2005 (document, pages and SHA-256 in each profile's datasource
+  and in profile-sources/fujifilm-pfdg/recipe.json). Method as the
+  2026-11-14 Eterna entry, with the grey-ramp refinement run through
+  fujifilm_crystal_archive_typeii. The extracted points, axis calibration
+  and the calibration against the shipped X-TRA 400 and Pro 400H are in
+  profile-sources/fujifilm-pfdg/. No existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 4 new films
+  on every colour paper, from upstream's solver. Existing entries
+  unchanged.
+- presets/grain.toml: grain sections for the 4 new films in a fourth
+  Negs-only block at the end (the guide's RMS granularity on every layer).
+  Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 4 new films,
+  crates/spektrafilm-io/src/film35.rs.
+
+2026-11-21: one more Fujifilm still negative from the Professional Film
+Data Guide (CC BY-SA 4.0; method and generic dye spectra from spektrafilm
+by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: fujifilm_true_definition_400, built as the 2026-11-20 entry
+  from page 33 of the guide. It shares X-TRA 400's code [CH] but not its
+  curves. No existing profile changed.
+- filters/neutral_print_filters.json: its TH-KG3 entry on every colour
+  paper, from upstream's solver. Existing entries unchanged.
+- presets/grain.toml: its grain section (the guide's RMS granularity 5 on
+  every layer) in the Negs-only Data Guide block. Existing sections
+  unchanged.
+- borders/35mm/: its edge-print strip, crates/spektrafilm-io/src/film35.rs.
+
+2026-11-21: seven Fujifilm slides prepared from Fujifilm's datasheets
+(CC BY-SA 4.0; method from spektrafilm by Andrea Volpato; measurement data
+(c) FUJIFILM Corporation):
+
+- profiles/: fujifilm_velvia_100f, fujifilm_provia_400f,
+  fujifilm_provia_400x, fujifilm_64t_type_ii, fujifilm_sensia_100,
+  fujifilm_sensia_200 and fujifilm_sensia_400, built by
+  tools/film_profiles (build_positive.py) from the Professional Film Data
+  Guide (US) AF3-207U, 2005, and the Provia 400X bulletin AF3-0213E, with
+  Fujifilm's own dye spectra, then made neutral on a grey ramp by Negs's
+  slide neutralisation (neutralise_positive.py; red and blue curves moved
+  by at most 0.09 D, staying close to the datasheet's curves). Document,
+  pages, SHA-256 and the step's figures in each profile's datasource and in
+  profile-sources/fujifilm-reversal/. Velvia 100 and Provia 100F were
+  rebuilt only for calibration; their shipped profiles are unchanged. No
+  existing profile changed.
+- presets/couplers.toml: own DIR coupler tables for Velvia 100F, Provia
+  400X and Sensia 100 (the colour-slide default scaled down so the DIR
+  pre-correction does not fold). Existing tables unchanged.
+- filters/neutral_print_filters.json: C0 M50 Y50 for the 7 new slides on
+  every paper, as upstream stores for its slides. Existing entries
+  unchanged.
+- presets/grain.toml: grain sections for the 7 new slides in a Negs-only
+  block at the end (the datasheet's RMS granularity on every layer).
+  Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 7 new slides,
+  crates/spektrafilm-io/src/film35.rs.
