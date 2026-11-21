@@ -1,6 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --dev: an app to try changes on this Mac. Apple silicon only, built in the
+# shared target/ (so it reuses what `cargo build --release`, `cargo test
+# --release` and the Swift tests built), into dist/negs-macos-dev. No source
+# archive, zip, DMG or package audit. Never publish it. About 5 s with nothing
+# changed, ~15 s after an engine edit, ~55 s after a Swift edit.
+# --dev --debug: the Swift app in debug, ~25 s after a Swift edit. SwiftUI is
+# much slower in debug, so don't judge timing, scrolling or launch with it.
+DEV=0
+SWIFT_CONFIG=release
+for arg in "$@"; do
+    case "$arg" in
+        --dev) DEV=1 ;;
+        --debug) SWIFT_CONFIG=debug ;;
+        *) echo "Unknown option: $arg (use --dev, --dev --debug, or nothing)" >&2; exit 2 ;;
+    esac
+done
+if [[ $SWIFT_CONFIG == debug && $DEV != 1 ]]; then
+    echo "--debug only goes with --dev" >&2
+    exit 2
+fi
+if [[ $DEV == 1 ]]; then
+    BUILD_TARGET_DIR="${BUILD_TARGET_DIR:-target}"
+    DIST_DIR="${DIST_DIR:-dist/negs-macos-dev}"
+fi
+
 ICON_SOURCE="${ICON_SOURCE:-assets/negs-icon.png}"
 ICON_ICNS="${ICON_ICNS:-}"
 BUILD_TARGET_DIR="${BUILD_TARGET_DIR:-target/macos-app}"
@@ -28,6 +53,11 @@ export MACOSX_DEPLOYMENT_TARGET=14.0
 # here can't run AVX2) and switch if it is faster and renders the same.
 rust_targets=(--target aarch64-apple-darwin --target x86_64-apple-darwin)
 swift_archs=(--arch arm64 --arch x86_64)
+if [[ $DEV == 1 ]]; then
+    # Host architecture into $BUILD_TARGET_DIR/release, where plain cargo builds go.
+    rust_targets=()
+    swift_archs=()
+fi
 # CI builds each architecture's Rust executables in parallel jobs and places
 # them under $BUILD_TARGET_DIR/<target>/release before calling this script.
 if [[ "${NEGS_PREBUILT_RUST:-}" == 1 ]]; then
@@ -40,21 +70,32 @@ if [[ "${NEGS_PREBUILT_RUST:-}" == 1 ]]; then
         done
     done
 else
-    cargo build --locked --release -p spektrafilm-native "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+    cargo build --locked --release -p spektrafilm-native ${rust_targets[@]+"${rust_targets[@]}"} --target-dir "$BUILD_TARGET_DIR"
 fi
-swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions "${swift_archs[@]}"
-swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions "${swift_archs[@]}" --show-bin-path)"
+# The shared app core (core/, Odin) into target/negs-core, where
+# macos/Package.swift links it: both architectures, or the host's for --dev.
+core_args=(--universal)
+if [[ $DEV == 1 ]]; then
+    core_args=()
+fi
+"$PYTHON" core/build.py lib ${core_args[@]+"${core_args[@]}"}
+swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c "$SWIFT_CONFIG" --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"}
+swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c "$SWIFT_CONFIG" --force-resolved-versions ${swift_archs[@]+"${swift_archs[@]}"} --show-bin-path)"
 if [[ "${NEGS_PREBUILT_RUST:-}" != 1 ]]; then
-    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
-    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm ${rust_targets[@]+"${rust_targets[@]}"} --target-dir "$BUILD_TARGET_DIR"
+    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 ${rust_targets[@]+"${rust_targets[@]}"} --target-dir "$BUILD_TARGET_DIR"
 fi
-universal_dir="$BUILD_TARGET_DIR/universal-apple-darwin/release"
-mkdir -p "$universal_dir"
-for binary in spektrafilm-native spektrafilm spektrafilm-f64; do
-    lipo -create -output "$universal_dir/$binary" \
-        "$BUILD_TARGET_DIR/aarch64-apple-darwin/release/$binary" \
-        "$BUILD_TARGET_DIR/x86_64-apple-darwin/release/$binary"
-done
+if [[ $DEV == 1 ]]; then
+    universal_dir="$BUILD_TARGET_DIR/release"
+else
+    universal_dir="$BUILD_TARGET_DIR/universal-apple-darwin/release"
+    mkdir -p "$universal_dir"
+    for binary in spektrafilm-native spektrafilm spektrafilm-f64; do
+        lipo -create -output "$universal_dir/$binary" \
+            "$BUILD_TARGET_DIR/aarch64-apple-darwin/release/$binary" \
+            "$BUILD_TARGET_DIR/x86_64-apple-darwin/release/$binary"
+    done
+fi
 
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks" "$RELEASE_DIR"
@@ -70,6 +111,11 @@ cp -R data "$APP_BUNDLE/Contents/Resources/data"
 mkdir -p "$APP_BUNDLE/Contents/Resources/Fonts"
 cp macos/Fonts/Newsreader-Negs.ttf macos/Fonts/Newsreader-Negs-Italic.ttf macos/Fonts/OFL-Newsreader.txt "$APP_BUNDLE/Contents/Resources/Fonts/"
 cp LICENSE "$APP_BUNDLE/Contents/Resources/LICENSE.txt"
+# The vendored RAW decoders compiled into the engine (vendor/README.md).
+cp vendor/rawler/LICENSE "$APP_BUNDLE/Contents/Resources/rawler-LICENSE.txt"
+cp vendor/libraw/LICENSE.LGPL "$APP_BUNDLE/Contents/Resources/LibRaw-LICENSE.LGPL.txt"
+cp vendor/libraw/LICENSE.CDDL "$APP_BUNDLE/Contents/Resources/LibRaw-LICENSE.CDDL.txt"
+cp vendor/libraw/COPYRIGHT "$APP_BUNDLE/Contents/Resources/LibRaw-COPYRIGHT.txt"
 # The app's accent colour, the warm grey of its outlines: menus, default
 # buttons and focus take it instead of the system blue (Info.plist names it).
 xcrun actool macos/Assets.xcassets --compile "$APP_BUNDLE/Contents/Resources" \
@@ -157,13 +203,17 @@ README
     git rev-parse HEAD
     git status --short
     "$PYTHON" scripts/macos_release.py
+    # Set by .claude/settings.json for agents; CI builds have none of these.
+    env | grep '^CARGO_PROFILE_' || echo "Cargo profile: Cargo.toml as is"
 } > "$DIST_DIR/BUILD-INFO.txt"
 
 # Snapshot the actual working source, including uncommitted port changes.
 # Exclude build products and local files unrelated to reproducing the app.
-COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='.build' --exclude='.swiftpm' \
-    -czf "$DIST_DIR/SOURCE.tar.gz" Cargo.toml Cargo.lock LICENSE README.md \
-    crates macos data assets scripts docs .github release
+if [[ $DEV != 1 ]]; then
+    COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='.build' --exclude='.swiftpm' \
+        -czf "$DIST_DIR/SOURCE.tar.gz" Cargo.toml Cargo.lock LICENSE README.md \
+        crates vendor macos data assets scripts docs .github release
+fi
 
 # Ad-hoc sign our own executables and the outer app. Do not recursively
 # overwrite Sparkle's supplied signatures. No Apple account is required.
@@ -175,6 +225,10 @@ done
 codesign --force --sign - "$APP_BUNDLE"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
+if [[ $DEV == 1 ]]; then
+    echo "Dev app: $repo_root/$APP_BUNDLE"
+    exit 0
+fi
 
 # Only the app goes in the update archive. Corresponding source is a separate
 # release asset so it doesn't double every updater download.

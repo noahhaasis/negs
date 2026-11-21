@@ -26,6 +26,43 @@ pub struct EditState {
     /// before it read as off and keep their exposure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness_match: Option<BrightnessMatch>,
+    /// A scanned negative printed as a frame of a darkroom roll (§9.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roll: Option<Roll>,
+}
+
+/// A darkroom roll (§9.2, `NegativeRoll`): frames printed alike, as a
+/// printer prints a roll with one filtration and gives each frame its own
+/// exposure. It lives in each frame's own sidecar (`edits.roll`), beside
+/// that frame's full copy of the shared settings; the roll is just the
+/// frames that carry its id. Its filtration is kept too, so a frame knows
+/// whether it set its own and can go back to the roll's.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Roll {
+    pub id: String,
+    /// The roll's enlarger filtration: magenta and yellow shifts.
+    pub magenta: f64,
+    pub yellow: f64,
+    /// The paper the roll's filtration is balanced for; None for a roll
+    /// kept before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paper: Option<String>,
+}
+
+impl Roll {
+    /// `state` prints with the roll's filtration, not one of its own.
+    pub fn filtered(&self, state: &EditState) -> bool {
+        state.value("enlarger.m_filter_shift").as_f64() == Some(self.magenta) && state.value("enlarger.y_filter_shift").as_f64() == Some(self.yellow)
+    }
+
+    /// Prep's word for a frame of this roll with its own filtration: why,
+    /// when it's on another paper.
+    pub fn own_filtration(&self, state: &EditState) -> &'static str {
+        match &self.paper {
+            Some(paper) if *paper != state.paper => "On another paper than its roll, so it has its own filtration.",
+            _ => "This frame has its own filtration.",
+        }
+    }
 }
 
 impl Default for EditState {
@@ -38,6 +75,7 @@ impl Default for EditState {
             border: BorderSettings::default(),
             crop: CropSettings::default(),
             brightness_match: None,
+            roll: None,
         }
     }
 }
@@ -51,6 +89,7 @@ impl PartialEq for EditState {
             && self.border == other.border
             && self.crop == other.crop
             && self.brightness_match == other.brightness_match
+            && self.roll == other.roll
     }
 }
 
@@ -92,7 +131,7 @@ pub const PREP_EXPOSURE: &str = "prep.exposure_ev";
 pub fn match_inputs(state: &EditState) -> Value {
     let mut params = state.params.clone();
     for path in [
-        "prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.crop", "io.crop_center",
+        "prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.flip", "io.crop", "io.crop_center",
         "io.crop_size", "io.output_color_space", "io.output_cctf_encoding", "settings.serial_grain",
     ] {
         json::set(&mut params, path, Value::Null);
@@ -102,8 +141,9 @@ pub fn match_inputs(state: &EditState) -> Value {
 
 impl EditState {
     /// The state without presentation-only settings, to decide whether an
-    /// edit needs a new render. The preview is never rotated: the canvas
-    /// turns it, and saving and exporting rotate the result. With an Image
+    /// edit needs a new render. The preview is never rotated or mirrored:
+    /// the canvas turns and mirrors it, and saving and exporting do it to the
+    /// result. With an Image
     /// Size target the crop's extent sets the working size, so it stays; its
     /// position, angle and ratio never change the render.
     pub fn rendered(&self) -> EditState {
@@ -116,6 +156,7 @@ impl EditState {
             state.crop.rect.height = self.crop.rect.height;
         }
         json::set(&mut state.params, "io.rotate_cw", Value::Null);
+        json::set(&mut state.params, FLIP, Value::Null);
         state
     }
 
@@ -126,7 +167,20 @@ impl EditState {
     pub fn rotation(&self) -> i32 {
         json::number(self.value("io.rotate_cw")) as i32
     }
+
+    /// Mirrored left to right after the crop, before the turns (`io.flip`).
+    pub fn flip(&self) -> bool {
+        self.value(FLIP).as_bool().unwrap_or(false)
+    }
+
+    pub fn orientation(&self) -> crate::crop::Orientation {
+        crate::crop::Orientation::new(self.rotation(), self.flip())
+    }
 }
+
+/// Flip (`IoParams::flip`): the engine mirrors the saved photograph left to
+/// right after the crop and before `io.rotate_cw`.
+pub const FLIP: &str = "io.flip";
 
 /// Image Size (`ImageSize.swift`): the resolution the film develops at. A
 /// Longest side target describes the cropped photograph before borders and
@@ -183,6 +237,196 @@ pub struct Stock {
     pub times: Vec<f64>,
     /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
     pub grain: Value,
+    /// Ported from Fotufilm; and, for those, whether from the manufacturer's
+    /// data rather than modelled from sample photographs (Settings › Fotufilm films).
+    pub fotufilm: bool,
+    pub manufacturer_data: bool,
+    /// Prepared by Negs itself from datasheets (Settings › Show Negs-built films).
+    pub negs_built: bool,
+}
+
+/// A camera colour filter from the catalog (`ColorFilter` in
+/// `Parameters.swift`, issue #21): its params key, the colour it's named
+/// by, the measured glass, and the glass's colour for its disc.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorFilter {
+    pub key: String,
+    pub name: String,
+    pub glass: String,
+    pub colour: u32,
+}
+
+impl ColorFilter {
+    pub const PATH: &'static str = "camera.color_filter";
+    pub const NONE: &'static str = "none";
+
+    pub fn new(value: &Value) -> Self {
+        Self {
+            key: json::string(&value["key"]).into(),
+            name: json::string(&value["name"]).into(),
+            glass: json::string(&value["glass"]).into(),
+            colour: u32::from_str_radix(json::string(&value["colour"]).trim_start_matches('#'), 16).unwrap_or(0x888888),
+        }
+    }
+
+    /// What each filter does to a black-and-white photograph.
+    pub fn effect(key: &str) -> &'static str {
+        match key {
+            "hoya_x1" => "Lightens foliage; darkens red lips and skin a little, for a tanned look.",
+            "hoya_x0" => "Lightens foliage and darkens the sky a little. Kind to skin outdoors.",
+            "hoya_y2" => "Darkens blue sky a touch so clouds stand out. The everyday filter.",
+            "hoya_ya3" => "Darker sky, stronger clouds, less haze. Hides freckles and blemishes.",
+            "hoya_r1" => "Near-black blue sky, bright red and brick, pale skin and lips. Cuts haze hard.",
+            _ => "No glass in front of the lens.",
+        }
+    }
+
+    /// What the filter does, then what it costs the film
+    /// (`ColorFilterPicker.hint`): "… Takes 1,3 stops on Ilford HP5 Plus;
+    /// auto exposure gives it." `decimal` is the locale's separator.
+    pub fn hint(filter: Option<&ColorFilter>, stops: Option<f64>, film: &str, metered: bool, decimal: char) -> String {
+        let Some(filter) = filter else { return Self::effect(Self::NONE).into() };
+        let mut text = Self::effect(&filter.key).to_string();
+        if let Some(stops) = stops {
+            let rounded = (stops * 10.0).round() / 10.0;
+            let number = if rounded.fract() == 0.0 { format!("{rounded:.0}") } else { format!("{rounded:.1}").replace('.', &decimal.to_string()) };
+            let plural = if (stops - 1.0).abs() < 0.05 { "" } else { "s" };
+            text += &format!(" Takes {number} stop{plural} on {film}");
+            text += if metered { "; auto exposure gives it." } else { "." };
+        }
+        text
+    }
+
+    /// The disc's tooltip.
+    pub fn help(filter: Option<&ColorFilter>) -> String {
+        filter.map_or_else(|| "No filter in front of the lens.".into(), |f| format!("{} · {}. {}", f.name, f.glass, Self::effect(&f.key)))
+    }
+}
+
+/// Enlarger › Shifts move (`FilterLink` in `Parameters.swift`): how the
+/// magenta and yellow shift sliders move each other. Together is the
+/// red↔cyan axis. Linked, they also reset together. A preference of the app,
+/// not of the edit: the edit still holds just the two shifts, so presets
+/// are unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilterLink {
+    Separate,
+    Together,
+    Opposite,
+}
+
+impl FilterLink {
+    pub const ALL: [FilterLink; 3] = [FilterLink::Separate, FilterLink::Together, FilterLink::Opposite];
+    pub const MAGENTA: &'static str = "enlarger.m_filter_shift";
+    pub const YELLOW: &'static str = "enlarger.y_filter_shift";
+    pub const RANGE: (f64, f64) = (-50.0, 50.0);
+
+    /// As the Mac stores it (`filterShiftLink`); anything else is Separately.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "together" => Self::Together,
+            "opposite" => Self::Opposite,
+            _ => Self::Separate,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Separate => "separate",
+            Self::Together => "together",
+            Self::Opposite => "opposite",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Separate => "Separately",
+            Self::Together => "Together",
+            Self::Opposite => "Opposite ways",
+        }
+    }
+
+    pub fn links(path: &str) -> bool {
+        path == Self::MAGENTA || path == Self::YELLOW
+    }
+
+    /// The two shifts after moving `path` to `value` (already snapped). The
+    /// other moves by the same change, so their gap (Together) or sum
+    /// (Opposite) holds, with no jump on switching; at either end of the
+    /// range both stop.
+    pub fn shifts(self, path: &str, value: f64, magenta: f64, yellow: f64) -> (f64, f64) {
+        let moving_magenta = path == Self::MAGENTA;
+        let (current, other) = if moving_magenta { (magenta, yellow) } else { (yellow, magenta) };
+        if self == Self::Separate {
+            return if moving_magenta { (value, yellow) } else { (magenta, value) };
+        }
+        let sign = if self == Self::Together { 1.0 } else { -1.0 };
+        // The other's room to move, in the moving slider's direction.
+        let (low, high) = if sign > 0.0 {
+            (Self::RANGE.0 - other, Self::RANGE.1 - other)
+        } else {
+            (other - Self::RANGE.1, other - Self::RANGE.0)
+        };
+        let delta = (value - current).max(low.min(0.0)).min(high.max(0.0));
+        let (moved, followed) = (current + delta, other + sign * delta);
+        if moving_magenta { (moved, followed) } else { (followed, moved) }
+    }
+}
+
+/// Settings › Show Negs-built films (`NegsBuiltFilms` in `Parameters.swift`):
+/// the films Negs prepared itself from datasheets stay out of the film menu and
+/// grid until shown. Only the lists, as for Fotufilm films.
+pub fn lists_negs_built(stock: &Stock, shown: bool) -> bool {
+    shown || !stock.negs_built
+}
+
+pub const NEGS_BUILT_HINT: &str = "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; and the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides. Photos already using one keep it.";
+
+/// Settings › Fotufilm films (`FotufilmFilms` in `Parameters.swift`): which
+/// of the films ported from Fotufilm the film menu and grid list. Only the
+/// lists: an edit or a preset with a hidden film keeps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FotufilmFilms {
+    All,
+    Datasheets,
+    Off,
+}
+
+impl FotufilmFilms {
+    pub const ALL: [FotufilmFilms; 3] = [FotufilmFilms::All, FotufilmFilms::Datasheets, FotufilmFilms::Off];
+
+    /// As the Mac stores it (`fotufilmFilms`); anything else is All.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "datasheets" => Self::Datasheets,
+            "off" => Self::Off,
+            _ => Self::All,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Datasheets => "datasheets",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Datasheets => "From datasheets",
+            Self::Off => "None",
+        }
+    }
+
+    pub fn lists(self, stock: &Stock) -> bool {
+        match self {
+            Self::All => true,
+            Self::Datasheets => !stock.fotufilm || stock.manufacturer_data,
+            Self::Off => !stock.fotufilm,
+        }
+    }
 }
 
 /// Grain arrays that stay null until edited, so the film's preset from the
@@ -233,6 +477,10 @@ impl Stock {
             target: json::string(&value["target_print"]).into(),
             times: value["development_times"].as_array().map(|a| a.iter().map(json::number).collect()).unwrap_or_default(),
             grain: value["grain"].clone(),
+            // A catalog from before these fields lists every film.
+            fotufilm: json::boolean(&value["fotufilm"]),
+            manufacturer_data: value["manufacturer_data"] != Value::Bool(false),
+            negs_built: json::boolean(&value["negs_built"]),
         }
     }
 
@@ -367,6 +615,9 @@ pub fn option_title(option: &str) -> String {
         "auto" => "Automatic",
         "daylight" => "Daylight",
         "tungsten" => "Tungsten",
+        "D55" => "Daylight, 5500 K",
+        "D50" => "Light box, 5000 K",
+        "D65" => "Cool LED, 6500 K",
         "custom" => "Custom",
         "black_pro_mist" => "Black Pro-Mist",
         "glimmerglass" => "Glimmerglass",
@@ -429,6 +680,8 @@ pub enum Adjustment {
     Choice { title: &'static str, path: &'static str, options: &'static [&'static str] },
     /// Solves the enlarger's M/Y filter shifts so a mid-grey prints neutral.
     BalancePrint { title: &'static str, help: &'static str },
+    /// Enlarger › Shifts move: a preference, not an edit (`FilterLink`).
+    FilterLink { help: &'static str },
 }
 
 impl Adjustment {
@@ -436,7 +689,7 @@ impl Adjustment {
     pub fn path(&self) -> &'static str {
         match *self {
             Adjustment::Slider { path, .. } | Adjustment::Toggle { path, .. } | Adjustment::Choice { path, .. } => path,
-            Adjustment::BalancePrint { .. } => "",
+            Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. } => "",
         }
     }
 }
@@ -572,11 +825,14 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Enlarger",
         section: Section::Print,
         enable: None,
-        basic: 4,
+        basic: 5,
         controls: &[
             slider("Print exposure", "enlarger.print_exposure", 0.1, 5.0, 0.01),
             slider("Magenta shift", "enlarger.m_filter_shift", -50.0, 50.0, 0.1),
             slider("Yellow shift", "enlarger.y_filter_shift", -50.0, 50.0, 0.1),
+            Adjustment::FilterLink {
+                help: "How the magenta and yellow shifts move. Together moves both the same way: more of both makes the print more cyan, less of both redder. Opposite ways moves one up as the other goes down. Linked, resetting either resets both. Each keeps its own value, so presets are unchanged.",
+            },
             Adjustment::BalancePrint {
                 title: "Balance Print",
                 help: "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.",
@@ -850,7 +1106,7 @@ mod tests {
     #[test]
     fn stocks_group_like_the_mac() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool, target: &str| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null,
+            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
         };
         let films = [
             stock("gold", "Gold", false, false, false, "endura"),
@@ -874,7 +1130,7 @@ mod tests {
     #[test]
     fn film_search_matches_every_word_in_name_id_or_group() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: String::new(), times: vec![], grain: Value::Null,
+            id: id.into(), name: name.into(), paper, positive, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
         };
         // The Mac's fixture: Gold 200, Velvia 50 and Tri-X 400.
         let films = [stock("gold", "Gold 200", false, false, false), stock("velvia", "Velvia 50", false, true, false), stock("trix", "Tri-X 400", false, false, true)];

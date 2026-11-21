@@ -9,7 +9,11 @@ struct PreviewCanvas: NSViewRepresentable {
     let image: AnyObject
     let size: CGSize
     let rotation: Int
+    /// Mirrored left to right after the crop, before `rotation` (`io.flip`).
+    var flip = false
     let crop: CropSettings
+    /// The tile's pixels have already been cropped and straightened.
+    var cut = false
     let border: BorderSettings?
     let filmTexture: CGImage?
     let filmStrip: FilmStrip?
@@ -26,6 +30,19 @@ struct PreviewCanvas: NSViewRepresentable {
     var settled = true
     /// A double-click on the photograph; true if it's zoomed from fitting.
     var doubleClick: ((_ zoomed: Bool) -> Void)?
+    /// While set, a click on the photograph is a pick: where, as fractions
+    /// of the whole, uncropped photograph from its top left.
+    var pick: ((CGPoint) -> Void)?
+    /// Space left and right of the fitted photograph. Compare lays out its
+    /// frames itself and fits each photograph to its frame (0).
+    var inset = ImageScrollView.fitInset
+    /// Compare: zoom and pan follow the other photograph's.
+    var link: ZoomLink?
+    /// A click on the photograph that didn't drag it.
+    var click: ((CGFloat) -> Void)?
+    /// Original ⌄ › Split line: the original left of the line, at this
+    /// fraction of the canvas's width.
+    var split: (original: AnyObject, fraction: CGFloat)?
 
     func makeNSView(context: Context) -> ImageScrollView {
         let scroll = ImageScrollView()
@@ -44,21 +61,23 @@ struct PreviewCanvas: NSViewRepresentable {
         scale?.view = scroll
         scroll.geometry = geometry
         scroll.doubleClick = doubleClick
+        scroll.click = click
+        if scroll.inset != inset { scroll.inset = inset; if scroll.fitting { scroll.applyZoom() } }
+        scroll.link = link
         let photo = scroll.documentView as! PhotographView
-        let cropped = crop.size(of: size)
-        let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
-        let documentSize = border.map { border in
-            let canvas = border.canvas(for: displaySize, strip: filmStrip)
-            return border.instagram ? border.instagramCanvas(for: canvas) : canvas
-        } ?? displaySize
+        if (photo.pick == nil) != (pick == nil) { photo.window?.invalidateCursorRects(for: photo) }
+        photo.pick = pick
+        let displaySize = Self.displaySize(size, rotation: rotation, crop: crop)
+        let documentSize = Self.documentSize(size, rotation: rotation, crop: crop, border: border, filmStrip: filmStrip)
         let oldSize = photo.frame.size, oldPhotoSize = photo.displaySize
         let commanded = scroll.lastCommand != zoomCommand
         // A different crop (such as an undone one) is a new picture: fit it.
         let recropped = photo.crop != crop && oldSize.width != 0
         if recropped { scroll.fitting = true }
         photo.settled = settled
-        photo.show(image, size: size, rotation: rotation, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
+        photo.show(image, size: size, rotation: rotation, flip: flip, crop: crop, cut: cut, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
         photo.turned = upsideDown
+        photo.split = split
         if oldSize != documentSize {
             if commanded || scroll.fitting || oldSize.width == 0 {
                 photo.setFrameSize(documentSize)
@@ -73,6 +92,41 @@ struct PreviewCanvas: NSViewRepresentable {
             scroll.lastCommand = zoomCommand; scroll.fitting = fit
             scroll.applyZoom()
         } else if oldSize != documentSize || recropped, scroll.fitting { scroll.applyZoom() }
+    }
+
+    /// The photograph's size on the canvas, cropped and turned.
+    static func displaySize(_ size: CGSize, rotation: Int, crop: CropSettings) -> CGSize {
+        let cropped = crop.size(of: size)
+        return rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
+    }
+    /// The print's size: the photograph in its border.
+    static func documentSize(_ size: CGSize, rotation: Int, crop: CropSettings, border: BorderSettings?, filmStrip: FilmStrip?) -> CGSize {
+        let displaySize = displaySize(size, rotation: rotation, crop: crop)
+        return border.map { border in
+            let canvas = border.canvas(for: displaySize, strip: filmStrip)
+            return border.instagram ? border.instagramCanvas(for: canvas) : canvas
+        } ?? displaySize
+    }
+}
+
+/// Compare's two canvases zoom and pan together: each at the same multiple
+/// of its own fit, showing the same fraction of its photograph.
+@MainActor final class ZoomLink {
+    private final class Entry { weak var view: ImageScrollView?; init(_ view: ImageScrollView) { self.view = view } }
+    private var entries: [Entry] = []
+    private var following = false
+
+    func register(_ view: ImageScrollView) {
+        entries.removeAll { $0.view == nil }
+        if !entries.contains(where: { $0.view === view }) { entries.append(Entry(view)) }
+    }
+
+    /// `view` was zoomed or panned by hand: the others follow.
+    func moved(_ view: ImageScrollView) {
+        guard !following, let state = view.linkState else { return }
+        following = true
+        defer { following = false }
+        for entry in entries { if let other = entry.view, other !== view { other.follow(state) } }
     }
 }
 
@@ -122,6 +176,10 @@ final class ImageScrollView: NSScrollView {
     var fitting = true { didSet { if fitting != oldValue { photograph?.refreshSharp() } } }
     private var photograph: PhotographView? { documentView as? PhotographView }
     var doubleClick: ((_ zoomed: Bool) -> Void)?
+    var click: ((CGFloat) -> Void)?
+    /// This canvas's space either side of a fitted photograph.
+    var inset = ImageScrollView.fitInset
+    var link: ZoomLink? { didSet { if link !== oldValue { link?.register(self) } } }
     var geometry: CanvasGeometry? { didSet { if geometry !== oldValue { observeBounds(); reportGeometry() } } }
     /// Space left and right of a fitted photograph (§2.3). The caption and
     /// label bands above and below are outside the scroll view.
@@ -136,7 +194,7 @@ final class ImageScrollView: NSScrollView {
         reportGeometry()
     }
     /// The viewport a fitted photograph fills.
-    var fitViewport: CGSize { Self.fitViewport(contentSize) }
+    var fitViewport: CGSize { CGSize(width: max(contentSize.width - inset * 2, 1), height: contentSize.height) }
     static func fitViewport(_ size: CGSize) -> CGSize { CGSize(width: max(size.width - fitInset * 2, 1), height: size.height) }
     func applyZoom() {
         guard let documentView, documentView.frame.width > 0, contentSize.width > 0 else { return }
@@ -150,6 +208,39 @@ final class ImageScrollView: NSScrollView {
     override func reflectScrolledClipView(_ clipView: NSClipView) {
         super.reflectScrolledClipView(clipView)
         photograph?.refreshSharp()
+        photograph?.placeSplit()
+        if !following { link?.moved(self) }
+    }
+
+    // MARK: Linked (compare)
+
+    /// Where it's zoomed and panned, apart from its photograph's size.
+    struct LinkState { var fitting: Bool; var relative: CGFloat; var centre: CGPoint }
+    private var following = false
+    var linkState: LinkState? {
+        guard let documentView, documentView.frame.width > 0, magnification > 0 else { return nil }
+        let size = documentView.frame.size, fit = fitMagnification
+        guard fit > 0 else { return nil }
+        let visible = contentView.bounds
+        return LinkState(fitting: fitting, relative: magnification / fit, centre: CGPoint(x: visible.midX / size.width, y: visible.midY / size.height))
+    }
+    private var fitMagnification: CGFloat {
+        guard let documentView else { return 0 }
+        return min(max(Self.magnification(fitting: true, document: documentView.frame.size, viewport: fitViewport,
+                                          backingScale: window?.backingScaleFactor ?? 2), minMagnification), maxMagnification)
+    }
+    func follow(_ state: LinkState) {
+        guard let documentView, documentView.frame.width > 0 else { return }
+        following = true
+        defer { following = false }
+        fitting = state.fitting
+        let size = documentView.frame.size
+        let amount = min(max(fitMagnification * state.relative, minMagnification), maxMagnification)
+        if abs(amount - magnification) > 1e-6 { magnification = amount }
+        let bounds = contentView.bounds
+        contentView.scroll(to: CGPoint(x: state.centre.x * size.width - bounds.width / 2, y: state.centre.y * size.height - bounds.height / 2))
+        reflectScrolledClipView(contentView)
+        reportGeometry()
     }
 
     private var boundsObserver: NSObjectProtocol?
@@ -242,10 +333,22 @@ final class PhotographView: NSView {
     /// grid (`FitDownscale`). Hidden whenever it doesn't match the canvas.
     let sharp = CALayer()
     private var borderLayers: BorderLayers!
+    /// Original ⌄ › Split line: a copy of the turn, crop and photograph
+    /// holding the original, cut off at the line in the view's coordinates.
+    private let splitHost = CALayer(), splitTurn = CALayer(), splitClip = CALayer(), splitPhoto = CALayer()
+    var split: (original: AnyObject, fraction: CGFloat)? {
+        didSet {
+            guard split?.original !== oldValue?.original || split?.fraction != oldValue?.fraction else { return }
+            if split?.original !== oldValue?.original { splitPhoto.contents = split?.original }
+            placeSplit()
+        }
+    }
     private var image: AnyObject?
     private var size = CGSize.zero
     private var rotation = 0
+    private var flip = false
     private(set) var crop = CropSettings()
+    private var cut = false
     private var border: BorderSettings?
     private var filmTexture: CGImage?
     private var filmStrip: FilmStrip?
@@ -281,13 +384,46 @@ final class PhotographView: NSView {
         turn.addSublayer(clip)
         layer?.addSublayer(turn)
         borderLayers = BorderLayers(in: turn, around: clip)
+        for split in [splitHost, splitTurn, splitClip, splitPhoto] { split.actions = none }
+        splitPhoto.contentsGravity = .resize
+        splitPhoto.minificationFilter = .trilinear
+        splitPhoto.magnificationFilter = .linear
+        splitClip.masksToBounds = true
+        splitHost.masksToBounds = true
+        splitHost.anchorPoint = .zero
+        splitHost.isHidden = true
+        splitClip.addSublayer(splitPhoto)
+        splitTurn.addSublayer(splitClip)
+        splitHost.addSublayer(splitTurn)
+        layer?.addSublayer(splitHost)
+    }
+
+    /// Mirrors the photograph's layers into the split's, and cuts them at
+    /// the line: a fraction of the visible width, so it stays put on screen
+    /// while the photograph pans and zooms.
+    func placeSplit() {
+        guard let split else {
+            if !splitHost.isHidden { splitHost.isHidden = true }
+            return
+        }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        let visible = enclosingScrollView.map { convert($0.contentView.bounds, from: $0.contentView) } ?? bounds
+        let x = min(max(visible.minX + visible.width * split.fraction, 0), bounds.width)
+        splitHost.position = .zero
+        splitHost.bounds = CGRect(x: 0, y: 0, width: x, height: bounds.height)
+        for (copy, layer) in [(splitTurn, turn), (splitClip, clip), (splitPhoto, photo)] {
+            copy.bounds = layer.bounds; copy.anchorPoint = layer.anchorPoint
+            copy.position = layer.position; copy.setAffineTransform(layer.affineTransform())
+        }
+        splitHost.isHidden = false
+        CATransaction.commit()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ image: AnyObject, size: CGSize, rotation: Int, crop: CropSettings = CropSettings(), border: BorderSettings? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
-        guard image !== self.image || size != self.size || rotation != self.rotation || crop != self.crop
-            || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
-        self.image = image; self.size = size; self.rotation = rotation; self.crop = crop
+    func show(_ image: AnyObject, size: CGSize, rotation: Int, flip: Bool = false, crop: CropSettings = CropSettings(), cut: Bool = false, border: BorderSettings? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
+        guard image !== self.image || size != self.size || rotation != self.rotation || flip != self.flip || crop != self.crop
+            || cut != self.cut || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
+        self.image = image; self.size = size; self.rotation = rotation; self.flip = flip; self.crop = crop; self.cut = cut
         self.border = border; self.filmTexture = filmTexture; self.filmStrip = filmStrip
         photo.contents = image
         needsLayout = true
@@ -300,10 +436,12 @@ final class PhotographView: NSView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         turn.bounds = CGRect(origin: .zero, size: bounds.size)
         placeTurn()
-        Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, center: CGPoint(x: bounds.midX, y: bounds.midY))
+        Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, flip: flip,
+                    center: CGPoint(x: bounds.midX, y: bounds.midY), cut: cut)
         borderLayers.layout(border, photo: displaySize, host: turn, texture: filmTexture, filmStrip: filmStrip)
         refreshSharp()
         CATransaction.commit()
+        placeSplit()
     }
 
     // MARK: The fitted photograph, resampled
@@ -457,6 +595,7 @@ final class PhotographView: NSView {
         turn.position = centre
         turn.setAffineTransform(turned ? CGAffineTransform(rotationAngle: .pi) : .identity)
         CATransaction.commit()
+        placeSplit()
     }
     /// The middle of the photograph's part on screen: all of it when fitted.
     static func turnCentre(visible: CGRect?, bounds: CGRect) -> CGPoint {
@@ -465,17 +604,20 @@ final class PhotographView: NSView {
         return CGPoint(x: area.midX, y: area.midY)
     }
 
-    /// Places a photograph of `size` in `clip`, cropped, straightened and
-    /// turned as the exporter does, centred on `center`. The edited
-    /// thumbnails use it too. `cut`: the photograph's image is the crop
-    /// already, straightened.
-    static func layout(clip: CALayer, photo: CALayer, size: CGSize, crop: CropSettings, rotation: Int, center: CGPoint, cut: Bool = false) {
+    /// Places a photograph of `size` in `clip`, cropped, straightened,
+    /// flipped and turned as the exporter does, centred on `center`. The
+    /// edited thumbnails use it too. `cut`: the photograph's image is the
+    /// crop already, straightened.
+    static func layout(clip: CALayer, photo: CALayer, size: CGSize, crop: CropSettings, rotation: Int, flip: Bool = false,
+                       center: CGPoint, cut: Bool = false) {
         // The crop's pixels, as the exporter cuts them. Layers are y-up, so
         // the rectangle's top-left origin flips, and clockwise is negative.
+        // The flip mirrors the cut about its middle before it turns.
         let pixels = crop.pixels(in: size)
         clip.bounds = CGRect(origin: .zero, size: pixels.size)
         clip.position = center
-        clip.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
+        let turn = CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation))
+        clip.setAffineTransform(flip ? CGAffineTransform(scaleX: -1, y: 1).concatenating(turn) : turn)
         if cut {
             photo.bounds = clip.bounds
             photo.position = CGPoint(x: pixels.width / 2, y: pixels.height / 2)
@@ -487,19 +629,50 @@ final class PhotographView: NSView {
         photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
     }
 
+    /// `PreviewCanvas.pick`.
+    var pick: ((CGPoint) -> Void)?
+    /// Where `point` (in this view) lies on the whole photograph, as
+    /// fractions from its top left: back through the turns, flip, crop and
+    /// straightening as shown, and T's half turn. That's the frame the
+    /// helper's `negative_base` and `negative_neutral` read: the decoded
+    /// photograph, upright as its file says, before any of Negs' geometry.
+    /// Nil off the shown photograph, such as on the border.
+    func photographFraction(_ point: CGPoint) -> CGPoint? {
+        guard let layer, size.width > 0, size.height > 0 else { return nil }
+        guard clip.bounds.contains(clip.convert(point, from: layer)) else { return nil }
+        let local = photo.convert(point, from: layer)
+        // The photograph's layer is y-up.
+        return CGPoint(x: local.x / size.width, y: 1 - local.y / size.height)
+    }
+
     private var grabbing = false
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    /// The press has moved the photograph: it isn't a click.
+    private var dragged = false
+    override func resetCursorRects() { addCursorRect(bounds, cursor: pick == nil ? .openHand : .crosshair) }
     override func mouseDown(with event: NSEvent) {
+        dragged = false
+        if let pick, let fraction = photographFraction(convert(event.locationInWindow, from: nil)) {
+            // A pick isn't a click on the photograph (compare's `click`).
+            dragged = true
+            pick(fraction)
+            return
+        }
         if event.clickCount == 2, let scroll = enclosingScrollView as? ImageScrollView {
             scroll.doubleClicked()
         } else if !grabbing { grabbing = true; NSCursor.closedHand.push() }
     }
     override func mouseDragged(with event: NSEvent) {
         guard let scroll = enclosingScrollView else { return }
+        if abs(event.deltaX) + abs(event.deltaY) > 0 { dragged = true }
         var point = scroll.contentView.bounds.origin
         point.x -= event.deltaX / scroll.magnification
         point.y += event.deltaY / scroll.magnification
         scroll.contentView.scroll(to: point); scroll.reflectScrolledClipView(scroll.contentView)
     }
-    override func mouseUp(with event: NSEvent) { if grabbing { grabbing = false; NSCursor.pop() } }
+    override func mouseUp(with event: NSEvent) {
+        if grabbing { grabbing = false; NSCursor.pop() }
+        if !dragged, event.clickCount == 1, let scroll = enclosingScrollView as? ImageScrollView, scroll.bounds.width > 0 {
+            scroll.click?(scroll.convert(event.locationInWindow, from: nil).x / scroll.bounds.width)
+        }
+    }
 }

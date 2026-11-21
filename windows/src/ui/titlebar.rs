@@ -1,9 +1,17 @@
-//! The title bar with the toolbar in it, like the Mac's unified toolbar:
-//! the app icon, the menu bar, the tools, the title and the caption
-//! buttons, drawn in the client area (`WM_NCCALCSIZE` removes the
+//! The title bar (IMPLEMENTATION.md §3, `TitleBar.swift`): 38 DIP of the
+//! theme's `bg` across the window, painted with Direct2D, holding a compact
+//! menu row on the left (File Edit Photo View Help), the file name in
+//! Newsreader 15 600 `paper` after it ("Negs" with nothing open), and
+//! Windows' own minimise, maximise and close on the right, drawn in the
+//! theme. There is no toolbar: its items are in the menus (§5.6) and the
+//! status line. It is drawn in the client area (`WM_NCCALCSIZE` removes the
 //! standard caption; the side and bottom frame stay the system's).
 //!
-//! The menu bar is a toolbar control with a button per menu, so screen
+//! The Grid · Photo · Compare switch stands before the caption buttons
+//! whenever a photograph is open (`view_switch`), the name ending 16 DIPs
+//! before it.
+//!
+//! The menu row is a toolbar control with a button per menu, so screen
 //! readers see "File", "Edit" … as buttons with menus. Its menus are the
 //! window's old menu bar's popups, opened with `TrackPopupMenuEx`; a
 //! message hook moves between them on Left, Right and the pointer, as a
@@ -25,15 +33,20 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use super::d2d::{self, Ink, Painter, TextStyle};
 use super::draw::{self, Canvas, RectF};
-use super::theme;
+use super::theme::{self, Tokens};
 use crate::platform::wide;
 
-/// The band's height, in DIPs.
-pub const HEIGHT: f64 = 40.0;
+/// The band's height, in DIPs (`Theme.Size.titleBar`).
+pub const HEIGHT: f64 = 38.0;
 const CAPTION_BUTTON: f64 = 46.0;
-const ICON: f64 = 40.0;
+/// Before the menu row, and between it and the file name.
+const MENU_INSET: f64 = 6.0;
+const NAME_GAP: f64 = 14.0;
 const MENU_FIRST: u16 = 800;
+/// The file name (§2.2: Newsreader 15, 600, `paper`).
+pub const NAME: TextStyle = TextStyle::serif(15.0, 600);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Caption {
@@ -59,32 +72,57 @@ thread_local! {
     static HOOK: Cell<isize> = const { Cell::new(0) };
     /// A menu opened with Alt+letter: Alt's release must not close it.
     static ALT_HELD: Cell<bool> = const { Cell::new(false) };
-    /// Where the title goes, and the fonts of the title and caption glyphs.
+    /// Where the file name goes, in pixels.
     static TITLE_AREA: Cell<RECT> = const { Cell::new(RECT { left: 0, top: 0, right: 0, bottom: 0 }) };
-    static FONTS: Cell<(isize, isize)> = const { Cell::new((0, 0)) };
-    /// The hairline between the menus and Open.
-    static DIVIDER: Cell<i32> = const { Cell::new(0) };
-    /// The toolbars' tooltips, as (toolbar, tooltip).
-    static TIPS: RefCell<Vec<(isize, isize)>> = const { RefCell::new(Vec::new()) };
+    /// What the band says: the file name, or "Negs".
+    static TITLE: RefCell<String> = RefCell::new(String::from("Negs"));
+    /// The name as it fits the area last painted: (name, width) → shown.
+    static FITTED: RefCell<(String, i32, String)> = const { RefCell::new((String::new(), 0, String::new())) };
+    /// Where the inspector column starts (0: hidden): its top rule runs
+    /// along the band's foot there (round 25).
+    static INSPECTOR_EDGE: Cell<i32> = const { Cell::new(0) };
+    /// The menu row's font (after a DPI change too).
+    static FONT: Cell<isize> = const { Cell::new(0) };
 }
 
-/// The title's and the caption glyphs' fonts (after a DPI change too).
-pub fn set_fonts(title: HFONT, glyphs: HFONT) {
-    FONTS.with(|f| f.set((title.0 as isize, glyphs.0 as isize)));
+/// The menu row's font.
+pub fn set_fonts(menus: HFONT) {
+    FONT.with(|f| f.set(menus.0 as isize));
 }
 
 fn px(hwnd: HWND, dip: f64) -> i32 {
     (dip * unsafe { GetDpiForWindow(hwnd) }.max(96) as f64 / 96.0).round() as i32
 }
 
-/// The band's height for `main` (none in full screen... the band stays,
-/// without caption buttons).
+/// The band's height for `main` (in full screen too, without caption buttons).
 pub fn height(main: HWND) -> i32 {
     px(main, HEIGHT)
 }
 
 fn full_screen(main: HWND) -> bool {
     unsafe { GetWindowLongW(main, GWL_STYLE) as u32 & WS_CAPTION.0 != WS_CAPTION.0 }
+}
+
+/// Sets what the band says and repaints it when that changed.
+pub fn set_title(main: HWND, title: &str) {
+    let changed = TITLE.with(|t| {
+        let mut t = t.borrow_mut();
+        if *t == title {
+            return false;
+        }
+        *t = title.to_string();
+        true
+    });
+    if changed {
+        invalidate(main);
+    }
+}
+
+/// Where the inspector column starts, or 0 while it's hidden.
+pub fn set_inspector_edge(main: HWND, x: i32) {
+    if INSPECTOR_EDGE.with(|e| e.replace(x)) != x {
+        invalidate(main);
+    }
 }
 
 /// The menu bar, from the popups of `menu` (the window has no menu bar).
@@ -130,78 +168,11 @@ pub fn create_menubar(main: HWND, menu: HMENU, font: HFONT) -> HWND {
     bar
 }
 
-/// Button padding for the DPI: menus 32 DIP high, tools 36 × 32.
+/// Button padding for the DPI: compact titles, 28 DIP high.
 pub fn set_metrics(main: HWND, bar: HWND) {
     unsafe {
-        SendMessageW(bar, TB_SETPADDING, WPARAM(0), LPARAM(((px(main, 10.0) & 0xffff) | (px(main, 16.0) << 16)) as isize));
+        SendMessageW(bar, TB_SETPADDING, WPARAM(0), LPARAM(((px(main, 16.0) & 0xffff) | (px(main, 12.0) << 16)) as isize));
         SendMessageW(bar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
-    }
-}
-
-pub fn tool_metrics(main: HWND, toolbar: HWND) {
-    unsafe {
-        let image = px(main, 20.0);
-        let (w, h) = (px(main, 36.0), px(main, 32.0));
-        SendMessageW(toolbar, TB_SETPADDING, WPARAM(0), LPARAM((((w - image) & 0xffff) | ((h - image) << 16)) as isize));
-        SendMessageW(toolbar, TB_SETBUTTONSIZE, WPARAM(0), LPARAM(((w & 0xffff) | (h << 16)) as isize));
-        // Labelled buttons size themselves to their words (`BTNS_AUTOSIZE`).
-        SendMessageW(toolbar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
-    }
-    place_tips(toolbar);
-}
-
-/// Tooltips for a toolbar's buttons, by command. The toolbar's own
-/// (`TBSTYLE_TOOLTIPS`) never showed in the title bar; a tooltip that
-/// watches the toolbar itself (`TTF_SUBCLASS`) does, as on the canvas.
-pub fn add_tips(toolbar: HWND, tips: Vec<(u16, &'static str)>) {
-    unsafe {
-        let Ok(tip) = CreateWindowExW(
-            WS_EX_TOPMOST,
-            TOOLTIPS_CLASSW,
-            None,
-            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX),
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            toolbar,
-            None,
-            super::instance(),
-            None,
-        ) else {
-            return;
-        };
-        theme::apply_control(tip, true);
-        for (command, text) in tips {
-            // The tooltip keeps the pointer: the text lives as long as it.
-            let text: &'static [u16] = Box::leak(wide(text).into_boxed_slice());
-            let info = TTTOOLINFOW {
-                cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
-                uFlags: TTF_SUBCLASS,
-                hwnd: toolbar,
-                uId: command as usize,
-                lpszText: windows::core::PWSTR(text.as_ptr() as *mut _),
-                ..Default::default()
-            };
-            SendMessageW(tip, TTM_ADDTOOLW, WPARAM(0), LPARAM(&info as *const _ as isize));
-        }
-        TIPS.with(|t| t.borrow_mut().push((toolbar.0 as isize, tip.0 as isize)));
-    }
-}
-
-/// Puts each button's tip over the button, after the toolbar sized them.
-fn place_tips(toolbar: HWND) {
-    let Some(tip) = TIPS.with(|t| t.borrow().iter().find(|(b, _)| *b == toolbar.0 as isize).map(|(_, tip)| HWND(*tip as *mut _))) else { return };
-    unsafe {
-        let count = SendMessageW(toolbar, TB_BUTTONCOUNT, WPARAM(0), LPARAM(0)).0 as usize;
-        for i in 0..count {
-            let mut button = TBBUTTON::default();
-            SendMessageW(toolbar, TB_GETBUTTON, WPARAM(i), LPARAM(&mut button as *mut _ as isize));
-            let mut rect = RECT::default();
-            SendMessageW(toolbar, TB_GETITEMRECT, WPARAM(i), LPARAM(&mut rect as *mut _ as isize));
-            let info = TTTOOLINFOW { cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32, hwnd: toolbar, uId: button.idCommand as usize, rect, ..Default::default() };
-            SendMessageW(tip, TTM_NEWTOOLRECTW, WPARAM(0), LPARAM(&info as *const _ as isize));
-        }
     }
 }
 
@@ -213,31 +184,30 @@ fn size_of(bar: HWND) -> SIZE {
     size
 }
 
-/// Places the menu bar, Open after it and the actions (Export, the panel)
-/// before the caption buttons; returns where the title may go, between them.
-/// The photograph's own tools are on the canvas.
-pub fn layout(main: HWND, bar: HWND, tools: HWND, actions: HWND) -> RECT {
+/// Places the menu row; the file name goes between it and the caption
+/// buttons.
+pub fn layout(main: HWND, bar: HWND) {
     let band = height(main);
     let mut client = RECT::default();
     unsafe {
         let _ = GetClientRect(main, &mut client);
         let menus = size_of(bar);
-        let x = px(main, ICON);
+        let x = px(main, MENU_INSET);
         let _ = MoveWindow(bar, x, (band - menus.cy) / 2, menus.cx, menus.cy, true);
-        let tools_size = size_of(tools);
-        let divider = x + menus.cx + px(main, 8.0);
-        DIVIDER.with(|d| d.set(divider));
-        let tools_x = divider + px(main, 8.0);
-        let _ = MoveWindow(tools, tools_x, (band - tools_size.cy) / 2, tools_size.cx, tools_size.cy, true);
         let captions = if full_screen(main) { 0 } else { 3 * px(main, CAPTION_BUTTON) };
-        let actions_size = size_of(actions);
-        let actions_x = client.right - captions - px(main, 8.0) - actions_size.cx;
-        let _ = MoveWindow(actions, actions_x, (band - actions_size.cy) / 2, actions_size.cx, actions_size.cy, true);
-        let area = RECT { left: tools_x + tools_size.cx + px(main, 16.0), top: 0, right: actions_x - px(main, 16.0), bottom: band };
+        let views = super::view_switch::layout(main, client.right - captions, band);
+        let right = if views < client.right - captions { views - px(main, super::view_switch::NAME_GAP) } else { client.right - captions - px(main, 16.0) };
+        let area = RECT { left: x + menus.cx + px(main, NAME_GAP), top: 0, right, bottom: band };
         TITLE_AREA.with(|t| t.set(area));
         let _ = InvalidateRect(main, Some(&RECT { left: 0, top: 0, right: client.right, bottom: band }), false);
-        area
     }
+}
+
+/// The caption buttons a window has: all three, or Close alone for a
+/// window that can't be minimised (Settings).
+fn captions(hwnd: HWND) -> &'static [Caption] {
+    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
+    if style & WS_MINIMIZEBOX.0 != 0 { &[Caption::Minimize, Caption::Maximize, Caption::Close] } else { &[Caption::Close] }
 }
 
 fn caption_rect(main: HWND, which: Caption) -> RECT {
@@ -246,11 +216,9 @@ fn caption_rect(main: HWND, which: Caption) -> RECT {
         let _ = GetClientRect(main, &mut client);
     }
     let w = px(main, CAPTION_BUTTON);
-    let index = match which {
-        Caption::Minimize => 3,
-        Caption::Maximize => 2,
-        Caption::Close => 1,
-    };
+    let shown = captions(main);
+    let Some(at) = shown.iter().position(|&c| c == which) else { return RECT::default() };
+    let index = (shown.len() - at) as i32;
     RECT { left: client.right - index * w, top: 0, right: client.right - (index - 1) * w, bottom: height(main) }
 }
 
@@ -258,7 +226,7 @@ fn caption_at(main: HWND, x: i32, y: i32) -> Option<Caption> {
     if full_screen(main) {
         return None;
     }
-    [Caption::Minimize, Caption::Maximize, Caption::Close].into_iter().find(|&c| {
+    captions(main).iter().copied().find(|&c| {
         let r = caption_rect(main, c);
         x >= r.left && x < r.right && y >= r.top && y < r.bottom
     })
@@ -304,7 +272,8 @@ pub fn nchittest(main: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         }
         let dpi = GetDpiForWindow(main).max(96);
         let frame = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-        if !IsZoomed(main).as_bool() && p.y < frame {
+        let sizable = GetWindowLongW(main, GWL_STYLE) as u32 & WS_THICKFRAME.0 != 0;
+        if sizable && !IsZoomed(main).as_bool() && p.y < frame {
             let mut client = RECT::default();
             let _ = GetClientRect(main, &mut client);
             return LRESULT(if p.x < frame * 2 { HTTOPLEFT } else if p.x >= client.right - frame * 2 { HTTOPRIGHT } else { HTTOP } as isize);
@@ -328,7 +297,7 @@ fn caption_of(hit: WPARAM) -> Option<Caption> {
 }
 
 fn invalidate_captions(main: HWND) {
-    let r = RECT { left: caption_rect(main, Caption::Minimize).left, top: 0, right: caption_rect(main, Caption::Close).right, bottom: height(main) };
+    let r = RECT { left: caption_rect(main, captions(main)[0]).left, top: 0, right: caption_rect(main, Caption::Close).right, bottom: height(main) };
     unsafe {
         let _ = InvalidateRect(main, Some(&r), false);
     }
@@ -381,15 +350,10 @@ pub fn ncmouse(main: HWND, msg: u32, wparam: WPARAM) -> Option<LRESULT> {
     }
 }
 
-/// Paints the band: icon, title and caption buttons (the menu bar and the
-/// tools paint themselves), and a hairline under it.
+/// Paints the band: `bg`, the file name and the caption buttons (the menu
+/// row paints itself), and the inspector's top rule over its column.
 pub fn paint(main: HWND, dc: HDC) {
-    let title_area = TITLE_AREA.with(Cell::get);
-    let (font, glyphs) = FONTS.with(Cell::get);
-    let (font, glyphs) = (HFONT(font as *mut _), HFONT(glyphs as *mut _));
-    let title = draw::window_text(main);
-    let icon = app_icon();
-    let p = theme::palette();
+    let t = theme::tokens();
     let s = draw::dpi_of(main);
     let band = height(main);
     let mut client = RECT::default();
@@ -397,72 +361,158 @@ pub fn paint(main: HWND, dc: HDC) {
         let _ = GetClientRect(main, &mut client);
     }
     let active = unsafe { GetForegroundWindow() } == main || unsafe { GetActiveWindow() } == main;
+    let area = TITLE_AREA.with(Cell::get);
+    let title = TITLE.with(|t| t.borrow().clone());
+    let edge = INSPECTOR_EDGE.with(Cell::get);
+    let windows10_edge = !full_screen(main) && !unsafe { IsZoomed(main) }.as_bool() && theme::build() < 22000;
     let mut c = Canvas::new(dc, RECT { left: 0, top: 0, right: client.right, bottom: band });
-    c.clear(p.panel);
-    unsafe {
-        let size = px(main, 16.0);
-        let x = (px(main, ICON) - size) / 2;
-        let _ = DrawIconEx(c.hdc(), x, (band - size) / 2, icon, size, size, 0, None, DI_NORMAL);
-    }
-    let divider = DIVIDER.with(Cell::get) as f32;
-    if divider > 0.0 {
-        c.round_rect(RectF::new(divider, band as f32 * 0.3, s.max(1.0).floor(), band as f32 * 0.4), 0.0, p.border);
-    }
-    // The title, centred in its space when it fits.
-    let ink = if active { p.text } else { p.disabled };
-    c.text(&title, title_area, font, if active { p.secondary } else { p.disabled }, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_END_ELLIPSIS);
-    if !full_screen(main) {
-        let maximized = unsafe { IsZoomed(main) }.as_bool();
-        for which in [Caption::Minimize, Caption::Maximize, Caption::Close] {
-            let r = caption_rect(main, which);
-            let hot = HOT.with(Cell::get) == Some(which);
-            let pressed = PRESSED.with(Cell::get) == Some(which) && hot;
-            let close = which == Caption::Close;
-            let mut glyph_ink = ink;
-            if hot || pressed {
-                let fill = if close {
-                    if pressed { theme::rgb(0xc8, 0x3c, 0x30) } else { theme::rgb(0xc4, 0x2b, 0x1c) }
-                } else if pressed {
-                    p.subtle_pressed
-                } else {
-                    p.subtle_hover
-                };
-                c.round_rect(RectF::of(r), 0.0, fill);
-                if close {
-                    glyph_ink = theme::rgb(0xff, 0xff, 0xff);
-                }
+    c.clear(theme::gdi(t.hex.bg));
+    let (w, h) = (c.w as f32 / s, band as f32 / s);
+    let drawn = c.d2d(s, t.plain, |p| {
+        let name_ink = Ink::hex(if active { t.hex.paper } else { t.hex.dim });
+        let room = (area.right - area.left) as f32 / s;
+        if room > 0.0 {
+            let shown = fitted(p, &title, room, s);
+            let m = p.measure(&shown, &NAME, 0.0);
+            // Centred by eye: the baseline a third of the cap height below the middle.
+            let baseline = h / 2.0 + NAME.size * 0.33;
+            p.text(&shown, &NAME, area.left as f32 / s, (baseline - m.baseline).round(), name_ink);
+        }
+        if !full_screen(main) {
+            paint_captions(p, main, &t, active, s);
+            if windows10_edge {
+                // Windows 10 draws no top edge once the caption is gone.
+                p.fill_rect(d2d::RectF::new(0.0, 0.0, w, 1.0 / s), Ink::hex(if active { t.hex.track } else { t.hex.line }));
             }
-            let glyph = match which {
-                Caption::Minimize => "\u{E921}",
-                Caption::Maximize if maximized => "\u{E923}",
-                Caption::Maximize => "\u{E922}",
-                Caption::Close => "\u{E8BB}",
-            };
-            c.text(glyph, r, glyphs, glyph_ink, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
         }
-        if !unsafe { IsZoomed(main) }.as_bool() && theme::build() < 22000 {
-            // Windows 10 draws no top edge once the caption is gone.
-            c.round_rect(RectF::new(0.0, 0.0, c.w as f32, 1.0), 0.0, if active { p.strong_border } else { p.border });
+        if edge > 0 {
+            p.fill_rect(d2d::RectF::new(edge as f32 / s, h - 1.0, w - edge as f32 / s, 1.0), Ink::hex(t.hex.line));
         }
+    });
+    if !drawn {
+        // No Direct2D: the name in the system font.
+        let font = HFONT(FONT.with(Cell::get) as *mut _);
+        c.text(&title, area, font, theme::gdi(t.hex.paper), DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     }
-    c.round_rect(RectF::new(0.0, band as f32 - s.max(1.0).floor(), c.w as f32, s.max(1.0).floor()), 0.0, p.border);
     c.present(dc);
 }
 
-fn app_icon() -> HICON {
-    thread_local! {
-        static ICON: Cell<isize> = const { Cell::new(0) };
+/// The band of a window of the app's own, such as Settings: `bg`, its
+/// title in Newsreader 15 600 at 16 DIPs, Close, and a rule along its foot.
+pub fn paint_band(hwnd: HWND, dc: HDC, title: &str) {
+    let t = theme::tokens();
+    let s = draw::dpi_of(hwnd);
+    let band = height(hwnd);
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
     }
-    ICON.with(|i| {
-        if i.get() == 0 {
-            let icon = unsafe { LoadImageW(super::instance(), windows::core::PCWSTR(1 as *const u16), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED) };
-            i.set(icon.map_or(0, |h| h.0 as isize));
+    let active = unsafe { GetActiveWindow() } == hwnd;
+    let windows10_edge = theme::build() < 22000;
+    let mut c = Canvas::new(dc, RECT { left: 0, top: 0, right: client.right, bottom: band });
+    c.clear(theme::gdi(t.hex.bg));
+    let (w, h) = (c.w as f32 / s, band as f32 / s);
+    c.d2d(s, t.plain, |p| {
+        let m = p.measure(title, &NAME, 0.0);
+        let baseline = h / 2.0 + NAME.size * 0.33;
+        p.text(title, &NAME, 16.0, (baseline - m.baseline).round(), Ink::hex(if active { t.hex.paper } else { t.hex.dim }));
+        paint_captions(p, hwnd, &t, active, s);
+        if windows10_edge {
+            p.fill_rect(d2d::RectF::new(0.0, 0.0, w, 1.0 / s), Ink::hex(if active { t.hex.track } else { t.hex.line }));
         }
-        HICON(i.get() as *mut _)
-    })
+        p.fill_rect(d2d::RectF::new(0.0, h - 1.0, w, 1.0), Ink::hex(t.hex.line));
+    });
+    c.present(dc);
 }
 
-/// Repaints the band (activation, the title).
+/// Repaints a window's band and its caption buttons (activation).
+pub fn invalidate_band(hwnd: HWND) {
+    unsafe {
+        let mut client = RECT::default();
+        let _ = GetClientRect(hwnd, &mut client);
+        let _ = InvalidateRect(hwnd, Some(&RECT { left: 0, top: 0, right: client.right, bottom: height(hwnd) }), false);
+    }
+}
+
+/// Minimise, maximise or restore, and close: Windows' own buttons, 46 DIP
+/// wide, with their glyphs drawn as lines in the theme's ink. Close turns
+/// Windows' red under the pointer.
+fn paint_captions(p: &mut Painter, main: HWND, t: &Tokens, active: bool, s: f32) {
+    let maximized = unsafe { IsZoomed(main) }.as_bool();
+    let ink = if active { t.hex.label } else { t.hex.dim };
+    for &which in captions(main) {
+        let r = caption_rect(main, which);
+        let r = d2d::RectF::new(r.left as f32 / s, r.top as f32 / s, (r.right - r.left) as f32 / s, (r.bottom - r.top) as f32 / s);
+        let hot = HOT.with(Cell::get) == Some(which);
+        let pressed = PRESSED.with(Cell::get) == Some(which) && hot;
+        let close = which == Caption::Close;
+        let mut glyph = Ink::hex(ink);
+        if hot || pressed {
+            if close {
+                p.fill_rect(r, Ink::hex(if pressed { 0xc83c30 } else { 0xc42b1c }));
+                glyph = Ink::hex(0xffffff);
+            } else {
+                p.fill_rect(r, Ink::hex(t.hex.paper).alpha(if pressed { 0.14 } else { 0.08 }));
+                glyph = Ink::hex(t.hex.paper);
+            }
+        }
+        // A 10 DIP glyph, its lines on whole pixels.
+        let snap = |v: f32| ((v * s).round() + 0.5) / s;
+        let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+        let line = 1.0 / s * s.round().max(1.0);
+        match which {
+            Caption::Minimize => p.fill_rect(d2d::RectF::new(cx - 5.0, snap(cy) - line / 2.0, 10.0, line), glyph),
+            Caption::Maximize if maximized => {
+                let (x, y) = (snap(cx - 5.0), snap(cy - 3.0));
+                p.stroke_rect(d2d::RectF::new(x, y, 8.0, 8.0), line, glyph);
+                // The window behind: its top and right edges.
+                p.line((x + 2.0, y - 2.0), (x + 10.0, y - 2.0), line, glyph);
+                p.line((x + 10.0, y - 2.0), (x + 10.0, y + 6.0), line, glyph);
+            }
+            Caption::Maximize => p.stroke_rect(d2d::RectF::new(snap(cx - 5.0), snap(cy - 5.0), 10.0, 10.0), line, glyph),
+            Caption::Close => {
+                p.line((cx - 5.0, cy - 5.0), (cx + 5.0, cy + 5.0), line, glyph);
+                p.line((cx + 5.0, cy - 5.0), (cx - 5.0, cy + 5.0), line, glyph);
+            }
+        }
+    }
+}
+
+/// `title` as fits `room` DIPs: whole, or with its middle given up to an
+/// ellipsis, as the macOS band truncates (cached for the last width).
+fn fitted(p: &mut Painter, title: &str, room: f32, s: f32) -> String {
+    let key = (room * s) as i32;
+    if let Some(shown) = FITTED.with(|f| {
+        let f = f.borrow();
+        (f.0 == title && f.1 == key).then(|| f.2.clone())
+    }) {
+        return shown;
+    }
+    let chars: Vec<char> = title.chars().collect();
+    let fits = |p: &mut Painter, text: &str| p.measure(text, &NAME, 0.0).width <= room;
+    let mut shown = title.to_string();
+    if !fits(p, &shown) {
+        // The most characters kept, half from each end, that fit.
+        let (mut low, mut high) = (0usize, chars.len());
+        let cut = |keep: usize| {
+            let head = keep.div_ceil(2);
+            let tail = keep / 2;
+            let mut s: String = chars[..head].iter().collect();
+            s.push('…');
+            s.extend(&chars[chars.len() - tail..]);
+            s
+        };
+        while low < high {
+            let mid = (low + high).div_ceil(2);
+            if fits(p, &cut(mid)) { low = mid } else { high = mid - 1 }
+        }
+        shown = if low == 0 { String::new() } else { cut(low) };
+    }
+    FITTED.with(|f| *f.borrow_mut() = (title.to_string(), key, shown.clone()));
+    shown
+}
+
+/// Repaints the band (activation, the title) and the menu row.
 pub fn invalidate(main: HWND) {
     unsafe {
         let mut client = RECT::default();
@@ -474,8 +524,7 @@ pub fn invalidate(main: HWND) {
 
 /// Windows 11 (22000 and later): rounded corners, asked for explicitly.
 /// Mica (`DWMWA_SYSTEMBACKDROP_TYPE`, 22621) is left out: it shows only
-/// where nothing paints opaquely, and the band's text, glyphs and the two
-/// toolbars are GDI, which paints opaque. See docs/windows-app.md.
+/// where nothing paints opaquely, and the band is opaque `bg`.
 pub fn round_corners(main: HWND) {
     if theme::build() < 22000 {
         return;
@@ -735,8 +784,9 @@ pub fn deactivated(main: HWND) {
     PRESSED.with(|p| p.set(None));
 }
 
-/// The menu bar paints its titles from the palette, with the mnemonic
-/// underlined while keyboard cues show.
+/// The menu row paints its titles in the theme on the band's `bg`: `label`,
+/// `paper` when hot or open (on a faint `paper` wash), `dim` while the
+/// window is inactive; the mnemonic underlined while keyboard cues show.
 extern "system" fn menubar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
     unsafe {
         match msg {
@@ -754,13 +804,14 @@ extern "system" fn menubar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
 }
 
 fn paint_menubar(hwnd: HWND, dc: HDC) {
-    let p = theme::palette();
+    let t = theme::tokens();
     let s = draw::dpi_of(hwnd);
+    let (bg, paper) = (theme::gdi(t.hex.bg), theme::gdi(t.hex.paper));
     unsafe {
         let mut client = RECT::default();
         let _ = GetClientRect(hwnd, &mut client);
         let mut c = Canvas::new(dc, client);
-        c.clear(p.panel);
+        c.clear(bg);
         let hot = SendMessageW(hwnd, TB_GETHOTITEM, WPARAM(0), LPARAM(0)).0;
         let main = GetParent(hwnd).unwrap_or_default();
         let cues = draw::accel_cues(main) || KEYS.with(Cell::get).is_some();
@@ -772,13 +823,15 @@ fn paint_menubar(hwnd: HWND, dc: HDC) {
             let mut r = RECT::default();
             SendMessageW(hwnd, TB_GETITEMRECT, WPARAM(i), LPARAM(&mut r as *mut _ as isize));
             let pressed = button.fsState & TBSTATE_PRESSED as u8 != 0;
-            if pressed || hot == i as isize {
-                c.round_rect(RectF::of(r).inset(0.0, 2.0 * s), 4.0 * s, if pressed { p.subtle_pressed } else { p.subtle_hover });
+            let lit = pressed || hot == i as isize;
+            if lit {
+                c.round_rect(RectF::of(r).inset(0.0, 2.0 * s), 4.0 * s, theme::mix(bg, paper, if pressed { 0.14 } else { 0.08 }));
             }
             let mut text = [0u16; 64];
             let n = SendMessageW(hwnd, TB_GETBUTTONTEXTW, WPARAM(button.idCommand as usize), LPARAM(text.as_mut_ptr() as isize)).0.max(0) as usize;
             let title = String::from_utf16_lossy(&text[..n.min(64)]);
-            c.label(&title, r, font, if active || pressed { p.text } else { p.secondary }, DT_SINGLELINE | DT_VCENTER | DT_CENTER, cues);
+            let ink = if lit { t.hex.paper } else if active { t.hex.label } else { t.hex.dim };
+            c.label(&title, r, font, theme::gdi(ink), DT_SINGLELINE | DT_VCENTER | DT_CENTER, cues);
         }
         c.present(dc);
     }

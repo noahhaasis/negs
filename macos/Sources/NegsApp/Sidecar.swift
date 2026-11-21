@@ -63,7 +63,7 @@ extension JSONValue {
 /// a new table and never edits an old one; `SidecarDefaultsTests` hashes each.
 struct SidecarDefaults: Equatable, Sendable {
     /// New sidecars get this version.
-    static let latest = 2
+    static let latest = 3
 
     let version: Int
     let film: String
@@ -203,7 +203,7 @@ struct PhotoSidecar: Equatable, Sendable {
     // MARK: Edits
 
     /// The edits keys this version reads and writes; others are kept as found.
-    static let editKeys = ["film", "paper", "params", "crop", "border", "brightnessMatch"]
+    static let editKeys = ["film", "paper", "params", "crop", "border", "brightnessMatch", "roll"]
 
     /// The stored form of `state`: the film and paper always, and only what
     /// differs from `table` otherwise. The brightness match keeps its solved
@@ -221,6 +221,11 @@ struct PhotoSidecar: Equatable, Sendable {
                 if !matchSolved { stored["solved"] = .bool(false) }
             }
             edits["brightnessMatch"] = .object(stored)
+        }
+        if let roll = state.roll {
+            var stored: [String: JSONValue] = ["id": .string(roll.id), "magenta": .number(roll.magenta), "yellow": .number(roll.yellow)]
+            if let paper = roll.paper { stored["paper"] = .string(paper) }
+            edits["roll"] = .object(stored)
         }
         return .object(edits)
     }
@@ -250,6 +255,17 @@ struct PhotoSidecar: Equatable, Sendable {
             }
             state.brightnessMatch = BrightnessMatch(ev: ev, inputs: nil, highlightLimited: match["highlightLimited"]?.bool ?? false)
             solved = ev != nil && match["solved"] != .bool(false)
+        }
+        if let stored = fields["roll"] {
+            guard case .string(let id) = stored["id"], !id.isEmpty, case .number(let magenta) = stored["magenta"], magenta.isFinite,
+                  case .number(let yellow) = stored["yellow"], yellow.isFinite else { throw Problem.unreadable("roll") }
+            var paper: String?
+            switch stored["paper"] {
+            case .null: break
+            case .string(let name) where !name.isEmpty: paper = name
+            default: throw Problem.unreadable("roll")
+            }
+            state.roll = NegativeRoll(id: id, magenta: magenta, yellow: yellow, paper: paper)
         }
         do { try state.validate() } catch { throw Problem.unreadable("edits out of range") }
         return SavedEdits(state: state, matchSolved: solved)

@@ -21,11 +21,10 @@ struct GridSheet: View {
                 SheetGrid(model: model)
                 SheetFoot(model: model)
             }
-            .background(Theme.film)
+            .background(Theme.grid)
             // Where the cells report their places (`SheetFlight`).
             .coordinateSpace(.named(ThumbnailPlaces.space))
-            .overlay(alignment: .topTrailing) { SheetHandle(model: model) }
-            .environment(\.colorScheme, .dark)
+            .environment(\.colorScheme, Theme.colorScheme)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("All photographs")
         }
@@ -91,7 +90,11 @@ enum SheetWords {
         }
         let flags = FilterMenu.flagChoices.filter { filter.flags.contains($0.flag) }.map { $0.title.lowercased() }
         if !flags.isEmpty { parts.append(Part(lead: "", word: flags.joined(separator: " or "))) }
-        if filter.editedOnly { parts.append(Part(lead: "", word: "edited")) }
+        switch filter.edits {
+        case .any: break
+        case .edited: parts.append(Part(lead: "", word: "edited"))
+        case .unedited: parts.append(Part(lead: "", word: "unedited"))
+        }
         return parts
     }
 
@@ -133,7 +136,7 @@ private struct FilterWord: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help("Filter photographs by rating and flag")
+        .help("Filter photographs by rating, flag and edits")
         .accessibilityLabel("Filter: \(word)")
     }
 }
@@ -146,7 +149,7 @@ private struct ClearMark: View {
 }
 
 /// The filter menu, a native menu with today's items: Rating, Flags,
-/// Edited Only and Clear Filter (⌥⌘L).
+/// Edits and Clear Filter (⌥⌘L).
 @MainActor final class FilterMenu: NSObject {
     private let model: EditorModel
     init(model: EditorModel) { self.model = model }
@@ -157,7 +160,7 @@ private struct ClearMark: View {
     func popUp(below view: NSView?) {
         guard let view else { return }
         let menu = NSMenu(title: "Filter")
-        menu.appearance = NSAppearance(named: .darkAqua)
+        menu.appearance = Theme.appearance
         fill(menu)
         let y = view.isFlipped ? view.bounds.maxY + 6 : view.bounds.minY - 6
         menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.minX - 14, y: y), in: view)
@@ -182,7 +185,9 @@ private struct ClearMark: View {
             add(title, #selector(flag(_:)), on: filter.flags.contains(flag), tag: index)
         }
         menu.addItem(.separator())
-        add("Edited Only", #selector(edited), on: filter.editedOnly)
+        menu.addItem(.sectionHeader(title: "Edits"))
+        add("Edited", #selector(edits(_:)), on: filter.edits == .edited, tag: 1)
+        add("Unedited", #selector(edits(_:)), on: filter.edits == .unedited, tag: 2)
         menu.addItem(.separator())
         let clear = menu.addItem(withTitle: "Clear Filter", action: filter.active ? #selector(clear) : nil, keyEquivalent: "l")
         clear.keyEquivalentModifierMask = [.command, .option]; clear.target = self
@@ -195,7 +200,11 @@ private struct ClearMark: View {
         let flag = Self.flagChoices[item.tag].flag
         if model.library.filter.flags.contains(flag) { model.library.filter.flags.remove(flag) } else { model.library.filter.flags.insert(flag) }
     }
-    @objc private func edited() { model.library.filter.editedOnly.toggle() }
+    /// Edited and Unedited exclude each other; choosing the one that's on turns it off.
+    @objc private func edits(_ item: NSMenuItem) {
+        let choice: LibraryFilter.Edits = item.tag == 1 ? .edited : .unedited
+        model.library.filter.edits = model.library.filter.edits == choice ? .any : choice
+    }
     @objc private func clear() { model.library.filter = LibraryFilter() }
 }
 
@@ -330,7 +339,7 @@ private struct SheetGrid: View {
                          waiting: model.sheetWaiting.contains(url),
                          selected: SheetLayout.drawnSelected(url, selection: selection),
                          current: url == selection.current, summary: library.summary(for: url),
-                         readOnly: library.readOnly, edited: model.editedThumbnail(for: url)) { visible in
+                         readOnly: library.readOnly, cameraJPEG: library.companion(of: url), edited: model.editedThumbnail(for: url)) { visible in
             model.thumbnailShown(file, visible)
         } loaded: { image in
             model.aspects.note(url, image: image)
@@ -353,7 +362,10 @@ private struct SheetGrid: View {
     /// opens: a pick's in cream, and selection's in yellow over it.
     private func box(_ file: PhotoFile, frame: CGRect, selection layer: Bool) -> some View {
         let url = file.url
-        let waiting = model.sheetWaiting.contains(url)
+        // A carried thumbnail's boxes fade in place as its flyer lands
+        // (`sheetBoxesWaiting`); the others rise with their cells.
+        let rising = model.sheetWaiting.contains(url) && !model.sheetCarried.contains(url)
+        let hidden = rising || model.sheetBoxesWaiting.contains(url)
         let picked = model.library.summary(for: url).flag == .pick, selected = SheetLayout.drawnSelected(url, selection: model.selection)
         return ZStack {
             if layer ? selected : picked {
@@ -361,8 +373,8 @@ private struct SheetGrid: View {
             }
         }
         .frame(width: frame.width, height: frame.height)
-        .opacity(waiting ? 0 : 1)
-        .offset(x: frame.minX, y: frame.minY + (waiting ? 14 : 0))
+        .opacity(hidden ? 0 : 1)
+        .offset(x: frame.minX, y: frame.minY + (rising ? 14 : 0))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -606,6 +618,7 @@ private struct SheetCell: View {
     let current: Bool
     let summary: LibrarySummary
     let readOnly: Bool
+    let cameraJPEG: URL?
     let edited: EditedThumbnail?
     /// On and off screen: what's shown is developed first.
     let shown: (Bool) -> Void
@@ -629,7 +642,7 @@ private struct SheetCell: View {
         .frame(width: size.width, height: size.height)
         .clipped()
         .opacity(summary.flag == .reject ? PhotoMarks.rejectOpacity(inStrip: false, current: current) : 1)
-        .overlay { PhotoMarks(summary: summary, name: file.name) }
+        .overlay { PhotoMarks(summary: summary, name: file.name, cameraJPEG: cameraJPEG) }
         .modifier(PlaceReport(image: image, placed: placed))
         .opacity(waiting ? 0 : 1)
         .offset(y: waiting ? 14 : 0)
@@ -637,9 +650,9 @@ private struct SheetCell: View {
         // A click selects at once; the second of a double-click opens.
         .onTapGesture(count: 2, perform: open)
         .simultaneousGesture(TapGesture().onEnded(click))
-        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
+        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly, cameraJPEG: cameraJPEG))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
+        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary, cameraJPEG: cameraJPEG))
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction { click() }
         .accessibilityAction(named: "Edit", open)
@@ -661,7 +674,7 @@ private struct SheetCell: View {
     }
 }
 
-// MARK: The foot and the handle
+// MARK: The foot
 
 /// "12 photographs · 1 selected" on the left, and the rows' Size on the right.
 private struct SheetFoot: View {
@@ -672,6 +685,11 @@ private struct SheetFoot: View {
             // A rating or flag note takes the count's place for a moment (§4.7).
             if let note = model.libraryNote {
                 NoteWords(note: note)
+            } else if let run = model.batch, run.running {
+                // A batch started here shows its progress here too.
+                BatchProgress(run: run)
+            } else if let words = model.lightroomWords {
+                Text(words).foregroundStyle(Theme.label)
             } else {
                 Text(SheetWords.count(shown: model.shownPhotos.count, total: model.library.items.count,
                                       selected: model.selection.selected.count, filtered: model.library.filter.active))
@@ -689,31 +707,5 @@ private struct SheetFoot: View {
         .foregroundStyle(Theme.dim)
         .padding(.horizontal, 18)
         .frame(height: Theme.Size.statusLine)
-    }
-}
-
-/// The grid's handle: just the arrow, pointing down, at the top right, 14 pt
-/// from the edge and 7 below the title bar. A click (or E, Return or Esc)
-/// folds the grid back to the photograph.
-private struct SheetHandle: View {
-    let model: EditorModel
-    @State private var hovered = false
-
-    var body: some View {
-        Button { model.editCurrent() } label: {
-            // A 7 pt chevron with 1.5 pt strokes, turned to point down.
-            LeaderArrow(down: true)
-                .stroke(Theme.dim, style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
-                .frame(width: 9.9, height: 4.95)
-                .offset(x: 0.5, y: hovered ? -0.5 : -3.5)
-                .frame(width: 36, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { over in withAnimation(.easeOut(duration: 0.3)) { hovered = over } }
-        .padding(.trailing, 14)
-        .padding(.top, 7)
-        .help("Edit Photograph (E)")
-        .accessibilityLabel("Edit Photograph")
     }
 }

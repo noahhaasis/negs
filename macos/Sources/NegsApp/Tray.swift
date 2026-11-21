@@ -16,13 +16,24 @@ import SwiftUI
     /// so ← → go on from there rather than from its group.
     @ObservationIgnored var inFavourites = true
 
-    init(paper: Bool, before: EditState) {
+    /// The film a negative is read as: colour negatives only.
+    let readAs: Bool
+
+    /// The film tray shows Scan, its first group, rather than the current
+    /// film: the photograph is read as a negative or looks like one. The
+    /// check can answer after the tray opened; it moves there then, unless
+    /// another film has been tried or searched for meanwhile.
+    var opensOnScan: Bool
+
+    init(paper: Bool, before: EditState, readAs: Bool = false, opensOnScan: Bool = false) {
         self.paper = paper
         self.before = before
+        self.readAs = readAs && !paper
+        self.opensOnScan = opensOnScan && !paper && !readAs
     }
 
     /// The app's undo names for a stock change.
-    var action: String { paper ? "Change Paper" : "Change Film" }
+    var action: String { paper ? "Change Paper" : readAs ? "Change Negative Film" : "Change Film" }
     /// The stock the tray opened on.
     var beforeID: String { paper ? before.paper : before.film }
 }
@@ -166,11 +177,11 @@ struct StockTray: View {
                 // A row of its own each visit: its tiles are made once with
                 // the visit, so the paper's name clicked in the film tray
                 // would otherwise keep the film tiles under the papers' foot.
-                TrayRow(model: model, visit: visit, sections: sections, scroll: scroll)
+                TrayRow(model: model, visit: visit, sections: sections, scroll: scroll, opensOnScan: visit.opensOnScan)
                     .id(ObjectIdentifier(visit))
                 if sections.isEmpty {
                     Text(StockTrayRules.noMatch(visit.query, paper: visit.paper))
-                        .font(Theme.serif(16, italic: true)).foregroundStyle(Theme.dim)
+                        .font(Theme.serif(16, italic: true)).foregroundStyle(Theme.Film.dim)
                         .padding(.top, 46).padding(.leading, 30)
                 }
             }
@@ -187,9 +198,22 @@ struct StockTray: View {
 
     static func sections(model: EditorModel, visit: TrayVisit) -> [StockTrayRules.Section] {
         let paper = visit.paper
-        return StockTrayRules.sections(paper ? model.paperGroups : model.filmGroups,
-                                       favorites: model.previews.favorites(in: paper ? model.papers : model.listedFilms, paper: paper),
-                                       query: visit.query)
+        if visit.readAs {
+            // Reading a negative: the colour negatives only.
+            let groups = model.filmGroups.compactMap { group -> StockGroup? in
+                let stocks = group.stocks.filter(NegativeScan.readable)
+                return stocks.isEmpty ? nil : StockGroup(title: group.title, stocks: stocks)
+            }
+            return StockTrayRules.sections(groups, favorites: model.previews.favorites(in: model.listedFilms, paper: false).filter(NegativeScan.readable),
+                                           query: visit.query)
+        }
+        let sections = StockTrayRules.sections(paper ? model.paperGroups : model.filmGroups,
+                                               favorites: model.previews.favorites(in: paper ? model.papers : model.listedFilms, paper: paper),
+                                               query: visit.query)
+        // Your negative, while not searching: always the first group, so
+        // the order never changes from one photograph to the next.
+        guard !paper, visit.query.trimmingCharacters(in: .whitespaces).isEmpty else { return sections }
+        return [StockTrayRules.Section(title: "Scan", stocks: [NegativeScan.stock], favorites: false)] + sections
     }
 }
 
@@ -224,6 +248,8 @@ private struct TrayRow: NSViewRepresentable {
     let visit: TrayVisit
     let sections: [StockTrayRules.Section]
     let scroll: TrayScroll
+    /// Read here so a late answer from the check updates the row.
+    let opensOnScan: Bool
 
     func makeNSView(context: Context) -> TrayScrollView {
         let view = TrayScrollView()
@@ -245,8 +271,8 @@ private struct TrayRow: NSViewRepresentable {
         context.coordinator.observe(clip)
         scroll.view = view
         context.coordinator.update(self)
-        // It opens on the current stock.
-        DispatchQueue.main.async { context.coordinator.reveal(centring: true, animated: false) }
+        // It opens on the current stock, or on Scan.
+        DispatchQueue.main.async { context.coordinator.opening() }
         return view
     }
 
@@ -262,6 +288,8 @@ private struct TrayRow: NSViewRepresentable {
         private var stock: String?
         private var query: String?
         private var observer: NSObjectProtocol?
+        /// The opening scroll is done; Scan has been shown.
+        private var opened = false, shownScan = false
 
         func observe(_ clip: NSClipView) {
             observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
@@ -273,6 +301,10 @@ private struct TrayRow: NSViewRepresentable {
         func update(_ row: TrayRow) {
             self.row = row
             let current = row.visit.paper ? row.model.paper : row.model.film
+            // The check answered after the tray opened: Scan, if nothing else was tried or searched for.
+            if opened, row.opensOnScan, !shownScan, current == row.visit.beforeID, row.visit.query.isEmpty {
+                DispatchQueue.main.async { self.showScan(animated: true) }
+            }
             defer { stock = current; query = row.visit.query; follow() }
             guard let stock, let query else { return }
             if query != row.visit.query {
@@ -283,6 +315,18 @@ private struct TrayRow: NSViewRepresentable {
                 // Stepped to (or tried from the search's first match): shown if out of view.
                 DispatchQueue.main.async { self.reveal(centring: false, animated: true) }
             }
+        }
+
+        func opening() {
+            opened = true
+            if row?.opensOnScan == true { showScan(animated: false) } else { reveal(centring: true, animated: false) }
+        }
+
+        /// Scan, the row's first group, at its start.
+        func showScan(animated: Bool) {
+            guard let row, !shownScan else { return }
+            shownScan = true
+            row.scroll.scroll(to: 0, animated: animated)
         }
 
         /// Shows the current stock's tile, the copy the arrows go on from:
@@ -335,15 +379,19 @@ struct TrayTiles: View {
             ForEach(StockTray.sections(model: model, visit: visit)) { section in
                 HStack(alignment: .top, spacing: StockTrayRules.titleGap) {
                     Text(section.title)
-                        .font(Theme.serif(13.5, italic: true)).foregroundStyle(Theme.label)
+                        .font(Theme.serif(13.5, italic: true)).foregroundStyle(Theme.Film.label)
                         .lineLimit(1).fixedSize()
                         .rotationEffect(.degrees(-90))
                         .frame(width: StockTrayRules.title, height: StockTrayRules.picture)
                         .accessibilityAddTraits(.isHeader)
                     HStack(alignment: .top, spacing: StockTrayRules.tileGap) {
                         ForEach(section.stocks) { stock in
-                            if let tile = previews.tile(stock.id, paper: paper) {
-                                TrayTile(stock: stock, tile: tile, selected: stock.id == current, before: tried && stock.id == visit.beforeID,
+                            if stock.id == NegativeScan.stockID {
+                                NegativeTile(selected: model.isNegative, before: tried && visit.before.params["workflow.route"].string == NegativeScan.route,
+                                             choose: { visit.inFavourites = false; model.tryStock(stock.id) })
+                            } else if let tile = previews.tile(stock.id, paper: paper) {
+                                TrayTile(stock: stock, tile: tile, orientation: model.shownOrientation,
+                                         selected: stock.id == current, before: tried && stock.id == visit.beforeID,
                                          favorite: previews.isFavorite(stock.id, paper: paper),
                                          toggleFavorite: { previews.toggleFavorite(stock.id, paper: paper) },
                                          choose: { visit.inFavourites = section.favorites; model.tryStock(stock.id) })
@@ -374,6 +422,8 @@ struct TrayTiles: View {
 private struct TrayTile: View {
     let stock: Stock
     let tile: PreviewTile
+    /// How the canvas shows the photograph: the tile is developed unturned, as the preview is.
+    let orientation: Orientation
     let selected: Bool
     let before: Bool
     let favorite: Bool
@@ -385,11 +435,11 @@ private struct TrayTile: View {
         Button(action: choose) {
             VStack(alignment: .leading, spacing: 4) {
                 // Not developed yet: a blank; an older edit of this photograph: dimmed.
-                Rectangle().fill(Theme.blank)
+                Rectangle().fill(Theme.Film.blank)
                     .frame(width: StockTrayRules.tile, height: StockTrayRules.picture)
                     .overlay {
                         if let image = tile.image {
-                            Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                            OrientedTileImage(image: image, orientation: orientation)
                                 .frame(width: StockTrayRules.tile, height: StockTrayRules.picture)
                                 .opacity(tile.dimmed ? 0.55 : 1)
                         }
@@ -397,19 +447,19 @@ private struct TrayTile: View {
                     .clipped()
                     .overlay {
                         if selected {
-                            PencilRing().stroke(Theme.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
+                            PencilRing().stroke(Theme.Film.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
                                 .padding(EdgeInsets(top: -6, leading: -7, bottom: -1, trailing: -7))
-                                .rotationEffect(.degrees(-1))
+                                .rotationEffect(PencilRing.tilt(-1))
                                 .allowsHitTesting(false)
                         }
                     }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(stock.name)
                         .font(Theme.serif(14, weight: selected ? 600 : 400))
-                        .foregroundStyle(selected ? Theme.paper : before || hovering ? Theme.label : Theme.dim)
+                        .foregroundStyle(selected ? Theme.Film.paper : before || hovering ? Theme.Film.label : Theme.Film.dim)
                         .lineLimit(1).truncationMode(.tail)
                     if before {
-                        Text("before").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim).fixedSize()
+                        Text("before").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.dim).fixedSize()
                     }
                 }
                 .frame(width: StockTrayRules.tile, alignment: .leading)
@@ -429,9 +479,9 @@ private struct TrayTile: View {
             if favorite || hovering {
                 Button(action: toggleFavorite) {
                     StarShape()
-                        .fill(favorite ? Theme.accent : .clear)
+                        .fill(favorite ? Theme.Film.accent : .clear)
                         .overlay {
-                            StarShape().stroke(favorite ? Theme.accent : Theme.paper,
+                            StarShape().stroke(favorite ? Theme.Film.accent : Theme.onPhoto,
                                                style: StrokeStyle(lineWidth: favorite ? 1.2 : 1.4, lineJoin: .round))
                         }
                         .frame(width: 15, height: 15)
@@ -446,6 +496,75 @@ private struct TrayTile: View {
                 .accessibilityLabel(StockTrayRules.starLabel(stock.name, favourite: favorite))
             }
         }
+        .onHover { hovering = $0 }
+    }
+}
+
+/// A tile's developed picture filling its place, mirrored and turned as the
+/// canvas shows the photograph (`io.flip`, then `io.rotate_cw`): the helper
+/// develops tiles unturned, as it does the preview.
+struct OrientedTileImage: View {
+    let image: CGImage
+    let orientation: Orientation
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let quarter = orientation.turns % 2 == 1
+            // Filled into the place as it is before the turn, then mirrored and turned into it.
+            Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: quarter ? size.height : size.width, height: quarter ? size.width : size.height)
+                .scaleEffect(x: orientation.flip ? -1 : 1, y: 1)
+                .rotationEffect(.degrees(Double(90 * orientation.turns)))
+                .position(x: size.width / 2, y: size.height / 2)
+        }
+    }
+}
+
+/// The film tray's "Your negative": no develop to show, so words on the
+/// blank, ringed while the photograph is read as a negative.
+private struct NegativeTile: View {
+    let selected: Bool
+    let before: Bool
+    let choose: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: choose) {
+            VStack(alignment: .leading, spacing: 4) {
+                Rectangle().fill(Theme.Film.blank)
+                    .frame(width: StockTrayRules.tile, height: StockTrayRules.picture)
+                    .overlay {
+                        Text(NegativeScan.tileText)
+                            .font(Theme.serif(15, italic: true)).foregroundStyle(Theme.Film.label)
+                            .multilineTextAlignment(.center).padding(.horizontal, 18)
+                    }
+                    .overlay {
+                        if selected {
+                            PencilRing().stroke(Theme.Film.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
+                                .padding(EdgeInsets(top: -6, leading: -7, bottom: -1, trailing: -7))
+                                .rotationEffect(PencilRing.tilt(-1))
+                                .allowsHitTesting(false)
+                        }
+                    }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(NegativeScan.name)
+                        .font(Theme.serif(14, weight: selected ? 600 : 400))
+                        .foregroundStyle(selected ? Theme.Film.paper : before || hovering ? Theme.Film.label : Theme.Film.dim)
+                        .lineLimit(1)
+                    if before {
+                        Text("before").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.dim).fixedSize()
+                    }
+                }
+                .frame(width: StockTrayRules.tile, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .help(NegativeScan.tileText)
+        .accessibilityLabel(NegativeScan.name)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .onHover { hovering = $0 }
     }
 }
@@ -484,11 +603,11 @@ private struct TrayFoot: View {
                 index
             } else {
                 Text(StockTrayRules.matches(sections.reduce(0) { $0 + $1.stocks.count }))
-                    .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.label).lineLimit(1)
+                    .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.label).lineLimit(1)
             }
             Spacer(minLength: 12)
             Text(StockTrayRules.hint(before: before))
-                .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim).lineLimit(1)
+                .font(Theme.serif(13, italic: true)).foregroundStyle(Theme.Film.dim).lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(-1)
             if !visit.paper {
@@ -497,15 +616,18 @@ private struct TrayFoot: View {
                     .padding(.bottom, 1)
                     .overlay(alignment: .bottom) {
                         if searching {
-                            PencilStroke().pencil().frame(height: 5).offset(y: 3).allowsHitTesting(false)
+                            PencilStroke().pencil(onFilm: true).frame(height: 5).offset(y: 3).allowsHitTesting(false)
                         } else {
-                            Rectangle().fill(Theme.line).frame(height: 1)
+                            Rectangle().fill(Theme.Film.line).frame(height: 1)
                         }
                     }
                     .padding(.leading, 6)
             }
+            if visit.paper, !visit.readAs {
+                KeepPaperWord(model: model).padding(.leading, 6)
+            }
             Button { model.endTray(keep: true) } label: {
-                Text("Done").font(Theme.serif(14, weight: 600)).foregroundStyle(Theme.paper)
+                Text("Done").font(Theme.serif(14, weight: 600)).foregroundStyle(Theme.Film.paper)
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -541,6 +663,36 @@ private struct TrayFoot: View {
     }
 }
 
+/// The paper tray's switch for the paper lock (`PaperLock`): "Keep for
+/// every film", and "Kept for every film" with the lock closed.
+private struct KeepPaperWord: View {
+    let model: EditorModel
+    @State private var hovering = false
+
+    var body: some View {
+        let kept = model.previews.keepPaper
+        Button { model.setKeepPaper(!kept) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(Image(systemName: kept ? "lock" : "lock.open"))
+                    .font(.system(size: PrintLabelLayout.lockSize, weight: .medium))
+                    .foregroundStyle(kept ? Theme.Film.accent : hovering ? Theme.Film.label : Theme.Film.dim)
+                Text(kept ? "Kept for every film" : "Keep for every film")
+                    .font(Theme.serif(13, italic: true))
+                    .foregroundStyle(kept ? Theme.Film.paper : hovering ? Theme.Film.label : Theme.Film.dim)
+                    .lineLimit(1).fixedSize()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { hovering = $0 }
+        .help(kept ? ControlHelp.paperKept : ControlHelp.paperLock)
+        .accessibilityLabel("Keep paper when changing film")
+        .accessibilityValue(kept ? "On" : "Off")
+        .accessibilityAddTraits(kept ? .isSelected : [])
+    }
+}
+
 private struct IndexWord: View {
     let title: String
     let selected: Bool
@@ -551,10 +703,10 @@ private struct IndexWord: View {
         Button(action: action) {
             Text(title)
                 .font(Theme.serif(13, italic: true))
-                .foregroundStyle(selected ? Theme.paper : hovering ? Theme.label : Theme.dim)
+                .foregroundStyle(selected ? Theme.Film.paper : hovering ? Theme.Film.label : Theme.Film.dim)
                 .padding(.bottom, 3)
                 .overlay(alignment: .bottom) {
-                    if selected { PencilStroke().pencil().frame(height: 5).allowsHitTesting(false) }
+                    if selected { PencilStroke().pencil(onFilm: true).frame(height: 5).allowsHitTesting(false) }
                 }
         }
         .buttonStyle(.plain)
@@ -580,10 +732,12 @@ private struct TraySearchField: NSViewRepresentable {
         field.focusRingType = .none
         field.cell?.isScrollable = true
         field.cell?.wraps = false
-        let font = Theme.serifFont(13.5, italic: true) as NSFont
-        field.font = font
-        field.textColor = Theme.NS.paper
-        field.placeholderAttributedString = NSAttributedString(string: "Search films", attributes: [.font: font, .foregroundColor: Theme.NS.dim])
+        Theme.follow(field) { [weak field] in
+            let font = Theme.serifFont(13.5, italic: true) as NSFont
+            field?.font = font
+            field?.textColor = Theme.Film.nsPaper
+            field?.placeholderAttributedString = NSAttributedString(string: "Search films", attributes: [.font: font, .foregroundColor: Theme.Film.nsDim])
+        }
         field.setAccessibilityLabel("Search films")
         field.delegate = context.coordinator
         field.stringValue = visit.query

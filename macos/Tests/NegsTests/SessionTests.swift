@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -182,6 +183,63 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
         XCTAssertEqual(model.value("prep.highlights"), .number(-65), "Relaunch restores the current photograph's Prep")
         XCTAssertFalse(model.inspectorVisible)
+    }
+
+    func testCroppedSessionKeepsActualSizeAfterTheOpeningThumbnail() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fixture = try fixture(), photo = dir.appendingPathComponent("photo.png")
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        try FileManager.default.moveItem(at: fixture, to: photo)
+
+        let model = EditorModel(previewCache: scratchCache(), sidecars: nil)
+        let thumbnails = EditedThumbnailStore(directory: dir.appendingPathComponent("Thumbnails", isDirectory: true))
+        model.editedThumbnails = thumbnails
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        func waitFor(_ ready: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(20)
+            while !ready() && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(ready())
+        }
+
+        try await waitFor { model.thumbnailStamp != nil && !model.library.items.isEmpty }
+        let file = try XCTUnwrap(model.library.items.first { $0.url == photo })
+        let look = try XCTUnwrap(model.thumbnailLook(for: photo))
+        let key = try XCTUnwrap(thumbnails.key(for: file, look: look))
+        var saved = model.state
+        saved.crop.rect = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+        let (image, size) = try XCTUnwrap(EditorModel.thumbnail(photo))
+        try thumbnails.save(try XCTUnwrap(image.cropping(to: saved.crop.pixels(in: size))), as: key)
+        XCTAssertTrue(model.restoreAtLaunch(EditorSession(source: photo, state: saved, fitImage: false)))
+        try await waitFor { model.standIn != nil }
+
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: CanvasArea(model: model))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 120, height: 280), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        func scrollView(in view: NSView) -> ImageScrollView? {
+            if let scroll = view as? ImageScrollView { return scroll }
+            return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+        }
+        host.layoutSubtreeIfNeeded()
+        let thumbnail = try XCTUnwrap(scrollView(in: host))
+        XCTAssertFalse(thumbnail.fitting)
+
+        model.finishLaunching(waitingUpTo: 0)
+        await model.start(paths: paths)
+        try await waitFor { model.previewCurrent }
+        host.layoutSubtreeIfNeeded()
+        let developed = try XCTUnwrap(scrollView(in: host))
+        XCTAssertEqual(developed.documentView?.frame.size, saved.crop.size(of: size))
+        XCTAssertFalse(developed.fitting)
     }
 
     func testLensCorrectionIsOnForNewEditsAndOffForOlderSessions() async throws {

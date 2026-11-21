@@ -80,6 +80,10 @@ def main():
     for name in ["Newsreader-Negs.ttf", "Newsreader-Negs-Italic.ttf", "OFL-Newsreader.txt"]:
         require((fonts / name).is_file(), f"bundled font file missing: {name}")
         require(sha(fonts / name) == sha(ROOT / "macos/Fonts" / name), f"stale bundled font file: {name}")
+    for name, source in [("rawler-LICENSE.txt", "vendor/rawler/LICENSE"), ("LibRaw-LICENSE.LGPL.txt", "vendor/libraw/LICENSE.LGPL"),
+                         ("LibRaw-LICENSE.CDDL.txt", "vendor/libraw/LICENSE.CDDL"), ("LibRaw-COPYRIGHT.txt", "vendor/libraw/COPYRIGHT")]:
+        bundled = app / "Contents/Resources" / name
+        require(bundled.is_file() and sha(bundled) == sha(ROOT / source), f"missing or stale licence: {name}")
     require(plist.get("NSAccentColorName") == "AccentColor", "the accent colour isn't named in Info.plist")
     require((app / "Contents/Resources/Assets.car").is_file(), "Assets.car (the accent colour) missing")
     data = app / "Contents/Resources/data"

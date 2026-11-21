@@ -1,191 +1,233 @@
-//! The Presets panel (`PresetInspector.swift`), in the adjustments column in
-//! place of the adjustments: a header with New Preset and a "…" menu, and a
-//! report-view ListView of the presets with the film → paper below each name.
-//! Clicking a row applies it; double-click or Enter applies it again. Rows
-//! drag to reorder, files dropped on the panel import, and F2 or the context
-//! menu renames inline. Created the first time it is shown.
+//! The Presets pane (`PresetInspector.swift`, IMPLEMENTATION.md §4.12): the
+//! presets as tiles in two columns, each the photograph developed through
+//! it (unless Settings turns previews off), its name in Newsreader 15, and
+//! its film and paper in the label's words. A click applies one; the one
+//! applied last to the photograph has the pencil ring. Tiles drag to sort,
+//! and preset files dropped on the pane import before the tile they're
+//! over. New and Import… are in the pane header (`panes.rs`); the folder is
+//! in the File menu and each tile's context menu. Created the first time
+//! it shows.
+//!
+//! Each tile is a push button, so Tab, the arrows, Enter, Del, F2, the
+//! context menu key and UI Automation reach it, but the tiles' parent
+//! paints them all, so a ring can reach past its tile. Only the tiles on
+//! screen, and a row ahead, are developed (`Model::set_visible_presets`).
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+use std::sync::Arc;
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::System::SystemServices::*;
+use windows::Win32::System::SystemServices::{SS_NOPREFIX, SS_OWNERDRAW};
 use windows::Win32::UI::Controls::*;
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{PWSTR, w};
+use windows::core::w;
 
-use super::draw::{self, Canvas, RectF};
+use super::d2d::{Align, Ink, Painter, RectF, TextStyle};
+use super::draw::{self, Canvas, Role};
 use super::theme;
-use super::{App, create, id, post, with_app};
+use super::{App, create, id, ink, post, with_app};
 use crate::model::{Model, Pane};
 use crate::platform::{pcwstr, wide};
 use crate::presets::{PresetFile, Status, name};
 use crate::previews::{Bitmap, Target};
-use std::sync::Arc;
 
-const LIST: u16 = 1;
-const ADD: u16 = 2;
-const MORE: u16 = 3;
+const TILE_FIRST: u16 = 100;
+const EMPTY_TITLE: u16 = 2;
+const EMPTY_TEXT: u16 = 3;
 const EMPTY_IMPORT: u16 = 4;
+const FOOT: u16 = 5;
+const RENAME: u16 = 6;
 
-/// A row as drawn: what the model says about one file.
-#[derive(Clone, PartialEq)]
-struct Row {
-    file: PresetFile,
+// The tiles' grid (`PresetTileRules`, `presets.css`), in DIPs.
+const COLUMN_GAP: f64 = 14.0;
+const ROW_GAP: f64 = 20.0;
+const TOP: f64 = 18.0;
+const BOTTOM: f64 = 22.0;
+/// Under the picture: 6, the name's line, 1, and the film's and paper's.
+const CAPTION_GAP: f64 = 6.0;
+const NAME_LINE: f64 = 20.0;
+const DETAIL_LINE: f64 = 16.0;
+const FOOT_HEIGHT: f64 = 34.0;
+
+const NAME: TextStyle = TextStyle::serif(15.0, 400);
+const NAME_APPLIED: TextStyle = TextStyle::serif(15.0, 600);
+const DETAIL: TextStyle = TextStyle::serif(12.5, 400);
+const DETAIL_LEAD: TextStyle = TextStyle::serif(12.5, 400).italic();
+const UNREADABLE: TextStyle = TextStyle::serif(13.0, 400).italic();
+const EMPTY_HEAD: TextStyle = TextStyle::serif(21.0, 500);
+const EMPTY_WORDS: TextStyle = TextStyle::serif(14.0, 400).italic();
+const EMPTY_NEW: TextStyle = TextStyle::serif(14.0, 400);
+const FOOT_WORDS: TextStyle = TextStyle::serif(13.0, 400).italic();
+
+/// The empty pane's sentence, its parts in their fonts: "New" upright in `label`.
+const EMPTY_SENTENCE: [(&str, bool); 3] = [
+    ("Save this photograph’s film, paper and Lab settings with ", false),
+    ("New", true),
+    (", or import presets made in Negs or spektrafilm. You can also drop them here.", false),
+];
+
+/// A tile as drawn: what the model says about one file.
+#[derive(Clone, Default)]
+struct Look {
     name: String,
-    detail: String,
-    valid: bool,
-    /// The engine refuses the file: greyed.
-    refused: bool,
+    /// The film's line, and the paper's: "printed on" and the paper, or
+    /// "not printed · film scan". None until the engine has read the file.
+    film: Option<String>,
+    paper: Option<(&'static str, String)>,
+    /// Why the engine refuses the file.
+    invalid: Option<String>,
+    applied: bool,
+    image: Option<Arc<Bitmap>>,
+    dimmed: bool,
+}
+
+impl PartialEq for Look {
+    fn eq(&self, other: &Self) -> bool {
+        let image = match (&self.image, &other.image) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        image && self.name == other.name && self.film == other.film && self.paper == other.paper && self.invalid == other.invalid && self.applied == other.applied && self.dimmed == other.dimmed
+    }
+}
+
+/// What painting reads, outside the app's borrow.
+#[derive(Default)]
+struct View {
+    looks: Vec<Look>,
+    /// Each tile's rectangle in content pixels, in the order shown.
+    rects: Vec<RECT>,
+    tiles: Vec<isize>,
+    scroll: i32,
+    pictures: bool,
+    enabled: bool,
+    /// The tile whose name is being edited, and the name as typed.
+    editing: Option<(usize, String)>,
+    /// Preset files over the pane.
+    dropping: bool,
+}
+
+thread_local! {
+    static VIEW: RefCell<View> = RefCell::new(View::default());
+}
+
+/// A tile held to sort: its index among the presets, and the order shown.
+struct Drag {
+    from: usize,
+    order: Vec<usize>,
 }
 
 pub struct Panel {
     pub window: HWND,
-    title: HWND,
-    add: HWND,
-    more: HWND,
-    list: HWND,
-    empty_icon: HWND,
+    tiles_view: HWND,
+    tiles: Vec<HWND>,
+    files: Vec<PresetFile>,
     empty_title: HWND,
     empty_text: HWND,
     empty_import: HWND,
-    icon_font: HFONT,
-    /// The rows the list holds.
-    shown: Vec<Row>,
-    /// The row the mouse just selected: its click applies it, a drag doesn't.
-    click_selected: Option<usize>,
-    /// The row being dragged to a new place.
-    drag: Option<usize>,
-    /// The rows have room for thumbnails (Settings › previews).
-    thumbnails: bool,
+    foot: HWND,
+    rename: HWND,
+    rename_font: HFONT,
+    /// Where the pointer went down on a tile, until it moves far enough to drag.
+    press: Option<(usize, POINT)>,
+    drag: Option<Drag>,
+    scroll: i32,
+    content: i32,
 }
-
-thread_local! {
-    /// The rows and fonts for drawing, which happens outside the app's borrow.
-    static ROWS: RefCell<Vec<Row>> = const { RefCell::new(Vec::new()) };
-    static FONTS: Cell<(isize, isize)> = const { Cell::new((0, 0)) };
-    /// Where a dragged row or dropped files would go: before this row.
-    static INSERT: Cell<Option<usize>> = const { Cell::new(None) };
-    /// Files are dragged over the panel.
-    static DROP_HIGHLIGHT: Cell<bool> = const { Cell::new(false) };
-    /// A finished label edit waits to reach the model; don't start another.
-    static EDIT_PENDING: Cell<bool> = const { Cell::new(false) };
-    /// The row whose name is being edited: its name isn't drawn under the field.
-    static EDITING: Cell<Option<usize>> = const { Cell::new(None) };
-    /// Each row's thumbnail while previews are on: the picture, and whether
-    /// it is out of date. None when previews are off.
-    static THUMBS: RefCell<Option<Vec<(Option<Arc<Bitmap>>, bool)>>> = const { RefCell::new(None) };
-}
-
-/// The thumbnail at the start of a row, in DIPs (`PresetThumbnail`).
-const THUMB_WIDTH: i32 = 72;
-const THUMB_HEIGHT: i32 = 48;
 
 pub fn register() {
     unsafe {
-        let class = WNDCLASSEXW {
-            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-            lpfnWndProc: Some(proc_),
-            hInstance: super::instance(),
-            lpszClassName: w!("NegsPresets"),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            ..Default::default()
-        };
-        RegisterClassExW(&class);
+        for (class, proc_) in [
+            (w!("NegsPresets"), Some(proc_ as unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT)),
+            (w!("NegsPresetTiles"), Some(tiles_proc as unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT)),
+        ] {
+            let class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: proc_,
+                hInstance: super::instance(),
+                lpszClassName: class,
+                hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+                ..Default::default()
+            };
+            RegisterClassExW(&class);
+        }
     }
 }
 
-fn icon_font(dpi: u32) -> HFONT {
-    let mut lf = LOGFONTW { lfHeight: -(36 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
-    let face = wide("Segoe MDL2 Assets");
+fn px(hwnd: HWND, dip: f64) -> i32 {
+    (dip * unsafe { GetDpiForWindow(hwnd) }.max(96) as f64 / 96.0).round() as i32
+}
+
+fn rename_font(dpi: u32) -> HFONT {
+    let mut lf = LOGFONTW { lfHeight: -(15 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
+    let face = wide("Segoe UI");
     lf.lfFaceName[..face.len()].copy_from_slice(&face);
     unsafe { CreateFontIndirectW(&lf) }
 }
 
 fn build(app: &mut App) {
-    let fonts = &app.fonts;
+    let font = app.fonts.ui;
     let window = create(w!("NegsPresets"), "Presets", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), app.main, 0, HFONT::default());
-    let title = create(w!("STATIC"), "Presets", WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0 | SS_CENTERIMAGE.0), WINDOW_EX_STYLE(0), window, 0, fonts.section);
-    let button = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32);
-    let add = create(w!("BUTTON"), "\u{E710}", button, WINDOW_EX_STYLE(0), window, ADD, fonts.glyph_small);
-    super::accessible_name(add, "New Preset");
-    super::dialogs::tooltip(add, "Save the film, paper and Lab settings as a preset (Ctrl+Shift+S)");
-    let more = create(w!("BUTTON"), "\u{E712}", button, WINDOW_EX_STYLE(0), window, MORE, fonts.glyph_small);
-    super::accessible_name(more, "More");
-    super::dialogs::tooltip(more, "Import presets or show their folder");
-    let style = WS_CHILD | WS_TABSTOP | WINDOW_STYLE(LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_EDITLABELS | LVS_NOCOLUMNHEADER);
-    let list = create(WC_LISTVIEWW, "Presets", style, WINDOW_EX_STYLE(0), window, LIST, fonts.ui);
+    // Not WS_CLIPCHILDREN: it paints its tiles under the buttons that stand for them.
+    let tiles_view = create(w!("NegsPresetTiles"), "Presets", WS_CHILD, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), window, 0, HFONT::default());
+    let drawn = |text: &str, id: u16| {
+        let c = create(w!("STATIC"), text, WS_CHILD | WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), window, id, font);
+        super::accessible_role(c, 0x29);
+        c
+    };
+    let empty_title = drawn("No presets yet", EMPTY_TITLE);
+    let empty_text = drawn(&EMPTY_SENTENCE.iter().map(|(t, _)| *t).collect::<String>(), EMPTY_TEXT);
+    let empty_import = create(w!("BUTTON"), "Import Presets…", WS_CHILD | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), window, EMPTY_IMPORT, font);
+    draw::set_role(empty_import, Role::Outlined);
+    draw::track_hover(empty_import);
+    super::dialogs::tooltip(empty_import, "Import presets (Ctrl+Shift+O)");
+    let foot = drawn(foot_words(false), FOOT);
+    let rename_font = rename_font(app.dpi);
+    let rename = create(w!("EDIT"), "", WS_CHILD | WINDOW_STYLE(ES_AUTOHSCROLL as u32), super::draw::keyed::STYLE, tiles_view, RENAME, rename_font);
+    // Keyed out, so the pencil (or highlighter) under it shows (`draw/keyed.rs`).
+    super::draw::keyed::key(rename, theme::gdi(theme::tokens().hex.panel));
+    super::accessible_name(rename, "Preset name");
     unsafe {
-        let extended = LVS_EX_FULLROWSELECT | LVS_EX_INFOTIP | LVS_EX_DOUBLEBUFFER;
-        SendMessageW(list, LVM_SETEXTENDEDLISTVIEWSTYLE, WPARAM(extended as usize), LPARAM(extended as isize));
-        let column = LVCOLUMNW { mask: LVCF_WIDTH, cx: 100, ..Default::default() };
-        SendMessageW(list, LVM_INSERTCOLUMNW, WPARAM(0), LPARAM(&column as *const _ as isize));
-        let _ = SetWindowSubclass(list, Some(list_subclass), 1, 0);
+        SendMessageW(rename, EM_SETLIMITTEXT, WPARAM(name::MAX_LENGTH + 20), LPARAM(0));
+        let _ = SetWindowSubclass(rename, Some(rename_subclass), 1, 0);
     }
-    theme_list(list);
-    let center = WS_CHILD | WINDOW_STYLE(SS_CENTER.0 | SS_NOPREFIX.0);
-    let icon_font = icon_font(app.dpi);
-    let empty_icon = create(w!("STATIC"), "\u{E81E}", center, WINDOW_EX_STYLE(0), window, 0, icon_font);
-    let empty_title = create(w!("STATIC"), "No Presets", center, WINDOW_EX_STYLE(0), window, 0, fonts.bold);
-    let empty_text = create(
-        w!("STATIC"),
-        "Save the film, paper and Lab settings with +, or import presets made in Negs or spektrafilm. You can also drop them here.",
-        center,
-        WINDOW_EX_STYLE(0),
-        window,
-        0,
-        fonts.ui,
-    );
-    let empty_import = create(w!("BUTTON"), "Import Presets…", WS_CHILD | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), window, EMPTY_IMPORT, fonts.ui);
     app.presets_view = Some(Panel {
         window,
-        title,
-        add,
-        more,
-        list,
-        empty_icon,
+        tiles_view,
+        tiles: vec![],
+        files: vec![],
         empty_title,
         empty_text,
         empty_import,
-        icon_font,
-        shown: vec![],
-        click_selected: None,
+        foot,
+        rename,
+        rename_font,
+        press: None,
         drag: None,
-        thumbnails: app.model.prefs.previews,
+        scroll: 0,
+        content: 0,
     });
-    set_metrics(app);
-    super::drop::register_presets(window, list);
-}
-
-/// Fonts for drawing, and the row height: a one-pixel-wide image list of
-/// that height is how a report view gets taller rows. Rows with thumbnails
-/// are taller.
-fn set_metrics(app: &mut App) {
-    let Some(p) = &app.presets_view else { return };
-    FONTS.with(|f| f.set((app.fonts.ui.0 as isize, app.fonts.small.0 as isize)));
-    let height = if p.thumbnails { THUMB_HEIGHT as f64 + 12.0 } else { 42.0 };
-    unsafe {
-        let images = ImageList_Create(1, app.px(height), ILC_COLOR, 1, 0);
-        let old = SendMessageW(p.list, LVM_SETIMAGELIST, WPARAM(LVSIL_SMALL as usize), LPARAM(images.0));
-        if old.0 != 0 {
-            let _ = ImageList_Destroy(HIMAGELIST(old.0));
-        }
-    }
+    super::drop::register_presets(window, tiles_view);
 }
 
 pub fn dpi_changed(app: &mut App) {
     let Some(p) = &mut app.presets_view else { return };
-    let icon = icon_font(app.dpi);
+    let font = rename_font(app.dpi);
     unsafe {
-        let fonts = &app.fonts;
-        for (c, f) in [(p.title, fonts.section), (p.add, fonts.glyph_small), (p.more, fonts.glyph_small), (p.list, fonts.ui), (p.empty_title, fonts.bold), (p.empty_text, fonts.ui), (p.empty_import, fonts.ui), (p.empty_icon, icon)] {
-            SendMessageW(c, WM_SETFONT, WPARAM(f.0 as usize), LPARAM(1));
-        }
-        let _ = DeleteObject(std::mem::replace(&mut p.icon_font, icon));
+        SendMessageW(p.rename, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+        let _ = DeleteObject(std::mem::replace(&mut p.rename_font, font));
     }
-    set_metrics(app);
+}
+
+/// What the foot says: what a click and a drag do, or what letting go of
+/// the files will do (`PresetTileRules.foot`).
+fn foot_words(dropping: bool) -> &'static str {
+    if dropping { "drop to import" } else { "click to apply · drag to sort · drop files to import" }
 }
 
 /// Places the panel in the adjustments column, creating it the first time
@@ -204,179 +246,329 @@ pub fn layout(app: &mut App, rect: RECT, visible: bool) {
         let _ = MoveWindow(p.window, rect.left, rect.top, w, h, true);
         let _ = ShowWindow(p.window, if visible { SW_SHOWNA } else { SW_HIDE });
     }
-    let px = |dip: f64| app.px(dip);
-    let (pad, header, button) = (px(16.0), px(48.0), px(32.0));
+    if visible {
+        place(app);
+    }
+}
+
+/// The tiles' grid for a view `width` pixels wide: each tile's rectangle
+/// in content pixels, and the content's height.
+fn grid(hwnd: HWND, count: usize, width: i32, pictures: bool) -> (Vec<RECT>, i32) {
+    let px = |dip: f64| px(hwnd, dip);
+    let (gutter, gap, row_gap) = (px(ink::GUTTER), px(COLUMN_GAP), px(ROW_GAP));
+    let tile_w = ((width - 2 * gutter - gap) / 2).max(px(40.0));
+    let picture = if pictures { (tile_w as f64 * 2.0 / 3.0).round() as i32 + px(CAPTION_GAP) } else { 0 };
+    let tile_h = picture + px(NAME_LINE + 1.0 + 2.0 * DETAIL_LINE);
+    let rects = (0..count)
+        .map(|i| {
+            let (column, row) = ((i % 2) as i32, (i / 2) as i32);
+            let (x, y) = (gutter + column * (tile_w + gap), px(TOP) + row * (tile_h + row_gap));
+            RECT { left: x, top: y, right: x + tile_w, bottom: y + tile_h }
+        })
+        .collect::<Vec<_>>();
+    let rows = count.div_ceil(2) as i32;
+    let content = if count == 0 { 0 } else { px(TOP) + rows * tile_h + (rows - 1) * row_gap + px(BOTTOM) };
+    (rects, content)
+}
+
+/// The order shown: as dragged, while a tile is.
+fn order(p: &Panel) -> Vec<usize> {
+    p.drag.as_ref().map_or_else(|| (0..p.files.len()).collect(), |d| d.order.clone())
+}
+
+/// Lays out the pane: the tiles in their grid and the foot under them, or
+/// the empty state; scrolls the tiles and tells the model which are seen.
+fn place(app: &mut App) {
+    let Some(p) = &mut app.presets_view else { return };
+    let window = p.window;
+    let px = |dip: f64| px(window, dip);
+    let mut client = RECT::default();
     unsafe {
-        let top = (header - button) / 2;
-        let _ = MoveWindow(p.title, pad, top, w - 2 * pad - 2 * button - px(8.0), button, true);
-        let _ = MoveWindow(p.more, w - pad - button + px(8.0), top, button, button, true);
-        let _ = MoveWindow(p.add, w - pad - 2 * button, top, button, button, true);
-        let _ = MoveWindow(p.list, 0, header, w, (h - header).max(0), true);
-        let width = (w - 2 * px(24.0)).max(px(100.0));
+        let _ = GetClientRect(window, &mut client);
+    }
+    let (w, h) = (client.right, client.bottom);
+    let empty = p.files.is_empty();
+    let rule = px(1.0).max(1);
+    let foot = px(FOOT_HEIGHT);
+    let view_h = (h - rule - foot - rule).max(0);
+    let pictures = app.model.prefs.previews;
+    let (rects, content) = grid(window, p.files.len(), w, pictures);
+    p.content = content;
+    p.scroll = p.scroll.clamp(0, (content - view_h).max(0));
+    let order = order(p);
+    // Each preset's place: its index in the order shown picks its rectangle.
+    let mut placed = vec![RECT::default(); p.files.len()];
+    for (slot, &index) in order.iter().enumerate() {
+        if let (Some(r), Some(at)) = (rects.get(slot), placed.get_mut(index)) {
+            *at = *r;
+        }
+    }
+    unsafe {
+        let _ = MoveWindow(p.tiles_view, 0, rule, w, view_h, true);
+        let _ = ShowWindow(p.tiles_view, if empty { SW_HIDE } else { SW_SHOWNA });
+        let _ = MoveWindow(p.foot, 0, h - foot, w, foot, true);
+        let _ = ShowWindow(p.foot, if empty { SW_HIDE } else { SW_SHOWNA });
+        for (i, &tile) in p.tiles.iter().enumerate() {
+            let r = placed[i];
+            let _ = MoveWindow(tile, r.left, r.top - p.scroll, r.right - r.left, r.bottom - r.top, false);
+        }
+        for c in [p.empty_title, p.empty_text, p.empty_import] {
+            let _ = ShowWindow(c, if empty { SW_SHOWNA } else { SW_HIDE });
+        }
+    }
+    if empty {
+        // Centred, 44 in from the sides, 40 up from the foot (`PresetsEmpty`).
+        let width = (w - 2 * px(44.0)).max(px(120.0));
+        let s = draw::dpi_of(window);
+        let plain = theme::tokens().plain;
+        let head = px(super::d2d::measure_text("No presets yet", &EMPTY_HEAD, 0.0, plain).height as f64);
+        let mut measure = |text: &str, style: &TextStyle| super::d2d::measure_text(text, style, 0.0, plain).width;
+        let lines = sentence_lines(width as f32 / s, &mut measure).len() as f32;
+        let line = sentence_line(super::d2d::measure_text("Save", &EMPTY_WORDS, 0.0, plain).height);
+        let text = (lines * line * s).ceil() as i32 + px(2.0);
+        let button = px(ink::width("Import Presets…", &ink::OUTLINED) as f64 + 24.0) + 2 * px(ink::MARGIN);
+        let button_h = px(23.0) + 2 * px(ink::MARGIN);
+        let total = head + px(10.0) + text + px(16.0) + px(23.0);
+        let mut y = rule + ((h - rule - px(40.0) - total) / 2).max(0);
         let x = (w - width) / 2;
-        let mut y = header + ((h - header) - px(200.0)).max(0) / 3;
-        for (control, height) in [(p.empty_icon, 56.0), (p.empty_title, 32.0), (p.empty_text, 80.0)] {
-            let _ = MoveWindow(control, x, y, width, px(height), true);
-            y += px(height);
+        unsafe {
+            let _ = MoveWindow(p.empty_title, x, y, width, head, true);
+            y += head + px(10.0);
+            let _ = MoveWindow(p.empty_text, x, y, width, text, true);
+            y += text + px(16.0);
+            let _ = MoveWindow(p.empty_import, (w - button) / 2, y - px(ink::MARGIN), button, button_h, true);
         }
-        let _ = MoveWindow(p.empty_import, (w - px(152.0)) / 2, y + px(8.0), px(152.0), px(32.0), true);
-        fit_column(p.list);
     }
-}
-
-/// The list on the column's colour.
-fn theme_list(list: HWND) {
-    let p = theme::palette();
+    // The tiles on screen, and a row either side.
+    let mut visible = 0..0;
+    if !empty {
+        let row = rects.first().map_or(1, |r| r.bottom - r.top + px(ROW_GAP)).max(1);
+        let first = ((p.scroll - px(TOP)) / row - 1).max(0) as usize * 2;
+        let last = (((p.scroll + view_h - px(TOP)) / row + 2).max(0) as usize * 2).min(p.files.len());
+        // Slots shown, as presets.
+        let shown: Vec<usize> = order.get(first.min(last)..last).map(|s| s.to_vec()).unwrap_or_default();
+        let (low, high) = (shown.iter().min().copied(), shown.iter().max().copied());
+        if let (Some(low), Some(high)) = (low, high) {
+            visible = low..high + 1;
+        }
+    }
+    VIEW.with(|v| {
+        let mut v = v.borrow_mut();
+        v.rects = placed;
+        v.scroll = p.scroll;
+        v.pictures = pictures;
+        v.tiles = p.tiles.iter().map(|t| t.0 as isize).collect();
+    });
+    place_rename(p);
+    let tiles_view = p.tiles_view;
     unsafe {
-        SendMessageW(list, LVM_SETBKCOLOR, WPARAM(0), LPARAM(p.panel as isize));
-        SendMessageW(list, LVM_SETTEXTBKCOLOR, WPARAM(0), LPARAM(p.panel as isize));
-        SendMessageW(list, LVM_SETTEXTCOLOR, WPARAM(0), LPARAM(p.text as isize));
+        let _ = InvalidateRect(tiles_view, None, false);
+        let _ = InvalidateRect(window, None, false);
     }
+    app.model.set_visible_presets(visible);
 }
 
-fn fit_column(list: HWND) {
-    unsafe {
-        let mut client = RECT::default();
-        let _ = GetClientRect(list, &mut client);
-        SendMessageW(list, LVM_SETCOLUMNWIDTH, WPARAM(0), LPARAM(client.right as isize));
-    }
-}
-
-fn row(model: &Model, file: &PresetFile) -> Row {
+fn look(model: &Model, file: &PresetFile) -> Look {
     let stock = |id: &str, paper: bool| model.stocks.iter().find(|s| s.paper == paper && s.id == id).map_or_else(|| id.to_owned(), |s| s.name.clone());
-    let status = model.preset_status.get(file);
-    let (detail, valid) = match status {
+    let mut look = Look { name: file.name(), applied: model.applied_preset() == Some(&file.path), ..Default::default() };
+    match model.preset_status.get(file) {
         Some(Status::Valid { film, paper, scan, .. }) => {
-            (if *scan { format!("{} · film scan", stock(film, false)) } else { format!("{} → {}", stock(film, false), stock(paper, true)) }, true)
+            look.film = Some(stock(film, false));
+            look.paper = Some(if *scan { ("not printed · film scan", String::new()) } else { ("printed on", stock(paper, true)) });
         }
-        Some(Status::Invalid(reason)) => (reason.clone(), false),
-        _ => (String::new(), false),
-    };
-    Row { file: file.clone(), name: file.name(), detail, valid, refused: matches!(status, Some(Status::Invalid(_))) }
-}
-
-fn editing(list: HWND) -> bool {
-    unsafe { SendMessageW(list, LVM_GETEDITCONTROL, WPARAM(0), LPARAM(0)).0 != 0 }
-}
-
-fn selected(list: HWND) -> Option<usize> {
-    let index = unsafe { SendMessageW(list, LVM_GETNEXTITEM, WPARAM(usize::MAX), LPARAM(LVNI_SELECTED as isize)).0 };
-    (index >= 0).then_some(index as usize)
-}
-
-fn select(list: HWND, index: usize) {
-    let item = LVITEMW { stateMask: LIST_VIEW_ITEM_STATE_FLAGS(LVIS_SELECTED.0 | LVIS_FOCUSED.0), state: LIST_VIEW_ITEM_STATE_FLAGS(LVIS_SELECTED.0 | LVIS_FOCUSED.0), ..Default::default() };
-    unsafe {
-        SendMessageW(list, LVM_SETITEMSTATE, WPARAM(index), LPARAM(&item as *const _ as isize));
-        SendMessageW(list, LVM_ENSUREVISIBLE, WPARAM(index), LPARAM(0));
+        Some(Status::Invalid(reason)) => look.invalid = Some(reason.clone()),
+        _ => {}
     }
+    if model.prefs.previews
+        && let Some(thumb) = model.previews.thumb(&Target::Preset(file.path.clone()))
+    {
+        look.image = thumb.image.clone();
+        look.dimmed = thumb.dimmed;
+    }
+    look
 }
 
-/// Brings the panel up to date with the model: the rows, the empty state,
-/// whether it can change presets, and a rename New Preset asked for.
+/// What a screen reader says after the name (`accessibilityValue`).
+fn spoken(look: &Look) -> String {
+    if let Some(reason) = &look.invalid {
+        return format!("Can’t be read. {reason}");
+    }
+    let (Some(film), Some((lead, paper))) = (&look.film, &look.paper) else { return String::new() };
+    let print = if paper.is_empty() { lead.to_string() } else { format!("{lead} {paper}") };
+    format!("{}{film}, {print}", if look.applied { "Applied last. " } else { "" })
+}
+
+/// Brings the pane up to date with the model: the tiles, the empty state,
+/// whether it can change presets, and a rename New asked for.
 pub fn sync(app: &mut App) {
     let Some(p) = &mut app.presets_view else { return };
     // Hidden: brought up to date when it shows (a layout change).
     if !unsafe { IsWindowVisible(p.window) }.as_bool() {
         return;
     }
-    if p.thumbnails != app.model.prefs.previews {
-        p.thumbnails = app.model.prefs.previews;
-        set_metrics(app);
-        redraw_previews(app);
-    }
-    let Some(p) = &mut app.presets_view else { return };
     let model = &app.model;
-    let rows: Vec<Row> = model.presets.iter().map(|f| row(model, f)).collect();
+    let files_changed = p.files != model.presets;
+    if files_changed && editing(p).is_none() {
+        p.drag = None;
+        p.press = None;
+        let font = app.fonts.ui;
+        let tiles_view = p.tiles_view;
+        while p.tiles.len() > model.presets.len() {
+            let tile = p.tiles.pop().unwrap();
+            unsafe {
+                let _ = DestroyWindow(tile);
+            }
+        }
+        while p.tiles.len() < model.presets.len() {
+            let index = p.tiles.len();
+            let style = WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_PUSHBUTTON as u32) | if index == 0 { WS_GROUP | WS_TABSTOP } else { WINDOW_STYLE(0) };
+            let tile = create(w!("BUTTON"), "", style, WINDOW_EX_STYLE(0), tiles_view, TILE_FIRST + index as u16, font);
+            draw::track_hover(tile);
+            unsafe {
+                let _ = SetWindowSubclass(tile, Some(tile_subclass), 1, 0);
+            }
+            p.tiles.push(tile);
+        }
+        p.files = model.presets.clone();
+    }
+    let looks: Vec<Look> = p.files.iter().map(|f| look(model, f)).collect();
     let enabled = model.can_change_presets();
-    let empty = rows.is_empty();
+    let changed = VIEW.with(|v| {
+        let mut v = v.borrow_mut();
+        let changed = v.looks != looks || v.enabled != enabled;
+        for (i, look) in looks.iter().enumerate() {
+            if v.looks.get(i).is_none_or(|old| old.name != look.name) {
+                let tile = p.tiles[i];
+                super::draw::window_text(tile).ne(&look.name).then(|| {
+                    let text = wide(&look.name);
+                    unsafe {
+                        let _ = SetWindowTextW(tile, pcwstr(&text));
+                    }
+                });
+                super::dialogs::tooltip(tile, &look.name);
+            }
+            if v.looks.get(i) != Some(look) {
+                super::accessible_value(p.tiles[i], &spoken(look));
+            }
+        }
+        v.looks = looks;
+        v.enabled = enabled;
+        changed
+    });
     unsafe {
-        for c in [p.empty_icon, p.empty_title, p.empty_text, p.empty_import] {
-            let _ = ShowWindow(c, if empty { SW_SHOWNA } else { SW_HIDE });
-        }
-        let _ = ShowWindow(p.list, if empty { SW_HIDE } else { SW_SHOWNA });
-        for c in [p.add, p.more, p.empty_import, p.list] {
-            let _ = EnableWindow(c, enabled);
+        for &c in p.tiles.iter().chain([&p.empty_import]) {
+            if IsWindowEnabled(c).as_bool() != enabled {
+                let _ = EnableWindow(c, enabled);
+            }
         }
     }
-    if rows != p.shown && !editing(p.list) {
-        let same_files = rows.len() == p.shown.len() && rows.iter().zip(&p.shown).all(|(a, b)| a.file.path == b.file.path && a.name == b.name);
-        if !same_files {
-            let kept = selected(p.list).and_then(|i| p.shown.get(i)).map(|r| r.file.path.clone());
-            unsafe {
-                SendMessageW(p.list, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0));
-                for (i, r) in rows.iter().enumerate() {
-                    let mut text = wide(&r.name);
-                    let item = LVITEMW { mask: LVIF_TEXT, iItem: i as i32, pszText: PWSTR(text.as_mut_ptr()), ..Default::default() };
-                    SendMessageW(p.list, LVM_INSERTITEMW, WPARAM(0), LPARAM(&item as *const _ as isize));
-                }
-            }
-            if let Some(i) = kept.and_then(|path| rows.iter().position(|r| r.file.path == path)) {
-                select(p.list, i);
-            }
-            p.click_selected = None;
-        }
-        ROWS.with(|r| *r.borrow_mut() = rows.clone());
-        p.shown = rows;
-        fit_column(p.list);
-        unsafe {
-            let _ = InvalidateRect(p.list, None, false);
-        }
-        redraw_previews(app);
+    // The applied tile, or the first, is where Tab lands.
+    let applied = VIEW.with(|v| v.borrow().looks.iter().position(|l| l.applied));
+    set_tab_stop(p, applied.unwrap_or(0), false);
+    let renaming = model.renaming_preset.as_ref().and_then(|path| p.files.iter().position(|f| &f.path == path));
+    if files_changed || changed {
+        place(app);
     }
-    let Some(p) = &mut app.presets_view else { return };
-    let model = &app.model;
-    // New Preset: rename the new row at once.
-    let renaming = model.renaming_preset.as_ref().and_then(|path| p.shown.iter().position(|r| &r.file.path == path));
     if let Some(index) = renaming {
-        let shown = unsafe { IsWindowVisible(p.list).as_bool() };
-        if shown && !editing(p.list) && !EDIT_PENDING.with(Cell::get) {
-            select(p.list, index);
-            unsafe {
-                let _ = SetFocus(p.list);
-                SendMessageW(p.list, LVM_EDITLABELW, WPARAM(index), LPARAM(0));
+        start_rename(app, index);
+    }
+}
+
+/// Moves the tab stop to tile `index`, unless a tile has focus (`force`: anyway).
+fn set_tab_stop(p: &Panel, index: usize, force: bool) {
+    let focused = unsafe { GetFocus() };
+    if !force && p.tiles.contains(&focused) {
+        return;
+    }
+    for (i, &tile) in p.tiles.iter().enumerate() {
+        unsafe {
+            let style = GetWindowLongW(tile, GWL_STYLE) as u32;
+            let want = if i == index { style | WS_TABSTOP.0 } else { style & !WS_TABSTOP.0 };
+            if want != style {
+                SetWindowLongW(tile, GWL_STYLE, want as i32);
             }
         }
     }
 }
 
-/// Applies the row if the engine reads it.
-fn apply(app: &mut App, index: usize) {
-    let Some(r) = app.presets_view.as_ref().and_then(|p| p.shown.get(index)).cloned() else { return };
-    if r.valid {
-        app.model.apply_preset(&r.file);
+fn editing(p: &Panel) -> Option<usize> {
+    unsafe { IsWindowVisible(p.rename).as_bool() }.then(|| VIEW.with(|v| v.borrow().editing.as_ref().map(|e| e.0))).flatten()
+}
+
+/// The pencil-underlined field over tile `index`'s name.
+fn start_rename(app: &mut App, index: usize) {
+    let Some(p) = &mut app.presets_view else { return };
+    if editing(p).is_some() || index >= p.files.len() {
+        return;
     }
-}
-
-fn file_at(app: &App, index: usize) -> Option<PresetFile> {
-    app.presets_view.as_ref()?.shown.get(index).map(|r| r.file.clone())
-}
-
-fn confirm_delete(app: &mut App, index: usize) {
-    let Some(file) = file_at(app, index) else { return };
-    if super::dialogs::confirm_delete_preset(app.main, &file.name()) {
-        app.model.delete_preset(&file);
-    }
-}
-
-fn rename(app: &mut App, index: usize) {
-    let Some(p) = &app.presets_view else { return };
+    let name = p.files[index].name();
+    VIEW.with(|v| v.borrow_mut().editing = Some((index, name.clone())));
+    reveal(p, index);
+    // Placed first: a name set in a box too narrow for it stays scrolled.
+    place_rename(p);
+    let text = wide(&name);
     unsafe {
-        let _ = SetFocus(p.list);
-        SendMessageW(p.list, LVM_EDITLABELW, WPARAM(index), LPARAM(0));
+        let _ = SetWindowTextW(p.rename, pcwstr(&text));
+        SendMessageW(p.rename, EM_SETSEL, WPARAM(0), LPARAM(-1));
+        let _ = ShowWindow(p.rename, SW_SHOW);
+        let _ = SetFocus(p.rename);
+        let _ = InvalidateRect(p.tiles_view, None, false);
     }
 }
 
-/// A label edit ended: `text` is None after Escape. An invalid name keeps
-/// the old one and says why; Escape on New Preset's row removes it.
-fn finish_rename(app: &mut App, file: PresetFile, text: Option<String>) {
-    EDIT_PENDING.with(|e| e.set(false));
-    let Some(text) = text else { return app.model.cancel_rename(&file) };
+/// The field on the name's line of the tile being named.
+fn place_rename(p: &Panel) {
+    let Some((index, _)) = VIEW.with(|v| v.borrow().editing.clone()) else { return };
+    let Some(r) = VIEW.with(|v| v.borrow().rects.get(index).copied()) else { return };
+    let px = |dip: f64| px(p.window, dip);
+    let top = name_top(p.window, r) - p.scroll;
+    let (w, h) = (r.right - r.left + px(1.0), px(NAME_LINE));
+    unsafe {
+        let mut now = RECT::default();
+        let _ = GetClientRect(p.rename, &mut now);
+        let _ = MoveWindow(p.rename, r.left - px(1.0), top, w, h, true);
+        if now.right != w {
+            // Its text stays scrolled as it was in the old width (a name set
+            // before the tile was laid out showed its end): from the start
+            // again, then the selection back, scrolled only if it must be.
+            let mut from = 0u32;
+            let mut to = 0u32;
+            SendMessageW(p.rename, EM_GETSEL, WPARAM(&mut from as *mut u32 as usize), LPARAM(&mut to as *mut u32 as isize));
+            SendMessageW(p.rename, EM_SETSEL, WPARAM(0), LPARAM(0));
+            SendMessageW(p.rename, EM_SETSEL, WPARAM(from as usize), LPARAM(to as isize));
+        }
+    }
+}
+
+/// The top of a tile's name line, in content pixels.
+fn name_top(hwnd: HWND, r: RECT) -> i32 {
+    let pictures = VIEW.with(|v| v.borrow().pictures);
+    let picture = if pictures { ((r.right - r.left) as f64 * 2.0 / 3.0).round() as i32 + px(hwnd, CAPTION_GAP) } else { 0 };
+    r.top + picture
+}
+
+/// The field is done: `typed` is None after Escape. An invalid name keeps
+/// the old one and says why; Escape on New's preset removes it.
+fn finish_rename(app: &mut App, typed: Option<String>) {
+    let Some(p) = &mut app.presets_view else { return };
+    let Some((index, _)) = VIEW.with(|v| v.borrow_mut().editing.take()) else { return };
+    unsafe {
+        let _ = ShowWindow(p.rename, SW_HIDE);
+        let _ = InvalidateRect(p.tiles_view, None, false);
+        if let Some(&tile) = p.tiles.get(index) {
+            let _ = SetFocus(tile);
+        }
+    }
+    let Some(file) = p.files.get(index).cloned() else { return };
+    let Some(text) = typed else { return app.model.cancel_rename(&file) };
     let typed = text.trim();
+    let old = file.name();
+    // The renamed tile keeps the focus wherever the list puts it.
+    let kept = if name::problem(typed).is_none() { typed.to_owned() } else { old.clone() };
+    post(move |app: &mut App| focus_named(app, &kept));
     match name::problem(typed) {
         None => app.model.rename_preset(&file, typed),
         Some(problem) => {
-            let old = file.name();
             app.model.rename_preset(&file, &old);
             if !typed.is_empty() {
                 let (main, instruction) = (app.main.0 as isize, format!("“{typed}” can’t be used as a preset name."));
@@ -386,27 +578,90 @@ fn finish_rename(app: &mut App, file: PresetFile, text: Option<String>) {
     }
 }
 
-fn context_menu(app: &mut App, screen: POINT) {
-    let Some(p) = &app.presets_view else { return };
-    let list = p.list;
-    let mut at = screen;
-    let index = if screen.x == -1 && screen.y == -1 {
-        // From the keyboard: under the selected row.
-        let index = selected(list);
-        if let Some(i) = index {
-            let mut r = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
-            unsafe {
-                SendMessageW(list, LVM_GETITEMRECT, WPARAM(i), LPARAM(&mut r as *mut _ as isize));
-                at = POINT { x: r.left + app.px(24.0), y: r.bottom };
-                let _ = ClientToScreen(list, &mut at);
-            }
-        }
-        index
+/// Focuses the tile of the preset called `name`, once the pane has the
+/// model's list.
+fn focus_named(app: &mut App, name: &str) {
+    sync(app);
+    let Some(p) = &mut app.presets_view else { return };
+    let Some(index) = p.files.iter().position(|f| name::key(&f.name()) == name::key(name)) else { return };
+    set_tab_stop(p, index, true);
+    reveal(p, index);
+    unsafe {
+        let _ = SetFocus(p.tiles[index]);
+    }
+}
+
+/// Scrolls so tile `index` is in view.
+fn reveal(p: &mut Panel, index: usize) {
+    let Some(r) = VIEW.with(|v| v.borrow().rects.get(index).copied()) else { return };
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(p.tiles_view, &mut client);
+    }
+    let margin = px(p.window, 12.0);
+    let target = if r.top - margin < p.scroll {
+        r.top - margin
+    } else if r.bottom + margin > p.scroll + client.bottom {
+        r.bottom + margin - client.bottom
     } else {
-        hit(list, screen)
+        return;
     };
-    let Some(index) = index else { return };
-    let valid = p.shown.get(index).is_some_and(|r| r.valid) && app.model.can_change_presets();
+    scroll_to(p, target);
+}
+
+fn scroll_to(p: &mut Panel, target: i32) {
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(p.tiles_view, &mut client);
+    }
+    let target = target.clamp(0, (p.content - client.bottom).max(0));
+    if target == p.scroll {
+        return;
+    }
+    p.scroll = target;
+    post(place);
+}
+
+/// Applies tile `index` if the engine reads it.
+fn apply(app: &mut App, index: usize) {
+    let Some(p) = &app.presets_view else { return };
+    let Some(file) = p.files.get(index).cloned() else { return };
+    if matches!(app.model.preset_status.get(&file), Some(Status::Valid { .. })) {
+        app.model.apply_preset(&file);
+    }
+}
+
+fn confirm_delete(app: &mut App, index: usize) {
+    let Some(file) = app.presets_view.as_ref().and_then(|p| p.files.get(index)).cloned() else { return };
+    if super::dialogs::confirm_delete_preset(app.main, &file.name()) {
+        app.model.delete_preset(&file);
+    }
+}
+
+fn show_in_folder(file: &PresetFile) {
+    let (verb, explorer) = (wide("open"), wide("explorer.exe"));
+    let arguments = wide(&format!("/select,\"{}\"", file.path.display()));
+    unsafe {
+        windows::Win32::UI::Shell::ShellExecuteW(None, pcwstr(&verb), pcwstr(&explorer), pcwstr(&arguments), windows::core::PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// Apply, Rename, Export…, Show in Folder and Delete… for tile `index`
+/// (`PresetTile.contextMenu`, with Windows' Show in Folder).
+fn context_menu(app: &mut App, index: usize, screen: POINT) {
+    let Some(p) = &app.presets_view else { return };
+    let Some(file) = p.files.get(index).cloned() else { return };
+    let tile = p.tiles[index];
+    let mut at = screen;
+    if screen.x == -1 && screen.y == -1 {
+        // From the keyboard: under the tile's name.
+        let mut r = RECT::default();
+        unsafe {
+            let _ = GetWindowRect(tile, &mut r);
+        }
+        at = POINT { x: r.left + app.px(12.0), y: r.bottom };
+    }
+    let valid = matches!(app.model.preset_status.get(&file), Some(Status::Valid { .. })) && app.model.can_change_presets();
     let choice = unsafe {
         let menu = CreatePopupMenu().unwrap();
         let add = |cmd: u32, text: &str, on: bool| {
@@ -416,6 +671,7 @@ fn context_menu(app: &mut App, screen: POINT) {
         add(1, "&Apply", valid);
         add(2, "&Rename\tF2", true);
         add(3, "&Export…", true);
+        add(5, "Show in &Folder", true);
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
         add(4, "&Delete…\tDel", true);
         let choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, at.x, at.y, 0, app.main, None).0;
@@ -424,142 +680,240 @@ fn context_menu(app: &mut App, screen: POINT) {
     };
     match choice {
         1 => apply(app, index),
-        2 => rename(app, index),
-        3 => {
-            if let Some(file) = file_at(app, index) {
-                super::dialogs::export_preset(app, &file);
-            }
-        }
+        2 => start_rename(app, index),
+        3 => super::dialogs::export_preset(app, &file),
         4 => confirm_delete(app, index),
+        5 => show_in_folder(&file),
         _ => {}
     }
 }
 
-/// The "…" button's menu, under it.
-fn more_menu(app: &mut App) {
-    let Some(p) = &app.presets_view else { return };
-    let mut r = RECT::default();
-    let choice = unsafe {
-        let _ = GetWindowRect(p.more, &mut r);
-        let menu = CreatePopupMenu().unwrap();
-        for (cmd, text) in [(id::IMPORT_PRESETS, "&Import Presets…\tCtrl+Shift+O"), (id::PRESETS_FOLDER, "&Show Presets Folder")] {
-            let w = wide(text);
-            let _ = AppendMenuW(menu, MF_STRING, cmd as usize, pcwstr(&w));
-        }
-        let choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTALIGN, r.right, r.bottom, 0, app.main, None).0;
-        let _ = DestroyMenu(menu);
-        choice
-    };
-    if choice != 0 {
-        app.command(choice as u16);
-    }
-}
-
-/// The row under a point on the screen.
-fn hit(list: HWND, screen: POINT) -> Option<usize> {
-    let mut info = LVHITTESTINFO { pt: screen, ..Default::default() };
-    unsafe {
-        let _ = ScreenToClient(list, &mut info.pt);
-        let index = SendMessageW(list, LVM_HITTEST, WPARAM(0), LPARAM(&mut info as *mut _ as isize)).0;
-        (index >= 0).then_some(index as usize)
-    }
-}
-
-/// Where a drop at `screen` goes: before the row whose upper half it is in,
-/// or after the last row.
-pub fn gap(list: HWND, screen: POINT) -> usize {
-    let count = ROWS.with(|r| r.borrow().len());
+/// The preset whose tile is under `screen`, by index, if any: files
+/// dropped there go before it.
+pub fn drop_position(tiles_view: HWND, screen: POINT) -> Option<usize> {
     let mut point = screen;
     unsafe {
-        let _ = ScreenToClient(list, &mut point);
-    }
-    for i in 0..count {
-        let mut r = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
-        unsafe {
-            SendMessageW(list, LVM_GETITEMRECT, WPARAM(i), LPARAM(&mut r as *mut _ as isize));
+        if !IsWindowVisible(tiles_view).as_bool() {
+            return None;
         }
-        if point.y < (r.top + r.bottom) / 2 {
-            return i;
-        }
+        let _ = ScreenToClient(tiles_view, &mut point);
     }
-    count
+    tile_at(tiles_view, point)
 }
 
-/// Shows where a drag would go, None to hide it.
-pub fn show_insert(list: HWND, at: Option<usize>) {
-    if INSERT.with(|i| i.replace(at)) != at {
-        unsafe {
-            let _ = InvalidateRect(list, None, false);
-        }
-    }
+/// The tile at `point` in the view's pixels, the gaps around it included.
+fn tile_at(hwnd: HWND, point: POINT) -> Option<usize> {
+    let (dx, dy) = (px(hwnd, COLUMN_GAP / 2.0), px(hwnd, ROW_GAP / 2.0));
+    VIEW.with(|v| {
+        let v = v.borrow();
+        let y = point.y + v.scroll;
+        v.rects.iter().position(|r| point.x >= r.left - dx && point.x < r.right + dx && y >= r.top - dy && y < r.bottom + dy)
+    })
 }
 
+/// Preset files over the pane: the loose pencil ring round it, and the
+/// foot says what letting go does.
 pub fn highlight_drop(window: HWND, on: bool) {
-    if DROP_HIGHLIGHT.with(|h| h.replace(on)) != on {
+    let changed = VIEW.with(|v| std::mem::replace(&mut v.borrow_mut().dropping, on) != on);
+    if changed {
         unsafe {
-            let _ = InvalidateRect(window, None, true);
+            let _ = InvalidateRect(window, None, false);
+            if let Ok(tiles) = FindWindowExW(window, None, w!("NegsPresetTiles"), None) {
+                let _ = InvalidateRect(tiles, None, false);
+            }
+            if let Ok(foot) = GetDlgItem(window, FOOT as i32) {
+                let text = wide(foot_words(on));
+                let _ = SetWindowTextW(foot, pcwstr(&text));
+                let _ = InvalidateRect(foot, None, false);
+            }
         }
     }
 }
 
-/// Scrolls while a drag is near the list's top or bottom edge.
-fn scroll_near_edge(list: HWND, y: i32) {
+// MARK: Pointer and keys
+
+fn tile_index(hwnd: HWND) -> Option<usize> {
+    let id = unsafe { GetDlgCtrlID(hwnd) } as u16;
+    id.checked_sub(TILE_FIRST).map(usize::from)
+}
+
+/// The pointer moved with the button down on a tile: past the drag
+/// distance it picks the tile up; then the tile moves to where it's held,
+/// and the view scrolls near its edges.
+fn pointer_moved(app: &mut App, tile: HWND, at: POINT) {
+    let Some(p) = &mut app.presets_view else { return };
+    if p.drag.is_none() {
+        let Some((index, start)) = p.press else { return };
+        let (dx, dy) = unsafe { (GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG)) };
+        if (at.x - start.x).abs() <= dx && (at.y - start.y).abs() <= dy {
+            return;
+        }
+        if !app.model.can_change_presets() {
+            return;
+        }
+        p.drag = Some(Drag { from: index, order: (0..p.files.len()).collect() });
+        unsafe {
+            SendMessageW(tile, BM_SETSTATE, WPARAM(0), LPARAM(0));
+        }
+    }
+    let mut point = at;
     let mut client = RECT::default();
     unsafe {
-        let _ = GetClientRect(list, &mut client);
-        let margin = (client.bottom / 8).max(12);
-        let step = if y < margin { -20 } else if y > client.bottom - margin { 20 } else { 0 };
-        if step != 0 {
-            SendMessageW(list, LVM_SCROLL, WPARAM(0), LPARAM(step));
+        let _ = MapWindowPoints(tile, p.tiles_view, std::slice::from_mut(&mut point));
+        let _ = GetClientRect(p.tiles_view, &mut client);
+    }
+    let margin = (client.bottom / 8).max(px(p.window, 12.0));
+    let step = if point.y < margin { -px(p.window, 16.0) } else if point.y > client.bottom - margin { px(p.window, 16.0) } else { 0 };
+    if step != 0 {
+        let target = p.scroll + step;
+        scroll_to(p, target);
+    }
+    // The slot under the pointer, in the grid as laid out now.
+    let Some(over) = tile_at(p.tiles_view, point) else { return };
+    let drag = p.drag.as_mut().unwrap();
+    let slot_of = |order: &[usize], index: usize| order.iter().position(|&i| i == index);
+    let Some(slot) = VIEW.with(|v| v.borrow().rects.get(over).copied()).and_then(|_| slot_of(&drag.order, over)) else { return };
+    let Some(from) = slot_of(&drag.order, drag.from) else { return };
+    if slot != from {
+        let moved = drag.order.remove(from);
+        drag.order.insert(slot, moved);
+        place(app);
+    }
+}
+
+/// The button came up: a drag puts the presets in its order.
+fn pointer_released(app: &mut App, drop: bool) -> bool {
+    let Some(p) = &mut app.presets_view else { return false };
+    p.press = None;
+    let Some(drag) = p.drag.take() else { return false };
+    if drop && drag.order.iter().enumerate().any(|(slot, &i)| slot != i) {
+        let order: Vec<PresetFile> = drag.order.iter().filter_map(|&i| p.files.get(i).cloned()).collect();
+        // The tile let go of keeps the focus in its new place.
+        if let Some(moved) = p.files.get(drag.from).map(PresetFile::name) {
+            post(move |app: &mut App| focus_named(app, &moved));
         }
+        app.model.move_presets(order);
     }
+    place(app);
+    true
 }
 
-fn drag_moved(app: &mut App) {
-    let Some(p) = &app.presets_view else { return };
-    if p.drag.is_none() {
-        return;
-    }
-    let mut cursor = POINT::default();
-    unsafe {
-        let _ = GetCursorPos(&mut cursor);
-        let mut local = cursor;
-        let _ = ScreenToClient(p.list, &mut local);
-        scroll_near_edge(p.list, local.y);
-    }
-    show_insert(p.list, Some(gap(p.list, cursor)));
-}
-
-fn drag_ended(app: &mut App, drop: bool) {
+/// Moves the focus from tile `index` by `step` (±1 across, ±2 down).
+fn step_focus(app: &mut App, index: usize, step: isize) {
     let Some(p) = &mut app.presets_view else { return };
-    let Some(from) = p.drag.take() else { return };
-    let to = INSERT.with(|i| i.get());
-    show_insert(p.list, None);
-    let Some(to) = to.filter(|_| drop) else { return };
-    if to == from || to == from + 1 {
+    let order = order(p);
+    let Some(slot) = order.iter().position(|&i| i == index) else { return };
+    let next = slot as isize + step;
+    if next < 0 || next as usize >= order.len() {
         return;
     }
-    let mut order: Vec<PresetFile> = p.shown.iter().map(|r| r.file.clone()).collect();
-    let moved = order.remove(from);
-    order.insert(if to > from { to - 1 } else { to }, moved);
-    app.model.move_presets(order);
+    let to = order[next as usize];
+    set_tab_stop(p, to, true);
+    reveal(p, to);
+    unsafe {
+        let _ = SetFocus(p.tiles[to]);
+    }
 }
 
-extern "system" fn list_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
     unsafe {
+        let Some(index) = tile_index(hwnd) else { return DefSubclassProc(hwnd, msg, wparam, lparam) };
+        // The name being typed, over the tile: the pointer comes through its
+        // keyed-out pixels.
+        if let Some(done) = super::draw::keyed::pass_on(rename_field(hwnd), hwnd, msg, wparam, lparam) {
+            return done;
+        }
         match msg {
-            // Enter applies, not the window's default button.
-            WM_GETDLGCODE if lparam.0 != 0 && (*(lparam.0 as *const MSG)).wParam.0 == VK_RETURN.0 as usize => {
-                LRESULT(DefSubclassProc(hwnd, msg, wparam, lparam).0 | DLGC_WANTMESSAGE as isize)
+            // The view paints the tile: its own paint only asks the view to.
+            // The view paints the tile (it isn't WS_CLIPCHILDREN): whatever
+            // makes the tile look different asks the view (`repaint_tile`).
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let _ = BeginPaint(hwnd, &mut ps);
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
             }
-            WM_KEYDOWN if [VK_RETURN, VK_DELETE, VK_F2].iter().any(|k| wparam.0 == k.0 as usize) => {
-                let key = VIRTUAL_KEY(wparam.0 as u16);
-                let Some(index) = selected(hwnd) else { return LRESULT(0) };
-                post(move |app: &mut App| match key {
-                    VK_RETURN => apply(app, index),
-                    VK_DELETE => confirm_delete(app, index),
-                    _ => rename(app, index),
+            WM_ERASEBKGND => LRESULT(1),
+            WM_SETFOCUS | WM_KILLFOCUS | WM_UPDATEUISTATE | BM_SETSTATE | WM_ENABLE => {
+                let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+                if msg == WM_SETFOCUS {
+                    post(move |app: &mut App| {
+                        if let Some(p) = &mut app.presets_view {
+                            set_tab_stop(p, index, true);
+                            reveal(p, index);
+                        }
+                    });
+                }
+                repaint_tile(hwnd);
+                result
+            }
+            WM_LBUTTONDOWN => {
+                let at = POINT { x: (lparam.0 & 0xffff) as i16 as i32, y: ((lparam.0 >> 16) & 0xffff) as i16 as i32 };
+                with_app(|app| {
+                    if let Some(p) = &mut app.presets_view {
+                        p.press = Some((index, at));
+                    }
                 });
+                DefSubclassProc(hwnd, msg, wparam, lparam)
+            }
+            WM_MOUSEMOVE if wparam.0 & 0x0001 != 0 => {
+                let at = POINT { x: (lparam.0 & 0xffff) as i16 as i32, y: ((lparam.0 >> 16) & 0xffff) as i16 as i32 };
+                let dragging = with_app(|app| {
+                    pointer_moved(app, hwnd, at);
+                    app.presets_view.as_ref().is_some_and(|p| p.drag.is_some())
+                })
+                .unwrap_or(false);
+                if dragging { LRESULT(0) } else { DefSubclassProc(hwnd, msg, wparam, lparam) }
+            }
+            WM_LBUTTONUP => {
+                let dragged = with_app(|app| pointer_released(app, true)).unwrap_or(false);
+                if dragged {
+                    let _ = ReleaseCapture();
+                    LRESULT(0)
+                } else {
+                    DefSubclassProc(hwnd, msg, wparam, lparam)
+                }
+            }
+            WM_CAPTURECHANGED => {
+                // Lost to another window (Alt+Tab): the drag goes back.
+                if with_app(|app| pointer_released(app, false)).is_none() {
+                    post(|app: &mut App| {
+                        pointer_released(app, false);
+                    });
+                }
+                DefSubclassProc(hwnd, msg, wparam, lparam)
+            }
+            WM_GETDLGCODE => {
+                let mut code = DefSubclassProc(hwnd, msg, wparam, lparam).0 | DLGC_WANTARROWS as isize;
+                if lparam.0 != 0 && (*(lparam.0 as *const MSG)).wParam.0 == VK_RETURN.0 as usize {
+                    code |= DLGC_WANTMESSAGE as isize;
+                }
+                LRESULT(code)
+            }
+            WM_KEYDOWN => {
+                let key = VIRTUAL_KEY(wparam.0 as u16);
+                let step = match key {
+                    VK_LEFT => Some(-1),
+                    VK_RIGHT => Some(1),
+                    VK_UP => Some(-2),
+                    VK_DOWN => Some(2),
+                    _ => None,
+                };
+                if let Some(step) = step {
+                    post(move |app: &mut App| step_focus(app, index, step));
+                    return LRESULT(0);
+                }
+                match key {
+                    VK_RETURN => post(move |app: &mut App| apply(app, index)),
+                    VK_DELETE => post(move |app: &mut App| confirm_delete(app, index)),
+                    VK_F2 => post(move |app: &mut App| start_rename(app, index)),
+                    _ => return DefSubclassProc(hwnd, msg, wparam, lparam),
+                }
+                LRESULT(0)
+            }
+            WM_CONTEXTMENU => {
+                let at = POINT { x: (lparam.0 & 0xffff) as i16 as i32, y: ((lparam.0 >> 16) & 0xffff) as i16 as i32 };
+                post(move |app: &mut App| context_menu(app, index, at));
                 LRESULT(0)
             }
             _ => DefSubclassProc(hwnd, msg, wparam, lparam),
@@ -567,306 +921,311 @@ extern "system" fn list_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
     }
 }
 
-/// Keeps the label edit where `LVN_BEGINLABELEDITW` placed it: `data` holds
-/// its x and y.
-extern "system" fn edit_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, data: usize) -> LRESULT {
+/// The rename field, from the tile view or a tile on it.
+fn rename_field(hwnd: HWND) -> HWND {
     unsafe {
-        if msg == WM_WINDOWPOSCHANGING {
-            let pos = &mut *(lparam.0 as *mut WINDOWPOS);
-            if pos.flags.0 & SWP_NOMOVE.0 == 0 {
-                pos.x = (data >> 32) as u32 as i32;
-                pos.y = data as u32 as i32;
-            }
-        }
-        DefSubclassProc(hwnd, msg, wparam, lparam)
+        let view = if draw::class_of(hwnd) == "NegsPresetTiles" { hwnd } else { GetParent(hwnd).unwrap_or_default() };
+        GetDlgItem(view, RENAME as i32).unwrap_or_default()
     }
 }
 
-/// Draws a row: the name, and the film → paper or why the file is refused
-/// below it, greyed when refused.
-fn draw_row(draw: &NMLVCUSTOMDRAW) {
-    let index = draw.nmcd.dwItemSpec;
-    let Some(r) = ROWS.with(|rows| rows.borrow().get(index).cloned()) else { return };
-    let list = draw.nmcd.hdr.hwndFrom;
-    let dc = draw.nmcd.hdc;
+/// Asks the view to paint `tile`'s place, ring and all, if it's a tile.
+pub fn repaint_tile(tile: HWND) {
     unsafe {
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(list).max(96) as i32;
-        let px = |dip: i32| dip * dpi / 96;
-        let mut bounds = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
-        SendMessageW(list, LVM_GETITEMRECT, WPARAM(index), LPARAM(&mut bounds as *mut _ as isize));
-        let state = SendMessageW(list, LVM_GETITEMSTATE, WPARAM(index), LPARAM(LVIS_SELECTED.0 as isize)).0 as u32;
-        let chosen = state & LVIS_SELECTED.0 != 0;
-        let focused = GetFocus() == list;
-        let hot = draw.nmcd.uItemState.0 & CDIS_HOT.0 != 0;
-        let p = theme::palette();
-        let s = dpi as f32 / 96.0;
-        let (text, detail) = if r.refused { (p.disabled, p.disabled) } else { (p.text, p.secondary) };
-        let mut c = Canvas::new(dc, bounds);
-        c.clear(p.panel);
-        let row = RectF::of(c.rect()).inset(4.0 * s, 2.0 * s);
-        if chosen {
-            c.round_rect(row, 4.0 * s, if focused { theme::mix(p.selection, p.accent, 0.12) } else { p.selection });
-            // The selection's accent pill, as in Windows lists.
-            c.round_rect(RectF::new(row.x, row.y + row.h / 2.0 - 8.0 * s, 3.0 * s, 16.0 * s), 1.5 * s, p.accent);
-        } else if hot {
-            c.round_rect(row, 4.0 * s, p.subtle_hover);
+        let Ok(view) = GetParent(tile) else { return };
+        if draw::class_of(view) != "NegsPresetTiles" {
+            return;
         }
-        let (ui, small) = FONTS.with(Cell::get);
-        let thumb = THUMBS.with(|t| t.borrow().as_ref().map(|t| t.get(index).cloned().unwrap_or_default()));
-        let text_left = match &thumb {
-            Some((image, dimmed)) => {
-                let top = (c.h - px(THUMB_HEIGHT)) / 2;
-                let frame = RECT { left: px(12), top, right: px(12 + THUMB_WIDTH), bottom: top + px(THUMB_HEIGHT) };
-                let behind = if chosen { if focused { theme::mix(p.selection, p.accent, 0.12) } else { p.selection } } else if hot { p.subtle_hover } else { p.panel };
-                super::inspector::draw_thumbnail(&mut c, frame, 6.0 * s, image.as_deref(), *dimmed, p.well, behind);
-                if r.refused {
-                    // A warning sign in the placeholder.
-                    c.text("\u{E7BA}", frame, HFONT(super::inspector::glyph_font().0), p.secondary, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-                }
-                px(12 + THUMB_WIDTH + 10)
-            }
-            None => px(16),
-        };
-        let inner = RECT { left: text_left, top: 0, right: c.w - px(12), bottom: c.h };
-        let middle = c.h / 2;
-        let line = DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS;
-        if EDITING.with(Cell::get) != Some(index) {
-            c.text(&r.name, RECT { top: px(3), bottom: middle + px(1), ..inner }, HFONT(ui as *mut _), text, line | DT_BOTTOM);
-        }
-        c.text(&r.detail, RECT { top: middle + px(2), bottom: c.h - px(3), ..inner }, HFONT(small as *mut _), detail, line | DT_TOP);
-        c.present(dc);
+        let mut r = RECT::default();
+        let _ = GetWindowRect(tile, &mut r);
+        let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+        let _ = MapWindowPoints(None, view, &mut corners);
+        let (ox, oy) = (px(view, 12.0), px(view, 10.0));
+        let area = RECT { left: corners[0].x - ox, top: corners[0].y - oy, right: corners[1].x + ox, bottom: corners[1].y + oy };
+        let _ = InvalidateRect(view, Some(&area), false);
     }
 }
 
-
-/// The line where a dragged row or dropped files would go.
-fn draw_insert(list: HWND, dc: HDC) {
-    let Some(at) = INSERT.with(Cell::get) else { return };
-    let count = ROWS.with(|r| r.borrow().len());
-    if count == 0 {
-        return;
-    }
-    unsafe {
-        let mut r = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
-        SendMessageW(list, LVM_GETITEMRECT, WPARAM(at.min(count - 1)), LPARAM(&mut r as *mut _ as isize));
-        let y = if at >= count { r.bottom } else { r.top };
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(list).max(96) as i32;
-        let thick = 2 * dpi / 96;
-        let line = RECT { left: r.left + 8 * dpi / 96, top: y - thick / 2 - thick % 2, right: r.right - 8 * dpi / 96, bottom: y + thick / 2 };
-        FillRect(dc, &line, theme::brush(theme::palette().accent));
-    }
-}
-
-fn notify(hwnd: HWND, header: &NMHDR, lparam: LPARAM) -> Option<LRESULT> {
-    unsafe {
-        match header.code {
-            NM_CUSTOMDRAW => {
-                let draw = &*(lparam.0 as *const NMLVCUSTOMDRAW);
-                Some(LRESULT(match draw.nmcd.dwDrawStage {
-                    CDDS_PREPAINT => (CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT) as isize,
-                    CDDS_ITEMPREPAINT => {
-                        draw_row(draw);
-                        CDRF_SKIPDEFAULT as isize
-                    }
-                    CDDS_POSTPAINT => {
-                        draw_insert(header.hwndFrom, draw.nmcd.hdc);
-                        CDRF_DODEFAULT as isize
-                    }
-                    _ => CDRF_DODEFAULT as isize,
-                }))
-            }
-            LVN_ITEMCHANGED => {
-                let change = &*(lparam.0 as *const NMLISTVIEW);
-                let now = change.uNewState & LVIS_SELECTED.0 != 0 && change.uOldState & LVIS_SELECTED.0 == 0;
-                if now && change.iItem >= 0 {
-                    let index = change.iItem as usize;
-                    let mouse = GetKeyState(VK_LBUTTON.0 as i32) < 0 || GetKeyState(VK_RBUTTON.0 as i32) < 0;
-                    with_app(|app| {
-                        if mouse {
-                            if let Some(p) = &mut app.presets_view {
-                                p.click_selected = (GetKeyState(VK_LBUTTON.0 as i32) < 0).then_some(index);
-                            }
-                        } else {
-                            // Arrow keys: the selected preset applies.
-                            apply(app, index);
-                        }
-                    });
-                }
-                Some(LRESULT(0))
-            }
-            NM_CLICK => {
-                let click = &*(lparam.0 as *const NMITEMACTIVATE);
-                with_app(|app| {
-                    let pending = app.presets_view.as_mut().and_then(|p| p.click_selected.take());
-                    if click.iItem >= 0 && pending == Some(click.iItem as usize) {
-                        apply(app, click.iItem as usize);
-                    }
-                });
-                Some(LRESULT(0))
-            }
-            NM_DBLCLK => {
-                let click = &*(lparam.0 as *const NMITEMACTIVATE);
-                if click.iItem >= 0 {
-                    with_app(|app| apply(app, click.iItem as usize));
-                }
-                Some(LRESULT(0))
-            }
-            LVN_BEGINDRAG => {
-                let change = &*(lparam.0 as *const NMLISTVIEW);
-                with_app(|app| {
-                    if let Some(p) = &mut app.presets_view {
-                        p.click_selected = None;
-                        if app.model.can_change_presets() {
-                            p.drag = Some(change.iItem as usize);
-                            SetCapture(hwnd);
-                        }
-                    }
-                });
-                Some(LRESULT(0))
-            }
-            LVN_BEGINLABELEDITW => {
-                let allowed = with_app(|app| app.model.can_change_presets()).unwrap_or(true);
-                if allowed {
-                    let info = &*(lparam.0 as *const NMLVDISPINFOW);
-                    let list = header.hwndFrom;
-                    let edit = HWND(SendMessageW(list, LVM_GETEDITCONTROL, WPARAM(0), LPARAM(0)).0 as *mut _);
-                    SendMessageW(edit, EM_SETLIMITTEXT, WPARAM(name::MAX_LENGTH + 20), LPARAM(0));
-                    // On the name's line, not centred in the two-line row.
-                    let mut r = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
-                    SendMessageW(list, LVM_GETITEMRECT, WPARAM(info.item.iItem.max(0) as usize), LPARAM(&mut r as *mut _ as isize));
-                    let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(list).max(96) as i32;
-                    let thumbnails = THUMBS.with(|t| t.borrow().is_some());
-                    let left = if thumbnails { 12 + THUMB_WIDTH + 7 } else { 13 };
-                    let name_top = if thumbnails { (r.bottom - r.top) / 2 - 18 * dpi / 96 } else { 3 * dpi / 96 };
-                    let (x, y) = (r.left + left * dpi / 96, r.top + name_top);
-                    let _ = SetWindowSubclass(edit, Some(edit_subclass), 2, (x as u32 as usize) << 32 | y as u32 as usize);
-                    EDITING.with(|e| e.set(Some(info.item.iItem.max(0) as usize)));
-                    let _ = InvalidateRect(list, Some(&r), false);
-                }
-                Some(LRESULT(!allowed as isize))
-            }
-            LVN_ENDLABELEDITW => {
-                let info = &*(lparam.0 as *const NMLVDISPINFOW);
-                EDITING.with(|e| e.set(None));
-                let _ = InvalidateRect(header.hwndFrom, None, false);
-                let text = (!info.item.pszText.is_null()).then(|| info.item.pszText.to_string().unwrap_or_default());
-                let file = ROWS.with(|r| r.borrow().get(info.item.iItem.max(0) as usize).map(|r| r.file.clone()));
-                if let Some(file) = file {
-                    EDIT_PENDING.with(|e| e.set(true));
-                    let mut work = Some((file, text));
-                    // Ended by the app's own change (focus moved): later.
-                    if with_app(|app| {
-                        let (file, text) = work.take().unwrap();
-                        finish_rename(app, file, text);
-                    })
-                    .is_none()
-                    {
-                        let (file, text) = work.take().unwrap();
-                        post(move |app: &mut App| finish_rename(app, file, text));
-                    }
-                }
-                // The list shows the name on disk after the rename.
-                Some(LRESULT(0))
-            }
-            LVN_GETINFOTIPW => {
-                let tip = &mut *(lparam.0 as *mut NMLVGETINFOTIPW);
-                let text = ROWS.with(|r| r.borrow().get(tip.iItem.max(0) as usize).map(|r| if r.detail.is_empty() { r.name.clone() } else { format!("{}\n{}", r.name, r.detail) }));
-                if let (Some(text), false) = (text, tip.pszText.is_null()) {
-                    let w: Vec<u16> = text.encode_utf16().take(tip.cchTextMax.max(1) as usize - 1).chain(Some(0)).collect();
-                    std::ptr::copy_nonoverlapping(w.as_ptr(), tip.pszText.0, w.len());
-                }
-                Some(LRESULT(0))
-            }
-            _ => None,
-        }
-    }
-}
-
-extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+extern "system" fn rename_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
     unsafe {
         match msg {
+            WM_GETDLGCODE => LRESULT(DefSubclassProc(hwnd, msg, wparam, lparam).0 | DLGC_WANTALLKEYS as isize),
+            WM_KEYDOWN if wparam.0 == VK_RETURN.0 as usize => {
+                let text = draw::window_text(hwnd);
+                post(move |app: &mut App| finish_rename(app, Some(text)));
+                LRESULT(0)
+            }
+            WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => {
+                post(|app: &mut App| finish_rename(app, None));
+                LRESULT(0)
+            }
+            WM_CHAR if wparam.0 == 13 || wparam.0 == 27 => LRESULT(0),
+            WM_KILLFOCUS => {
+                // Clicking elsewhere keeps the name, as Return does.
+                let text = draw::window_text(hwnd);
+                post(move |app: &mut App| finish_rename(app, Some(text)));
+                DefSubclassProc(hwnd, msg, wparam, lparam)
+            }
+            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+// MARK: Painting
+
+/// `text` cut with an ellipsis to fit `width` DIPs in `style`.
+fn fitted(p: &mut Painter, text: &str, style: &TextStyle, width: f32) -> String {
+    if p.measure(text, style, 0.0).width <= width {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let (mut low, mut high) = (0usize, chars.len());
+    while low < high {
+        let mid = (low + high).div_ceil(2);
+        let candidate: String = chars[..mid].iter().collect::<String>().trim_end().to_string() + "…";
+        if p.measure(&candidate, style, 0.0).width <= width { low = mid } else { high = mid - 1 }
+    }
+    if low == 0 { String::new() } else { chars[..low].iter().collect::<String>().trim_end().to_string() + "…" }
+}
+
+/// The view: each tile on screen, the field's pencil, and the drop ring.
+fn paint_tiles(hwnd: HWND, dc: HDC, dirty: RECT) {
+    let t = theme::tokens();
+    let s = draw::dpi_of(hwnd);
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
+    }
+    VIEW.with(|v| {
+        let Ok(v) = v.try_borrow() else { return };
+        let mut c = Canvas::new(dc, client);
+        c.clear(theme::gdi(t.hex.panel));
+        let in_dirty = |r: &RECT| {
+            let ring = (12.0 * s) as i32;
+            r.bottom - v.scroll + ring >= dirty.top && r.top - v.scroll - ring <= dirty.bottom
+        };
+        let picture_of = |r: &RECT| {
+            let h = ((r.right - r.left) as f64 * 2.0 / 3.0).round() as i32;
+            RECT { left: r.left, top: r.top - v.scroll, right: r.right, bottom: r.top - v.scroll + h }
+        };
+        // The pictures first, through GDI; then words and marks in one pass.
+        if v.pictures {
+            for (i, r) in v.rects.iter().enumerate() {
+                let Some(look) = v.looks.get(i) else { continue };
+                if !in_dirty(r) {
+                    continue;
+                }
+                let frame = picture_of(r);
+                let image = if look.invalid.is_none() { look.image.as_deref() } else { None };
+                super::inspector::draw_thumbnail(&mut c, frame, 0.0, image, look.dimmed, theme::gdi(t.hex.blank), theme::gdi(t.hex.blank));
+            }
+        }
+        let focus = unsafe { GetFocus() };
+        c.d2d(s, t.plain, |p| {
+            let dip = |v: i32| v as f32 / s;
+            for (i, r) in v.rects.iter().enumerate() {
+                let Some(look) = v.looks.get(i) else { continue };
+                if !in_dirty(r) {
+                    continue;
+                }
+                let tile = HWND(v.tiles.get(i).copied().unwrap_or(0) as *mut _);
+                let hot = draw::is_hot(tile);
+                let focused = focus == tile && draw::focus_cues(tile);
+                let alpha = if v.enabled { 1.0 } else { theme::DISABLED_OPACITY };
+                let (x, w) = (dip(r.left), dip(r.right - r.left));
+                let mut y = dip(r.top - v.scroll);
+                if v.pictures {
+                    let frame = picture_of(r);
+                    let pic = RectF::new(x, dip(frame.top), w, dip(frame.bottom - frame.top));
+                    if look.invalid.is_some() {
+                        let m = p.measure("can’t be read", &UNREADABLE, 0.0);
+                        p.text("can’t be read", &UNREADABLE, (pic.x + (pic.w - m.width) / 2.0).round(), (pic.y + (pic.h - m.height) / 2.0).round(), Ink::hex(t.hex.dim));
+                    }
+                    if look.applied {
+                        let (ox, oy) = (negs_marks::RING_OUTSET.0 as f32, negs_marks::RING_OUTSET.1 as f32);
+                        p.ring(RectF::new(pic.x - ox, pic.y - oy, pic.w + 2.0 * ox, pic.h + 2.0 * oy), negs_marks::Radii::BOX, -1.0, Ink::hex(t.hex.accent).alpha(alpha));
+                    }
+                    y = pic.y + pic.h + CAPTION_GAP as f32;
+                }
+                let editing = v.editing.as_ref().filter(|e| e.0 == i);
+                if let Some((_, typed)) = editing {
+                    // The field's pencil, as wide as the name (`namingUnderline`).
+                    let width = (p.measure(typed, &NAME, 0.0).width + 8.0).min(w);
+                    p.underline(RectF::new(x, y + NAME_LINE as f32 - 1.0, width, 5.0), &t, false);
+                } else {
+                    let style = if look.applied { NAME_APPLIED } else { NAME };
+                    let ink = if look.invalid.is_some() { t.hex.dim } else if look.applied || hot { t.hex.paper } else { t.hex.label };
+                    let shown = fitted(p, &look.name, &style, w);
+                    let m = p.measure(&shown, &style, 0.0);
+                    p.text(&shown, &style, x, (y + (NAME_LINE as f32 - m.height) / 2.0).round(), Ink::hex(ink).alpha(alpha));
+                }
+                y += NAME_LINE as f32 + 1.0;
+                let dim = Ink::hex(t.hex.dim).alpha(alpha);
+                if let Some(reason) = &look.invalid {
+                    p.clipped(RectF::new(x, y, w, 2.0 * DETAIL_LINE as f32), |p| {
+                        p.text_in(reason, &DETAIL.line_height(1.3), RectF::new(x, y, w, 0.0), Align::Leading, dim);
+                    });
+                } else if let (Some(film), Some((lead, paper))) = (&look.film, &look.paper) {
+                    let shown = fitted(p, film, &DETAIL, w);
+                    p.text(&shown, &DETAIL, x, y, dim);
+                    let y = y + DETAIL_LINE as f32;
+                    let lead_m = p.measure(lead, &DETAIL_LEAD, 0.0);
+                    let lead_shown = fitted(p, lead, &DETAIL_LEAD, w);
+                    p.text(&lead_shown, &DETAIL_LEAD, x, y, dim);
+                    if !paper.is_empty() {
+                        let space = p.measure(" ", &DETAIL, 0.0).width;
+                        let left = x + lead_m.width + space;
+                        let shown = fitted(p, paper, &DETAIL, (x + w - left).max(0.0));
+                        let detail_m = p.measure(&shown, &DETAIL, 0.0);
+                        p.text(&shown, &DETAIL, left, y + lead_m.baseline - detail_m.baseline, dim);
+                    }
+                }
+                if focused {
+                    ink::focus_box(p, RectF::new(x - 5.0, dip(r.top - v.scroll) - 5.0, w + 10.0, dip(r.bottom - r.top) + 10.0), &t);
+                }
+            }
+            if v.dropping {
+                // The loose ring round the pane (`PresetsEmpty.dropRing`), 9 in.
+                let (w, h) = (dip(client.right), dip(client.bottom));
+                p.ring(RectF::new(9.0, 9.0, w - 18.0, h - 18.0), DROP_RING, 0.0, Ink::hex(t.hex.accent));
+            }
+        });
+        c.present(dc);
+    });
+}
+
+const DROP_RING: negs_marks::Radii = negs_marks::Radii { horizontal: [18.0, 26.0, 16.0, 24.0], vertical: [22.0, 14.0, 26.0, 16.0], relative: false };
+
+/// The empty pane's sentence broken into centred lines: each line's
+/// words, upright or italic.
+fn sentence_lines(width: f32, measure: &mut dyn FnMut(&str, &TextStyle) -> f32) -> Vec<Vec<(String, bool)>> {
+    let mut lines: Vec<Vec<(String, bool)>> = vec![vec![]];
+    let mut line_width = 0.0;
+    for (part, upright) in EMPTY_SENTENCE {
+        let style = if upright { EMPTY_NEW } else { EMPTY_WORDS };
+        // Words with the space after them; a part's start may glue to the last word (", or").
+        for word in part.split_inclusive(' ') {
+            let w = measure(word.trim_end(), &style);
+            let advance = measure(word, &style);
+            let glued = !word.starts_with(' ') && lines.last().unwrap().last().is_some_and(|(w, _)| !w.ends_with(' '));
+            if line_width + w > width && line_width > 0.0 && !glued {
+                lines.push(vec![]);
+                line_width = 0.0;
+            }
+            lines.last_mut().unwrap().push((word.to_string(), upright));
+            line_width += advance;
+        }
+    }
+    lines
+}
+
+/// The sentence's line height: its size and 3 more (`lineSpacing(3)`),
+/// from the height of a word of it.
+fn sentence_line(word_height: f32) -> f32 {
+    word_height + 3.0
+}
+
+fn paint_drawn(item: &DRAWITEMSTRUCT) {
+    let hwnd = item.hwndItem;
+    let s = draw::dpi_of(hwnd);
+    let t = theme::tokens();
+    let r = item.rcItem;
+    let (w, h) = ((r.right - r.left) as f32 / s, (r.bottom - r.top) as f32 / s);
+    let dropping = VIEW.with(|v| v.borrow().dropping);
+    let mut c = Canvas::new(item.hDC, r);
+    c.clear(theme::gdi(t.hex.panel));
+    let id = unsafe { GetDlgCtrlID(hwnd) } as u16;
+    c.d2d(s, t.plain, |p| match id {
+        EMPTY_TITLE => {
+            let m = p.measure("No presets yet", &EMPTY_HEAD, 0.0);
+            p.text("No presets yet", &EMPTY_HEAD, ((w - m.width) / 2.0).round(), 0.0, Ink::hex(t.hex.paper));
+        }
+        EMPTY_TEXT => {
+            let line = sentence_line(p.measure("Save", &EMPTY_WORDS, 0.0).height);
+            let lines = sentence_lines(w, &mut |text, style| p.measure(text, style, 0.0).width);
+            for (n, words) in lines.iter().enumerate() {
+                let style = |upright: bool| if upright { EMPTY_NEW } else { EMPTY_WORDS };
+                let total: f32 = words.iter().enumerate().map(|(i, (word, upright))| {
+                    let text = if i + 1 == words.len() { word.trim_end() } else { word.as_str() };
+                    p.measure(text, &style(*upright), 0.0).width
+                }).sum();
+                let mut x = ((w - total) / 2.0).round();
+                let y = n as f32 * line;
+                let base = p.measure("Save", &EMPTY_WORDS, 0.0).baseline;
+                for (word, upright) in words {
+                    let m = p.measure(word, &style(*upright), 0.0);
+                    let ink = if *upright { t.hex.label } else { t.hex.dim };
+                    p.text(word, &style(*upright), x, y + base - m.baseline, Ink::hex(ink));
+                    x += m.width;
+                }
+            }
+        }
+        FOOT => {
+            // Under a rule, centred.
+            p.fill_rect(RectF::new(0.0, 0.0, w, 1.0), Ink::hex(t.hex.line));
+            let words = foot_words(dropping);
+            let shown = fitted(p, words, &FOOT_WORDS, w - 16.0);
+            let m = p.measure(&shown, &FOOT_WORDS, 0.0);
+            p.text(&shown, &FOOT_WORDS, ((w - m.width) / 2.0).round(), ((h - m.height) / 2.0 + 0.5).round(), Ink::hex(if dropping { t.hex.paper } else { t.hex.dim }));
+        }
+        _ => {}
+    });
+    c.present(item.hDC);
+}
+
+extern "system" fn tiles_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        if let Some(done) = super::draw::keyed::pass_on(rename_field(hwnd), hwnd, msg, wparam, lparam) {
+            return done;
+        }
+        match msg {
             WM_COMMAND => {
-                let command = (wparam.0 & 0xffff) as u16;
-                match command {
-                    ADD => {
-                        with_app(|app| app.command(id::NEW_PRESET));
-                    }
-                    MORE => {
-                        with_app(more_menu);
-                    }
-                    EMPTY_IMPORT => {
-                        with_app(|app| app.command(id::IMPORT_PRESETS));
-                    }
-                    _ => {}
+                let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
+                if id == RENAME && code == EN_CHANGE {
+                    let typed = draw::window_text(HWND(lparam.0 as *mut _));
+                    VIEW.with(|v| {
+                        if let Some(e) = &mut v.borrow_mut().editing {
+                            e.1 = typed;
+                        }
+                    });
+                    let _ = InvalidateRect(hwnd, None, false);
+                } else if code == BN_CLICKED
+                    && let Some(index) = tile_index(HWND(lparam.0 as *mut _))
+                {
+                    with_app(|app| apply(app, index));
                 }
                 LRESULT(0)
             }
             WM_NOTIFY => {
-                if let Some(result) = draw::custom_draw(lparam) {
-                    return result;
-                }
                 let header = &*(lparam.0 as *const NMHDR);
-                if header.idFrom == LIST as usize {
-                    if let Some(result) = notify(hwnd, header, lparam) {
-                        return result;
-                    }
+                if header.code == NM_CUSTOMDRAW && tile_index(header.hwndFrom).is_some() {
+                    // The view paints the tiles.
+                    return LRESULT(CDRF_SKIPDEFAULT as isize);
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
-            WM_CONTEXTMENU => {
-                let point = POINT { x: (lparam.0 & 0xffff) as i16 as i32, y: ((lparam.0 >> 16) & 0xffff) as i16 as i32 };
+            WM_MOUSEWHEEL => {
+                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as i32;
                 with_app(|app| {
-                    if app.presets_view.as_ref().is_some_and(|p| p.list.0 as usize == wparam.0) {
-                        context_menu(app, point);
+                    if let Some(p) = &mut app.presets_view {
+                        let target = p.scroll - delta * px(hwnd, 60.0) / 120;
+                        scroll_to(p, target);
                     }
                 });
                 LRESULT(0)
             }
-            WM_MOUSEMOVE => {
-                with_app(drag_moved);
-                LRESULT(0)
-            }
-            WM_LBUTTONUP => {
-                with_app(|app| drag_ended(app, true));
-                let _ = ReleaseCapture();
-                LRESULT(0)
-            }
-            WM_CAPTURECHANGED => {
-                // Lost to another window (Alt+Tab): the drag is cancelled.
-                if with_app(|app| drag_ended(app, false)).is_none() {
-                    post(|app: &mut App| drag_ended(app, false));
-                }
-                LRESULT(0)
-            }
-            WM_SIZE => {
-                if let Some(list) = GetDlgItem(hwnd, LIST as i32).ok() {
-                    fit_column(list);
-                }
-                LRESULT(0)
-            }
-            WM_CTLCOLORSTATIC => {
+            WM_CTLCOLOREDIT => {
+                // The name being typed: `paper` words on the keyed-out panel.
                 let dc = HDC(wparam.0 as *mut _);
-                SetBkMode(dc, TRANSPARENT);
-                let grey = with_app(|app| app.presets_view.as_ref().is_some_and(|p| [p.empty_text, p.empty_icon].contains(&HWND(lparam.0 as *mut _)))).unwrap_or(false);
-                let p = theme::palette();
-                SetTextColor(dc, COLORREF(if grey { p.secondary } else { p.text }));
-                LRESULT(theme::brush(p.panel).0 as isize)
+                let t = theme::tokens();
+                super::draw::keyed::color(dc, HWND(lparam.0 as *mut _), theme::gdi(t.hex.paper), theme::gdi(t.hex.panel))
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let dc = BeginPaint(hwnd, &mut ps);
-                let p = theme::palette();
-                FillRect(dc, &ps.rcPaint, theme::brush(p.panel));
-                if DROP_HIGHLIGHT.with(Cell::get) {
-                    let mut r = RECT::default();
-                    let _ = GetClientRect(hwnd, &mut r);
-                    let s = draw::dpi_of(hwnd);
-                    let mut c = Canvas::new(dc, r);
-                    c.clear(p.panel);
-                    c.round_frame(RectF::of(c.rect()).inset(3.0 * s, 3.0 * s), 6.0 * s, 3.0 * s, p.accent);
-                    c.present(dc);
-                }
+                paint_tiles(hwnd, dc, ps.rcPaint);
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
             }
@@ -875,41 +1234,62 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
     }
 }
 
-/// Brings the rows' thumbnails up to date with the model's.
-pub fn redraw_previews(app: &mut App) {
-    let Some(p) = &app.presets_view else { return };
-    let thumbs = p.thumbnails.then(|| {
-        p.shown
-            .iter()
-            .map(|r| {
-                let thumb = app.model.previews.thumb(&Target::Preset(r.file.path.clone()));
-                (thumb.and_then(|t| t.image.clone()), thumb.is_some_and(|t| t.dimmed))
-            })
-            .collect::<Vec<_>>()
-    });
-    let same = THUMBS.with(|t| {
-        let old = t.borrow();
-        match (old.as_ref(), thumbs.as_ref()) {
-            (None, None) => true,
-            (Some(a), Some(b)) => {
-                a.len() == b.len()
-                    && a.iter().zip(b).all(|(x, y)| {
-                        x.1 == y.1
-                            && match (&x.0, &y.0) {
-                                (Some(i), Some(j)) => Arc::ptr_eq(i, j),
-                                (None, None) => true,
-                                _ => false,
-                            }
-                    })
+extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_COMMAND => {
+                if (wparam.0 & 0xffff) as u16 == EMPTY_IMPORT && ((wparam.0 >> 16) & 0xffff) as u32 == BN_CLICKED {
+                    with_app(|app| app.command(id::IMPORT_PRESETS));
+                }
+                LRESULT(0)
             }
-            _ => false,
+            WM_DRAWITEM => {
+                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
+                if !ink::draw_item(item) {
+                    paint_drawn(item);
+                }
+                LRESULT(1)
+            }
+            WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_CTLCOLORBTN => draw::button_brush(),
+            WM_SIZE => {
+                if with_app(place).is_none() {
+                    post(place);
+                }
+                LRESULT(0)
+            }
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
+                // The rule along the top; with no presets, the drop ring round the pane.
+                let mut ps = PAINTSTRUCT::default();
+                let dc = BeginPaint(hwnd, &mut ps);
+                let mut client = RECT::default();
+                let _ = GetClientRect(hwnd, &mut client);
+                let t = theme::tokens();
+                let s = draw::dpi_of(hwnd);
+                let dropping = VIEW.with(|v| v.borrow().dropping);
+                let mut c = Canvas::new(dc, client);
+                c.clear(theme::gdi(t.hex.panel));
+                let (w, h) = (client.right as f32 / s, client.bottom as f32 / s);
+                c.d2d(s, t.plain, |p| {
+                    p.fill_rect(RectF::new(0.0, 0.0, w, 1.0), Ink::hex(t.hex.line));
+                    if dropping {
+                        p.ring(RectF::new(9.0, 9.0, w - 18.0, h - 18.0), DROP_RING, 0.0, Ink::hex(t.hex.accent));
+                    }
+                });
+                c.present(dc);
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
-    });
-    if !same {
-        THUMBS.with(|t| *t.borrow_mut() = thumbs);
-        unsafe {
-            let _ = InvalidateRect(p.list, None, false);
-        }
+    }
+}
+
+/// The thumbnails changed: the tiles show the model's.
+pub fn redraw_previews(app: &mut App) {
+    if app.presets_view.is_some() {
+        sync(app);
     }
 }
 
@@ -919,9 +1299,29 @@ pub fn shown(model: &Model) -> bool {
     model.inspector_visible && model.pane() == Pane::Presets && !model.cropping()
 }
 
-/// After a theme change: the list's own colours.
+/// After a theme change: the words may set in another font.
 pub fn retheme(app: &mut App) {
-    if let Some(p) = &app.presets_view {
-        theme_list(p.list);
+    if app.presets_view.is_some() {
+        place(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// "click to apply · drag to sort · drop files to import", or "drop to import".
+    #[test]
+    fn the_foot_says_what_a_drop_does() {
+        assert_eq!(foot_words(false), "click to apply · drag to sort · drop files to import");
+        assert_eq!(foot_words(true), "drop to import");
+    }
+
+    #[test]
+    fn a_tile_speaks_its_film_and_print() {
+        let look = Look { name: "Evening".into(), film: Some("Portra 400".into()), paper: Some(("printed on", "Endura".into())), applied: true, ..Default::default() };
+        assert_eq!(spoken(&look), "Applied last. Portra 400, printed on Endura");
+        let scan = Look { film: Some("Velvia 50".into()), paper: Some(("not printed · film scan", String::new())), ..Default::default() };
+        assert_eq!(spoken(&scan), "Velvia 50, not printed · film scan");
     }
 }

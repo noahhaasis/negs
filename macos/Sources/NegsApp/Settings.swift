@@ -7,7 +7,7 @@ import SwiftUI
 
 /// Settings' pages, in the order of their tabs.
 enum SettingsTab: String, CaseIterable {
-    case photographs = "Photographs", speed = "Speed", upkeep = "Upkeep"
+    case photographs = "Photographs", speed = "Speed", upkeep = "Upkeep", look = "Look"
 }
 
 /// The Settings window: Newsreader's title in the 38 pt band over the tabs,
@@ -35,12 +35,14 @@ enum SettingsTab: String, CaseIterable {
         if #available(macOS 15, *) { toolbar.allowsDisplayModeCustomization = false }
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
-        window.backgroundColor = Theme.NS.panel
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         band.title = "Settings"
         let frame = EditorFrameView(band: band, content: host)
-        frame.layer?.backgroundColor = Theme.NS.panel.cgColor
+        Theme.follow(frame) { [weak window, weak frame] in
+            window?.backgroundColor = Theme.NS.panel
+            frame?.layer?.backgroundColor = Theme.NS.panel.cgColor
+        }
         frame.addSubview(host)
         frame.addSubview(band)
         window.contentView = frame
@@ -91,9 +93,12 @@ struct SettingsView: View {
     /// Called with the page's height, for the window to fit it.
     var resize: (CGFloat) -> Void = { _ in }
     @AppStorage("settingsTab") private var tab = SettingsTab.photographs
-    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.darkroom
+    @AppStorage(ViewerSheet.key) private var sheet = ViewerSheet.theme
     @State private var thumbnailBytes: Int?
     @State private var emptyingThumbnails = false
+    /// The sent copies' sizes, read when Upkeep opens; nil for no folder.
+    @State private var lightroomBytes: [LightroomKind: Int] = [:]
+    @State private var deletingSent = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -113,6 +118,7 @@ struct SettingsView: View {
             case .photographs: photographs
             case .speed: speed
             case .upkeep: upkeep
+            case .look: look
             }
         }
         .frame(width: SettingsWindowController.width, alignment: .top)
@@ -120,7 +126,7 @@ struct SettingsView: View {
         .onGeometryChange(for: CGFloat.self, of: \.size.height) { resize($0) }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.panel)
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, Theme.colorScheme)
     }
 
     // MARK: Photographs: what a new photograph starts with, and what it lies on
@@ -148,11 +154,16 @@ struct SettingsView: View {
             ChoiceRow(title: "Fotufilm films", items: FotufilmFilms.allCases.map { .option($0.title, tag: $0.rawValue) },
                       selection: model.fotufilmFilms.rawValue) { model.fotufilmFilms = FotufilmFilms(rawValue: $0) ?? .all }
             HintText("Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.")
+            TickRow(title: "Show Negs-built films", isOn: Binding(
+                get: { model.showNegsBuiltFilms }, set: { model.showNegsBuiltFilms = $0 }))
+            HintText(NegsBuiltFilms.hint)
         }
-        InkSection(title: "Changing film") {
-            TickRow(title: "Keep paper when changing film", isOn: Binding(
-                get: { model.previews.keepPaper }, set: { model.setKeepPaper($0) }))
-            HintText("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")
+        InkSection(title: "RAW + JPEG") {
+            TickRow(title: "Show camera JPEGs separately", isOn: Binding(
+                get: { model.separateCameraJPEGs }, set: { model.separateCameraJPEGs = $0 }))
+            HintText(model.separateCameraJPEGs
+                     ? "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are two photos."
+                     : "A RAW and the camera’s JPEG of the same name, such as IMG_0412.CR3 and IMG_0412.JPG, are one photo: the RAW develops, the JPEG goes to the Trash with it, and Original can show it. A JPEG you’ve already rated or edited stays a photo of its own.")
         }
         InkSection(title: "Edits") {
             TickRow(title: "Save ratings and edits next to photos", isOn: Binding(
@@ -161,10 +172,19 @@ struct SettingsView: View {
                      ? "Each photo remembers its own edits in a small file beside it, such as IMG_0412.CR3.negs, which travels with the folder. A photo you haven’t edited starts with the film and paper above, default Prep and Lab settings and no border; the Image Size and output colour stay."
                      : "Ratings and edits won’t be saved. Reopening a photo starts from the defaults.")
         }
+    }
+
+    // MARK: Look: the theme and the sheet behind the photograph (round 28)
+
+    @ViewBuilder private var look: some View {
+        InkSection(title: "Theme") {
+            ThemePicker()
+            HintText(ThemeStore.shared.theme.hint)
+        }
         InkSection(title: "Viewer") {
             ChoiceRow(title: "Sheet", items: ViewerSheet.allCases.map { .option($0.title, tag: $0.rawValue) },
-                      selection: sheet.rawValue) { sheet = ViewerSheet(rawValue: $0) ?? .darkroom }
-            HintText("The colour behind the photograph. The caption and the label under it change their ink to suit; the panels stay dark.")
+                      selection: sheet.rawValue) { sheet = ViewerSheet(rawValue: $0) ?? .theme }
+            HintText("The colour behind the photograph. Theme’s own follows the theme; a grey is fairer for judging a photograph. The caption and the label under it change their ink to suit.")
         }
     }
 
@@ -226,6 +246,7 @@ struct SettingsView: View {
             HintText("The strip and grid show each photograph as developed; the least recently shown are removed first. Emptied, the open folder’s are developed again in the background.")
         }
         .task { thumbnailBytes = await model.thumbnailCacheSize() }
+        lightroom
         InkSection(title: "App data") {
             ButtonRow {
                 EmptyView()
@@ -239,6 +260,56 @@ struct SettingsView: View {
                 HintText("Finish or close the update dialog before removing app data.", reason: true)
             }
             HintText("Removes settings, the saved editing session, and caches. Your original photographs and exported images are kept.")
+        }
+    }
+
+    /// Ticket 48: the copies sent to Lightroom, with their size and a button
+    /// to delete them. Shown with Lightroom installed or copies left.
+    @ViewBuilder private var lightroom: some View {
+        let kinds = LightroomKind.allCases.filter { model.lightroomKinds.contains($0) || (lightroomBytes[$0] ?? 0) > 0 }
+        if !kinds.isEmpty {
+            InkSection(title: "Lightroom") {
+                ForEach(kinds, id: \.self) { kind in
+                    let bytes = lightroomBytes[kind]
+                    ButtonRow {
+                        FigureText(lead: kinds.count > 1 ? kind.title : nil,
+                                   figure: bytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "…",
+                                   trail: "sent")
+                    } button: {
+                        Button(kind == .cloud ? "Delete Sent Copies" : "Delete Copies…") { deleteSent(kind) }
+                            .buttonStyle(OutlinedButtonStyle())
+                            .inkDisabled(deletingSent || (bytes ?? 0) == 0 || model.batch?.running == true)
+                    }
+                    HintText(kind == .cloud
+                             ? "Open in Lightroom sends full-size 16-bit TIFFs. Each is deleted once Lightroom has copied it into its library, or after a week."
+                             : "Lightroom Classic adds the TIFFs in “Negs for Lightroom” in Pictures where they are, so Negs never deletes them. Delete them only once Classic no longer needs them.",
+                             warning: kind == .classic)
+                }
+            }
+            .task { await measureSent() }
+        }
+    }
+
+    private func measureSent() async {
+        let sizes = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: LightroomKind.allCases.compactMap { kind in Lightroom.size(of: kind.folder).map { (kind, $0) } })
+        }.value
+        lightroomBytes = sizes
+    }
+
+    private func deleteSent(_ kind: LightroomKind) {
+        Task {
+            if kind == .classic {
+                let answer = await model.ask(AppAlert(
+                    title: "Delete the TIFFs sent to Lightroom Classic?",
+                    detail: "Lightroom Classic may still use them: photos it added from “Negs for Lightroom” go missing there.",
+                    buttons: [.init(title: "Delete", role: .destructive), .init(title: "Cancel", role: .cancel)]))
+                guard answer.button == 0 else { return }
+            }
+            deletingSent = true
+            await Task.detached(priority: .userInitiated) { Lightroom.deleteSent(in: kind.folder) }.value
+            await measureSent()
+            deletingSent = false
         }
     }
 
@@ -258,7 +329,7 @@ private struct StruckRow: View {
             RowLabel(title: title)
             Spacer(minLength: 8)
             Text(value).font(Theme.serif(14.5)).foregroundStyle(Theme.dim).lineLimit(1)
-                .overlay { PencilStroke().pencil().frame(height: 5).offset(y: 1) }
+                .overlay { PencilStroke().strike().frame(height: 5).offset(y: 1) }
         }
         .padding(.horizontal, Theme.Size.gutter)
         .frame(height: Theme.Size.row)

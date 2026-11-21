@@ -1,5 +1,6 @@
-//! Dropping a photograph on the canvas opens it. The canvas shows an outline
-//! while a file is dragged over it; folders and other files are refused.
+//! Dropping a photograph on the canvas opens it, and a folder opens on its
+//! first photograph, as on the Mac. The canvas shows an outline while one
+//! is dragged over it; other files are refused.
 //! Files dropped on the Presets panel import as presets, between the rows
 //! they are dropped between.
 
@@ -10,9 +11,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::System::Ole::*;
 use windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS;
-use windows::Win32::UI::Controls::LVM_GETITEMCOUNT;
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
-use windows::Win32::UI::WindowsAndMessaging::{IsWindowVisible, SendMessageW};
 use windows::core::implement;
 
 use super::{App, with_app};
@@ -48,17 +47,18 @@ fn files(data: Option<&IDataObject>) -> Vec<PathBuf> {
     }
 }
 
-/// The first file in a drag, if it is a photograph.
+/// The first file in a drag, if it is a photograph or a folder.
 fn photograph(data: Option<&IDataObject>) -> Option<PathBuf> {
     let path = files(data).into_iter().next()?;
-    (path.is_file() && is_photo(&path)).then_some(path)
+    ((path.is_file() && is_photo(&path)) || path.is_dir()).then_some(path)
 }
 
 fn highlight(on: bool) {
     with_app(|app: &mut App| {
         if app.drop_target_active != on {
             app.drop_target_active = on;
-            app.model.dirty |= dirty::CANVAS;
+            // The film strip and the status line step aside while dropping.
+            app.model.dirty |= dirty::CANVAS | dirty::LAYOUT;
             super::empty::highlight(app, on);
         }
     });
@@ -85,7 +85,7 @@ impl IDropTarget_Impl for Target_Impl {
         let path = photograph(data);
         unsafe { *effect = if path.is_some() { DROPEFFECT_COPY } else { DROPEFFECT_NONE } };
         if let Some(path) = path {
-            super::post(move |app: &mut App| app.model.open(&path));
+            super::post(move |app: &mut App| super::dialogs::open_path(app, &path));
         }
         Ok(())
     }
@@ -109,51 +109,30 @@ struct PresetTarget {
 }
 
 impl PresetTarget {
-    fn rows(&self) -> usize {
-        unsafe {
-            if !IsWindowVisible(self.list).as_bool() {
-                return 0;
-            }
-            SendMessageW(self.list, LVM_GETITEMCOUNT, WPARAM(0), LPARAM(0)).0.max(0) as usize
-        }
-    }
-
-    /// Where files dropped at `point` go: before a row, or None for the end.
+    /// Where files dropped at `point` go: before the tile there, or None for the end.
     fn position(&self, point: &POINTL) -> Option<usize> {
-        let rows = self.rows();
-        let at = super::presets::gap(self.list, POINT { x: point.x, y: point.y });
-        (rows > 0 && at < rows).then_some(at)
-    }
-
-    fn track(&self, point: &POINTL) {
-        let rows = self.rows();
-        let at = (self.accepted.get() && rows > 0).then(|| self.position(point).unwrap_or(rows));
-        super::presets::show_insert(self.list, at);
+        super::presets::drop_position(self.list, POINT { x: point.x, y: point.y })
     }
 }
 
 impl IDropTarget_Impl for PresetTarget_Impl {
-    fn DragEnter(&self, data: Option<&IDataObject>, _: MODIFIERKEYS_FLAGS, point: &POINTL, effect: *mut DROPEFFECT) -> windows::core::Result<()> {
+    fn DragEnter(&self, data: Option<&IDataObject>, _: MODIFIERKEYS_FLAGS, _: &POINTL, effect: *mut DROPEFFECT) -> windows::core::Result<()> {
         let accepted = !files(data).is_empty() && with_app(|app| app.model.can_change_presets()).unwrap_or(false);
         self.accepted.set(accepted);
         unsafe { *effect = if accepted { DROPEFFECT_COPY } else { DROPEFFECT_NONE } };
         super::presets::highlight_drop(self.panel, accepted);
-        self.track(point);
         Ok(())
     }
-    fn DragOver(&self, _: MODIFIERKEYS_FLAGS, point: &POINTL, effect: *mut DROPEFFECT) -> windows::core::Result<()> {
+    fn DragOver(&self, _: MODIFIERKEYS_FLAGS, _: &POINTL, effect: *mut DROPEFFECT) -> windows::core::Result<()> {
         unsafe { *effect = if self.accepted.get() { DROPEFFECT_COPY } else { DROPEFFECT_NONE } };
-        self.track(point);
         Ok(())
     }
     fn DragLeave(&self) -> windows::core::Result<()> {
         super::presets::highlight_drop(self.panel, false);
-        super::presets::show_insert(self.list, None);
         Ok(())
     }
     fn Drop(&self, data: Option<&IDataObject>, _: MODIFIERKEYS_FLAGS, point: &POINTL, effect: *mut DROPEFFECT) -> windows::core::Result<()> {
         super::presets::highlight_drop(self.panel, false);
-        super::presets::show_insert(self.list, None);
         let paths = if self.accepted.get() { files(data) } else { vec![] };
         unsafe { *effect = if paths.is_empty() { DROPEFFECT_NONE } else { DROPEFFECT_COPY } };
         if !paths.is_empty() {

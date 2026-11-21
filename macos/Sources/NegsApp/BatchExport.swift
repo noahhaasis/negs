@@ -44,12 +44,15 @@ struct BatchOptions: Codable, Equatable, Sendable {
     var custom = "{name}_{film}"
     var existing = BatchExisting.number
     var lowMemory = false
+    /// Handed to Lightroom when the batch ends (ticket 48).
+    var lightroom: LightroomKind?
 
     var outputFormat: OutputFormat { OutputFormat(rawValue: format) ?? .jpeg }
     var exportEngine: ExportEngine { ExportEngine(rawValue: engine) ?? .reference }
     var size: ExportSize { ExportSize(edge: ExportSize.Edge(rawValue: edge) ?? .full, pixels: pixels) }
     var save: SaveSettings { SaveSettings(bitDepth: bitDepth, colorSpace: colorSpace, jpegQuality: jpegQuality) }
-    var fileExtension: String { outputFormat.type.preferredFilenameExtension ?? format }
+    /// Lightroom's TIFFs end `.tif` (ticket 48), other exports as before.
+    var fileExtension: String { lightroom != nil && outputFormat == .tiff ? "tif" : outputFormat.type.preferredFilenameExtension ?? format }
 
     /// The file name for a photograph named `name` (without its extension,
     /// a duplicate's number included) developed with `film`.
@@ -422,7 +425,7 @@ struct BatchProgressView: View {
         .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
         .frame(width: Self.width, alignment: .leading)
         .background(Theme.panel)
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, Theme.colorScheme)
     }
 }
 

@@ -6,7 +6,7 @@ resolver = "2"
 
 [package]
 name = "negs-windows"
-version = "0.15.0"
+version = "0.17.0"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
@@ -18,8 +18,11 @@ path = "src/main.rs"
 [dependencies]
 # Crop, border and 35mm geometry, so the canvas cuts the same pixels as the exporter.
 spektrafilm-io = { path = "../crates/spektrafilm-io", default-features = false }
+# The image buffers spektrafilm-io crops and borders, for edited thumbnails.
+spektrafilm-math = { path = "../crates/spektrafilm-math" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact float reading: the catalog's defaults must equal the sidecar tables' to the bit.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 anyhow = "1"
 # The `implement` macro refers to windows-core by name.
 windows-core = "0.58"
@@ -30,17 +33,30 @@ rawler = "0.8"
 raw-window-handle = "0.6"
 pollster = "0.4"
 bytemuck = { version = "1.25", features = ["derive"] }
+# The pencil marks' geometry, ported from the macOS app (tested on any OS).
+negs-marks = { path = "marks" }
+# The library: .negs sidecars, ratings, flags, per-photograph edits, undo.
+negs-library = { path = "../crates/negs-library" }
 
 [build-dependencies]
-image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg"] }
 
 [dependencies.windows]
 version = "0.58"
 features = [
     "implement",
+    "Foundation_Numerics",
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",
     "Win32_Security",
@@ -54,6 +70,7 @@ features = [
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_Performance",
+    "Win32_System_Power",
     "Win32_System_Recovery",
     "Win32_System_Registry",
     "Win32_System_SystemInformation",

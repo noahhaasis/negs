@@ -34,6 +34,33 @@ import XCTest
         }
     }
 
+    /// The camera JPEG fills the RAW's frame whatever size it was saved at,
+    /// and a JPEG cropped to another shape sits centred on black.
+    func testCameraJPEGIsLaidOverTheRAWsFrame() throws {
+        let fixture = try makeJPEG(orientation: 1)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let same = try XCTUnwrap(OriginalImage.loadCameraPicture(fixture, frame: CGSize(width: 4896, height: 3264), maxPixels: 300))
+        XCTAssertEqual([same.width, same.height], [300, 200])
+        XCTAssertFalse(isBlack(same, x: 150, y: 2), "fills the frame")
+        // The RAW is square (say), the camera JPEG 3:2: bands above and below.
+        let square = try XCTUnwrap(OriginalImage.loadCameraPicture(fixture, frame: CGSize(width: 3000, height: 3000), maxPixels: 120))
+        XCTAssertEqual([square.width, square.height], [120, 120])
+        XCTAssertTrue(isBlack(square, x: 60, y: 4))
+        XCTAssertTrue(isBlack(square, x: 60, y: 115))
+        XCTAssertFalse(isBlack(square, x: 60, y: 60))
+        XCTAssertFalse(isBlack(square, x: 2, y: 60), "as wide as the frame")
+        // An upright frame from a portrait RAW.
+        let upright = try XCTUnwrap(OriginalImage.loadCameraPicture(fixture, frame: CGSize(width: 3264, height: 4896), maxPixels: 300))
+        XCTAssertEqual([upright.width, upright.height], [200, 300])
+    }
+
+    private func isBlack(_ surface: IOSurface, x: Int, y: Int) -> Bool {
+        surface.lock(options: .readOnly, seed: nil)
+        defer { surface.unlock(options: .readOnly, seed: nil) }
+        let pixel = surface.baseAddress.advanced(by: y * surface.bytesPerRow + x * 4).assumingMemoryBound(to: UInt8.self)
+        return pixel[0] < 8 && pixel[1] < 8 && pixel[2] < 8
+    }
+
     func testVolatileSurfaceKeepsItsPixelsWithoutPressure() throws {
         let surface = try XCTUnwrap(IOSurface(properties: [.width: 4, .height: 4, .bytesPerElement: 4]))
         surface.makeVolatile()
@@ -55,7 +82,9 @@ import XCTest
         // The badge says Loading Original until the decode arrives.
         XCTAssertTrue(model.holdingOriginal)
         XCTAssertNil(model.original)
+        XCTAssertTrue(model.loadingOriginal)
         try await waitUntil { model.original != nil }
+        XCTAssertFalse(model.loadingOriginal)
         XCTAssertEqual([model.original?.width, model.original?.height], [96, 64])
         model.holdOriginal(false)
         XCTAssertNil(model.original)

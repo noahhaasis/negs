@@ -72,6 +72,8 @@ final class EdgeSplitView: NSSplitView {
     private var turnKey: UInt16?
     /// The batch export popover.
     private var batchPopover: NSPopover?
+    /// The title band's view switch, made the first time it shows.
+    private var viewSwitch: NSHostingView<ViewSwitch>?
 
     init(model: EditorModel) {
         self.model = model
@@ -125,7 +127,6 @@ final class EdgeSplitView: NSSplitView {
         if #available(macOS 15, *) { toolbar.allowsDisplayModeCustomization = false }
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
-        window.backgroundColor = Theme.NS.bg
         window.isRestorable = false
         // Place the window before adding its content, so the first layout is at the final size.
         if !window.setFrameUsingName("editor") { window.center() }
@@ -134,10 +135,16 @@ final class EdgeSplitView: NSSplitView {
         Self.fitMinimum(of: window, width: inspector.isCollapsed ? canvasMinimum : columnsMinimum)
         editorFrame = EditorFrame(split: split, size: window.contentRect(forFrameRect: window.frame).size)
         window.contentViewController = editorFrame
-        window.setFrameAutosaveName("editor")
         super.init(window: window)
+        // After super.init: NSWindowController(window:) clears the window's
+        // autosave name, so naming it earlier never saved the frame.
+        window.setFrameAutosaveName("editor")
         shouldCascadeWindows = false
         window.delegate = self
+        Theme.follow(self) { [weak window, weak split] in
+            window?.backgroundColor = Theme.NS.bg
+            split?.splitView.needsDisplay = true
+        }
 
         model.undoManager = window.undoManager
         model.presentBatch = { [weak self] view in self?.showBatchPopover(below: view) }
@@ -220,7 +227,7 @@ final class EdgeSplitView: NSSplitView {
     /// if the event was handled.
     func handleKey(_ event: NSEvent) -> Bool {
         alertKeys(event) || holdOriginal(event) || holdUpsideDown(event) || trayKeys(event) || cropKeys(event)
-            || enterInspector(event) || escapeToGrid(event) || arrowsToStep(event)
+            || enterInspector(event) || escapeToGrid(event) || compareKeys(event) || arrowsToStep(event)
     }
 
     /// A key let go in another window never reaches this one, so held keys
@@ -328,7 +335,26 @@ final class EdgeSplitView: NSSplitView {
         guard event.type == .keyDown, event.keyCode == 53, event.window === window,
               event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
               model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
-        if model.mode == .grid { model.editCurrent() } else if model.imageOnly { model.leaveImageOnly() } else { model.showGrid() }
+        // Esc cancels a pick on the canvas (Prep's base and neutral pickers).
+        if model.negativePick != nil { model.negativePick = nil; return true }
+        if model.mode == .grid { model.editCurrent() } else if model.imageOnly { model.leaveImageOnly() }
+        else if model.comparison != nil { model.leaveCompare() } else { model.showGrid() }
+        return true
+    }
+
+    /// In compare: S switches side by side and the slider, and ← → step the
+    /// second photograph (the tray's keys win while it's open: `trayKeys`).
+    private func compareKeys(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, model.comparison != nil, model.mode == .photo,
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              !(window?.firstResponder is NSText) else { return false }
+        if let focused = window?.firstResponder as? NSView, InkKeyLoop.root(of: focused) != nil { return false }
+        switch event.keyCode {
+        case 123, 124: model.stepCompared(by: event.keyCode == 123 ? -1 : 1)
+        default:
+            guard event.charactersIgnoringModifiers?.lowercased() == "s", !event.modifierFlags.contains(.shift) else { return false }
+            model.toggleCompareLayout()
+        }
         return true
     }
 
@@ -364,10 +390,32 @@ final class EdgeSplitView: NSSplitView {
     private func update() {
         guard let window else { return }
         let grid = model.mode == .grid
-        // The file name, in the grid too; "Negs" with no photograph (§3).
-        let title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
+        // The file name, in the grid the selected one's (else the open
+        // photograph's); "Negs" with no photograph (§3). Comparing, both
+        // names, or the one with its original.
+        let title: String
+        if let comparison = model.comparison {
+            let first = model.library.name(of: comparison.first.item)
+            title = comparison.againstOriginal ? "\(first) with its \(model.originalPhrase)" : "\(first) and \(model.library.name(of: comparison.second.item))"
+        } else {
+            let named = grid ? model.selection.current ?? model.sourceItem : model.sourceItem
+            title = named.map { model.library.name(of: $0) } ?? "Negs"
+        }
         if window.title != title { window.title = title }
         editorFrame.band.title = title
+        // Grid · Photo · Compare, whenever a photograph is open (ticket 46).
+        if model.source != nil {
+            if viewSwitch == nil {
+                let host = NSHostingView(rootView: ViewSwitch(model: model))
+                host.sizingOptions = [.intrinsicContentSize]
+                // In the title bar: no inset for it.
+                host.safeAreaRegions = []
+                viewSwitch = host
+            }
+            editorFrame.band.showViews(viewSwitch)
+        } else {
+            editorFrame.band.showViews(nil)
+        }
         showSheet(grid)
         let alert = model.alert
         if alert != nil, alertPresenter == nil { alertPresenter = AlertPresenter(model: model, window: window, root: root) }
@@ -462,7 +510,7 @@ final class EdgeSplitView: NSSplitView {
         content.sizingOptions = .preferredContentSize
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.appearance = Theme.appearance
         popover.contentViewController = content
         popover.delegate = self
         batchPopover = popover

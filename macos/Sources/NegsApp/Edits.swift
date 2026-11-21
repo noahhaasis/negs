@@ -12,7 +12,7 @@ enum EditGroup: String, CaseIterable, Codable, Sendable {
         case .lab: "Lab"
         case .border: "Border"
         case .output: "Image size and output"
-        case .cropAndRotation: "Crop and rotation"
+        case .cropAndRotation: "Crop, rotation and flip"
         case .file: "Lens correction and input interpretation"
         }
     }
@@ -26,7 +26,7 @@ enum EditGroup: String, CaseIterable, Codable, Sendable {
         "raw_white_balance": .prep,
         "output_gamut_compress": .lab, "input_gamut_compress": .lab,
         "photo_long_side_px": .output, "upscale_factor": .output, "output_color_space": .output, "output_cctf_encoding": .output,
-        "rotate_cw": .cropAndRotation, "crop": .cropAndRotation, "crop_center": .cropAndRotation, "crop_size": .cropAndRotation,
+        "rotate_cw": .cropAndRotation, "flip": .cropAndRotation, "crop": .cropAndRotation, "crop_center": .cropAndRotation, "crop_size": .cropAndRotation,
     ]
 
     /// The group of a parameter: `io` keys one by one (any not listed is
@@ -35,6 +35,8 @@ enum EditGroup: String, CaseIterable, Codable, Sendable {
         switch section {
         case "io": io[key] ?? .file
         case "prep": .prep
+        // Reading a negative goes with the film.
+        case "workflow": .filmAndPaper
         default: .lab
         }
     }
@@ -43,7 +45,8 @@ enum EditGroup: String, CaseIterable, Codable, Sendable {
     /// edits and stay.
     static func merge(_ groups: Set<EditGroup>, from source: EditState, into target: EditState) -> EditState {
         var merged = target
-        if groups.contains(.filmAndPaper) { merged.film = source.film; merged.paper = source.paper }
+        // A negative's roll goes with reading it, as its route does.
+        if groups.contains(.filmAndPaper) { merged.film = source.film; merged.paper = source.paper; merged.roll = source.roll }
         if groups.contains(.border) { merged.border = source.border }
         if groups.contains(.cropAndRotation) { merged.crop = source.crop }
         // Match camera brightness on or off goes with Prep; the match itself

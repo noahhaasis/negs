@@ -165,28 +165,55 @@ pub struct Bitmap {
     pub bgra: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// A stock's tile keeps the helper's pixels too, for the tray's stand-in.
+    pub source: Option<Source>,
+}
+
+/// The helper's RGBA thumbnail as it came: unturned, in its display space.
+pub struct Source {
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub wide: bool,
 }
 
 impl Bitmap {
     /// The helper's RGBA buffer (sRGB curve; Rec. 2020 primaries when
     /// `wide`) for the screen: through the monitor profile like the canvas,
     /// and turned `rotation` quarter turns clockwise.
-    pub fn from_rgba(rgba: &[u8], width: u32, height: u32, wide: bool, cm: Option<&Transform>, rotation: i32) -> Result<Bitmap> {
+    /// Mirrored left to right (`flip`) and then turned as the canvas shows
+    /// the photograph (`OrientedTileImage`): the helper develops tiles
+    /// unturned, as it does the preview.
+    pub fn from_rgba(rgba: &[u8], width: u32, height: u32, wide: bool, cm: Option<&Transform>, rotation: i32, flip: bool) -> Result<Bitmap> {
         ensure!(width > 0 && height > 0 && width <= 4096 && height <= 4096, "Invalid thumbnail dimensions");
         ensure!(rgba.len() == width as usize * height as usize * 4, "The image engine returned an invalid thumbnail buffer.");
         let decode: Vec<f32> = (0..256).map(|i| srgb_decode(i as f32 / 255.0)).collect();
         let m = crate::gpu::REC2020_TO_SRGB;
-        let shown: Vec<[u8; 3]> = rgba
-            .chunks_exact(4)
-            .map(|p| {
-                let mut rgb = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
-                if wide {
-                    let c = rgb;
-                    rgb = std::array::from_fn(|i| m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2]);
-                }
-                present(rgb, cm).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        let convert = |pixels: &[u8]| -> Vec<[u8; 3]> {
+            pixels
+                .chunks_exact(4)
+                .map(|p| {
+                    let mut rgb = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
+                    if wide {
+                        let c = rgb;
+                        rgb = std::array::from_fn(|i| m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2]);
+                    }
+                    present(rgb, cm).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+                })
+                .collect()
+        };
+        // A large picture (Compare's) across the cores; each pixel as alone.
+        let pixels = rgba.len() / 4;
+        let threads = if pixels >= 1 << 20 { std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8) } else { 1 };
+        let shown: Vec<[u8; 3]> = if threads == 1 {
+            convert(rgba)
+        } else {
+            let chunk = pixels.div_ceil(threads) * 4;
+            std::thread::scope(|scope| {
+                let parts: Vec<_> = rgba.chunks(chunk).map(|part| scope.spawn(|| convert(part))).collect();
+                parts.into_iter().flat_map(|part| part.join().expect("converted")).collect()
             })
-            .collect();
+        };
         let turns = rotation.rem_euclid(4);
         let (w, h) = (width as usize, height as usize);
         let (out_w, out_h) = if turns % 2 == 1 { (h, w) } else { (w, h) };
@@ -200,11 +227,18 @@ impl Bitmap {
                     3 => (w - 1 - y, x),
                     _ => (x, y),
                 };
+                let sx = if flip { w - 1 - sx } else { sx };
                 let [r, g, b] = shown[sy * w + sx];
                 bgra[(y * out_w + x) * 4..][..4].copy_from_slice(&[b, g, r, 255]);
             }
         }
-        Ok(Bitmap { bgra, width: out_w as u32, height: out_h as u32 })
+        Ok(Bitmap { bgra, width: out_w as u32, height: out_h as u32, source: None })
+    }
+
+    /// Keeps the helper's pixels (`from_rgba`'s arguments) for a stand-in.
+    pub fn keeping(mut self, rgba: Vec<u8>, width: u32, height: u32, wide: bool) -> Bitmap {
+        self.source = Some(Source { rgba, width, height, wide });
+        self
     }
 }
 
@@ -268,6 +302,11 @@ impl Thumb {
         self.dimmed = false;
     }
 
+    /// It shows exactly `key`'s thumbnail.
+    pub fn shows(&self, key: &Key) -> bool {
+        self.image.is_some() && self.shown.as_ref() == Some(key)
+    }
+
     /// Drops the thumbnail; true if there was one.
     pub fn clear(&mut self) -> bool {
         let had = self.shown.is_some() || self.image.is_some();
@@ -283,17 +322,28 @@ pub enum Target {
     Preset(PathBuf),
 }
 
-/// The tiles and the foldouts' open state. The setting itself is
+/// A visit to the film or paper tray (`tray_rules::Visit`).
+pub type TrayVisit = crate::tray_rules::Visit<EditState>;
+
+/// A tried stock's tile, enlarged on the canvas until the develop of the
+/// edit it shows is in (IMPLEMENTATION.md §5.1): the helper's pixels as
+/// they came, unturned, so the canvas turns and colour-manages them as it
+/// does the photograph.
+#[derive(Clone)]
+pub struct Trial {
+    pub picture: crate::picture::Picture,
+    /// The edit it stands in for.
+    pub revision: u64,
+    pub generation: u64,
+}
+
+/// The tiles, the tray and the stand-in. The setting itself is
 /// `Preferences::previews`.
 #[derive(Default)]
 pub struct Previews {
-    /// Collapsed at every launch.
-    pub film_open: bool,
-    pub paper_open: bool,
-    /// The Film grid's search field, as typed: for this session, kept while
-    /// the foldout closes and opens again, as the Mac's `StockFoldout` keeps
-    /// its query. Not a preference.
-    pub film_query: String,
+    /// The film or paper tray, while it's open: closed at every launch.
+    pub tray: Option<TrayVisit>,
+    pub trial: Option<Trial>,
     thumbs: HashMap<Target, Thumb>,
     /// A thumbnail request is with the helper.
     pub busy: bool,
@@ -304,8 +354,9 @@ pub struct Previews {
 }
 
 impl Previews {
+    /// The film's (or the paper's) tray is open.
     pub fn open(&self, paper: bool) -> bool {
-        if paper { self.paper_open } else { self.film_open }
+        self.tray.as_ref().is_some_and(|t| t.paper == paper)
     }
 
     pub fn thumb(&self, target: &Target) -> Option<&Thumb> {
@@ -344,7 +395,7 @@ mod tests {
     use super::*;
 
     fn stock(id: &str, paper: bool, positive: bool, target: &str) -> Stock {
-        Stock { id: id.into(), name: id.into(), paper, positive, bw: false, target: target.into(), times: vec![], grain: Value::Null }
+        Stock { id: id.into(), name: id.into(), paper, positive, bw: false, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false }
     }
 
     fn stocks() -> Vec<Stock> {
@@ -389,7 +440,7 @@ mod tests {
         assert_eq!(slide.paper, "crystal");
     }
 
-    /// Settings › Keep paper when changing film (Linux `keep_paper_leaves_the_paper_alone`).
+    /// The paper lock (Linux `keep_paper_leaves_the_paper_alone`).
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
         for keep in [false, true] {
@@ -479,7 +530,7 @@ mod tests {
         assert_eq!(display(Some(&shown), &Key { generation: 2, request: "a".into() }), Display::Placeholder);
 
         let mut thumb = Thumb::default();
-        let bitmap = Arc::new(Bitmap { bgra: vec![0; 4], width: 1, height: 1 });
+        let bitmap = Arc::new(Bitmap { bgra: vec![0; 4], width: 1, height: 1, source: None });
         thumb.show(Some(bitmap), shown.clone());
         assert_eq!(thumb.mark(&shown), (false, false));
         assert_eq!(thumb.mark(&Key { generation: 1, request: "b".into() }), (true, true));
@@ -511,13 +562,19 @@ mod tests {
     fn thumbnails_turn_with_the_photograph() {
         // Two pixels side by side, red then blue.
         let rgba = [255, 0, 0, 255, 0, 0, 255, 255];
-        let bitmap = Bitmap::from_rgba(&rgba, 2, 1, false, None, 1).unwrap();
+        let bitmap = Bitmap::from_rgba(&rgba, 2, 1, false, None, 1, false).unwrap();
         assert_eq!((bitmap.width, bitmap.height), (1, 2));
         // A clockwise turn puts the left (red) pixel on top.
         assert_eq!(&bitmap.bgra[..4], &[0, 0, 255, 255]);
         assert_eq!(&bitmap.bgra[4..], &[255, 0, 0, 255]);
-        let plain = Bitmap::from_rgba(&rgba, 2, 1, false, None, 0).unwrap();
+        let plain = Bitmap::from_rgba(&rgba, 2, 1, false, None, 0, false).unwrap();
         assert_eq!(&plain.bgra[..4], &[0, 0, 255, 255]);
-        assert!(Bitmap::from_rgba(&rgba, 3, 1, false, None, 0).is_err());
+        assert!(Bitmap::from_rgba(&rgba, 3, 1, false, None, 0, false).is_err());
+        // Mirrored, as the canvas shows a flipped photograph: blue on the left.
+        let mirrored = Bitmap::from_rgba(&rgba, 2, 1, false, None, 0, true).unwrap();
+        assert_eq!(&mirrored.bgra[..4], &[255, 0, 0, 255]);
+        // Mirrored before the turn: blue on top.
+        let both = Bitmap::from_rgba(&rgba, 2, 1, false, None, 1, true).unwrap();
+        assert_eq!(&both.bgra[..4], &[255, 0, 0, 255]);
     }
 }

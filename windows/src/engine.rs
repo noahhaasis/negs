@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use crate::platform::{self, Job};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 pub const STOPPED: &str = "The image engine stopped unexpectedly. Open the image again to retry.";
 
 #[derive(Clone, Debug)]
@@ -180,6 +181,7 @@ struct Helper {
 /// time, in order; each has a timeout, and a helper that dies or hangs is
 /// replaced by the next request.
 pub struct EngineClient {
+    #[cfg(test)]
     pub paths: EnginePaths,
     pub scratch: Arc<ScratchSpace>,
     sender: Sender<Message>,
@@ -199,6 +201,18 @@ pub struct EngineClient {
 
 impl EngineClient {
     pub fn start(paths: EnginePaths) -> Result<Self> {
+        Self::start_at(paths, false)
+    }
+
+    /// A helper for work nobody waits on (the strip's and grid's
+    /// thumbnails), below the photograph's own on the CPU and the GPU, as
+    /// the Mac runs them at utility QoS: a flight's or a scroll's frames
+    /// aren't held behind its develop.
+    pub fn start_background(paths: EnginePaths) -> Result<Self> {
+        Self::start_at(paths, true)
+    }
+
+    fn start_at(paths: EnginePaths, background: bool) -> Result<Self> {
         let scratch = Arc::new(ScratchSpace::new()?);
         let (sender, receiver) = mpsc::channel::<Message>();
         let child = Arc::new(Mutex::new(None));
@@ -213,11 +227,14 @@ impl EngineClient {
             sequence: 0,
             pid: child.clone(),
             epoch: epoch.clone(),
+            background,
+            lowered: 0,
             #[cfg(test)]
             commands: commands.clone(),
         };
         std::thread::Builder::new().name("engine".into()).spawn(move || worker.run(receiver))?;
         Ok(Self {
+            #[cfg(test)]
             paths,
             scratch,
             sender,
@@ -270,6 +287,11 @@ impl EngineClient {
         if running { epoch } else { epoch + 1 }
     }
 
+    /// A helper process runs now (a request wouldn't start one).
+    pub fn helper_running(&self) -> bool {
+        (*self.child.lock().unwrap()).is_some_and(pid_running)
+    }
+
     /// Tests: kills the running helper, as a crash would; the next request
     /// starts another.
     #[cfg(test)]
@@ -318,6 +340,10 @@ struct Worker {
     sequence: u64,
     pid: Arc<Mutex<Option<u32>>>,
     epoch: Arc<AtomicU64>,
+    /// `EngineClient::start_background`; the helper (by `epoch`) whose GPU
+    /// priority was lowered.
+    background: bool,
+    lowered: u64,
     #[cfg(test)]
     commands: Arc<Mutex<Vec<Value>>>,
 }
@@ -328,6 +354,15 @@ impl Worker {
             match message {
                 Message::Request { command, timeout, reply } => {
                     let result = self.exchange(command, timeout);
+                    // Once the helper has the GPU open (before, Windows
+                    // has no GPU process to set it on).
+                    let epoch = self.epoch.load(Ordering::SeqCst);
+                    if self.background && result.is_ok() && self.lowered != epoch {
+                        self.lowered = epoch;
+                        if let Some(helper) = &self.helper {
+                            platform::lower_gpu_priority(&helper.child);
+                        }
+                    }
                     reply(result);
                 }
                 Message::Stop => break,
@@ -353,7 +388,7 @@ impl Worker {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(log))
-            .creation_flags(CREATE_NO_WINDOW)
+            .creation_flags(CREATE_NO_WINDOW | if self.background { BELOW_NORMAL_PRIORITY_CLASS } else { 0 })
             .spawn()
             .with_context(|| format!("Could not start the image engine ({})", self.paths.helper.display()))?;
         Job::get().assign(&child);

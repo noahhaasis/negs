@@ -27,6 +27,11 @@ pub enum RawDecoderPreference {
     Apple9,
     Apple8,
     Rawler,
+    /// LibRaw unpacks the sensor even where rawler could, with rawler's
+    /// metadata where it reads it: for comparisons.
+    LibRaw,
+    /// LibRaw's sensor and metadata, for comparisons.
+    LibRawOnly,
 }
 
 impl FromStr for RawDecoderPreference {
@@ -39,7 +44,9 @@ impl FromStr for RawDecoderPreference {
             "apple9" => Ok(Self::Apple9),
             "apple8" => Ok(Self::Apple8),
             "rawler" => Ok(Self::Rawler),
-            _ => bail!("Unknown RAW decoder {value:?}; choose auto, apple, apple9, apple8, or rawler"),
+            "libraw" => Ok(Self::LibRaw),
+            "libraw-only" => Ok(Self::LibRawOnly),
+            _ => bail!("Unknown RAW decoder {value:?}; choose auto, apple, apple9, apple8, rawler, libraw or libraw-only"),
         }
     }
 }
@@ -121,7 +128,7 @@ impl RawDecoder for RawlerDecoder {
             image: raw.image,
             reduced_from: None,
             lens_correction_supported: raw.lens.is_some(),
-            decoder_version: None,
+            decoder_version: raw.libraw,
         })
     }
 }
@@ -140,7 +147,12 @@ impl DecodedRaw {
         Self {
             image: raw.image,
             reduced_from: raw.reduced_from,
-            decoder: decoder.name(),
+            // rawler hands files it can't decode to LibRaw.
+            decoder: match &raw.decoder_version {
+                #[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
+                Some(v) if decoder.name() == "rawler" && v.starts_with(crate::libraw::VERSION_PREFIX) => crate::libraw::NAME,
+                _ => decoder.name(),
+            },
             lens_correction_supported: raw.lens_correction_supported,
             decoder_version: raw.decoder_version,
         }
@@ -216,6 +228,17 @@ pub fn decode_raw(
     }
     if matches!(preference, RawDecoderPreference::Apple | RawDecoderPreference::Apple9 | RawDecoderPreference::Apple8) {
         bail!("Apple RAW decoding requires macOS and the apple-raw Cargo feature");
+    }
+    if matches!(preference, RawDecoderPreference::LibRaw | RawDecoderPreference::LibRawOnly) {
+        #[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
+        {
+            let unpacker = if preference == RawDecoderPreference::LibRaw { crate::Unpacker::LibRaw } else { crate::Unpacker::LibRawOnly };
+            let raw = crate::load_raw_rawler_with(path, options.apply_orientation, options.white_balance, options.lens_correction, unpacker)?;
+            let raw = RawImage { image: raw.image, reduced_from: None, lens_correction_supported: false, decoder_version: raw.libraw };
+            return Ok(DecodedRaw::new(raw, &RawlerDecoder));
+        }
+        #[cfg(not(all(feature = "libraw", not(target_arch = "wasm32"))))]
+        bail!("LibRaw decoding requires the libraw Cargo feature");
     }
     RawlerDecoder
         .decode(path, options)

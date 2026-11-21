@@ -34,7 +34,7 @@ final class EditorFrameView: NSView {
         self.content = content
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = Theme.NS.bg.cgColor
+        Theme.follow(self) { [weak self] in self?.layer?.backgroundColor = Theme.NS.bg.cgColor }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -62,6 +62,8 @@ final class EditorFrameView: NSView {
 /// bar.
 final class TitleBand: NSView {
     let name = NSTextField(labelWithString: "Negs")
+    /// The view switch at the right, Grid · Photo · Compare (ticket 46).
+    private var views: NSView?
     /// Between the zoom button and the name (`.lights`' 14 pt padding).
     static let gap: CGFloat = 14
     /// Where the name starts in full screen, with no traffic lights.
@@ -70,9 +72,13 @@ final class TitleBand: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = Theme.NS.bg.cgColor
-        name.font = Theme.serifFont(15, weight: 600) as NSFont
-        name.textColor = Theme.NS.paper
+        Theme.follow(self) { [weak self] in
+            self?.layer?.backgroundColor = Theme.NS.bg.cgColor
+            self?.name.textColor = Theme.NS.paper
+            self?.name.font = Theme.serifFont(15, weight: 600) as NSFont
+            // Plain's type is wider: the name and the view switch are measured again.
+            self?.needsLayout = true
+        }
         name.lineBreakMode = .byTruncatingMiddle
         name.cell?.truncatesLastVisibleLine = true
         // The window's title says it; VoiceOver reads that.
@@ -87,7 +93,21 @@ final class TitleBand: NSView {
         set { guard newValue != name.stringValue else { return }; name.stringValue = newValue; needsLayout = true }
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    /// Shows `switcher` at the band's right, or nothing.
+    func showViews(_ switcher: NSView?) {
+        guard switcher !== views else { return }
+        views?.removeFromSuperview()
+        views = switcher
+        if let switcher { addSubview(switcher) }
+        needsLayout = true
+    }
+    var showsViews: Bool { views != nil }
+
+    /// Only the view switch takes clicks; the rest goes to the title bar.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let views, let superview else { return nil }
+        return views.hitTest(convert(point, from: superview))
+    }
     override var mouseDownCanMoveWindow: Bool { true }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -112,7 +132,14 @@ final class TitleBand: NSView {
             left = convert(zoom.bounds, from: zoom).maxX + Self.gap
             middle = convert(close.bounds, from: close).midY
         }
-        let width = max(min(size.width, bounds.width - left - Theme.Size.gutter), 0)
+        var right = bounds.width - Theme.Size.gutter
+        if let views {
+            // Level with the name, at the band's right.
+            let width = ceil(views.fittingSize.width)
+            views.frame = NSRect(x: bounds.width - width, y: (middle - 14).rounded(), width: width, height: 28)
+            right = views.frame.minX - 16
+        }
+        let width = max(min(size.width, right - left), 0)
         name.frame = NSRect(x: left.rounded(), y: (middle - size.height / 2).rounded(), width: width, height: size.height)
     }
 }

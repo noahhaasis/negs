@@ -39,22 +39,67 @@ struct CropSettings: Codable, Equatable, Sendable {
     /// The cropped photograph's size, before rotation.
     func size(of size: CGSize) -> CGSize { size == .zero ? .zero : pixels(in: size).size }
 
-    /// The rectangle as the photograph is shown, after `rotation` clockwise
-    /// quarter turns, like `ImageBuf::rotated_cw`.
-    static func shown(_ rect: CGRect, rotation: Int) -> CGRect {
-        var r = rect
+    /// The rectangle as the photograph is shown: mirrored left to right if
+    /// `flip`, then after `rotation` clockwise quarter turns, like
+    /// `ImageBuf::flipped_rotated_cw`.
+    static func shown(_ rect: CGRect, rotation: Int, flip: Bool = false) -> CGRect {
+        var r = flip ? mirrored(rect) : rect
         for _ in 0..<((rotation % 4 + 4) % 4) {
             r = CGRect(x: 1 - r.minY - r.height, y: r.minX, width: r.height, height: r.width)
         }
         return r
     }
     /// The inverse of `shown`.
-    static func unrotated(_ rect: CGRect, rotation: Int) -> CGRect {
+    static func unrotated(_ rect: CGRect, rotation: Int, flip: Bool = false) -> CGRect {
         var r = rect
         for _ in 0..<((rotation % 4 + 4) % 4) {
             r = CGRect(x: r.minY, y: 1 - r.minX - r.width, width: r.height, height: r.width)
         }
-        return r
+        return flip ? mirrored(r) : r
+    }
+    /// A fraction of the photograph mirrored left to right.
+    static func mirrored(_ rect: CGRect) -> CGRect { CGRect(x: 1 - rect.maxX, y: rect.minY, width: rect.width, height: rect.height) }
+}
+
+/// How the cropped photograph is shown (`io.flip`, `io.rotate_cw`): mirrored
+/// left to right if `flip`, then turned `turns` quarter turns clockwise. A
+/// mirror top to bottom is a flip and a half turn, so one Flip covers both.
+struct Orientation: Equatable, Sendable {
+    var turns = 0
+    var flip = false
+
+    init(turns: Int = 0, flip: Bool = false) { self.turns = (turns % 4 + 4) % 4; self.flip = flip }
+    init(params: JSONValue) { self.init(turns: Int(params["io.rotate_cw"].double), flip: params["io.flip"].bool) }
+
+    /// Mirrored left to right as shown: a flip conjugates the turns, so a
+    /// quarter turn becomes three.
+    var flippedAsShown: Orientation { Orientation(turns: 4 - turns, flip: !flip) }
+
+    /// Where a point at `fraction` of the cropped photograph (unmirrored,
+    /// unturned, from its top left) is shown, as a fraction of the shown photograph.
+    func shown(_ fraction: CGPoint) -> CGPoint {
+        var p = flip ? CGPoint(x: 1 - fraction.x, y: fraction.y) : fraction
+        for _ in 0..<turns { p = CGPoint(x: 1 - p.y, y: p.x) }
+        return p
+    }
+    /// The inverse of `shown`.
+    func unshown(_ fraction: CGPoint) -> CGPoint {
+        var p = fraction
+        for _ in 0..<turns { p = CGPoint(x: p.y, y: 1 - p.x) }
+        return flip ? CGPoint(x: 1 - p.x, y: p.y) : p
+    }
+    /// The photograph's edge ("left", "top"…) as shown.
+    func shownEdge(_ edge: String) -> String {
+        let point: CGPoint
+        switch edge {
+        case "left": point = CGPoint(x: 0, y: 0.5)
+        case "right": point = CGPoint(x: 1, y: 0.5)
+        case "top": point = CGPoint(x: 0.5, y: 0)
+        case "bottom": point = CGPoint(x: 0.5, y: 1)
+        default: return edge
+        }
+        let p = shown(point)
+        return p.x < 0.25 ? "left" : p.x > 0.75 ? "right" : p.y < 0.25 ? "top" : "bottom"
     }
 }
 
@@ -265,11 +310,13 @@ enum CropGeometry {
     /// The locked ratio is taller than wide (for presets; custom uses its sides).
     private(set) var portrait: Bool
     private(set) var custom: CGSize
-    /// Degrees clockwise, as `CropSettings.angle`.
+    /// Degrees clockwise as shown: `CropSettings.angle`, the other way
+    /// round on a flipped photograph.
     private(set) var angle: Double
-    /// The developed photograph as shown, in pixels, and its rotation.
+    /// The developed photograph as shown, in pixels, its rotation and flip.
     private(set) var photo: CGSize
     private(set) var rotation: Int
+    private(set) var flip: Bool
     /// A handle is being dragged; the thirds grid shows.
     var adjusting = false
     /// The dial or slider is turning the photograph; a finer grid shows.
@@ -284,18 +331,22 @@ enum CropGeometry {
     /// The decoded source's size, to project Image Size's working frame; zero if unknown.
     @ObservationIgnored let source: CGSize
 
-    init(start: EditState, photo: CGSize, rotation: Int, source: CGSize = .zero) {
+    init(start: EditState, photo: CGSize, rotation: Int, flip: Bool = false, source: CGSize = .zero) {
         self.start = start; self.source = source
         let settings = start.crop
-        rect = settings.rect; aspect = settings.aspect; custom = settings.custom; angle = settings.angle
-        self.photo = photo; self.rotation = rotation
-        let shown = CropSettings.shown(settings.rect, rotation: rotation)
+        rect = settings.rect; aspect = settings.aspect; custom = settings.custom; angle = Self.mirrored(settings.angle, flip)
+        self.photo = photo; self.rotation = rotation; self.flip = flip
+        let shown = CropSettings.shown(settings.rect, rotation: rotation, flip: flip)
         portrait = shown.height * photo.height > shown.width * photo.width
         if aspect == .custom, (custom.height > custom.width) != portrait { custom = CGSize(width: custom.height, height: custom.width) }
     }
 
+    /// A flip mirrors the straightening: clockwise as shown is anticlockwise
+    /// on the unflipped photograph.
+    private static func mirrored(_ angle: Double, _ flip: Bool) -> Double { flip && angle != 0 ? -angle : angle }
+
     var settings: CropSettings {
-        guard angle == 0 else { return CropSettings(rect: rect, aspect: aspect, custom: custom, angle: angle) }
+        guard angle == 0 else { return CropSettings(rect: rect, aspect: aspect, custom: custom, angle: Self.mirrored(angle, flip)) }
         let unit = rect.intersection(CropSettings.full)
         // Within a thousandth of the whole photograph is no crop.
         let whole = abs(unit.minX) < 1e-3 && abs(unit.minY) < 1e-3 && abs(unit.maxX - 1) < 1e-3 && abs(unit.maxY - 1) < 1e-3
@@ -326,25 +377,27 @@ enum CropGeometry {
     /// The rectangle in pixels of the photograph as shown.
     var shown: CGRect {
         get {
-            let r = CropSettings.shown(rect, rotation: rotation)
+            let r = CropSettings.shown(rect, rotation: rotation, flip: flip)
             return CGRect(x: r.minX * photo.width, y: r.minY * photo.height, width: r.width * photo.width, height: r.height * photo.height)
         }
         set {
             guard photo.width > 0, photo.height > 0 else { return }
             let r = CGRect(x: newValue.minX / photo.width, y: newValue.minY / photo.height, width: newValue.width / photo.width, height: newValue.height / photo.height)
-            rect = CropSettings.unrotated(r, rotation: rotation)
+            rect = CropSettings.unrotated(r, rotation: rotation, flip: flip)
         }
     }
     /// Where the rectangle can go: the turned photograph's bounding box.
     var bounds: CGRect { CropGeometry.bounds(of: photo, angle: angle) }
 
     /// A newer render: a quarter turn swaps the locked ratio's orientation,
-    /// as the rectangle turns with the photograph.
-    func update(photo: CGSize, rotation: Int) {
+    /// as the rectangle turns with the photograph. A flip mirrors the
+    /// rectangle and the straightening with it.
+    func update(photo: CGSize, rotation: Int, flip: Bool = false) {
         if (rotation - self.rotation) % 2 != 0 {
             portrait.toggle(); custom = CGSize(width: custom.height, height: custom.width)
         }
-        self.photo = photo; self.rotation = rotation
+        if flip != self.flip { angle = Self.mirrored(angle, true); intended = nil }
+        self.photo = photo; self.rotation = rotation; self.flip = flip
     }
 
     func choose(_ aspect: CropAspect) {
@@ -422,7 +475,7 @@ struct CropEditor: View {
             let crop = CGRect(x: frame.minX + shown.minX * scale, y: frame.minY + shown.minY * scale,
                               width: shown.width * scale, height: shown.height * scale)
             ZStack(alignment: .topLeading) {
-                CropPhoto(image: image, frame: frame, rotation: session.rotation, angle: session.angle)
+                CropPhoto(image: image, frame: frame, rotation: session.rotation, flip: session.flip, angle: session.angle)
                 CropOverlay(photo: CropGeometry.corners(of: frame.size, angle: session.angle).map { CGPoint(x: $0.x + frame.minX, y: $0.y + frame.minY) },
                             crop: crop, fine: session.straightening)
             }
@@ -655,22 +708,24 @@ private struct QuarterTurn: View {
     }
 }
 
-/// The developed photograph at `frame`, turned like the canvas and then
-/// straightened by `angle`.
+/// The developed photograph at `frame`, flipped and turned like the canvas
+/// and then straightened by `angle` as shown.
 private struct CropPhoto: NSViewRepresentable {
     let image: AnyObject
     let frame: CGRect
     let rotation: Int
+    let flip: Bool
     let angle: Double
 
     func makeNSView(context: Context) -> CropPhotoView { CropPhotoView() }
-    func updateNSView(_ view: CropPhotoView, context: Context) { view.show(image, frame: frame, rotation: rotation, angle: angle) }
+    func updateNSView(_ view: CropPhotoView, context: Context) { view.show(image, frame: frame, rotation: rotation, flip: flip, angle: angle) }
 }
 
 final class CropPhotoView: NSView {
     private let photo = CALayer()
     private var frameRect = CGRect.zero
     private var rotation = 0
+    private var flip = false
     private var angle = 0.0
     override var wantsUpdateLayer: Bool { true }
 
@@ -688,9 +743,10 @@ final class CropPhotoView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// `frame` is in SwiftUI's top-left coordinates.
-    func show(_ image: AnyObject, frame: CGRect, rotation: Int, angle: Double) {
-        guard image !== photo.contents as AnyObject? || frame != frameRect || rotation != self.rotation || angle != self.angle else { return }
-        photo.contents = image; frameRect = frame; self.rotation = rotation; self.angle = angle
+    func show(_ image: AnyObject, frame: CGRect, rotation: Int, flip: Bool = false, angle: Double) {
+        guard image !== photo.contents as AnyObject? || frame != frameRect || rotation != self.rotation || flip != self.flip
+            || angle != self.angle else { return }
+        photo.contents = image; frameRect = frame; self.rotation = rotation; self.flip = flip; self.angle = angle
         needsLayout = true
     }
 
@@ -699,9 +755,11 @@ final class CropPhotoView: NSView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         let size = rotation % 2 != 0 ? CGSize(width: frameRect.height, height: frameRect.width) : frameRect.size
         photo.bounds = CGRect(origin: .zero, size: size)
-        // Layers are y-up, so clockwise is a negative angle.
+        // Layers are y-up, so clockwise is a negative angle. The flip mirrors
+        // the photograph before it turns.
         photo.position = CGPoint(x: frameRect.midX, y: bounds.height - frameRect.midY)
-        photo.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation) - angle * .pi / 180))
+        let turn = CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation) - angle * .pi / 180)
+        photo.setAffineTransform(flip ? CGAffineTransform(scaleX: -1, y: 1).concatenating(turn) : turn)
         CATransaction.commit()
     }
 }
@@ -743,6 +801,11 @@ struct CropInspector: View {
                                       reset: { session.beginStraightening(); session.straighten(to: 0); session.endStraightening() },
                                       editing: { $0 ? session.beginStraightening() : session.endStraightening() },
                                       help: "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.")
+                    }
+                    InkSection(title: "Flip") {
+                        TickRow(title: "Flip left to right", isOn: Binding(get: { session.flip }, set: { _ in model.flip() }),
+                                changed: session.flip,
+                                help: "Mirrors the photograph, as a negative photographed from its base side needs. With a half turn it mirrors top to bottom.")
                     }
                     InkSection(title: nil) {
                         let size = session.exportedSize(working: model.workingSize)

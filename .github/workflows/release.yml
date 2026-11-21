@@ -7,8 +7,9 @@ on:
       - main
     tags:
       - "v*"
-    # Docs-only pushes to main build nothing. Path filters never apply to tags,
-    # so every release tag builds and publishes all platforms.
+    # Docs-only pushes to main build nothing. Path filters never apply to tags:
+    # a tag on a commit main built green reuses that run and repackages only
+    # the Mac app; any other tag builds and publishes all platforms.
     paths:
       - "**"
       - "!**.md"
@@ -18,6 +19,8 @@ on:
 
 permissions:
   contents: read
+  # A tag reuses the artifacts of main's run of the same commit.
+  actions: read
 
 # Tags queue behind each other and are never cancelled. A newer push to a
 # branch supersedes its unfinished build, and branch runs never hold up a tag.
@@ -30,12 +33,38 @@ jobs:
     name: Choose platforms
     runs-on: ubuntu-latest
     outputs:
-      # Tags and manual runs build everything; pushes to main build only the
-      # platforms the push can affect.
-      linux: ${{ github.event_name != 'push' || github.ref_type == 'tag' || steps.filter.outputs.linux == 'true' }}
-      windows: ${{ github.event_name != 'push' || github.ref_type == 'tag' || steps.filter.outputs.windows == 'true' }}
-      macos: ${{ github.event_name != 'push' || github.ref_type == 'tag' || steps.filter.outputs.macos == 'true' }}
+      # Manual runs build everything; pushes to main build only the platforms
+      # the push can affect. A tag reuses main's green run of the same commit
+      # (engines, Windows and Linux packages, all tests) and only repackages
+      # the Mac app with the update feed; without one it builds everything.
+      reuse: ${{ steps.reuse.outputs.run }}
+      linux: ${{ github.event_name != 'push' || (github.ref_type == 'tag' && steps.reuse.outputs.run == '') || steps.filter.outputs.linux == 'true' }}
+      windows: ${{ github.event_name != 'push' || (github.ref_type == 'tag' && steps.reuse.outputs.run == '') || steps.filter.outputs.windows == 'true' }}
+      macos: ${{ github.event_name != 'push' || (github.ref_type == 'tag' && steps.reuse.outputs.run == '') || steps.filter.outputs.macos == 'true' }}
     steps:
+      - name: Find main's green run of this commit
+        id: reuse
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Main and the tag are often pushed together: wait for main's run.
+          runs="repos/$REPO/actions/workflows/release.yml/runs?head_sha=$SHA&branch=main&event=push"
+          for _ in $(seq 120); do
+            pending=$(gh api "$runs" --jq '[.workflow_runs[] | select(.status != "completed")] | length')
+            [ "$pending" = 0 ] && break
+            echo "Waiting for main's run of $SHA"; sleep 30
+          done
+          need='["build-macos-aarch64-apple-darwin","build-macos-x86_64-apple-darwin","negs-windows","negs-linux","negs-linux-flatpak","negs-linux-appimage"]'
+          for id in $(gh api "$runs" --jq '.workflow_runs[] | select(.conclusion == "success") | .id'); do
+            have=$(gh api "repos/$REPO/actions/runs/$id/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name]')
+            if jq -e --argjson need "$need" '. as $have | $need - $have | length == 0' <<<"$have" > /dev/null; then
+              echo "Reusing run $id"; echo "run=$id" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          done
+          echo "No complete green run of $SHA on main; building everything"
       - uses: actions/checkout@v4
         if: github.event_name == 'push' && github.ref_type == 'branch'
       - uses: dorny/paths-filter@v3
@@ -60,6 +89,7 @@ jobs:
               - "windows/**"
             macos:
               - *shared
+              - "core/**"
               - "macos/**"
               - "scripts/**"
 
@@ -83,6 +113,16 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test Windows app
         run: cargo test --locked --manifest-path windows/Cargo.toml
+      # The marks' geometry and the pure rules the app includes by #[path]
+      # (library map, tray, strip and grid). bash, so any failure fails the step.
+      - name: Test the marks and the Windows rules
+        shell: bash
+        run: |
+          set -e
+          cargo test --locked --manifest-path windows/Cargo.toml -p negs-marks
+          for crate in library-map tray-rules sheet-rules; do
+            cargo test --locked --manifest-path "windows/$crate/Cargo.toml" --target-dir windows/target
+          done
 
   windows-engine:
     name: Windows engine
@@ -199,11 +239,14 @@ jobs:
             target/${{ matrix.target }}/release/spektrafilm
             target/${{ matrix.target }}/release/spektrafilm-f64
           if-no-files-found: error
-          retention-days: 1
+          # Kept for a week so a tag made days later can still reuse them.
+          retention-days: 7
 
   macos:
     name: macOS universal
-    needs: macos-engine
+    needs: [changes, macos-engine]
+    # With a reused run, macos-engine is skipped and its engines come from there.
+    if: ${{ !cancelled() && (needs.macos-engine.result == 'success' || (needs.changes.result == 'success' && needs.changes.outputs.reuse != '')) }}
     runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -235,19 +278,29 @@ jobs:
         with:
           name: build-macos-aarch64-apple-darwin
           path: target/aarch64-apple-darwin/release
+          run-id: ${{ needs.changes.outputs.reuse || github.run_id }}
+          github-token: ${{ needs.changes.outputs.reuse != '' && github.token || '' }}
       - uses: actions/download-artifact@v4
         with:
           name: build-macos-x86_64-apple-darwin
           path: target/x86_64-apple-darwin/release
+          run-id: ${{ needs.changes.outputs.reuse || github.run_id }}
+          github-token: ${{ needs.changes.outputs.reuse != '' && github.token || '' }}
       - name: Restore executable bits lost in artifact upload
         run: chmod +x target/*-apple-darwin/release/spektrafilm*
+      - name: Install the shared core's pinned Odin
+        run: python core/install_odin.py
+      - name: Test the shared core
+        run: python core/build.py test
       - name: Package and verify app, update ZIP and installer
         env:
           BUILD_TARGET_DIR: target
           NEGS_PREBUILT_RUST: "1"
         run: bash scripts/package_macos_app.sh
-      # The Swift tests run the engine from target/release.
+      # The Swift tests run the engine from target/release. A reused run
+      # passed them on this commit; only Info.plist's update feed differs.
       - name: Test native app and session restoration
+        if: needs.changes.outputs.reuse == ''
         run: |
           mkdir -p target/release
           cp target/aarch64-apple-darwin/release/spektrafilm-native target/aarch64-apple-darwin/release/spektrafilm-f64 target/release/
@@ -274,11 +327,13 @@ jobs:
 
   publish:
     name: Publish complete release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: [macos, windows, windows-test, linux]
+    # Windows and Linux are skipped when reused; any failure stops the release.
+    if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && needs.macos.result == 'success' && !contains(needs.*.result, 'failure') }}
+    needs: [changes, macos, windows, windows-test, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -286,6 +341,14 @@ jobs:
           pattern: negs-{macos,windows,linux,linux-flatpak,linux-appimage}
           path: release-assets
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        if: needs.changes.outputs.reuse != ''
+        with:
+          pattern: negs-{windows,linux,linux-flatpak,linux-appimage}
+          path: release-assets
+          merge-multiple: true
+          run-id: ${{ needs.changes.outputs.reuse }}
+          github-token: ${{ github.token }}
       # Linux includes the Flatpak and AppImage jobs; neither format may be
       # missing, renamed or mismatched with its checksum file.
       - name: Check the complete expected asset list

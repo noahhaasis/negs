@@ -59,48 +59,44 @@ lifecycle_test! {
 }
 
 lifecycle_test! {
-    /// With matching on, the settled frame of an edit whose match is pending
-    /// is held, not shown: the solve starts from it (it reads that render's
-    /// decode), and the canvas goes from the previous frame straight to the
-    /// matched one. Before B1 (docs/windows-nov5-port) the held frame was
-    /// shown during the solve, so the canvas changed twice.
-    fn the_match_solves_after_the_settled_frame_and_renders_again() {
+    /// With matching on, a pending match is solved before anything renders
+    /// (ticket 39): a decode alone, the solve, then the one render, of the
+    /// matched exposure. The canvas goes from the previous frame straight to
+    /// the matched one, and the old exposure never renders.
+    fn the_match_solves_before_the_render_and_renders_once() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
         let opened = h.model().revision;
         h.edit(|m| m.open(&photo));
         let generation = h.model().source_generation;
-        // Stop where the solve starts: the first render is held, nothing shown.
+        // The solve starts before anything renders.
         h.run_until("the solve", |m| m.matching_brightness);
-        let first = h.model().held_frame().expect("the first frame is held");
-        assert_eq!((first.revision, first.generation, first.kind), (opened + 1, generation, FrameKind::Settled));
-        assert!(!h.model().preview_current && h.model().shown_frame.is_none() && h.model().image.is_none());
-        assert_eq!(h.command_names(), ["catalog", "render"]);
+        assert!(h.renders().is_empty() && h.model().held_frame().is_none() && h.model().image.is_none());
         h.idle();
         let m = h.model();
         let ev = m.state.brightness_match.as_ref().and_then(|b| b.ev).expect("matched");
         assert!(!m.brightness_match_pending() && m.preview_current && m.held_frame().is_none(), "{:?} {:?}", m.brightness_match_note(), h.errors);
-        assert!(ev.abs() > 1e-9, "the match moved the exposure ({ev}), so it renders again");
+        assert!(ev.abs() > 1e-9, "the match moved the exposure ({ev})");
         assert!((crate::json::number(m.value(state::PREP_EXPOSURE)) - ev).abs() < 1e-6, "Exposure holds the match");
         let solved = m.revision;
         assert_eq!(solved, opened + 2, "the match is one more edit");
-        assert_eq!(h.renders(), [settled(opened + 1, generation), settled(solved, generation)]);
-        assert_eq!(h.command_names(), ["catalog", "render", "place_exposure", "render"]);
+        assert_eq!(m.source_size, (3072, 2048));
+        assert_eq!(h.renders(), [settled(solved, generation)]);
+        assert_eq!(h.command_names(), ["catalog", "thumbnail", "place_exposure", "render"]);
         let last = h.model().shown_frame.unwrap();
         assert_eq!((last.revision, last.kind), (solved, FrameKind::Settled));
         assert_eq!(h.frames, [last], "only the matched frame is shown");
         eprintln!("opened: matched at {ev:+.3} EV");
 
         // A film change. Gold 200 and Portra 400 match this photograph at the
-        // same exposure, so the solve only marks the match current: the held
-        // frame is the final one, and is shown.
+        // same exposure, so the solve only marks the match current, and the
+        // edit renders once it's back.
         h.clear_logs();
         let film = other(&h.model().state.film);
         h.edit(|m| m.choose_film(film));
         let changed = h.model().revision;
         h.run_until("the solve", |m| m.matching_brightness);
-        let held = h.model().held_frame().expect("the film's frame is held during the solve");
-        assert_eq!(held.revision, changed);
+        assert!(h.renders().is_empty(), "nothing renders during the solve");
         assert_eq!(h.model().shown_frame, Some(last), "the previous frame stays on screen");
         h.idle();
         let m = h.model();
@@ -109,19 +105,17 @@ lifecycle_test! {
         assert!((film_ev - ev).abs() < 0.05, "under 0.05 EV apart, the match keeps its value");
         assert!(!m.brightness_match_pending() && m.preview_current && m.revision == changed);
         assert_eq!(h.renders(), [settled(changed, generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure"]);
-        assert_eq!(h.frames, [held], "the held frame is shown");
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render"]);
+        assert_eq!(h.frames.iter().map(|f| (f.revision, f.kind)).collect::<Vec<_>>(), [(changed, FrameKind::Settled)]);
 
         // Turning off the print exposure's normalisation needs another
         // exposure (camera exposure compensation doesn't: the normalised print
-        // takes it back). The settled frame at the old exposure is held during
-        // the solve and never shown; the matched one renders and shows.
+        // takes it back). Only the matched exposure renders.
         h.clear_logs();
         h.edit(|m| m.set("enlarger.normalize_print_exposure", serde_json::json!(false)));
         let compensated = h.model().revision;
         h.run_until("the solve", |m| m.matching_brightness);
-        assert_eq!(h.model().held_frame().map(|f| (f.revision, f.kind)), Some((compensated, FrameKind::Settled)));
-        assert_eq!(h.model().shown_frame, Some(held), "the film change's frame stays on screen during the solve");
+        assert!(h.renders().is_empty() && h.model().held_frame().is_none());
         h.idle();
         let m = h.model();
         let new_ev = m.state.brightness_match.as_ref().and_then(|b| b.ev).unwrap();
@@ -129,9 +123,20 @@ lifecycle_test! {
         assert!((new_ev - film_ev).abs() >= 0.05, "the match moved ({film_ev} to {new_ev})");
         assert!(!m.brightness_match_pending() && m.preview_current && m.held_frame().is_none());
         assert_eq!(m.revision, compensated + 1);
-        assert_eq!(h.renders(), [settled(compensated, generation), settled(compensated + 1, generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render"]);
+        assert_eq!(h.renders(), [settled(compensated + 1, generation)]);
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render"]);
         assert_eq!(h.frames.iter().map(|f| f.revision).collect::<Vec<_>>(), [compensated + 1], "the canvas changes once");
+
+        // Back to normalised: solved before for this very request, so the
+        // match cache answers, with no decode and no solve.
+        h.clear_logs();
+        h.edit(|m| m.set("enlarger.normalize_print_exposure", serde_json::json!(true)));
+        let back = h.model().revision;
+        h.idle();
+        let m = h.model();
+        assert!((matched_ev(m) - film_ev).abs() < 0.05, "the kept solve: {} against {film_ev}", matched_ev(m));
+        assert_eq!(m.revision, back + 1);
+        assert_eq!(h.command_names(), ["render"], "the match cache answered");
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
@@ -322,12 +327,13 @@ lifecycle_test! {
         // Settings › previews off, end to end: thumbnails made, then turned off.
         h.clear_logs();
         h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        h.edit(|m| m.open_tray(false));
         let started = std::time::Instant::now();
         h.idle();
         let thumbnails = h.command_names().iter().filter(|c| *c == "thumbnail").count();
         eprintln!("{thumbnails} film thumbnails in {:.1} s (debug or release test build, 3072 × 2048 photograph)", started.elapsed().as_secs_f64());
-        assert_eq!(thumbnails, 69);
+        // Settings › Show Negs-built films is off: their 17 films get no tile.
+        assert_eq!(thumbnails, 52);
         h.clear_logs();
         h.edit(|m| m.set_previews(false));
         h.idle();
@@ -371,6 +377,15 @@ fn second_photo(h: &Harness, name: &str) -> std::path::PathBuf {
     path
 }
 
+/// Waits until the current edit's solve runs (before anything renders for
+/// it, ticket 39), and checks that nothing was rendered or held for it.
+fn until_solving(h: &mut Harness) {
+    let revision = h.model().revision;
+    h.run_until("the solve", |m| m.matching_brightness);
+    let m = h.model();
+    assert!(m.held_frame().is_none() && !m.render_log.iter().any(|r| r.revision == revision), "{:?}", m.render_log);
+}
+
 /// Waits until the current edit's frame is held, and returns it.
 fn until_held(h: &mut Harness) -> FrameTag {
     h.run_until("the held frame", |m| m.held_frame().is_some_and(|f| f.revision == m.revision));
@@ -383,11 +398,10 @@ fn trace_events(path: &std::path::Path) -> Vec<serde_json::Value> {
 }
 
 lifecycle_test! {
-    /// A film change that moves the match: the frame at the old exposure is
-    /// held while the solve runs, then dropped by the matched exposure's
-    /// edit, and never shown. The previous frame and the activity badge stay
-    /// up meanwhile; the canvas changes once, to the matched frame. The
-    /// trace records render(old) → held → solve → render(new) → shown.
+    /// A film change that moves the match: the solve runs first, so the old
+    /// exposure never renders (ticket 39). The previous frame and the
+    /// activity badge stay up meanwhile; the canvas changes once, to the
+    /// matched frame. The trace records solve → render(new) → shown.
     fn a_moved_match_never_shows_the_old_exposure() {
         let trace = std::env::temp_dir().join(format!("negs-held-trace-{}.jsonl", std::process::id()));
         let _ = std::fs::remove_file(&trace);
@@ -404,11 +418,10 @@ lifecycle_test! {
         h.clear_logs();
         h.edit(|m| m.choose_film(SUPERIA));
         let edited = h.model().revision;
-        let held = until_held(&mut h);
-        assert_eq!((held.revision, held.generation, held.kind), (edited, generation, FrameKind::Settled));
+        until_solving(&mut h);
         let m = h.model();
         assert!(!m.preview_current && m.shown_frame == Some(previous) && m.image.as_ref().unwrap().id == previous_picture, "the previous frame stays");
-        // The activity timer, run now: the badge shows while the frame is held.
+        // The activity timer, run now: the badge shows while it solves.
         h.fire_timers(std::time::Duration::from_millis(400));
         assert_eq!(h.model().badge(), Some("Updating"));
         h.idle();
@@ -419,11 +432,10 @@ lifecycle_test! {
         assert!((ev - gold_ev).abs() >= 0.05, "the film change moves the match ({gold_ev} to {ev})");
         assert_eq!(m.revision, edited + 1, "the matched exposure is one more edit");
         assert!(m.preview_current && !m.brightness_match_pending() && m.held_frame().is_none() && m.badge().is_none());
-        assert_eq!(h.renders(), [settled(edited, generation), settled(edited + 1, generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render"]);
+        assert_eq!(h.renders(), [settled(edited + 1, generation)]);
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render"]);
         let shown = h.model().shown_frame.unwrap();
         assert_eq!((shown.revision, shown.kind), (edited + 1, FrameKind::Settled));
-        assert_ne!(shown.request, held.request);
         assert_eq!(h.frames, [shown], "the canvas changes once, to the matched frame");
         assert!(h.errors.is_empty(), "{:?}", h.errors);
 
@@ -450,11 +462,8 @@ lifecycle_test! {
         let (old, new) = (edited, edited + 1);
         assert_eq!(lifecycle, [
             format!("edit r{old}"),
-            format!("render_request r{old}"),
-            format!("render_finished r{old} held"),
             format!("match_start r{old}"),
             "match_solved rnull".to_owned(),
-            format!("held_dropped r{old} edit"),
             format!("edit r{new}"),
             format!("render_request r{new}"),
             format!("render_finished r{new} shown"),
@@ -464,9 +473,9 @@ lifecycle_test! {
 
 lifecycle_test! {
     /// A match that leaves the exposure as it is (Gold 200 to Portra 400):
-    /// the held frame itself is shown once the solve answers, with no second
-    /// render, and the preview is current.
-    fn an_unchanged_match_shows_the_held_frame() {
+    /// the edit renders once the solve answers, once, and the preview is
+    /// current.
+    fn an_unchanged_match_renders_once_after_the_solve() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
         open_matched(&mut h, &photo);
@@ -474,27 +483,25 @@ lifecycle_test! {
         h.clear_logs();
         h.edit(|m| m.choose_film(PORTRA));
         let edited = h.model().revision;
-        let held = until_held(&mut h);
-        assert_eq!(h.model().shown_frame, previous);
-        h.run_until("the solve", |m| m.matching_brightness);
+        until_solving(&mut h);
         assert_eq!(h.model().shown_frame, previous, "the previous frame stays during the solve");
         h.idle();
         let m = h.model();
         assert!((matched_ev(m) - gold_ev).abs() < 0.05);
         assert!(m.preview_current && !m.brightness_match_pending() && m.held_frame().is_none() && m.revision == edited);
         assert!(m.render_at_export_size && m.status.contains("developed in"), "{}", m.status);
-        assert_eq!(h.frames, [held], "the held render is the one shown");
+        assert_eq!(h.frames.iter().map(|f| (f.revision, f.kind)).collect::<Vec<_>>(), [(edited, FrameKind::Settled)]);
         assert_eq!(h.renders(), [settled(edited, h.app.model.source_generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure"]);
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render"]);
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
 
 lifecycle_test! {
-    /// A failed match shows the held frame and its note: for the photograph
-    /// (a transparent PNG can't be matched) and for the look (one that would
-    /// need more than ±3 EV).
-    fn a_failed_match_shows_the_held_frame_and_its_note() {
+    /// A failed match renders the edit as it is, with its note: for the
+    /// photograph (a transparent PNG can't be matched) and for the look (one
+    /// that would need more than ±3 EV).
+    fn a_failed_match_renders_the_edit_with_its_note() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         // For the photograph: the match is refused once the frame is held.
         let transparent = std::env::temp_dir().join(format!("negs-harness-transparent-{}.png", std::process::id()));
@@ -506,7 +513,7 @@ lifecycle_test! {
         image::save_buffer(&transparent, &pixels, w, h_, image::ExtendedColorType::Rgba8).unwrap();
         h.edit(|m| m.open(&transparent));
         let generation = h.model().source_generation;
-        let held = until_held(&mut h);
+        until_solving(&mut h);
         assert!(h.model().shown_frame.is_none() && h.model().brightness_match_pending());
         h.idle();
         let _ = std::fs::remove_file(&transparent);
@@ -514,7 +521,7 @@ lifecycle_test! {
         assert_eq!(m.brightness_match_note().as_deref(), Some("Transparent images can’t be matched."));
         assert!(m.brightness_match_unavailable().is_some() && !m.brightness_match_pending());
         assert!(m.preview_current && m.held_frame().is_none());
-        assert_eq!(h.frames, [held], "the held frame is shown");
+        assert_eq!(h.frames.iter().map(|f| (f.generation, f.kind)).collect::<Vec<_>>(), [(generation, FrameKind::Settled)], "the edit renders");
         assert_eq!(h.renders().iter().filter(|r| r.generation == generation).count(), 1);
         assert!(h.errors.is_empty(), "a refused match is a note: {:?}", h.errors);
 
@@ -529,7 +536,7 @@ lifecycle_test! {
         h.clear_logs();
         h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(-5.0)));
         let edited = h.model().revision;
-        let held = until_held(&mut h);
+        until_solving(&mut h);
         assert_eq!(h.model().shown_frame, previous);
         h.idle();
         let m = h.model();
@@ -537,18 +544,17 @@ lifecycle_test! {
         assert_eq!(note.as_deref(), Some("Matching would take more than ±3 EV."));
         assert!(m.brightness_match_unavailable().is_none() && !m.brightness_match_active(), "a failure for this look, not the photograph");
         assert!(m.preview_current && m.held_frame().is_none() && m.revision == edited);
-        assert_eq!(h.frames, [held]);
+        assert_eq!(h.frames.iter().map(|f| (f.revision, f.kind)).collect::<Vec<_>>(), [(edited, FrameKind::Settled)]);
         assert_eq!(h.renders(), [settled(edited, h.app.model.source_generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure"]);
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render"]);
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
 
 lifecycle_test! {
     /// Matching turned off while the solve runs: the exposure stays where it
-    /// was, so the held frame is the new state's render. It is shown once the
-    /// solve (whose answer no longer applies) is back; nothing renders again
-    /// and nothing stays held.
+    /// was, and the edit renders once, at once; the superseded solve's
+    /// answer, if it is still asked for, isn't applied. Nothing is held.
     fn turning_the_match_off_mid_solve_leaves_nothing_held() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
@@ -557,8 +563,7 @@ lifecycle_test! {
         h.clear_logs();
         h.edit(|m| m.choose_film(SUPERIA));
         let edited = h.model().revision;
-        let held = until_held(&mut h);
-        h.run_until("the solve", |m| m.matching_brightness);
+        until_solving(&mut h);
         h.edit(|m| m.set_matches_brightness(false));
         assert_eq!(h.model().revision, edited, "turning the match off doesn't change the render");
         assert!(!h.model().brightness_match_pending());
@@ -566,9 +571,12 @@ lifecycle_test! {
         let m = h.model();
         assert!(!m.matches_brightness() && m.held_frame().is_none() && m.preview_current);
         assert!((crate::json::number(m.value(state::PREP_EXPOSURE)) - gold_exposure).abs() < 1e-9, "the solve's answer isn't applied");
-        assert_eq!(h.frames, [held]);
+        assert_eq!(h.frames.iter().map(|f| (f.revision, f.kind)).collect::<Vec<_>>(), [(edited, FrameKind::Settled)]);
         assert_eq!(h.renders(), [settled(edited, h.app.model.source_generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure"]);
+        let names = h.command_names();
+        assert_eq!(names[0], "thumbnail", "{names:?}");
+        assert_eq!(names.iter().filter(|c| *c == "render").count(), 1, "{names:?}");
+        assert!(names.iter().filter(|c| *c == "place_exposure").count() <= 1, "{names:?}");
         assert_eq!(h.model().undo_title(), Some("Stop Matching Camera Brightness"));
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
@@ -576,8 +584,8 @@ lifecycle_test! {
 
 lifecycle_test! {
     /// Edits while the solve runs: film changes in a row, Undo, and opening
-    /// another photograph. The held frame is dropped each time; only frames
-    /// of the latest edit and photograph are shown, once matched.
+    /// another photograph. Only frames of the latest edit and photograph are
+    /// shown, once matched.
     fn edits_during_the_solve_never_show_a_stale_frame() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
@@ -587,10 +595,9 @@ lifecycle_test! {
         // Two more film changes while the first one's solve runs.
         h.clear_logs();
         h.edit(|m| m.choose_film(SUPERIA));
-        let superia = until_held(&mut h);
-        h.run_until("the solve", |m| m.matching_brightness);
+        until_solving(&mut h);
         h.edit(|m| m.choose_film(PORTRA));
-        assert!(h.model().held_frame().is_none(), "an edit drops the held frame");
+        assert!(h.model().held_frame().is_none());
         h.edit(|m| m.choose_film("harman_phoenix_200"));
         let last = h.model().revision;
         h.idle();
@@ -600,7 +607,7 @@ lifecycle_test! {
         let shown = m.shown_frame.unwrap();
         assert_eq!(shown.revision, m.revision);
         assert_eq!(h.frames, [shown], "only the latest edit's matched frame shows");
-        assert!(h.renders().iter().all(|r| r.revision == superia.revision || r.revision >= last), "the Portra edit coalesced: {:?}", h.renders());
+        assert!(h.renders().iter().all(|r| r.revision >= last), "Superia and Portra never rendered: {:?}", h.renders());
         assert!(h.errors.is_empty(), "{:?}", h.errors);
 
         // Undo while the solve runs: back to a state whose match is solved.
@@ -608,9 +615,9 @@ lifecycle_test! {
         h.idle();
         assert!((matched_ev(h.model()) - gold_ev).abs() < 1e-9);
         h.clear_logs();
+        // Superia's solve is in the match cache now; it answers as a solve.
         h.edit(|m| m.choose_film(SUPERIA));
-        let superia = until_held(&mut h);
-        h.run_until("the solve", |m| m.matching_brightness);
+        until_solving(&mut h);
         h.edit(|m| m.perform_undo());
         assert!(h.model().held_frame().is_none());
         h.idle();
@@ -621,11 +628,8 @@ lifecycle_test! {
         let shown = m.shown_frame.unwrap();
         assert_eq!(shown.revision, m.revision);
         assert_eq!(h.frames, [shown], "the undone state's frame, and nothing of Superia");
-        assert_eq!(h.renders().iter().map(|r| r.revision).collect::<Vec<_>>(), [superia.revision, shown.revision]);
-        // The undone state's render can reach the helper before the solve.
-        let mut commands = h.command_names();
-        commands.sort();
-        assert_eq!(commands, ["place_exposure", "render", "render"]);
+        assert_eq!(h.renders().iter().map(|r| r.revision).collect::<Vec<_>>(), [shown.revision], "Superia never rendered");
+        assert_eq!(h.command_names().iter().filter(|c| *c == "render").count(), 1);
         assert!(h.errors.is_empty(), "{:?}", h.errors);
         let _ = gold_frame;
 
@@ -633,8 +637,8 @@ lifecycle_test! {
         let other_photo = second_photo(&h, "held-other");
         h.clear_logs();
         h.edit(|m| m.choose_film(SUPERIA));
-        let old_generation = until_held(&mut h).generation;
-        h.run_until("the solve", |m| m.matching_brightness);
+        let old_generation = h.model().source_generation;
+        until_solving(&mut h);
         h.edit(|m| m.open(&other_photo));
         let generation = h.model().source_generation;
         assert_ne!(generation, old_generation);
@@ -664,16 +668,48 @@ lifecycle_test! {
 }
 
 lifecycle_test! {
-    /// Closing drops a held frame.
-    fn closing_drops_a_held_frame() {
+    /// Closing during a solve: nothing renders or is held, and the previous
+    /// frame stays.
+    fn closing_during_a_solve_renders_nothing() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
         open_matched(&mut h, &photo);
         let previous = h.model().shown_frame;
+        h.clear_logs();
         h.edit(|m| m.choose_film(SUPERIA));
-        until_held(&mut h);
+        until_solving(&mut h);
         h.edit(|m| m.shutdown());
-        assert!(h.model().held_frame().is_none() && h.model().shown_frame == previous);
+        assert!(!h.model().matching_brightness);
+        assert!(h.model().held_frame().is_none() && h.model().shown_frame == previous && h.renders().is_empty());
+    }
+}
+
+lifecycle_test! {
+    /// The one case left for the held frame (ticket 39): matching turned on,
+    /// at exposure 0 (no edit), while a settled frame renders. That frame is
+    /// held while the solve runs, and only the matched frame shows.
+    fn matching_turned_on_during_a_render_holds_its_frame_for_the_solve() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
+        let photo = h.photo.clone();
+        h.open(&photo);
+        let previous = h.model().shown_frame;
+        h.clear_logs();
+        h.edit(|m| m.choose_film(SUPERIA));
+        let edited = h.model().revision;
+        h.run_until("the render", |m| m.rendering);
+        h.edit(|m| m.set_matches_brightness(true));
+        assert_eq!(h.model().revision, edited, "no edit at exposure 0");
+        let held = until_held(&mut h);
+        assert_eq!((held.revision, held.kind), (edited, FrameKind::Settled));
+        assert_eq!(h.model().shown_frame, previous);
+        h.idle();
+        let m = h.model();
+        assert!(m.preview_current && !m.brightness_match_pending() && m.held_frame().is_none());
+        let shown = m.shown_frame.unwrap();
+        assert!(shown.revision == edited || shown.revision == edited + 1, "{shown:?}");
+        assert_eq!(h.frames, [shown], "only the matched frame shows");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
 
@@ -706,10 +742,11 @@ fn fast_render(h: &Harness, state: &crate::state::EditState, destination: &std::
 }
 
 lifecycle_test! {
-    /// Save Preview and Fast Export asked for while a frame is held wait for
-    /// the matched frame, also past the 30 s check while the lifecycle is
+    /// Save Preview and Fast Export asked for while the match is solved wait
+    /// for the matched frame, also past the 30 s check while the lifecycle is
     /// still getting there, and write it: the same bytes as the Fast
-    /// exporter's file of the matched state, not the held state's.
+    /// exporter's file of the matched state, not the unmatched state's. The
+    /// second (Gold again) is answered by the match cache.
     fn save_and_export_wait_for_the_matched_frame() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
@@ -723,7 +760,7 @@ lifecycle_test! {
         h.clear_logs();
         h.edit(|m| m.choose_film(SUPERIA));
         let edited = h.model().revision;
-        until_held(&mut h);
+        until_solving(&mut h);
         let held_state = h.model().state.clone();
         let saved = dir.join("saved.tif");
         h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
@@ -739,7 +776,7 @@ lifecycle_test! {
         assert!(m.waiting_output.is_none() && m.status == "Saved saved.tif", "{}", m.status);
         assert_eq!(m.revision, edited + 1, "the match moved");
         let matched_state = m.state.clone();
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "save"]);
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render", "save"]);
         assert_eq!(h.frames.iter().map(|f| f.revision).collect::<Vec<_>>(), [edited + 1]);
         let saved_bytes = std::fs::read(&saved).unwrap();
         assert_eq!(saved_bytes, fast_render(&h, &matched_state, &dir.join("matched-fast.tif"), save), "the saved preview is the matched state's");
@@ -749,7 +786,7 @@ lifecycle_test! {
         h.clear_logs();
         h.edit(|m| m.choose_film(GOLD));
         let edited = h.model().revision;
-        until_held(&mut h);
+        until_solving(&mut h);
         let exported = dir.join("exported.tif");
         h.edit(|m| m.export(exported.clone(), crate::engine::ExportEngine::Fast, super::ExportSize::FULL, save));
         assert!(h.model().waiting_output.is_some());
@@ -758,7 +795,7 @@ lifecycle_test! {
         assert!(m.waiting_output.is_none() && m.status == "Exported exported.tif", "{}", m.status);
         assert_eq!(m.revision, edited + 1, "the match moved back");
         let matched_state = m.state.clone();
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "save"], "exported from the matched preview");
+        assert_eq!(h.command_names(), ["render", "save"], "the kept solve, then exported from the matched preview");
         assert_eq!(
             std::fs::read(&exported).unwrap(),
             fast_render(&h, &matched_state, &dir.join("matched-fast-2.tif"), save),
@@ -783,7 +820,8 @@ lifecycle_test! {
         h.edit(|m| m.set("enlarger.y_filter_shift", serde_json::json!("not a number")));
         h.idle();
         assert!(h.model().render_failed && h.model().brightness_match_pending() && h.model().held_frame().is_none());
-        assert_eq!(h.errors.len(), 1, "the render's own error");
+        // The render's own error is said on the canvas, not in an alert.
+        assert!(h.errors.is_empty() && h.model().develop_error.is_some(), "{:?}", h.errors);
         let saved = std::env::temp_dir().join(format!("negs-held-failed-{}.tif", std::process::id()));
         h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 }));
         assert!(h.model().waiting_output.is_none() && !saved.exists());
@@ -792,9 +830,9 @@ lifecycle_test! {
 }
 
 lifecycle_test! {
-    /// A drag with the match on: drag frames show live, as before (a held
-    /// frame would freeze the slider), and the solve waits for the release.
-    /// The release's settled frame is then held for the match like any other.
+    /// A drag with the match on: drag frames show live, as before (a solve
+    /// would freeze the slider), and the solve waits for the release. The
+    /// release then solves before it renders, like any other edit.
     fn a_drag_with_the_match_on_shows_its_frames() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         let photo = h.photo.clone();
@@ -816,19 +854,15 @@ lifecycle_test! {
         assert!(h.command_names().iter().all(|c| c == "render"), "no solve during the drag");
         h.clear_logs();
         h.edit(|m| m.end_interaction("Change Adjustment"));
-        let held = until_held(&mut h);
-        assert_eq!((held.revision, held.kind), (dragged, FrameKind::Settled));
+        until_solving(&mut h);
         h.idle();
         let m = h.model();
         assert!(m.preview_current && !m.showing_interactive_frame && m.held_frame().is_none() && !m.brightness_match_pending());
         assert_eq!(m.undo_title(), Some("Change Adjustment"));
         let (generation, revision) = (m.source_generation, m.revision);
-        assert_eq!(h.renders()[0], settled(dragged, generation));
-        if revision == dragged {
-            assert_eq!(h.frames, [held], "an unchanged match shows the release's frame");
-        } else {
-            assert_eq!(h.frames.iter().map(|f| (f.revision, f.kind)).collect::<Vec<_>>(), [(dragged + 1, FrameKind::Settled)], "a moved match shows only the matched frame");
-        }
+        assert!(revision == dragged || revision == dragged + 1, "an unchanged or a moved match");
+        assert_eq!(h.renders(), [settled(revision, generation)]);
+        assert_eq!(h.frames.iter().map(|f| (f.revision, f.kind)).collect::<Vec<_>>(), [(revision, FrameKind::Settled)], "only the matched frame shows");
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
@@ -845,28 +879,24 @@ enum Blocker {
     Crop,
 }
 
-/// Review S1 (scenario L1): a film change whose frame is held behind a solve
-/// for an earlier edit; the solve comes back stale while `blocker` keeps the
-/// next one from starting. The frame must stay held (its exposure is the
-/// old one) with a waiting Save, until the blocker lets go: then the solve
-/// runs, only the matched frame shows and the Save writes it.
+/// Review S1 (scenario L1): a film change during a solve for an earlier
+/// edit; the solve comes back stale while `blocker` keeps the next one from
+/// starting. Nothing renders (the exposure is the old one) and a Save waits,
+/// until the blocker lets go: then the solve runs, only the matched frame
+/// shows and the Save writes it.
 fn a_stale_solve_waits_for(blocker: Blocker) {
     let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
     let photo = h.photo.clone();
     open_matched(&mut h, &photo);
     let (gold_ev, previous) = (matched_ev(h.model()), h.model().shown_frame.unwrap());
     h.clear_logs();
-    // Superia's frame is held and its solve (S1) starts in the same task.
+    // Superia's solve (S1) starts with its edit.
     h.edit(|m| m.choose_film(SUPERIA));
-    let superia = until_held(&mut h);
-    assert!(h.model().matching_brightness, "S1 runs");
-    // Phoenix during S1: its render reaches the helper before S1's
-    // place_exposure (the reference is still being read), so its frame is
-    // held behind S1. Checked, not assumed: the test stops here otherwise.
+    until_solving(&mut h);
+    // Phoenix during S1: it waits for S1, unrendered.
     h.edit(|m| m.choose_film(PHOENIX));
-    let phoenix = until_held(&mut h);
-    assert!(phoenix.revision > superia.revision);
-    assert!(h.model().matching_brightness, "Phoenix's frame was held while S1 still ran");
+    let phoenix = h.model().revision;
+    assert!(h.model().matching_brightness, "S1 still runs");
     let dir = std::env::temp_dir().join(format!("negs-held-blocked-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -880,7 +910,7 @@ fn a_stale_solve_waits_for(blocker: Blocker) {
     // S1 comes back stale; nothing can start S2 yet.
     h.idle();
     let m = h.model();
-    assert_eq!(m.held_frame(), Some(phoenix), "the frame stays held while its match is pending");
+    assert!(m.held_frame().is_none() && m.render_log.is_empty(), "nothing renders while its match is pending: {:?}", m.render_log);
     assert!(m.brightness_match_pending() && !m.matching_brightness);
     assert_eq!(m.shown_frame, Some(previous), "the old exposure isn't shown");
     assert!(h.frames.is_empty(), "{:?}", h.frames);
@@ -896,9 +926,11 @@ fn a_stale_solve_waits_for(blocker: Blocker) {
     let m = h.model();
     let ev = matched_ev(m);
     assert!((ev - gold_ev).abs() >= 0.05, "Phoenix moves the match ({gold_ev} to {ev})");
-    assert_eq!(m.revision, phoenix.revision + 1);
+    assert_eq!(m.revision, phoenix + 1);
     assert!(m.preview_current && m.held_frame().is_none() && !m.brightness_match_pending());
-    assert_eq!(h.frames.iter().map(|f| f.revision).collect::<Vec<_>>(), [phoenix.revision + 1], "only the matched frame shows");
+    assert_eq!(h.frames.iter().map(|f| f.revision).collect::<Vec<_>>(), [phoenix + 1], "only the matched frame shows");
+    let generation = h.model().source_generation;
+    assert_eq!(h.renders(), [settled(phoenix + 1, generation)]);
     assert_eq!(h.command_names().iter().filter(|c| *c == "place_exposure").count(), 2);
     assert!(h.model().waiting_output.is_none() && h.model().status == "Saved saved.tif", "{}", h.model().status);
     let matched_state = h.model().state.clone();
@@ -1179,10 +1211,11 @@ lifecycle_test! {
         }
         h.idle();
         assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)], "no retry");
-        assert_eq!(h.errors.len(), 1, "one error: {:?}", h.errors);
-        eprintln!("error: {}", h.errors[0]);
+        // Said once, on the canvas ("couldn't be developed"), not in an alert.
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
         let m = h.model();
-        assert!(m.render_failed && !m.preview_current);
+        eprintln!("error: {:?}", m.develop_error);
+        assert!(m.render_failed && !m.preview_current && m.develop_error.is_some());
         assert!(m.shown_frame == previous, "the quick frame failed, silently");
         assert!(presented(&h).is_empty());
     }
@@ -1236,14 +1269,13 @@ lifecycle_test! {
 }
 
 lifecycle_test! {
-    /// The Mac's `testTheMatchRunsBeforeTheSettledRender`, with the held
-    /// frame: with the match on, a film's quick frame is held while the
-    /// solve runs from it (the helper holds its decode). A match that moves
-    /// is an edit with a quick frame of its own, then the one settled render,
-    /// of the matched exposure; the old exposure never renders at export
-    /// size and never shows. One that doesn't move shows the held quick
-    /// frame, then settles. The trace records the order.
-    fn the_match_runs_on_the_quick_frame_before_the_settled_render() {
+    /// The Mac's `testTheMatchRunsBeforeTheSettledRender` (ticket 39): with
+    /// the match on, a film change solves first, on a decode alone, before
+    /// any frame renders. A match that moves is an edit with a quick frame
+    /// of its own, then the one settled render, of the matched exposure; the
+    /// old exposure never renders. One that doesn't move renders the edit's
+    /// quick frame, then settles. The trace records the order.
+    fn the_match_runs_before_the_quick_and_settled_frames() {
         let trace = std::env::temp_dir().join(format!("negs-quick-trace-{}.jsonl", std::process::id()));
         let _ = std::fs::remove_file(&trace);
         // SAFETY: the child process runs this test alone, before any thread
@@ -1255,9 +1287,7 @@ lifecycle_test! {
 
         h.edit(|m| m.choose_film(SUPERIA));
         let edited = h.model().revision;
-        let held = until_held(&mut h);
-        assert_eq!((held.revision, held.kind), (edited, FrameKind::Quick));
-        assert!(h.model().matching_brightness, "the solve starts from the held quick frame");
+        until_solving(&mut h);
         assert_eq!(h.model().shown_frame, previous);
         h.idle();
         let m = h.model();
@@ -1265,25 +1295,26 @@ lifecycle_test! {
         assert!((ev - gold_ev).abs() >= 0.05, "the film change moves the match ({gold_ev} to {ev})");
         assert!(m.preview_current && m.held_frame().is_none() && !m.brightness_match_pending() && m.revision == edited + 1);
         let matched = edited + 1;
-        assert_eq!(h.renders(), [quick(edited, generation), quick(matched, generation), settled(matched, generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "render"]);
+        assert_eq!(h.renders(), [quick(matched, generation), settled(matched, generation)]);
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render", "render"]);
         assert_eq!(presented(&h), [(matched, FrameKind::Quick), (matched, FrameKind::Settled)], "previous, matched quick, matched settled");
         assert!(h.errors.is_empty(), "{:?}", h.errors);
 
         // Back to Gold, then Portra 400, which Gold matches within 0.05 EV.
+        // (Portra may be the film it opened on, solved then and kept.)
         h.edit(|m| m.choose_film(GOLD));
         h.idle();
         h.clear_logs();
         h.edit(|m| m.choose_film(PORTRA));
         let unchanged = h.model().revision;
-        let held = until_held(&mut h);
-        assert_eq!((held.revision, held.kind), (unchanged, FrameKind::Quick));
+        until_solving(&mut h);
         h.idle();
         let m = h.model();
         assert!(m.preview_current && m.held_frame().is_none() && m.revision == unchanged);
         assert_eq!(h.renders(), [quick(unchanged, generation), settled(unchanged, generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render"]);
-        assert_eq!(presented(&h), [(unchanged, FrameKind::Quick), (unchanged, FrameKind::Settled)], "the held quick frame, then settled");
+        let names = h.command_names();
+        assert!(names == ["thumbnail", "place_exposure", "render", "render"] || names == ["render", "render"], "{names:?}");
+        assert_eq!(presented(&h), [(unchanged, FrameKind::Quick), (unchanged, FrameKind::Settled)], "its quick frame, then settled");
         assert!(h.errors.is_empty(), "{:?}", h.errors);
 
         drop(h);
@@ -1312,11 +1343,8 @@ lifecycle_test! {
         let (old, new) = (edited, matched);
         assert_eq!(lifecycle, [
             format!("edit r{old}"),
-            format!("render_request r{old} quick"),
-            format!("render_finished r{old} quick held"),
             format!("match_start r{old}"),
             "match_solved rnull".to_owned(),
-            format!("held_dropped r{old} edit"),
             format!("edit r{new}"),
             format!("render_request r{new} quick"),
             format!("render_finished r{new} quick shown"),
@@ -1328,17 +1356,15 @@ lifecycle_test! {
 
 lifecycle_test! {
     /// The Mac's `testTurningTheMatchOffReleasesAHeldFrame`: matching turned
-    /// off while a quick frame is held for the solve shows that frame once
-    /// the solve is back, then settles it.
-    fn turning_the_match_off_releases_a_held_quick_frame() {
+    /// off while the solve runs renders the edit's quick frame once the solve
+    /// is back, then settles it.
+    fn turning_the_match_off_mid_solve_renders_the_quick_frame_then_settles() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         open_quick(&mut h, true);
         let generation = h.model().source_generation;
         h.edit(|m| m.choose_film(SUPERIA));
         let edited = h.model().revision;
-        let held = until_held(&mut h);
-        assert_eq!(held.kind, FrameKind::Quick);
-        h.run_until("the solve", |m| m.matching_brightness);
+        until_solving(&mut h);
         h.edit(|m| m.set_matches_brightness(false));
         assert_eq!(h.model().revision, edited);
         h.idle();
@@ -1373,7 +1399,7 @@ lifecycle_test! {
         assert!(m.preview_current && !m.brightness_match_pending() && m.revision == edited + 1, "the match moved the exposure");
         let matched = edited + 1;
         assert_eq!(h.renders(), [quick(edited, generation), quick(matched, generation), settled(matched, generation)]);
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "render"]);
+        assert_eq!(h.command_names(), ["render", "thumbnail", "place_exposure", "render", "render"]);
         assert_eq!(presented(&h), [(edited, FrameKind::Quick), (matched, FrameKind::Quick), (matched, FrameKind::Settled)]);
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
@@ -1394,30 +1420,30 @@ fn export_now(h: &mut Harness, file: &std::path::Path) {
 }
 
 lifecycle_test! {
-    /// B2 review S1: Undo while the solve of a held quick frame runs. The
-    /// undone state's match is solved, so its quick frame is shown, not held,
-    /// while the stale solve still runs; only `brightness_solved`'s settle
-    /// settles it. A Fast Export asked for meanwhile finishes.
-    fn undo_during_the_solve_of_a_held_quick_frame_settles_the_undone_state() {
+    /// B2 review S1: Undo while a film change's solve runs. The undone
+    /// state's match is solved, and the helper still holds its output (the
+    /// solve's decode doesn't replace it), so it renders at once at export
+    /// size, shown, not held, whether or not the stale solve is back. A Fast
+    /// Export asked for meanwhile finishes.
+    fn undo_during_a_solve_settles_the_undone_state() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         open_quick(&mut h, true);
         let generation = h.model().source_generation;
         h.edit(|m| m.choose_film(SUPERIA));
-        assert_eq!(until_held(&mut h).kind, FrameKind::Quick);
-        h.run_until("the solve", |m| m.matching_brightness);
+        until_solving(&mut h);
         h.edit(|m| m.perform_undo());
         let undone = h.model().revision;
-        h.run_until("the undone quick frame", |m| m.shown_frame.is_some_and(|f| f.revision == m.revision));
+        h.run_until("the undone frame", |m| m.shown_frame.is_some_and(|f| f.revision == m.revision));
         let m = h.model();
-        assert_eq!(m.shown_frame.map(|f| f.kind), Some(FrameKind::Quick));
-        assert!(m.matching_brightness && m.held_frame().is_none(), "shown while the stale solve still runs");
+        assert_eq!(m.shown_frame.map(|f| f.kind), Some(FrameKind::Settled), "the kept output: no quick frame");
+        assert!(m.held_frame().is_none(), "shown, not held");
         let (dir, file) = export_target("undo-solve");
         export_now(&mut h, &file);
         assert!(h.model().waiting_output.is_some(), "the Export waits");
         h.idle();
         let m = h.model();
         assert!(m.state.film == GOLD && m.revision == undone);
-        assert!(m.preview_current && !m.matching_brightness, "the undone state's quick frame settles");
+        assert!(m.preview_current && !m.matching_brightness, "the undone state settles");
         assert_eq!(h.renders().last(), Some(&settled(undone, generation)));
         assert!(h.renders().iter().all(|r| r.kind != FrameKind::Settled || r.revision == undone), "{:?}", h.renders());
         let m = h.model();
@@ -1478,7 +1504,7 @@ fn nothing_else_runs_between_the_quick_and_settled_frames(matched: bool) {
     let Some(mut h) = Harness::start(harness::prefs(matched)) else { return };
     open_quick(&mut h, matched);
     h.edit(|m| m.set_previews(true));
-    h.edit(|m| m.toggle_foldout(false));
+    h.edit(|m| m.open_tray(false));
     h.idle();
     assert!(h.command_names().iter().any(|c| c == "thumbnail"), "the grid's thumbnails were made");
     h.clear_logs();
@@ -1492,9 +1518,9 @@ fn nothing_else_runs_between_the_quick_and_settled_frames(matched: bool) {
     eprintln!("commands: {names:?}");
     let renders: Vec<usize> = names.iter().enumerate().filter(|(_, c)| *c == "render").map(|(i, _)| i).collect();
     let between = &names[renders[0] + 1..renders[1]];
-    let expected: &[&str] = if matched { &["place_exposure"] } else { &[] };
-    assert_eq!(between, expected, "between the quick and the settled render");
-    assert!(names[..renders[0]].iter().all(|c| c == "tone_curve"), "before the quick render: {names:?}");
+    assert_eq!(between, &[] as &[String], "between the quick and the settled render");
+    // With the match, its decode and solve come first (or the match cache).
+    assert!(names[..renders[0]].iter().all(|c| c == "tone_curve" || matched && (c == "thumbnail" || c == "place_exposure")), "before the quick render: {names:?}");
     assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
 }
 
@@ -1739,11 +1765,11 @@ lifecycle_test! {
 }
 
 lifecycle_test! {
-    /// The longer wait with the match on: quick frame held, solve, matched
-    /// quick frame, settled frame, then the Save, also past the 30 s check
-    /// (moved clock) at the held and at the matched quick frame. The saved
-    /// bytes are the matched state's.
-    fn a_save_during_a_held_quick_frame_waits_for_the_matched_settled_frame() {
+    /// The longer wait with the match on: solve, matched quick frame,
+    /// settled frame, then the Save, also past the 30 s check (moved clock)
+    /// during the solve and at the matched quick frame. The saved bytes are
+    /// the matched state's.
+    fn a_save_during_a_solve_waits_for_the_matched_settled_frame() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         open_quick(&mut h, true);
         let dir = std::env::temp_dir().join(format!("negs-quick-held-save-{}", std::process::id()));
@@ -1752,7 +1778,7 @@ lifecycle_test! {
         let save = super::SaveSettings { bit_depth: 16, color_space: 0, jpeg_quality: 95 };
         h.edit(|m| m.choose_film(SUPERIA));
         let edited = h.model().revision;
-        assert_eq!(until_held(&mut h).kind, FrameKind::Quick);
+        until_solving(&mut h);
         let saved = dir.join("saved.tif");
         h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
         assert_eq!(h.model().status, "Matching camera brightness…");
@@ -1771,7 +1797,7 @@ lifecycle_test! {
         assert!(m.waiting_output.is_none() && m.status == "Saved saved.tif", "{}", m.status);
         assert_eq!(m.revision, edited + 1);
         let state = m.state.clone();
-        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "render", "save"]);
+        assert_eq!(h.command_names(), ["thumbnail", "place_exposure", "render", "render", "save"]);
         assert!(std::fs::read(&saved).unwrap() == fast_render(&h, &state, &dir.join("fast.tif"), save), "the matched settled frame was saved");
         assert!(h.errors.is_empty(), "{:?}", h.errors);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1780,12 +1806,21 @@ lifecycle_test! {
 
 // MARK: Film search with the held and quick frames (chunk C)
 
-/// Searches the Film grid for `query` as typing in the field does
-/// (`inspector::film_search_changed`; the headless app has no grid
-/// windows, so only the model's part runs), then refreshes.
+/// Searches the open film tray for `query` as typing in its field does
+/// (`ui::tray`; the headless app has no tray window, so only the model's
+/// part runs), then refreshes.
 fn search_films(h: &mut Harness, query: &str) {
-    crate::ui::inspector::film_search_changed(&mut h.app, query.to_owned());
-    h.edit(|_| {});
+    h.edit(|m| m.set_tray_query(query));
+}
+
+/// Opens the film tray already searching for `query`, as typing the moment
+/// it opens would: its first thumbnails are the matches'.
+fn open_searching(h: &mut Harness, query: &str) {
+    h.edit(|m| m.set_previews(true));
+    h.edit(|m| {
+        m.open_tray(false);
+        m.set_tray_query(query);
+    });
 }
 
 /// The films the Film grid lists for `query`, in its order.
@@ -1800,6 +1835,8 @@ fn thumbnails_and_renders(h: &Harness) -> Vec<String> {
     h.commands()
         .iter()
         .map(|c| match c["command"].as_str().unwrap() {
+            // The brightness match's decode alone.
+            "thumbnail" if c["decode_only"] == true => "decode".to_owned(),
             "thumbnail" => format!("thumbnail {}", c["film"].as_str().unwrap()),
             other => other.to_owned(),
         })
@@ -1821,64 +1858,60 @@ fn thumbnails_after_the_settled_render(h: &Harness, matches: &[String]) -> usize
     thumbnails.len()
 }
 
-/// Large photo, match on, Film grid open and searching: Return in the field
-/// (`inspector::choose_first_match`) chooses the first match. The canvas
-/// goes previous → matched quick → settled. The search is widened while
-/// the held quick frame's solve runs, and the new matches' thumbnails are
-/// made only after the settled frame, at the matched exposure: the solve
-/// leaves the helper free, so this is where `previews_may_render`'s
-/// `preview_current` matters.
 lifecycle_test! {
+    /// Large photo, match on, film tray open and searching: Return in the field
+    /// (`Model::tray_submit`) tries the first match. The canvas goes previous →
+    /// matched quick → settled. The search is widened while the solve runs, and
+    /// the new matches' thumbnails are made only after
+    /// the settled frame, at the matched exposure: the solve leaves the helper
+    /// free, so this is where `previews_may_render`'s `preview_current`
+    /// matters. Keeping the film then is one undo step.
     fn a_searched_film_chosen_with_the_match_on_shows_the_matched_quick_frame_then_settles() {
         let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
         open_quick(&mut h, true);
         let query = "superia 200";
-        search_films(&mut h, query);
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, query);
         h.idle();
         let matches = film_matches(h.model(), query);
         assert_eq!(matches.first().map(String::as_str), Some(SUPERIA), "{matches:?}");
         assert_eq!(thumbnails_after_the_settled_render(&h, &matches), matches.len(), "only the matches' thumbnails");
         let (gold_ev, generation) = (matched_ev(h.model()), h.model().source_generation);
+        let undo = h.model().undo_title().map(str::to_owned);
         h.clear_logs();
 
-        crate::ui::inspector::choose_first_match(&mut h.app);
-        h.edit(|_| {});
+        h.edit(|m| m.tray_submit());
         let edited = h.model().revision;
         assert_eq!(h.model().state.film, SUPERIA);
-        assert_eq!(h.model().undo_title(), Some("Change Film"));
-        assert_eq!(until_held(&mut h).kind, FrameKind::Quick);
+        assert_eq!(h.model().undo_title().map(str::to_owned), undo, "a try isn't an undo step");
+        until_solving(&mut h);
         let wider = "superia";
         search_films(&mut h, wider);
         let superias = film_matches(h.model(), wider);
         assert!(superias.len() > matches.len(), "{superias:?}");
-        assert!(h.model().matching_brightness && h.model().held_frame().is_some(), "the search was typed during the solve");
+        assert!(h.model().matching_brightness, "the search was typed during the solve");
         h.idle();
         let m = h.model();
         assert!((matched_ev(m) - gold_ev).abs() >= 0.05, "the film change moves the match");
         assert!(m.preview_current && m.held_frame().is_none() && m.revision == edited + 1);
-        assert_eq!(m.previews.film_query, wider);
+        assert_eq!(m.tray().map(|t| t.query.as_str()), Some(wider));
         let matched = edited + 1;
-        assert_eq!(h.renders(), [quick(edited, generation), quick(matched, generation), settled(matched, generation)]);
+        assert_eq!(h.renders(), [quick(matched, generation), settled(matched, generation)]);
         assert_eq!(presented(&h), [(matched, FrameKind::Quick), (matched, FrameKind::Settled)], "previous, matched quick, settled");
         // The matched exposure makes every match's thumbnail stale.
         assert_eq!(thumbnails_after_the_settled_render(&h, &superias), superias.len());
+        h.edit(|m| m.end_tray(true));
+        assert_eq!(h.model().undo_title(), Some("Change Film"));
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
 
-/// A search typed while a quick frame shows asks for no thumbnail until
-/// the settled frame, and then only for its matches.
 lifecycle_test! {
+    /// The tray opened with a search while a quick frame shows asks for no
+    /// thumbnail until the settled frame, and then only for its matches.
     fn searching_while_a_quick_frame_shows_waits_for_the_settled_frame() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
-        // The search first: it lasts while the foldout is closed, and the
-        // grid then asks only for its matches from the start.
-        search_films(&mut h, "portra");
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, "portra");
         h.idle();
         let portras = film_matches(h.model(), "portra");
         assert!(portras.len() >= 2, "{portras:?}");
@@ -1886,10 +1919,12 @@ lifecycle_test! {
         h.clear_logs();
 
         let generation = h.model().source_generation;
+        // An edit closes the tray, keeping its stock.
         h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        assert!(h.model().tray().is_none());
         let edited = h.model().revision;
         until_quick(&mut h);
-        search_films(&mut h, "gold");
+        open_searching(&mut h, "gold");
         assert!(!h.model().preview_current);
         h.idle();
         let golds = film_matches(h.model(), "gold");
@@ -1900,26 +1935,24 @@ lifecycle_test! {
     }
 }
 
-/// Starring a match while searching, during the settled render after a
-/// quick frame: the render isn't disturbed, nothing renders again, and the
-/// matches' thumbnails, the starred one included, are made once each after
-/// the settled frame.
 lifecycle_test! {
+    /// Starring a match while searching, during the settled render after a
+    /// quick frame: the render isn't disturbed, nothing renders again, and the
+    /// matches' thumbnails, the starred one included, are made once each after
+    /// the settled frame.
     fn starring_a_match_during_the_settled_render_leaves_it_alone() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
-        // The search first: it lasts while the foldout is closed, and the
-        // grid then asks only for its matches from the start.
-        search_films(&mut h, "portra");
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, "portra");
         h.idle();
         let portras = film_matches(h.model(), "portra");
         let starred = portras.iter().find(|id| !h.app.model.prefs.is_favorite(id, false)).expect("an unstarred Portra").clone();
         h.clear_logs();
 
         let generation = h.model().source_generation;
+        // An edit closes the tray; it opens again, searching, before the settled render.
         h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        open_searching(&mut h, "portra");
         let edited = h.model().revision;
         h.run_until("the settled render", |m| m.rendering && m.render_log.last().is_some_and(|r| r.kind == FrameKind::Settled && r.revision == m.revision));
         h.edit(|m| m.toggle_favorite(&starred, false));
@@ -1934,21 +1967,20 @@ lifecycle_test! {
     }
 }
 
-/// Clearing a search once idle asks for the other films' thumbnails at the
-/// current state: an edit made while searching re-made only the matches,
-/// so without the field's `dirty::PREVIEWS` mark the rest would keep the old
-/// exposure until something unrelated refreshed the grid.
 lifecycle_test! {
+    /// Clearing a search once idle asks for the other films' thumbnails at the
+    /// current state: after an edit the tray reopened searching re-made only
+    /// the matches, so without the field's `dirty::PREVIEWS` mark the rest
+    /// would keep the old exposure until something unrelated refreshed the tray.
     fn clearing_a_search_remakes_the_other_films_thumbnails_at_the_new_state() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
-        search_films(&mut h, "portra");
-        h.edit(|m| m.set_previews(true));
-        h.edit(|m| m.toggle_foldout(false));
+        open_searching(&mut h, "portra");
         h.idle();
         let portras = film_matches(h.model(), "portra");
         h.clear_logs();
         h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        open_searching(&mut h, "portra");
         h.idle();
         assert_eq!(thumbnails_after_the_settled_render(&h, &portras), portras.len(), "the edit re-made the matches only");
         h.clear_logs();
@@ -1961,5 +1993,753 @@ lifecycle_test! {
             assert_eq!(command["params"]["camera"]["exposure_compensation_ev"], serde_json::json!(0.5), "{}", command["film"]);
         }
         assert!(h.renders().is_empty() && h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+// MARK: The tray and the sidecar
+
+lifecycle_test! {
+    /// Stocks tried in the tray reach the photograph's sidecar only when one
+    /// is kept, in one write a second later; Esc leaves an unedited
+    /// photograph without a sidecar. The visit is one undo step.
+    fn a_tray_visit_reaches_the_sidecar_once_when_kept() {
+        use std::time::Duration;
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let folder = std::env::temp_dir().join(format!("negs-harness-tray-sidecar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let photo = folder.join("tray.png");
+        std::fs::copy(&h.photo, &photo).unwrap();
+        let sidecar = negs_library::sidecar::sidecar_path(&photo);
+        h.model().shelf.enabled = true;
+        h.open(&photo);
+        assert!(h.model().shelf.library.is_some(), "the photograph's folder is the library");
+        h.edit(|m| m.set_previews(true));
+        let before = h.model().state.film.clone();
+        let films: Vec<String> = h.model().films().iter().map(|s| s.id.clone()).filter(|id| *id != before).take(3).collect();
+        assert_eq!(films.len(), 3);
+        h.edit(|m| m.open_tray(false));
+        for film in &films {
+            h.edit(|m| m.try_stock(film));
+            h.fire_timers(Duration::from_secs(2));
+        }
+        assert!(!sidecar.exists(), "tried stocks aren't saved");
+        h.edit(|m| m.end_tray(false));
+        h.fire_timers(Duration::from_secs(2));
+        assert_eq!(h.model().state.film, before);
+        assert!(!sidecar.exists(), "Esc leaves no sidecar");
+        assert!(h.model().undo.undo.is_empty(), "nor an undo step");
+        h.edit(|m| m.open_tray(false));
+        h.edit(|m| m.try_stock(&films[0]));
+        h.edit(|m| m.try_stock(&films[1]));
+        h.fire_timers(Duration::from_secs(2));
+        assert!(!sidecar.exists(), "still trying");
+        h.edit(|m| m.end_tray(true));
+        h.fire_timers(Duration::from_secs(2));
+        let text = std::fs::read_to_string(&sidecar).expect("kept: the sidecar is written");
+        assert!(text.contains(&films[1]) && !text.contains(&films[0]), "{text}");
+        let written = std::fs::metadata(&sidecar).unwrap().modified().unwrap();
+        h.fire_timers(Duration::from_secs(3));
+        assert_eq!(std::fs::metadata(&sidecar).unwrap().modified().unwrap(), written, "written once");
+        assert_eq!(h.model().undo.undo.len(), 1, "one undo step for the visit");
+        h.edit(|m| m.perform_undo());
+        assert_eq!(h.model().state.film, before);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+lifecycle_test! {
+    /// Your negative from the film's menu: read as Portra 400 (the photograph's
+    /// film isn't a colour negative), its base found and the print balanced
+    /// and metered as part of the same undo step; Auto is a step of its own;
+    /// another film prints it as a scene again, and Undo brings the negative
+    /// back with its base, without asking again.
+    fn your_negative_reads_the_scan_and_undo_brings_it_back() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let photo = h.photo.clone();
+        h.open(&photo);
+        let slide = h.model().stocks.iter().find(|s| !s.paper && s.positive).map(|s| s.id.clone()).expect("a slide film");
+        h.edit(|m| m.choose_film(&slide));
+        h.idle();
+        let default_base = crate::json::get(&h.model().defaults, "film_render.base").clone();
+        h.edit(|m| m.choose_negative());
+        h.idle();
+        let m = h.model();
+        assert!(m.is_negative());
+        assert_eq!(m.state.film, crate::negative::DEFAULT_FILM);
+        assert_eq!(m.value("io.scan_film"), &serde_json::json!(false));
+        assert_eq!(m.undo_title(), Some("Read as Negative"), "the base is part of the step");
+        assert!(!crate::negative::same_base(m.value("film_render.base"), &default_base), "the base was found");
+        assert!(m.negative_base().is_some() && !m.negative_busy());
+        let found = m.state.clone();
+        let names = h.command_names();
+        assert!(names.iter().any(|c| c == "negative_base") && names.iter().any(|c| c == "negative_meter"), "{names:?}");
+
+        h.edit(|m| m.auto_print_negative());
+        h.idle();
+        assert_eq!(h.model().undo_title(), Some("Auto Print"));
+        h.edit(|m| m.perform_undo());
+        h.idle();
+        assert_eq!(h.model().state, found);
+
+        h.edit(|m| m.choose_film(&slide));
+        h.idle();
+        assert!(!h.model().is_negative(), "another film prints a scene again");
+        h.clear_logs();
+        h.edit(|m| m.perform_undo());
+        h.idle();
+        assert_eq!(h.model().state, found, "Undo brings the negative back as it was");
+        assert!(h.command_names().iter().all(|c| c != "negative_base"), "{:?}", h.command_names());
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `adoptEdits` and `surveyNegativeIfNeeded`: a negative
+    /// opened again keeps the base saved with it, one set by hand too, never
+    /// found again over it; once its preview is in, Prep says where the base
+    /// came from, not "Reading the negative as …".
+    fn a_negative_opened_again_keeps_its_saved_base() {
+        fn nudged(value: &serde_json::Value) -> serde_json::Value {
+            let mut value = value.clone();
+            fn first(v: &mut serde_json::Value) -> bool {
+                match v {
+                    serde_json::Value::Number(n) => {
+                        *v = serde_json::json!(n.as_f64().unwrap_or(0.0) * 0.9 + 0.01);
+                        true
+                    }
+                    serde_json::Value::Array(items) => items.iter_mut().any(first),
+                    serde_json::Value::Object(map) => map.values_mut().any(first),
+                    _ => false,
+                }
+            }
+            assert!(first(&mut value), "a number in {value}");
+            value
+        }
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-reopen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let extension = h.photo.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+        let (negative, other) = (dir.join(format!("a.{extension}")), dir.join(format!("b.{extension}")));
+        std::fs::copy(&h.photo, &negative).unwrap();
+        std::fs::copy(&h.photo, &other).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&negative);
+        h.idle();
+        h.edit(|m| m.choose_negative());
+        h.idle();
+        let base = nudged(h.model().value("film_render.base"));
+        h.edit(|m| m.set("film_render.base", base.clone()));
+        h.idle();
+        assert_eq!(h.model().negative_sentence(), "Film base as picked or set in Lab.");
+        let filtration = ["enlarger.m_filter_shift", "enlarger.y_filter_shift"].map(|p| h.model().value(p).clone());
+        h.fire_timers(std::time::Duration::from_secs(3));
+
+        h.open(&other);
+        h.idle();
+        h.open(&negative);
+        h.idle();
+        let m = h.model();
+        assert!(m.is_negative());
+        assert!(crate::negative::same_base(m.value("film_render.base"), &base), "the saved base, not one found again");
+        assert_eq!(["enlarger.m_filter_shift", "enlarger.y_filter_shift"].map(|p| m.value(p).clone()), filtration);
+        assert_eq!(m.negative_sentence(), "Film base as picked or set in Lab.");
+        assert!(m.undo_title().is_none(), "opening is no edit");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// Flip (`io.flip`) starts cropping like a turn: Cancel takes it back,
+    /// Done keeps it with the crop as one undo step. It never develops again
+    /// (the canvas mirrors the preview), and Save Preview mirrors the file
+    /// as the exporter does from the same edit, a quarter turn included.
+    fn a_flip_mirrors_without_a_develop_and_saves_as_the_exporter() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
+        let photo = h.photo.clone();
+        h.open(&photo);
+        h.clear_logs();
+        h.edit(|m| m.flip());
+        assert!(h.model().cropping() && h.model().state.flip());
+        h.edit(|m| m.end_crop(false));
+        assert!(!h.model().cropping() && !h.model().state.flip(), "Cancel takes the flip back");
+        assert!(h.model().undo_title().is_none());
+        h.edit(|m| m.begin_crop());
+        h.edit(|m| m.rotate());
+        h.edit(|m| m.flip());
+        let o = h.model().state.orientation();
+        assert_eq!((o.turns, o.flip), (3, true), "flipped as shown: the quarter turn conjugated");
+        h.edit(|m| m.end_crop(true));
+        h.idle();
+        assert_eq!(h.model().undo_title(), Some("Crop"));
+        assert!(h.command_names().iter().all(|c| c != "render"), "{:?}", h.command_names());
+        let dir = std::env::temp_dir().join(format!("negs-flip-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save = super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 };
+        let saved = dir.join("flipped.tif");
+        h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
+        h.idle();
+        let flipped_state = h.model().state.clone();
+        let saved_bytes = std::fs::read(&saved).unwrap();
+        assert_eq!(saved_bytes, fast_render(&h, &flipped_state, &dir.join("flipped-fast.tif"), save), "the exporter flips from io.flip");
+        let mut unflipped = flipped_state.clone();
+        crate::json::set(&mut unflipped.params, state::FLIP, serde_json::Value::Bool(false));
+        assert_ne!(saved_bytes, fast_render(&h, &unflipped, &dir.join("unflipped-fast.tif"), save));
+        h.edit(|m| m.perform_undo());
+        assert!(!h.model().state.flip() && h.model().rotation() == 0);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// MARK: Compare
+
+lifecycle_test! {
+    /// The Mac's `develop(_ other:)`: the other photograph develops in
+    /// Compare's own helper once the open one has settled, its match solved
+    /// first as opening it would, then a full preview `render`. Opening it
+    /// afterwards finds that match in the cache and solves nothing.
+    fn compare_develops_the_other_as_opening_it_would() {
+        use crate::compare::Origin;
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+        assert!(h.model().shelf.library.is_some());
+        let items = h.model().shown_items();
+        assert_eq!(items.len(), 2);
+        h.clear_logs();
+        h.edit(|m| m.compare(items[0].clone(), items[1].clone(), Origin::Photo));
+        h.idle();
+        let m = h.model();
+        assert_eq!(m.compare_commands(), ["thumbnail", "place_exposure", "render"], "decode, solve, develop");
+        let other = m.compared_other().expect("developed");
+        assert_eq!((other.width, other.height), (480, 320));
+        assert!(h.command_names().iter().all(|c| c != "render" && c != "place_exposure"), "the open helper isn't used: {:?}", h.command_names());
+        h.edit(|m| m.leave_compare());
+        h.clear_logs();
+        h.open(&b);
+        h.idle();
+        assert!(h.command_names().iter().all(|c| c != "place_exposure"), "the match was kept: {:?}", h.command_names());
+        assert!(h.model().state.brightness_match.as_ref().is_some_and(|m| m.ev.is_some()));
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+lifecycle_test! {
+    /// Noah's stale pair: A and B compared, then C and D, and one side
+    /// showed A until C developed. Each side shows only its own photograph,
+    /// from the first moment (its stand-in) to its develop, and the edited
+    /// one isn't blank meanwhile, as `openPicture` on the Mac.
+    fn a_new_comparison_shows_only_its_own_photographs() {
+        use crate::compare::{Origin, Side};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-pair-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A and B landscape, C and D portrait: each picture tells which pair it's of.
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let tall = small.rotate90();
+        let paths: Vec<_> = ["a", "b", "c", "d"].iter().map(|n| dir.join(format!("{n}.png"))).collect();
+        small.save(&paths[0]).unwrap();
+        small.fliph().save(&paths[1]).unwrap();
+        tall.save(&paths[2]).unwrap();
+        tall.fliph().save(&paths[3]).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&paths[0]);
+        let items = h.model().shown_items();
+        assert_eq!(items.len(), 4);
+        h.edit(|m| m.compare(items[0].clone(), items[1].clone(), Origin::Photo));
+        h.idle();
+        // The view asks for each side's picture as it syncs; the open one's is made then.
+        let first = Side::Photo(items[0].clone());
+        h.edit(|m| m.compared_side(&first));
+        h.idle();
+        let a = h.model().compared_side(&first).expect("A developed");
+        assert_eq!((a.width, a.height), (480, 320));
+        h.edit(|m| m.leave_compare());
+        // Whatever each side shows of the new pair is portrait: C or D.
+        let check = |m: &mut super::Model, when: &str| {
+            for side in [Side::Photo(items[2].clone()), Side::Photo(items[3].clone())] {
+                if let Some(shown) = m.compared_side(&side) {
+                    assert!(shown.height > shown.width, "{when}: a picture of the first pair ({} × {}) shown for {:?}", shown.width, shown.height, side.item().photo);
+                }
+            }
+        };
+        h.edit(|m| m.compare(items[2].clone(), items[3].clone(), Origin::Photo));
+        check(h.model(), "at once");
+        let mut open_shown = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            if !h.step() {
+                if h.quiescent() {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "not idle");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                continue;
+            }
+            check(h.model(), "while developing");
+            open_shown |= h.model().compared_side(&Side::Photo(items[2].clone())).is_some();
+        }
+        h.edit(|m| m.compared_side(&Side::Photo(items[2].clone())));
+        h.idle();
+        check(h.model(), "developed");
+        assert!(open_shown, "the edited one showed nothing until developed");
+        let m = h.model();
+        let c = m.compared_side(&Side::Photo(items[2].clone())).expect("C developed");
+        let d = m.compared_side(&Side::Photo(items[3].clone())).expect("D developed");
+        assert_eq!(((c.width, c.height), (d.width, d.height)), ((320, 480), (320, 480)));
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+lifecycle_test! {
+    /// Original ⌄'s Split line and Side by side: the original's side shows
+    /// once decoded, also after the decode is on the GPU (whose upload
+    /// frees other pictures' pixels; the PC's split line stayed grey), and
+    /// it's made once for each crop, not at each refresh; on a split line
+    /// it's left of the line. Holding Original says Loading original until
+    /// it's in, then no tag, as on the Mac.
+    fn compare_with_the_original_shows_it_and_holding_it_ends_the_tag() {
+        use crate::compare::{Layout, Side};
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-original-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+
+        let item = h.model().library_item().unwrap();
+        for layout in [Layout::Slider, Layout::SideBySide] {
+            h.edit(|m| m.compare_with_original(layout));
+            let c = h.model().comparison().cloned().expect("comparing");
+            // On a split line the original is left of the line, as on the Mac.
+            let original = if layout == Layout::Slider { c.first.clone() } else { c.second.clone() };
+            assert!(matches!(original, Side::Original(_)), "{layout:?}");
+            assert_eq!(c.edited(), &item);
+            assert!(h.model().compare_summary().ends_with(" and Original"), "{}", h.model().compare_summary());
+            assert_eq!(h.model().compared_original_loading(), Some("Loading original"), "until its side shows it");
+            h.idle();
+            // What the canvas's upload leaves of it.
+            h.model().original_cache.as_ref().expect("decoded").1.as_if_uploaded();
+            assert!(h.edit(|m| m.compared_side(&original)).is_none(), "made off the UI thread");
+            h.idle();
+            let shown = h.edit(|m| m.compared_side(&original)).expect("the original's side");
+            assert_eq!((shown.width, shown.height), (480, 320), "{layout:?}");
+            let again = h.edit(|m| m.compared_side(&original)).unwrap();
+            assert!(std::sync::Arc::ptr_eq(&shown.rgba, &again.rgba), "the same picture until the crop changes");
+            assert_eq!(h.edit(|m| m.badge()), None);
+            h.edit(|m| m.leave_compare());
+            h.idle();
+        }
+
+        // Hold: the decode kept from the comparison shows at once, with no tag.
+        h.edit(|m| m.hold_original(true));
+        assert!(h.model().original.is_some());
+        assert_eq!(h.model().badge(), None, "no running tag over the original");
+        h.edit(|m| m.hold_original(false));
+
+        // Another photograph: Loading original until its decode is in.
+        h.open(&b);
+        h.idle();
+        h.edit(|m| m.hold_original(true));
+        assert_eq!(h.model().badge(), Some("Loading original"));
+        h.idle();
+        assert!(h.model().original.is_some());
+        assert_eq!(h.model().badge(), None);
+        h.edit(|m| m.hold_original(false));
+        assert!(h.model().original.is_none() && h.model().badge().is_none());
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `openPicture`: compare opens on the open photograph's
+    /// develop at once. Two selected with it the one to edit, its picture
+    /// is made ahead; compare shows that, never its stand-in, and shows it
+    /// again at once when compared once more.
+    fn compare_opens_on_the_develop_made_ahead() {
+        use crate::compare::{Origin, Side};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-compare-ahead-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.fliph().save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        let items = h.model().shown_items();
+        assert!(!h.model().compare_likely(false), "one selected");
+        h.edit(|m| m.shelf.selection.select_all_of(&items));
+        assert!(h.model().compare_likely(false), "two selected, the open one edited");
+        let (key, job) = h.edit(|m| m.open_job_ahead()).expect("a develop to make it from");
+        assert!(h.edit(|m| m.open_job_ahead()).is_none(), "made once");
+        let ahead = job().expect("made");
+        let id = ahead.id;
+        h.edit(|m| m.compared_open_made(key, Some(ahead)));
+        let first = Side::Photo(items[0].clone());
+        let at_once = h.edit(|m| {
+            m.compare(items[0].clone(), items[1].clone(), Origin::Photo);
+            m.compared_side(&first)
+        });
+        let shown = at_once.expect("the develop at once");
+        assert_eq!((shown.id, shown.width, shown.height), (id, 480, 320));
+        h.edit(|m| m.compared_side(&first));
+        h.idle();
+        assert_eq!(h.edit(|m| m.compared_side(&first)).map(|s| s.id), Some(id), "no stand-in over it, nothing made again");
+        h.edit(|m| m.leave_compare());
+        let again = h.edit(|m| {
+            m.compare(items[0].clone(), items[1].clone(), Origin::Photo);
+            m.compared_side(&first)
+        });
+        assert_eq!(again.map(|s| s.id), Some(id), "compared again at once");
+        h.idle();
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// MARK: The film side's release (ticket 41)
+
+lifecycle_test! {
+    /// The Mac's `FilmCacheReleaseTests`: edits and a photo switch send no
+    /// `release_film_cache` (a new decode frees it in the helper); the grid
+    /// opening and a memory warning send one each, which the helper answers;
+    /// with no helper running nothing is sent, so none is started.
+    fn the_grid_and_low_memory_release_the_film_side_but_editing_does_not() {
+        use crate::film_cache_release::Reason;
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let photo = h.photo.clone();
+        h.open(&photo);
+        h.clear_logs();
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        h.idle();
+        let other_photo = second_photo(&h, "film-cache");
+        h.open(&other_photo);
+        let _ = std::fs::remove_file(&other_photo);
+        assert!(!h.command_names().iter().any(|c| c == "release_film_cache"), "{:?}", h.command_names());
+
+        h.clear_logs();
+        h.edit(|m| m.release_film_cache(Reason::EditorClosed));
+        h.edit(|m| m.release_film_cache(Reason::MemoryPressure));
+        h.idle();
+        assert_eq!(h.command_names(), ["release_film_cache", "release_film_cache"]);
+        let answer = ask(&h, serde_json::json!({"command": "release_film_cache"}));
+        assert!(answer["released_bytes"].as_f64().is_some(), "{answer}");
+
+        let engine = h.model().engine.clone().unwrap();
+        let epoch = engine.helper_epoch();
+        engine.kill_helper();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while engine.helper_running() {
+            assert!(std::time::Instant::now() < deadline, "the helper didn't exit");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.clear_logs();
+        h.edit(|m| m.release_film_cache(Reason::MemoryPressure));
+        h.idle();
+        assert!(h.command_names().is_empty() && !engine.helper_running(), "no helper started for a release");
+        assert_eq!(engine.helper_epoch(), epoch + 1);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+// MARK: Filter
+
+lifecycle_test! {
+    /// The Mac's `filterChanged`: in the grid, a filter that leaves out the
+    /// current photograph takes it away too, and the next one shown becomes
+    /// current ("Showing 2 of 4", not 3). The edit view keeps its open one.
+    /// Rating the current one out moves on the same way.
+    fn a_filter_in_the_grid_moves_off_the_current_photograph() {
+        use negs_library::{Filter, RatingFilter};
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-filter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(120, 80, image::imageops::FilterType::Triangle);
+        let photos: Vec<std::path::PathBuf> = ["a", "b", "c", "d"].iter().map(|n| dir.join(format!("{n}.png"))).collect();
+        for photo in &photos {
+            small.save(photo).unwrap();
+        }
+        // c and d rated, a and b not.
+        for photo in &photos[2..] {
+            let sidecar = r#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "v1", "rating": 3, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {}}}]}"#;
+            std::fs::write(negs_library::sidecar::sidecar_path(photo), sidecar).unwrap();
+        }
+        h.model().shelf.enabled = true;
+        h.open(&photos[0]);
+        h.idle();
+        let item = |i: usize| negs_library::Item::photo(&photos[i]);
+        let rated = Filter { rating: RatingFilter::AtLeast(1), ..Filter::default() };
+
+        // The edit view: the open photograph stays in the strip.
+        h.edit(|m| m.set_library_filter(rated.clone()));
+        assert_eq!(h.model().shown_items(), vec![item(0), item(2), item(3)]);
+        h.edit(|m| m.set_library_filter(Filter::default()));
+
+        // The grid, on b: it goes, and c (the next shown) becomes current.
+        h.edit(|m| {
+            m.shelf.in_grid = true;
+            m.shelf.selection.select(&item(1));
+            m.set_library_filter(rated.clone());
+        });
+        assert_eq!(h.model().shelf.selection.current(), Some(&item(2)));
+        assert_eq!(h.model().shown_items(), vec![item(2), item(3)]);
+
+        // Unrated only: c goes, and a, the open one, comes back as current
+        // only if it's the next shown: here b is.
+        h.edit(|m| m.set_library_filter(Filter { rating: RatingFilter::Unrated, ..Filter::default() }));
+        assert_eq!(h.model().shown_items(), vec![item(0), item(1)]);
+        assert_eq!(h.model().shelf.selection.current(), Some(&item(1)), "the one after c, or before it at the end");
+
+        // Rating the current one out of the filter moves on in the grid,
+        // without opening anything.
+        h.edit(|m| m.library_key(super::library_map::LibraryKey::Rate(2)));
+        h.idle();
+        assert_eq!(h.model().shelf.selection.current(), Some(&item(0)));
+        assert_eq!(h.model().shown_items(), vec![item(0)]);
+        assert_eq!(h.model().library_item(), Some(item(0)));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+// MARK: Batch export
+
+lifecycle_test! {
+    /// The Mac's `testBatchExportsEachPhotographWithItsOwnEdits`: the grid's
+    /// three photographs export with their own edits, names and ratings; an
+    /// edited one whose match isn't solved for its edits is solved and the
+    /// match stored with them; a never-edited one exports as opening it
+    /// would, without a sidecar. Each, exported alone after opening it,
+    /// gives the same bytes. Again into the folder: Add a Number, then Skip.
+    fn a_batch_exports_each_photograph_with_its_own_edits() {
+        use crate::batch::{Existing, Options, Status};
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-batch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (photos, out, alone) = (dir.join("photos"), dir.join("out"), dir.join("alone"));
+        for folder in [&photos, &out, &alone] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        // Small, so three Reference exports stay quick.
+        let small = image::open(&h.photo).unwrap().resize_exact(480, 320, image::imageops::FilterType::Triangle);
+        let (a, b, c) = (photos.join("a.png"), photos.join("b.png"), photos.join("c.png"));
+        for photo in [&a, &b, &c] {
+            small.save(photo).unwrap();
+        }
+        // b edited and rated, its match on but not solved for these edits; c never edited.
+        let sidecar = r#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 4, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "brightnessMatch": {"highlightLimited": false}}}]}"#;
+        std::fs::write(negs_library::sidecar::sidecar_path(&b), sidecar).unwrap();
+        h.model().batch_journal = dir.join("journal").join("active-export.json");
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+        assert!(h.model().shelf.library.is_some());
+        // a: another film than the default, and 3 stars.
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        h.idle();
+        h.edit(|m| m.library_key(super::library_map::LibraryKey::Rate(3)));
+        h.idle();
+
+        h.edit(|m| {
+            m.shelf.in_grid = true;
+            let shown = m.shown_items();
+            m.shelf.selection.select_all(&shown);
+        });
+        assert_eq!(h.model().export_title(), "Export 3 Photographs…");
+        assert!(h.model().can_export_any() && !h.model().exports_single());
+        let targets = h.model().export_targets();
+        let mut options = Options { format: "png".into(), ..Options::default() };
+        h.edit(|m| m.export_batch(targets.clone(), out.clone(), options.clone(), None));
+        let (names, needs, running) = {
+            let run = h.model().batch.as_ref().expect("started");
+            (run.journal.items.iter().map(|i| i.file_name.clone()).collect::<Vec<_>>(), run.journal.items.iter().map(|i| i.needs_match).collect::<Vec<_>>(), run.running)
+        };
+        let new_film = names[2].trim_start_matches("c_").trim_end_matches(".png").to_string();
+        assert_ne!(new_film, film, "c has the default film, not the open photograph's");
+        assert_eq!(names, [format!("a_{film}.png"), "b_kodak_portra_400.png".into(), format!("c_{new_film}.png")]);
+        assert_eq!(needs, [false, true, true]);
+        assert!(running && !h.model().can_export_any(), "one batch at a time");
+        assert!(h.model().batch_journal.exists(), "journalled");
+        h.run_until("the batch", |m| !m.batch_running());
+        h.idle();
+        assert!(!h.model().batch_journal.exists(), "the journal goes when the batch ends");
+        assert!(h.model().batch.is_none(), "a batch without failures is forgotten: {}", h.model().status);
+        assert_eq!(h.model().status, format!("Exported 3 photographs to “out”"));
+
+        let files: Vec<_> = names.iter().map(|n| out.join(n)).collect();
+        let ratings: Vec<_> = files.iter().map(|f| negs_library::xmp::read_rating(&std::fs::read(f).unwrap())).collect();
+        assert_eq!(ratings, [Some(3), Some(4), None]);
+        // b's match solved and stored with its edits; c gets no sidecar.
+        let stored = std::fs::read_to_string(negs_library::sidecar::sidecar_path(&b)).unwrap();
+        let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        let edits = &stored["variants"][0]["edits"];
+        assert!(edits["brightnessMatch"]["ev"].as_f64().is_some_and(f64::is_finite), "solved: {edits}");
+        assert_eq!(edits["params"]["prep"]["lift"], 5);
+        assert!(!negs_library::sidecar::sidecar_path(&c).exists());
+
+        // Each exported alone, as today, gives the same bytes: a open as it
+        // was, and c opened after it, with the default film and its match
+        // solved; b, its stored match now solved.
+        let save = super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 };
+        for (photo, file) in [(&a, &files[0]), (&c, &files[2]), (&b, &files[1])] {
+            h.edit(|m| m.shelf.in_grid = false);
+            h.open(photo);
+            h.idle();
+            let single = alone.join(file.file_name().unwrap());
+            let target = single.clone();
+            h.edit(|m| m.export(target, crate::engine::ExportEngine::Reference, super::ExportSize::FULL, save));
+            h.run_until("the export", |m| !m.exporting && m.waiting_output.is_none() && single.exists());
+            h.idle();
+            assert_eq!(std::fs::read(&single).unwrap(), std::fs::read(file).unwrap(), "{}", file.display());
+        }
+
+        // Again into the same folder: Add a Number, then Skip.
+        let b_item = targets[1].clone();
+        h.edit(|m| m.shelf.in_grid = true);
+        h.edit(|m| m.export_batch(vec![b_item.clone()], out.clone(), options.clone(), None));
+        h.run_until("the second batch", |m| !m.batch_running());
+        h.idle();
+        assert!(out.join("b_kodak_portra_400 2.png").exists());
+        options.existing = Existing::Skip;
+        h.edit(|m| m.export_batch(vec![b_item], out.clone(), options, None));
+        h.run_until("the third batch", |m| !m.batch_running());
+        h.idle();
+        assert_eq!(h.model().status, "Exported 0 photographs to “out”; 1 skipped");
+        assert!(!out.join("b_kodak_portra_400 3.png").exists());
+        let _ = Status::Skipped;
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// MARK: Open in Lightroom
+
+lifecycle_test! {
+    /// Ticket 48: with Lightroom installed, the grid's selection develops
+    /// to full-size 16-bit TIFFs named `a-Negs.tif` in the cloud folder,
+    /// and they're handed to Lightroom in one launch (here recorded, not
+    /// launched); the words say so, then go. Nothing is offered without it.
+    fn open_in_lightroom_sends_16_bit_tiffs_in_one_hand_over() {
+        use crate::lightroom::{Apps, Kind};
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        let dir = std::env::temp_dir().join(format!("negs-harness-lightroom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(300, 200, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("lra.png"), dir.join("lrb.png"));
+        small.save(&a).unwrap();
+        small.save(&b).unwrap();
+        let folder = Kind::Cloud.folder();
+        for name in ["lra-Negs.tif", "lrb-Negs.tif"] {
+            let _ = std::fs::remove_file(folder.join(name));
+        }
+        h.model().batch_journal = dir.join("journal").join("active-export.json");
+        h.model().shelf.enabled = true;
+        h.open(&a);
+        h.idle();
+        h.edit(|m| {
+            m.shelf.in_grid = true;
+            let shown = m.shown_items();
+            m.shelf.selection.select_all(&shown);
+        });
+        h.model().lightroom.apps = Apps::default();
+        assert!(h.model().lightroom_kinds().is_empty() && !h.model().can_open_in_lightroom(Kind::Cloud));
+        let fake = dir.join("Lightroom.exe");
+        h.model().lightroom.apps = Apps { cloud: Some(fake.clone()), classic: None };
+        assert_eq!(h.model().lightroom_kinds(), [Kind::Cloud]);
+        assert!(h.model().can_open_in_lightroom(Kind::Cloud) && !h.model().can_open_in_lightroom(Kind::Classic));
+        h.edit(|m| m.open_in_lightroom(Kind::Cloud));
+        assert_eq!(h.model().batch.as_ref().expect("started").progress_words(), "Sending 1 of 2 photographs to Lightroom");
+        h.run_until("the hand-over", |m| m.lightroom.words.as_deref().is_some_and(|w| w.starts_with("Sent")));
+        h.idle();
+        assert_eq!(h.model().status, "Sent 2 photographs to Lightroom");
+        let handed: Vec<_> = super::lightroom::HANDED.lock().unwrap().iter().filter(|(app, _)| *app == fake).map(|(_, f)| f.clone()).collect();
+        assert_eq!(handed, [vec![folder.join("lra-Negs.tif"), folder.join("lrb-Negs.tif")]], "one hand-over with both");
+        for file in &handed[0] {
+            let image = image::open(file).unwrap();
+            assert_eq!(image.color(), image::ColorType::Rgb16, "{}", file.display());
+            assert_eq!((image.width(), image.height()), (300, 200));
+        }
+        h.fire_timers(std::time::Duration::from_secs(5));
+        assert!(h.model().lightroom.words.is_none(), "the words go after a moment");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        for file in &handed[0] {
+            let _ = std::fs::remove_file(file);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// MARK: The stand-in
+
+lifecycle_test! {
+    /// As a photograph opens, its developed thumbnail stands in at once,
+    /// before anything is decoded (`standIn`); its develop replaces it.
+    /// Without a thumbnail filed for its edits there's none.
+    fn a_photograph_opens_on_its_developed_thumbnail() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::edited_store::thumbnails().set_engine(Some("harness-engine".into()));
+        crate::edited_store::renders().set_engine(Some("harness-engine".into()));
+        let dir = std::env::temp_dir().join(format!("negs-harness-stand-in-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let small = image::open(&h.photo).unwrap().resize_exact(600, 400, image::imageops::FilterType::Triangle);
+        let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+        small.save(&a).unwrap();
+        small.save(&b).unwrap();
+        h.model().shelf.enabled = true;
+        h.edit(|m| m.open(&a));
+        assert!(h.model().stand_in.is_none(), "nothing filed yet");
+        h.idle();
+        let item = h.model().library_item().unwrap();
+        let (key, _) = h.model().filed_key(crate::edited_store::thumbnails(), &item).expect("a key");
+        // Leaving it files its thumbnail from the preview.
+        h.open(&b);
+        h.run_until("the thumbnail filed", |_| crate::edited_store::thumbnails().contains(&key));
+        h.idle();
+        h.edit(|m| m.open(&a));
+        let m = h.model();
+        let stand_in = m.stand_in.as_ref().expect("the developed thumbnail stands in at once");
+        assert!(m.image.is_none() && m.placeholder.is_none());
+        assert_eq!(stand_in.width.max(stand_in.height), crate::sheet_rules::EDITED_LONG_SIDE.min(600));
+        h.idle();
+        let m = h.model();
+        assert!(m.image.is_some() && m.stand_in.is_none(), "the develop replaces it");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

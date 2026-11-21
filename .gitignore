@@ -17,6 +17,10 @@ AGENTS.md
 /*.tiff
 /*.jpg
 
+# Claude Code: share .claude/settings.json (build env), not worktrees or local settings.
+.claude/worktrees/
+.claude/settings.local.json
+
 # SwiftPM local build and IDE state
 macos/.build/
 macos/.swiftpm/

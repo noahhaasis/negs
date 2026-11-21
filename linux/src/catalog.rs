@@ -18,6 +18,11 @@ pub struct Stock {
     /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
     #[serde(default)]
     pub grain: serde_json::Value,
+    /// Prepared by Negs itself from datasheets, still being checked: the Mac,
+    /// web and Windows apps hide these until Settings › Show Negs-built films;
+    /// Linux has no such setting yet, so it leaves them out.
+    #[serde(default)]
+    pub negs_built: bool,
 }
 #[derive(Deserialize)]
 struct Catalog {
@@ -91,7 +96,7 @@ pub fn stocks(paper: bool) -> Vec<&'static Stock> {
         })
         .profiles
         .iter()
-        .filter(|s| s.paper == paper)
+        .filter(|s| s.paper == paper && !s.negs_built)
         .collect();
     // Match the macOS menu sections while retaining catalog order within each.
     stocks.sort_by_key(|stock| group_order(&stock.group));
@@ -214,9 +219,10 @@ mod tests {
     fn complete_catalog_and_pairing_metadata() {
         let films = super::stocks(false);
         let papers = super::stocks(true);
-        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm and the
-        // 10 Fujifilm negatives and 7 Fujifilm slides prepared from Fujifilm's datasheets.
-        assert_eq!(films.len(), 69);
+        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm. The 17
+        // Negs-built Fujifilm films (catalog `negs_built`) are left out: Linux
+        // has no Settings › Show Negs-built films yet.
+        assert_eq!(films.len(), 52);
         assert_eq!(papers.len(), 10);
         assert!(
             films

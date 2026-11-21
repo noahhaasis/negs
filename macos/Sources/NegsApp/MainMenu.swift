@@ -11,6 +11,8 @@ import SwiftUI
     private let removeAppData: () -> Void
     private let recent = NSMenu(title: "Open Recent")
     private var settings: SettingsWindowController?
+    /// File › Open in Lightroom and Open in Lightroom Classic, hidden without them.
+    private var lightroomItems: [LightroomKind: NSMenuItem] = [:]
     private var removingAppData = false
 
     init(model: EditorModel, updates: UpdateController, removeAppData: @escaping () -> Void) {
@@ -49,6 +51,14 @@ import SwiftUI
         command(file, "Save Preview…", #selector(savePreview), "s")
         command(file, "Export Photograph…", #selector(exportPhotograph), "e", [.command, .shift])
         command(file, "Export LUT…", #selector(exportLUT), "l", [.command, .shift])
+        // Ticket 48. ⌥⌘E, beside Export's ⇧⌘E.
+        for kind in LightroomKind.allCases {
+            let item = file.addItem(withTitle: "Open in \(kind.title)", action: #selector(openInLightroom(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = kind.rawValue
+            lightroomItems[kind] = item
+        }
+        showLightroomItems()
         file.addItem(.separator())
         command(file, "New Preset", #selector(newPreset), "s", [.command, .shift])
         command(file, "Import Presets…", #selector(importPresets), "o", [.command, .shift])
@@ -73,7 +83,9 @@ import SwiftUI
         // Plain keys, as in Lightroom, behind the same check as the rating keys.
         command(view, "Edit Photograph", #selector(editPhotograph), "e", [])
         hidden(view, #selector(editPhotograph), "\r")
-        command(view, "Show Grid", #selector(showGrid), "g", [])
+        command(view, "Show Grid", #selector(toggleGrid), "g", [])
+        // The two selected, side by side (ticket 46); C again stops.
+        command(view, "Compare", #selector(toggleCompare), "c", [])
         // Esc shows the grid too: `EditorWindowController.escapeToGrid`.
         command(view, "Larger Thumbnails", #selector(largerThumbnails), "+")
         hidden(view, #selector(largerThumbnails), "=", .command)
@@ -90,13 +102,31 @@ import SwiftUI
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
-        // Rotate lives in cropping (§4.10); from here it starts cropping.
+        // Rotate and flip live in cropping (§4.10); from here they start cropping.
         command(view, "Rotate Clockwise", #selector(rotate), "r")
         command(view, "Rotate Counterclockwise", #selector(rotateLeft), "r", [.command, .option])
+        command(view, "Flip Horizontal", #selector(flip), "")
         command(view, "Crop", #selector(crop), "k")
         view.addItem(.separator())
         // ⇧⌘R is Photo › Reset Edits.
         command(view, "Reset All Adjustments", #selector(resetAdjustments), "")
+        view.addItem(.separator())
+        // The same themes as Settings › Look, the chosen one ticked.
+        let theme = NSMenu(title: "Theme")
+        view.addItem(withTitle: "Theme", action: nil, keyEquivalent: "").submenu = theme
+        for appTheme in AppTheme.allCases {
+            let item = theme.addItem(withTitle: appTheme.title, action: #selector(chooseTheme(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = appTheme.rawValue
+        }
+        // And the sheets of Settings › Look › Viewer.
+        let sheet = NSMenu(title: "Viewer Sheet")
+        view.addItem(withTitle: "Viewer Sheet", action: nil, keyEquivalent: "").submenu = sheet
+        for viewerSheet in ViewerSheet.allCases {
+            let item = sheet.addItem(withTitle: viewerSheet.title, action: #selector(chooseSheet(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = viewerSheet.rawValue
+        }
         view.addItem(.separator())
 
         // Plain keys, as in Lightroom and Capture One. Disabled while text is
@@ -184,6 +214,23 @@ import SwiftUI
     @objc private func savePreview() { model.savePanel(export: false) }
     @objc private func exportPhotograph() { model.exportPanel() }
     @objc private func exportLUT() { model.exportLUTPanel() }
+    @objc private func openInLightroom(_ item: NSMenuItem) {
+        if let kind = (item.representedObject as? String).flatMap(LightroomKind.init) { model.openInLightroom(kind) }
+    }
+
+    /// Shows the Lightroom items that are installed, and again whenever
+    /// detection changes what is. The first offered gets ⌥⌘E. Hidden
+    /// items take no keys.
+    private func showLightroomItems() {
+        let kinds = withObservationTracking { model.lightroomKinds } onChange: { [weak self] in
+            Task { @MainActor in self?.showLightroomItems() }
+        }
+        for (kind, item) in lightroomItems {
+            item.isHidden = !kinds.contains(kind)
+            item.keyEquivalent = kinds.first == kind ? "e" : ""
+            item.keyEquivalentModifierMask = [.command, .option]
+        }
+    }
     @objc private func toggleImageOnly() { model.toggleImageOnly() }
     @objc private func toggleFilmstrip() { model.toggleFilmstrip() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
@@ -196,6 +243,7 @@ import SwiftUI
     @objc private func actualSize() { model.zoom(fit: false) }
     @objc private func rotate() { model.turn(clockwise: true) }
     @objc private func rotateLeft() { model.turn(clockwise: false) }
+    @objc private func flip() { model.flip() }
     @objc private func crop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
     @objc private func resetAdjustments() { model.reset() }
     @objc private func rate(_ item: NSMenuItem) { model.setRating(item.tag) }
@@ -205,6 +253,15 @@ import SwiftUI
     @objc private func reject() { model.setFlag(.reject) }
     @objc private func unflag() { model.setFlag(nil) }
     @objc private func toggleAdvance() { model.advanceAfterRating.toggle() }
+    @objc private func chooseTheme(_ item: NSMenuItem) {
+        if let theme = (item.representedObject as? String).flatMap(AppTheme.init) { ThemeStore.shared.choose(theme) }
+    }
+    /// Written where Settings' `@AppStorage(ViewerSheet.key)` reads it, so the views follow.
+    @objc private func chooseSheet(_ item: NSMenuItem) {
+        if let sheet = (item.representedObject as? String).flatMap(ViewerSheet.init) {
+            UserDefaults.standard.set(sheet.rawValue, forKey: ViewerSheet.key)
+        }
+    }
     @objc private func clearFilter() { model.library.filter = LibraryFilter() }
     @objc private func editPhotograph() { model.editCurrent() }
     @objc private func copyEdits() { model.copyEdits() }
@@ -221,7 +278,8 @@ import SwiftUI
         guard NSApp.keyWindow is EditorWindow else { return }
         model.copyEditsChoosing()
     }
-    @objc private func showGrid() { model.showGrid() }
+    @objc private func toggleGrid() { model.mode == .grid ? model.editCurrent() : model.showGrid() }
+    @objc private func toggleCompare() { model.toggleCompare() }
     @objc private func largerThumbnails() { model.changeGridCellSize(larger: true) }
     @objc private func smallerThumbnails() { model.changeGridCellSize(larger: false) }
 
@@ -267,6 +325,11 @@ import SwiftUI
             item.title = model.exportTitle
             return model.canExport && !model.cropping
         case #selector(exportLUT): return model.canExportLUT && model.mode == .photo
+        case #selector(openInLightroom(_:)):
+            guard let kind = (item.representedObject as? String).flatMap(LightroomKind.init) else { return false }
+            let targets = model.exportTargets
+            item.title = EditorModel.lightroomTitle(kind, count: targets.count)
+            return model.canOpenInLightroom(kind, targets: targets)
         case #selector(toggleImageOnly):
             item.state = model.imageOnly ? .on : .off
             // In the grid it opens the current photograph in Image Only.
@@ -286,13 +349,21 @@ import SwiftUI
             item.state = UserDefaults.standard.bool(forKey: AdjustmentInspector.allControlsKey) ? .on : .off
             return model.mode == .photo
         case #selector(fitPhotograph), #selector(actualSize): return editing && !model.cropping
-        case #selector(rotate), #selector(rotateLeft): return model.cropping || (editing && model.image != nil)
+        case #selector(rotate), #selector(rotateLeft), #selector(flip): return model.cropping || (editing && model.image != nil)
         case #selector(crop):
             item.title = model.cropping ? "Done Cropping" : "Crop"
             return model.cropping || (model.image != nil && model.mode == .photo)
         case #selector(resetAdjustments): return model.hasCatalog && !model.cropping && model.mode == .photo
         case #selector(editPhotograph): return model.mode == .grid && model.selection.current != nil && Self.takesRatingKeys(NSApp.keyWindow)
-        case #selector(showGrid): return editing && !model.cropping && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(toggleGrid):
+            let grid = model.mode == .grid
+            item.title = grid ? "Hide Grid" : "Show Grid"
+            // In the grid it opens the current photograph, as E does.
+            let canToggle = grid ? model.selection.current != nil : editing && !model.cropping
+            return canToggle && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(toggleCompare):
+            item.state = model.comparison != nil ? .on : .off
+            return model.canToggleCompare && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < SheetLayout.sizes.upperBound
         case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > SheetLayout.sizes.lowerBound
         case #selector(copyEdits), #selector(copyEditsChoosing):
@@ -316,6 +387,13 @@ import SwiftUI
         case #selector(reject): item.state = state { $0.flag == .reject }; return rating
         case #selector(unflag): item.state = state { $0.flag == nil }; return rating
         case #selector(toggleAdvance): item.state = model.advanceAfterRating ? .on : .off; return true
+        case #selector(chooseTheme(_:)):
+            item.state = item.representedObject as? String == ThemeStore.shared.theme.rawValue ? .on : .off
+            return true
+        case #selector(chooseSheet(_:)):
+            let chosen = UserDefaults.standard.string(forKey: ViewerSheet.key).flatMap(ViewerSheet.init) ?? .theme
+            item.state = item.representedObject as? String == chosen.rawValue ? .on : .off
+            return true
         case #selector(clearFilter): return model.library.filter.active
         default: return true
         }

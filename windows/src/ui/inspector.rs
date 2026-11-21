@@ -19,12 +19,15 @@ use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
+use super::d2d::{Ink, RectF as DRect, TextStyle};
 use super::draw::{self, Canvas, RectF, Role};
+use super::ink;
 use super::motion;
 use super::theme;
 use super::{App, TBM_GETPOS, create, post, with_app};
 use crate::border::{self, BorderColor, BorderStyle};
 use crate::crop::CropAspect;
+use crate::edits::MoreAction;
 use crate::json;
 use crate::model::{BorderWidth, Model, dirty};
 use crate::platform::{pcwstr, wide};
@@ -43,27 +46,25 @@ const HEADER: u16 = 6;
 const ACTION: u16 = 7;
 const TAB_LAB: u16 = 900;
 const TAB_OUTPUT: u16 = 901;
-const RESET_ALL: u16 = 902;
 const TAB_PREP: u16 = 903;
-const SCOPE_MODE: u16 = 904;
-/// The Film grid's search field, on the pinned panel.
-const FILM_SEARCH: u16 = 905;
+/// Histogram · Waveform.
+const SCOPE_HISTOGRAM: u16 = 904;
+const SCOPE_WAVEFORM: u16 = 906;
+/// Each tab's dot and count, which opens its edits: 907–909.
+const TAB_COUNT: u16 = 907;
+/// What an export makes, over Export (`ExportFoot`).
+const FOOT_SUMMARY: u16 = 910;
 const TABS: [(u16, &str); 3] = [(TAB_PREP, "Prep"), (TAB_LAB, "Lab"), (TAB_OUTPUT, "Output")];
-/// An open stock grid's height, in DIPs: it scrolls inside itself, keeping
-/// the tabs in reach.
-const GRID_HEIGHT: f64 = 290.0;
-/// The search field over the Film grid: 4 DIPs above a 24 DIP field, 4 below.
-const SEARCH_HEIGHT: f64 = 32.0;
+const EDIT_TABS: [crate::edits::Tab; 3] = crate::edits::Tab::ALL;
 const CROP_FIRST: u16 = 950;
 
-/// Prepare the photograph, develop the film, then finish it; the pinned
-/// rows (film and paper) sit above the tabs.
+/// Prepare the photograph, develop the film, then finish it. The film and
+/// paper are chosen from the label under the print (`ui::tray`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Prep,
     Lab,
     Output,
-    Pinned,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -74,7 +75,6 @@ enum When {
     AssumeInput,
     ManualInput,
     FilmTimes,
-    NotScanning,
     PaperTimes,
     Raw,
     /// A RAW whose decode found corrections for its lens.
@@ -90,11 +90,12 @@ enum When {
     MeterAuto,
     /// Film format › Custom…: the long-edge slider.
     CustomFormat,
-    /// Not among the Lab's basics: with Advanced controls, or once changed.
-    Shows(&'static str),
+    /// A section's loose row: its "N more" was clicked, or it changed.
+    Shows(Section, &'static str),
     ScanToggle,
-    ScanSection,
     OutputGroup,
+    /// A "N more" line with something to say.
+    More(More),
     /// An adjustment group: it has basics, or something in it changed.
     Group(usize),
     Mat,
@@ -102,6 +103,14 @@ enum When {
     FilmStyle,
     /// Hidden for B&W films (one emulsion): per-channel grain lanes.
     ColorFilm,
+    /// Lab › Camera › Color Filter: B&W films, or while a filter is set.
+    ColorFilter,
+    /// The photograph is read as a negative (Prep's Film base and Balance).
+    Negative,
+    /// Prep › Backlight, once its "Backlight…" line was clicked.
+    Backlight,
+    /// A frame of a roll with a filtration of its own.
+    OwnFiltration,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -118,10 +127,9 @@ enum Kind {
     ExposureOffset,
     /// Lab › Camera › Film format: stills formats, or Custom….
     FilmFormat,
-    /// Lab › Advanced controls (a preference).
-    AllControls,
+    /// "N more controls…", "Hide …", or "Showing all controls. Show fewer".
+    More(More),
     /// The paper row while scanning film directly.
-    PaperSkipped,
     /// The colour space the preview develops in (a preference).
     PreviewSpace,
     /// Image Size: Original or Longest side.
@@ -133,16 +141,21 @@ enum Kind {
     Note(Note),
     BorderToggle(&'static str, u8),
     Choice(&'static str, &'static str, &'static [&'static str]),
-    Stock(bool),
-    /// The film or paper as a foldout of preview tiles (Settings › previews).
-    Foldout(bool),
     DevTime(bool),
     BorderStyles,
     Color(bool),
     /// The Balance Print button: title, tooltip.
     BalancePrint(&'static str, &'static str),
+    /// Enlarger › Shifts move (a preference): its tooltip.
+    FilterLink(&'static str),
     /// The tone graph atop Print Curves, with its label and channel buttons.
     ToneGraph,
+    /// Color Filter's glass discs, the hint and the colour film warning.
+    ColorFilter,
+    /// Prep's buttons on a negative, at the row's end: title, tooltip.
+    Actions(&'static [(&'static str, &'static str)]),
+    /// Prep › Flat field: the light frame's name, Choose… and Off (`FlatFieldRow`).
+    FlatField,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -151,8 +164,60 @@ enum Note {
     Size,
     /// What the brightness match did, or why it can't.
     Brightness,
-    /// What Advanced controls shows.
-    AllControls,
+    /// Where the negative's film base came from, or what's being read.
+    NegativeBase,
+    /// The scan doesn't look like a colour negative.
+    NegativeWarning,
+    /// The base is a guess: pick it from the rebate.
+    NegativeGuess,
+    /// A RAW negative not on Daylight white balance.
+    NegativeDaylight,
+    /// The light frame isn't used on this frame, and why.
+    FlatField,
+    /// A frame of a roll: what's the roll's and what's its own.
+    Roll,
+    /// A frame of a roll with its own filtration: why.
+    OwnFiltration,
+}
+
+/// Prep's buttons on a negative (`NegativePrep`).
+const FIND_BUTTONS: &[(&str, &str)] = &[
+    ("Find again", "Looks for the clear film again, forgetting a picked point."),
+    ("Pick from rebate", "Click the clear film between frames or along the edge. Esc cancels."),
+];
+const CROP_BUTTONS: &[(&str, &str)] = &[("Crop to picture", "Crops to the picture inside the clear film, levelled by the rebate.")];
+const ROLL_BUTTONS: &[(&str, &str)] = &[(
+    "Use for whole roll",
+    "Prints every photograph in view as a frame of this roll: this film, backlight, base and filtration, each frame with its own exposure. Frames that set their own filtration keep it.",
+)];
+const ROLL_FILTRATION_BUTTONS: &[(&str, &str)] = &[("Roll\u{2019}s filtration", "Prints this frame with the roll\u{2019}s magenta and yellow again, and meters its exposure.")];
+const BALANCE_BUTTONS: &[(&str, &str)] = &[
+    ("Auto", "Sets the enlarger's magenta, yellow and print exposure so this frame prints as a minilab's auto printer would."),
+    ("Pick neutral", "Click something that should be grey. Esc cancels."),
+];
+/// The Film module's words for what a negative skips.
+const NEGATIVE_SKIPS: [&str; 3] = ["Grain", "Halation", "DIR Couplers"];
+
+/// What a "N more" line folds: a module's controls, a section's modules
+/// and rows, or (at the Lab's top) View › Show All Controls.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum More {
+    Module(usize),
+    Section(Section),
+    All,
+    /// Prep › Film base on a negative: "Backlight…" (`NegativePrep`'s `MoreLine`).
+    Backlight,
+}
+
+/// A "N more" line's words and what a click does; None hides it.
+fn more_line(model: &Model, more: More) -> Option<(String, crate::edits::MoreAction)> {
+    use crate::edits::{self, MoreAction};
+    match more {
+        More::Module(index) => edits::module_more(model, index),
+        More::Section(section) => edits::section_more(model, section),
+        More::All => model.prefs.lab_all_controls.then(|| ("Showing all controls. Show fewer".into(), MoreAction::ShowFewer)),
+        More::Backlight => (model.is_negative() && !model.negative.backlight_shown).then(|| ("Backlight…".into(), MoreAction::ShowFewer)),
+    }
 }
 
 struct Row {
@@ -165,6 +230,9 @@ struct Row {
     print: bool,
     /// Border controls, disabled while the border is off.
     border: bool,
+    /// Prep's tone, colour and detail: on a scene, before the film; a
+    /// negative is film already (the convert-film route).
+    scene: bool,
     /// An adjustment group's control: the group and its place, for the
     /// Lab's basics.
     basic: Option<(usize, usize)>,
@@ -175,17 +243,27 @@ struct Row {
 pub struct Inspector {
     pub panel: HWND,
     scope: HWND,
-    scope_mode: HWND,
+    /// Histogram · Waveform, as words.
+    scope_words: [HWND; 2],
     scope_label: HWND,
     grip: HWND,
     /// The scope's height in DIPs, as dragged.
     scope_height: f64,
-    /// The film and paper rows, above the tabs.
-    pinned: HWND,
-    pinned_height: i32,
     tabs: [HWND; 3],
+    /// Each tab's dot and count; hidden while it has no edits.
+    counts: [HWND; 3],
+    /// The edits each tab held at the last sync.
+    tab_counts: [usize; 3],
     rows_panel: HWND,
-    reset: HWND,
+    /// The Output tab's foot: what an export makes, and Export.
+    foot_summary: HWND,
+    export: HWND,
+    /// Open in Lightroom, Open in Lightroom Classic under Export (ticket
+    /// 48), and how many are laid out: those installed.
+    lightroom: [HWND; 2],
+    lightroom_shown: Vec<crate::lightroom::Kind>,
+    /// Whether the foot shows (the Output tab).
+    foot_shown: bool,
     crop: Option<CropPanel>,
     pub rect: RECT,
     rows: Vec<Row>,
@@ -193,21 +271,13 @@ pub struct Inspector {
     content: i32,
     built: bool,
     dpi: u32,
-    /// The stock lists were filled from this catalog and these favourites.
-    stocks_filled: String,
-    /// The film and paper tiles, built the first time each foldout opens.
-    grids: [Option<StockGrid>; 2],
-    /// The search field over the Film grid, made with its first grid. It
-    /// outlives the grids' rebuilds, which starring a film makes, so typing
-    /// in it goes on.
-    film_search: HWND,
     dev_times: [Vec<f64>; 2],
     decimal: char,
     /// The UI font's line height, for value boxes inside their fields.
     line: i32,
     /// Motion: the next layout slides rows to their places; the slide
     /// running.
-    slide: bool,
+    pub(super) slide: bool,
     sliding: Option<Slide>,
     /// Where the last layout put each control (its top), to slide from.
     placed: std::collections::HashMap<isize, i32>,
@@ -224,17 +294,13 @@ struct Slide {
 }
 
 thread_local! {
-    /// The current film and paper names, for the foldout headers.
-    static FOLDOUT_NAMES: RefCell<[String; 2]> = const { RefCell::new([String::new(), String::new()]) };
-    /// The tiles as drawn, by grid (film, paper) and position.
-    static TILES: RefCell<[Vec<TileLook>; 2]> = const { RefCell::new([Vec::new(), Vec::new()]) };
+    /// The value each slider last gave UI Automation.
+    static ACC_VALUES: RefCell<std::collections::HashMap<isize, String>> = RefCell::new(std::collections::HashMap::new());
     /// What the scope draws: the histogram, the waveform, and whether it shows the waveform.
     static SCOPE: RefCell<(Option<crate::histogram::Histogram>, Option<crate::histogram::Waveform>, bool)> = const { RefCell::new((None, None, false)) };
     /// The scope's height while its handle is dragged: where the drag
     /// started on screen, and the height then.
     static GRIP_DRAG: Cell<Option<(i32, f64)>> = const { Cell::new(None) };
-    /// The tile under the pointer, by grid and position, which shows its star.
-    static HOVER_TILE: Cell<Option<(bool, usize)>> = const { Cell::new(None) };
     static SWATCHES: Cell<(u32, u32, u32)> = const { Cell::new((0xffffff, 0, 0)) };
     static ITEM_HEIGHT: Cell<i32> = const { Cell::new(20) };
 }
@@ -242,7 +308,7 @@ thread_local! {
 pub fn register() {
     unsafe {
         // Their backgrounds are painted from the palette.
-        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 7] = [
+        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 6] = [
             (w!("NegsInspector"), Some(panel_proc), WNDCLASS_STYLES(0)),
             (w!("NegsRows"), Some(rows_proc), WNDCLASS_STYLES(0)),
             (w!("NegsScope"), Some(scope_proc), WNDCLASS_STYLES(0)),
@@ -250,7 +316,6 @@ pub fn register() {
             (w!("NegsCropPanel"), Some(crop_proc), WNDCLASS_STYLES(0)),
             // Its own class only so its scroll bar takes the dark theme.
             (w!("NegsCropRows"), Some(crop_proc), WNDCLASS_STYLES(0)),
-            (w!("NegsStockGrid"), Some(grid_proc), WNDCLASS_STYLES(0)),
         ];
         for (name, proc_, style) in classes {
             let class = WNDCLASSEXW {
@@ -267,7 +332,7 @@ pub fn register() {
     }
 }
 
-fn decimal_separator() -> char {
+pub(crate) fn decimal_separator() -> char {
     use windows::Win32::Globalization::{GetLocaleInfoEx, LOCALE_SDECIMAL};
     let mut buffer = [0u16; 8];
     let n = unsafe { GetLocaleInfoEx(PCWSTR::null(), LOCALE_SDECIMAL, Some(&mut buffer)) };
@@ -291,15 +356,19 @@ impl Inspector {
         Self {
             panel,
             scope: HWND::default(),
-            scope_mode: HWND::default(),
+            scope_words: [HWND::default(); 2],
             scope_label: HWND::default(),
             grip: HWND::default(),
             scope_height: SCOPE_HEIGHTS.0,
-            pinned: HWND::default(),
-            pinned_height: 0,
             tabs: [HWND::default(); 3],
+            counts: [HWND::default(); 3],
+            tab_counts: [usize::MAX; 3],
             rows_panel: HWND::default(),
-            reset: HWND::default(),
+            foot_summary: HWND::default(),
+            export: HWND::default(),
+            lightroom: [HWND::default(); 2],
+            lightroom_shown: vec![],
+            foot_shown: false,
             crop: None,
             rect: RECT::default(),
             rows: vec![],
@@ -307,9 +376,6 @@ impl Inspector {
             content: 0,
             built: false,
             dpi,
-            stocks_filled: String::new(),
-            grids: [None, None],
-            film_search: HWND::default(),
             dev_times: [vec![], vec![]],
             decimal: '.',
             line,
@@ -355,50 +421,92 @@ impl Inspector {
         }
     }
 
-    /// The scope, the pinned stocks, the tab switch, the rows and the reset
-    /// button.
+    /// The scope with its words and grabber, the tabs
+    /// between two rules, the rows, and on Output the Export foot
+    /// (`AdjustmentInspector`, `ScopePanelView`).
     fn layout_frame(&mut self) {
         if !self.built {
             return;
         }
         let (w, h) = (self.rect.right - self.rect.left, self.rect.bottom - self.rect.top);
-        let pad = self.px(16.0);
-        // On the 8 DIP grid: the scope's menu, the scope and its grabber,
-        // the pinned stocks, the tabs, the rows and the reset button.
-        let inner = w - 2 * pad;
-        let mode = self.px(24.0);
+        let gutter = self.px(ink::GUTTER);
+        let margin = self.px(ink::MARGIN);
+        let inner = w - 2 * gutter;
         let scope = self.px(self.scope_height);
-        let grip = self.px(8.0);
-        let tabs = self.px(32.0);
-        let reset = self.px(32.0);
-        let mut y = self.px(8.0);
+        let words = self.px(18.0);
         // Moved together (`DeferWindowPos`): one at a time, each move
         // repainted what it uncovered before the next filled it, which
         // flickered on every step of dragging the scope's grabber.
-        let mut positions = vec![(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0))];
-        positions.push((self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0)));
-        y += mode + self.px(8.0);
-        positions.push((self.scope, pad, y, inner, scope));
-        y += scope;
-        positions.push((self.grip, pad, y, inner, grip));
-        y += grip;
-        positions.push((self.pinned, 0, y, w, self.pinned_height));
-        y += self.pinned_height + self.px(8.0);
-        let each = inner / 3;
-        for (i, &tab) in self.tabs.iter().enumerate() {
-            let x = pad + each * i as i32;
-            let width = if i == 2 { inner - 2 * each } else { each };
-            positions.push((tab, x, y, width, tabs));
+        let mut positions = vec![];
+        let mut x = gutter - margin;
+        for (&word, title) in self.scope_words.iter().zip(["Histogram", "Waveform"]) {
+            let width = self.px(ink::width(title, &ink::SCOPE_WORD) as f64) + 2 * margin;
+            positions.push((word, x, 0, width, words));
+            x += width - 2 * margin + self.px(14.0);
         }
-        y += tabs + self.px(8.0);
-        let rows_bottom = h - reset - pad - self.px(8.0);
-        positions.push((self.rows_panel, 0, y, w, (rows_bottom - y).max(0)));
-        positions.push((self.reset, pad, h - reset - pad, inner, reset));
+        positions.push((self.scope_label, w - gutter - self.px(40.0), 0, self.px(40.0), words));
+        let mut y = words + self.px(4.0);
+        positions.push((self.scope, gutter, y, inner, scope));
+        y += scope;
+        // The grabber in the 6 DIPs under the scope and its 8 DIP line, then 10 to the tabs.
+        positions.push((self.grip, gutter, y + self.px(2.0), inner, self.px(12.0)));
+        y += self.px(24.0);
+        let tabs_top = y;
+        self.place_tabs(&mut positions, tabs_top);
+        y += self.px(ink::TAB_ROW);
+        // Quieter than Export: words under it, only with Lightroom installed.
+        let words = if self.lightroom_shown.is_empty() { 0 } else { self.px(28.0) };
+        let foot = if self.foot_shown { self.px(91.0) + words } else { 0 };
+        positions.push((self.rows_panel, 0, y, w, (h - foot - y).max(0)));
+        let mut rules = vec![tabs_top, tabs_top + self.px(ink::TAB_ROW) - self.px(1.0).max(1)];
+        if self.foot_shown {
+            let top = h - foot;
+            rules.push(top);
+            positions.push((self.foot_summary, gutter, top + self.px(11.0), inner, self.px(20.0)));
+            positions.push((self.export, gutter - margin, h - self.px(16.0 + 36.0) - margin - words, inner + 2 * margin, self.px(36.0) + 2 * margin));
+            // Centred, 14 DIPs apart; each control is its word and the margins it draws in.
+            let m = ink::MARGIN;
+            let widths: Vec<i32> = self
+                .lightroom_shown
+                .iter()
+                .map(|k| self.px(super::d2d::measure_text(&format!("Open in {}", k.title()), &ink::WORD, 0.0, true).width as f64 + 2.0 * m))
+                .collect();
+            let total: i32 = widths.iter().sum::<i32>() + self.px(14.0 - 2.0 * m) * (widths.len() as i32 - 1).max(0);
+            let mut x = gutter + (inner - total) / 2;
+            for (kind, width) in self.lightroom_shown.iter().zip(widths) {
+                positions.push((self.lightroom[*kind as usize], x, h - self.px(16.0 + 22.0), width, self.px(22.0)));
+                x += width + self.px(14.0 - 2.0 * m);
+            }
+        }
+        ink::set_rules(self.panel, rules);
         if let Some(crop) = &self.crop {
             positions.push((crop.panel, 0, 0, w, h));
         }
         place(&positions, 0);
         layout_crop(self);
+    }
+
+    /// Prep · Lab · Output from the gutter, one gap apart, each followed by
+    /// its count when it has edits (`TabRow`).
+    fn place_tabs(&self, positions: &mut Vec<(HWND, i32, i32, i32, i32)>, top: i32) {
+        let margin = self.px(ink::MARGIN);
+        let plain = theme::tokens().plain;
+        let mut x = self.px(ink::GUTTER);
+        let (y, height) = (top + 1, self.px(ink::TAB_ROW) - 2);
+        for (i, (_, title)) in TABS.iter().enumerate() {
+            let word = self.px(ink::tab_width(title, plain) as f64);
+            let count = self.tab_counts[i];
+            // The count follows the word's last ink; the word's own box stops there.
+            let counted = count > 0 && count != usize::MAX;
+            positions.push((self.tabs[i], x - margin, y, word + if counted { margin } else { 2 * margin }, height));
+            x += word;
+            if counted {
+                let width = self.px(13.0 + ink::width(&count.to_string(), &ink::COUNT) as f64) + margin;
+                positions.push((self.counts[i], x, y, width, height));
+                x += width - margin;
+            }
+            x += self.px(ink::TAB_GAP);
+        }
     }
 }
 
@@ -407,23 +515,36 @@ impl Inspector {
 fn rows() -> Vec<Row> {
     let mut rows = vec![];
     let add = |rows: &mut Vec<Row>, kind: Kind, tab: Tab, group: Option<usize>, when: When| {
-        rows.push(Row { kind, tab, group, when, print: false, border: false, basic: None, controls: vec![], shown: false });
+        rows.push(Row { kind, tab, group, when, print: false, border: false, scene: false, basic: None, controls: vec![], shown: false });
         rows.len() - 1
     };
-    // Above the tabs: the stocks shape everything the tabs adjust.
-    let pinned = Tab::Pinned;
-    add(&mut rows, Kind::Stock(false), pinned, None, When::Always);
-    add(&mut rows, Kind::Foldout(false), pinned, None, When::Always);
-    add(&mut rows, Kind::DevTime(false), pinned, None, When::FilmTimes);
-    add(&mut rows, Kind::Stock(true), pinned, None, When::NotScanning);
-    add(&mut rows, Kind::Foldout(true), pinned, None, When::NotScanning);
-    add(&mut rows, Kind::DevTime(true), pinned, None, When::PaperTimes);
-    add(&mut rows, Kind::PaperSkipped, pinned, None, When::Scanning);
-
     let prep = Tab::Prep;
+    // An untitled section: 8 DIPs, the white balance, a rule.
+    add(&mut rows, Kind::Section(""), prep, None, When::Raw);
     add(&mut rows, Kind::Choice("White balance", "io.raw_white_balance.mode", state::WHITE_BALANCE), prep, None, When::Raw);
     add(&mut rows, Kind::Slider(state::WB_TEMPERATURE), prep, None, When::CustomWhiteBalance);
     add(&mut rows, Kind::Slider(state::WB_TINT), prep, None, When::CustomWhiteBalance);
+    // Your negative: the film base, the scan light and the balance.
+    add(&mut rows, Kind::Section("Film base"), prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::NegativeBase), prep, None, When::Note);
+    add(&mut rows, Kind::Note(Note::NegativeWarning), prep, None, When::Note);
+    add(&mut rows, Kind::Note(Note::NegativeGuess), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(FIND_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::FlatField, prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::FlatField), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(CROP_BUTTONS), prep, None, When::Negative);
+    // Behind "Backlight…", as on the Mac: Daylight suits most light pads and scanners.
+    add(&mut rows, Kind::Choice("Backlight", crate::negative::SCAN_ILLUMINANT, &["D55", "D50", "D65"]), prep, None, When::Backlight);
+    add(&mut rows, Kind::More(More::Backlight), prep, None, When::More(More::Backlight));
+    add(&mut rows, Kind::Note(Note::Roll), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(ROLL_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::Section("Balance"), prep, None, When::Negative);
+    add(&mut rows, Kind::Footer("Balance Print ran when the base was found, and the print exposure was metered. Auto prints this frame as a minilab would, and runs again on each new paper; the picker balances on something grey. Both set Lab › Enlarger."), prep, None, When::Negative);
+    add(&mut rows, Kind::Actions(BALANCE_BUTTONS), prep, None, When::Negative);
+    add(&mut rows, Kind::Note(Note::OwnFiltration), prep, None, When::Note);
+    add(&mut rows, Kind::Actions(ROLL_FILTRATION_BUTTONS), prep, None, When::OwnFiltration);
+    add(&mut rows, Kind::Note(Note::NegativeDaylight), prep, None, When::Note);
+    let scene = rows.len();
     add(&mut rows, Kind::Section("Brightness"), prep, None, When::Always);
     add(&mut rows, Kind::MatchBrightness, prep, None, When::Always);
     add(&mut rows, Kind::ExposureOffset, prep, None, When::Always);
@@ -436,9 +557,13 @@ fn rows() -> Vec<Row> {
             add(&mut rows, Kind::Slider(*slider), prep, None, When::Always);
         }
     }
+    for row in &mut rows[scene..] {
+        row.scene = true;
+    }
     // How the file is read; set once per photograph.
     add(&mut rows, Kind::Section("Lens"), prep, None, When::LensCorrection);
     add(&mut rows, Kind::Toggle("Lens corrections", state::LENS_CORRECTION), prep, None, When::LensCorrection);
+    add(&mut rows, Kind::Section(""), prep, None, When::NotRaw);
     let input = add(&mut rows, Kind::Group { title: "Input Colour", enable: None }, prep, None, When::NotRaw);
     add(&mut rows, Kind::Choice("Read as", "io.input_interpretation.mode", state::INPUT_MODES), prep, Some(input), When::NotRaw);
     add(&mut rows, Kind::Choice("Colour space", "io.input_interpretation.color_space", state::ASSUMED_SPACES), prep, Some(input), When::AssumeInput);
@@ -460,6 +585,7 @@ fn rows() -> Vec<Row> {
                     Adjustment::Toggle { title, path } => Kind::Toggle(title, path),
                     Adjustment::Choice { title, path, options } => Kind::Choice(title, path, options),
                     Adjustment::BalancePrint { title, help } => Kind::BalancePrint(title, help),
+                    Adjustment::FilterLink { help } => Kind::FilterLink(help),
                     slider => Kind::Slider(slider),
                 };
                 let when = if state::color_only(control.path()) { When::ColorFilm } else { When::Always };
@@ -467,29 +593,47 @@ fn rows() -> Vec<Row> {
                 rows[row].print = section == Section::Print;
                 rows[row].basic = Some((index, place));
             }
+            let more = More::Module(index);
+            let row = add(rows, Kind::More(more), lab, Some(header), When::More(more));
+            rows[row].print = section == Section::Print;
         }
     };
+    let section_more = |rows: &mut Vec<Row>, section: Section| {
+        let more = More::Section(section);
+        add(rows, Kind::More(more), lab, None, When::More(more));
+    };
+    // View › Show All Controls says so where it shows, with the way back.
+    add(&mut rows, Kind::More(More::All), lab, None, When::More(More::All));
     add(&mut rows, Kind::Section("Camera"), lab, None, When::Always);
+    add(&mut rows, Kind::Footer("The camera is skipped: your negative was exposed already."), lab, None, When::Negative);
     add(&mut rows, Kind::Slider(state::NEGATIVE_EXPOSURE), lab, None, When::Always);
     add(&mut rows, Kind::FilmFormat, lab, None, When::Always);
     add(&mut rows, Kind::Slider(state::FILM_FORMAT), lab, None, When::CustomFormat);
-    add(&mut rows, Kind::Slider(state::LENS_BLUR), lab, None, When::Shows(state::LENS_BLUR.path()));
+    add(&mut rows, Kind::Slider(state::LENS_BLUR), lab, None, When::Shows(Section::Camera, state::LENS_BLUR.path()));
+    // Its switch takes the glass off and puts the last one back.
+    let filter = add(&mut rows, Kind::Group { title: "Color Filter", enable: Some(state::ColorFilter::PATH) }, lab, None, When::ColorFilter);
+    add(&mut rows, Kind::ColorFilter, lab, Some(filter), When::ColorFilter);
     groups(&mut rows, Section::Camera);
+    section_more(&mut rows, Section::Camera);
     add(&mut rows, Kind::Section("Film"), lab, None, When::Always);
+    add(&mut rows, Kind::Footer("Your negative is read through the film's curves and base. Its grain, halation and couplers are skipped: the negative has them already."), lab, None, When::Negative);
+    // The stock's development time, from the times it was measured at.
+    add(&mut rows, Kind::DevTime(false), lab, None, When::FilmTimes);
     groups(&mut rows, Section::Film);
+    section_more(&mut rows, Section::Film);
     add(&mut rows, Kind::Section("Print"), lab, None, When::Always);
+    add(&mut rows, Kind::DevTime(true), lab, None, When::PaperTimes);
     // Here rather than beside the stocks: few photographs want it.
     add(&mut rows, Kind::Toggle("Scan film directly", "io.scan_film"), lab, None, When::ScanToggle);
-    groups(&mut rows, Section::Print);
     add(&mut rows, Kind::Footer("Printing and the paper are skipped while scanning film directly."), lab, None, When::Scanning);
-    add(&mut rows, Kind::Section("Scan & Color"), lab, None, When::ScanSection);
+    groups(&mut rows, Section::Print);
+    section_more(&mut rows, Section::Print);
+    add(&mut rows, Kind::Section("Scan & Color"), lab, None, When::Always);
     groups(&mut rows, Section::Scan);
     let output = add(&mut rows, Kind::Group { title: "Output", enable: None }, lab, None, When::OutputGroup);
     add(&mut rows, Kind::PreviewSpace, lab, Some(output), When::OutputGroup);
     add(&mut rows, Kind::Toggle("Encode with the colour space’s curve", "io.output_cctf_encoding"), lab, Some(output), When::OutputGroup);
-    add(&mut rows, Kind::Section(""), lab, None, When::Always);
-    add(&mut rows, Kind::AllControls, lab, None, When::Always);
-    add(&mut rows, Kind::Note(Note::AllControls), lab, None, When::Always);
+    section_more(&mut rows, Section::Scan);
 
     // The size and frame of the finished photograph. Tone and colour edits
     // live in Prep, before the film, where nothing has clipped yet.
@@ -527,32 +671,49 @@ pub fn build(app: &mut App) {
     ins.decimal = decimal_separator();
     ins.scope_height = app.model.prefs.scope_height.clamp(SCOPE_HEIGHTS.0, SCOPE_HEIGHTS.1).round();
     let visible = WS_CHILD | WS_VISIBLE;
-    ins.scope_mode = create(w!("COMBOBOX"), "", visible | WS_TABSTOP | WS_GROUP | WINDOW_STYLE(CBS_DROPDOWNLIST as u32), WINDOW_EX_STYLE(0), ins.panel, SCOPE_MODE, fonts.small);
-    for title in ["Histogram", "Waveform"] {
-        let text = wide(title);
-        unsafe {
-            SendMessageW(ins.scope_mode, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
-        }
+    // Histogram · Waveform as words, like the pane header's.
+    let word_style = visible | WS_TABSTOP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
+    for (i, (id, title)) in [(SCOPE_HISTOGRAM, "Histogram"), (SCOPE_WAVEFORM, "Waveform")].into_iter().enumerate() {
+        let word = create(w!("BUTTON"), title, word_style | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, id, fonts.small);
+        draw::set_role(word, Role::ScopeWord);
+        draw::track_hover(word);
+        ins.scope_words[i] = word;
     }
-    draw::paint_combo(ins.scope_mode);
-    super::accessible_name(ins.scope_mode, "Scope view");
-    ins.scope_label = create(w!("STATIC"), "RGB", visible | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), ins.panel, 0, fonts.small);
+    ins.scope_label = create(w!("STATIC"), "RGB", visible | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0 | SS_CENTERIMAGE.0), WINDOW_EX_STYLE(0), ins.panel, 0, fonts.small);
     ins.scope = create(w!("NegsScope"), "Histogram", visible, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
-    ins.grip = create(w!("NegsScopeGrip"), "Scope height", visible | WS_TABSTOP, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
+    ins.grip = create(w!("NegsScopeGrip"), "Scope height", visible | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
     draw::track_hover(ins.grip);
     super::dialogs::tooltip(ins.grip, "Drag to resize the scope; double-click for its smallest height");
-    ins.pinned = create(w!("NegsRows"), "", visible | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
+    // Prep · Lab · Output in type (§4.8).
     let tab_style = visible | WS_TABSTOP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
     for (i, (id, title)) in TABS.into_iter().enumerate() {
         ins.tabs[i] = create(w!("BUTTON"), title, tab_style | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, id, fonts.ui);
-        // Prep | Lab | Output: Lab is the switch's middle segment.
-        if i == 1 {
-            draw::set_role(ins.tabs[i], Role::SegmentMiddle);
-        }
+        draw::set_role(ins.tabs[i], Role::TabWord);
+        draw::track_hover(ins.tabs[i]);
+    }
+    // Their counts after the switch, so the arrows keep to the tabs.
+    for i in 0..3 {
+        let count = create(w!("BUTTON"), "", WS_CHILD | WS_TABSTOP | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, TAB_COUNT + i as u16, fonts.small);
+        draw::set_role(count, Role::Count);
+        draw::track_hover(count);
+        ins.counts[i] = count;
     }
     ins.rows_panel = create(w!("NegsRows"), "", visible | WS_VSCROLL | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
-    ins.reset = create(w!("BUTTON"), "Reset Adjustments", visible | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, RESET_ALL, fonts.ui);
-    super::dialogs::tooltip(ins.reset, "Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.");
+    ins.foot_summary = create(w!("STATIC"), "", WS_CHILD | WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), ins.panel, FOOT_SUMMARY, fonts.ui);
+    draw::set_role(ins.foot_summary, Role::Summary);
+    super::accessible_role(ins.foot_summary, 0x29);
+    ins.export = create(w!("BUTTON"), "Export Photograph…", WS_CHILD | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, super::id::EXPORT, fonts.ui);
+    draw::set_role(ins.export, Role::Export);
+    draw::track_hover(ins.export);
+    super::dialogs::tooltip(ins.export, "Export photograph (Ctrl+Shift+E)");
+    for (i, kind) in crate::lightroom::Kind::ALL.into_iter().enumerate() {
+        let id = super::id::LIGHTROOM + i as u16;
+        let c = create(w!("BUTTON"), &format!("Open in {}", kind.title()), WS_CHILD | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), ins.panel, id, fonts.ui);
+        draw::set_role(c, Role::WordButton);
+        draw::track_hover(c);
+        super::dialogs::tooltip(c, &format!("Open the photograph in {} as full-size 16-bit TIFFs", kind.title()));
+        ins.lightroom[i] = c;
+    }
     ins.rows = rows();
     ins.built = true;
     ITEM_HEIGHT.with(|h| h.set(ins.px(20.0)));
@@ -572,10 +733,7 @@ pub fn dpi_changed(app: &mut App) {
         for (i, &c) in row.controls.iter().enumerate() {
             // The font each control was created with, at the new size.
             let f = match (row.kind, i) {
-                (Kind::Section(_), _) => fonts.section,
-                (Kind::Footer(_) | Kind::Note(_) | Kind::BorderStyles | Kind::ToneGraph, _) => fonts.small,
-                (Kind::Group { .. }, 0) => fonts.bold,
-                (Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset, 3) => fonts.glyph_small,
+                (Kind::BorderStyles | Kind::ToneGraph, _) => fonts.small,
                 _ => fonts.ui,
             };
             unsafe {
@@ -583,12 +741,12 @@ pub fn dpi_changed(app: &mut App) {
             }
         }
     }
-    for &c in ins.tabs.iter().chain([&ins.reset]).chain([&ins.film_search].into_iter().filter(|s| !s.is_invalid())) {
+    for &c in ins.tabs.iter().chain([&ins.export]) {
         unsafe {
             SendMessageW(c, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
         }
     }
-    for &c in [&ins.scope_mode, &ins.scope_label] {
+    for &c in ins.scope_words.iter().chain([&ins.scope_label]) {
         let small = app.fonts.small;
         unsafe {
             SendMessageW(c, WM_SETFONT, WPARAM(small.0 as usize), LPARAM(1));
@@ -597,12 +755,6 @@ pub fn dpi_changed(app: &mut App) {
     if let Some(crop) = app.inspector.crop.take() {
         unsafe {
             let _ = DestroyWindow(crop.panel);
-        }
-    }
-    // Built again at the new size when shown.
-    for grid in app.inspector.grids.iter_mut().filter_map(Option::take) {
-        unsafe {
-            let _ = DestroyWindow(grid.window);
         }
     }
 }
@@ -620,18 +772,6 @@ fn output_changed(model: &Model) -> bool {
     model.preview_space() != crate::model::COLOR_SPACES[0] || model.is_modified("io.output_cctf_encoding")
 }
 
-fn control_modified(model: &Model, control: &Adjustment) -> bool {
-    !matches!(control, Adjustment::BalancePrint { .. }) && model.is_modified(control.path())
-}
-
-/// Whether the Lab shows a group: it has basics, or something in it changed.
-fn group_shows(model: &Model, group: &state::AdjustmentGroup) -> bool {
-    model.prefs.lab_all_controls
-        || group.basic > 0
-        || group.enable.is_some_and(|path| model.is_modified(path))
-        || group.controls.iter().any(|c| control_modified(model, c))
-}
-
 fn photo_size(model: &Model) -> Option<(u32, u32)> {
     let size = model.photo_size();
     (!size.is_zero()).then(|| (size.width as u32, size.height as u32))
@@ -647,11 +787,12 @@ fn stock_times(model: &Model, paper: bool) -> Vec<f64> {
 fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> bool {
     let scanning = json::boolean(model.value("io.scan_film"));
     let border = model.state.border;
-    let all = model.prefs.lab_all_controls;
+    if row.scene && model.is_negative() {
+        return false;
+    }
     let shown = match row.when {
         When::Always => true,
         When::FilmTimes => stock_times(model, false).len() > 1,
-        When::NotScanning => !scanning,
         When::PaperTimes => !scanning && stock_times(model, true).len() > 1,
         When::Raw => model.is_raw,
         When::LensCorrection => model.is_raw && model.lens_supported,
@@ -661,36 +802,75 @@ fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> boo
         When::CustomWhiteBalance => model.is_raw && json::string(model.value("io.raw_white_balance.mode")) == "custom",
         When::Scanning => scanning,
         When::ColorFilm => !model.film_is_bw(),
+        When::ColorFilter => model.shows_color_filter(),
+        When::Negative => model.is_negative(),
+        When::Backlight => model.is_negative() && model.negative.backlight_shown,
+        When::OwnFiltration => model.is_negative() && model.state.roll.as_ref().is_some_and(|r| !r.filtered(&model.state)),
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
         When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
         When::Note => matches!(row.kind, Kind::Note(note) if !note_text(model, note).is_empty()),
         When::Meter => model.shows_meter(),
         When::MeterAuto => model.shows_meter() && json::boolean(model.value("camera.auto_exposure")),
         When::CustomFormat => model.film_format_custom(),
-        When::Shows(path) => all || model.is_modified(path),
-        When::ScanToggle => all || scanning,
-        When::ScanSection => {
-            all || output_changed(model) || ADJUSTMENT_GROUPS.iter().any(|g| g.section == Section::Scan && group_shows(model, g))
-        }
-        When::OutputGroup => all || output_changed(model),
-        When::Group(index) => group_shows(model, &ADJUSTMENT_GROUPS[index]),
+        When::Shows(section, path) => crate::edits::shows_section(model, section) || model.is_modified(path),
+        When::ScanToggle => scanning || crate::edits::shows_section(model, Section::Print),
+        When::OutputGroup => output_changed(model) || crate::edits::shows_section(model, Section::Scan),
+        When::More(more) => more_line(model, more).is_some(),
+        When::Group(index) => crate::edits::group_shows(model, index),
         When::Mat => matches!(border.style, BorderStyle::Solid | BorderStyle::Keyline),
         When::Keyline => border.style == BorderStyle::Keyline,
         When::FilmStyle => border.style == BorderStyle::Film,
     };
-    // The previews setting shows the foldouts or the menus.
-    let shown = shown
-        && match row.kind {
-            Kind::Stock(_) => !model.prefs.previews,
-            Kind::Foldout(_) => model.prefs.previews,
-            _ => true,
-        };
-    // The Lab shows each group's basics, and anything changed from its default.
-    let basic = row.basic.is_none_or(|(index, place)| {
-        let group = &ADJUSTMENT_GROUPS[index];
-        all || place < group.basic || control_modified(model, &group.controls[place])
-    });
+    // The Lab shows each module's basics, those revealed, and anything
+    // changed from its default.
+    let basic = row.basic.is_none_or(|(index, place)| crate::edits::control_shows(model, index, place));
     shown && basic && row.group.is_none_or(|g| group_shown(g))
+}
+
+/// A Film module a negative skips: it has its grain, halation and couplers already.
+fn negative_skips(model: &Model, title: &str) -> bool {
+    NEGATIVE_SKIPS.contains(&title) && model.is_negative()
+}
+
+/// A module's switch: on for a bool path, and for Color Filter while a
+/// glass is in front of the lens.
+fn switch_on(model: &Model, path: &str) -> bool {
+    if path == state::ColorFilter::PATH { model.color_filter() != state::ColorFilter::NONE } else { json::boolean(model.value(path)) }
+}
+
+/// Under Color Filter's discs: what the glass does and costs this film, and
+/// on colour film the warning (`ColorFilterPicker`).
+fn color_filter_hints(model: &Model, decimal: char) -> (String, String) {
+    let chosen = model.chosen_color_filter();
+    let film = model.stocks.iter().find(|s| !s.paper && s.id == model.state.film).map_or("this film", |s| s.name.as_str());
+    // Auto exposure meters through the glass, and so does matching the camera's brightness.
+    let metered = json::boolean(model.value("camera.auto_exposure")) || model.matches_brightness();
+    let stops = chosen.and_then(|f| model.color_filter_stops(&f.key));
+    let hint = state::ColorFilter::hint(chosen, stops, film, metered, decimal);
+    let warning = if chosen.is_some() && !model.film_is_bw() {
+        "Taking filters are made for black-and-white film. On colour film this one tints the whole photograph.".to_string()
+    } else {
+        String::new()
+    };
+    (hint, warning)
+}
+
+/// What an export makes, over the Export button: "6048 × 4024 · PNG 16-bit
+/// · sRGB", from the last save's choices (`ExportFoot.summary`).
+fn export_summary(model: &Model) -> String {
+    use crate::model::{OutputFormat, SaveSettings, COLOR_SPACES, QUALITY_RANGE};
+    let prefs = &model.prefs;
+    let format = OutputFormat::from_key(&prefs.output_format);
+    let depth = |d: u32| if d == 16 { 16 } else { 8 };
+    let (kind, bits) = match format {
+        OutputFormat::Jpeg => (format!("JPEG {}", prefs.jpeg_quality.clamp(QUALITY_RANGE.0, QUALITY_RANGE.1)), 8),
+        OutputFormat::Png => (format!("PNG {}-bit", depth(prefs.png_bit_depth)), depth(prefs.png_bit_depth)),
+        OutputFormat::Tiff => (format!("TIFF {}-bit", depth(prefs.tiff_bit_depth)), depth(prefs.tiff_bit_depth)),
+    };
+    let chosen = COLOR_SPACES.iter().position(|s| *s == prefs.color_space).unwrap_or(0);
+    let space = COLOR_SPACES[SaveSettings::effective_space(chosen, bits)];
+    let size = photo_size(model).map(|(w, h)| format!("{w} × {h}"));
+    size.into_iter().chain([kind, space.to_string()]).collect::<Vec<_>>().join(" · ")
 }
 
 /// A note's text; empty hides it.
@@ -698,8 +878,30 @@ fn note_text(model: &Model, note: Note) -> String {
     match note {
         Note::Size => size_note(model),
         Note::Brightness => model.brightness_match_note().unwrap_or_default(),
-        Note::AllControls if model.prefs.lab_all_controls => "Every camera, film, print and scan setting.".into(),
-        Note::AllControls => "The settings most photographs need. Any setting you or a preset changed also shows.".into(),
+        _ if !model.is_negative() => String::new(),
+        Note::NegativeBase => model.negative_sentence(),
+        Note::NegativeWarning => model.negative_warning().unwrap_or_default().into(),
+        Note::NegativeGuess => match model.negative_base() {
+            Some(base) if base.guessed() && model.state.roll.is_some() => "Pick from the rebate if the scan shows clear film; otherwise Use for whole roll on a frame that has it.".into(),
+            Some(base) if base.guessed() => "Pick from the rebate if the scan shows clear film; otherwise this guess can tint the print.".into(),
+            _ => String::new(),
+        },
+        Note::FlatField => model.flat_field().hint().unwrap_or_default(),
+        Note::Roll if model.is_negative() && model.state.roll.is_some() => {
+            "A frame of a roll: the film, backlight, base and filtration are the roll\u{2019}s; the print exposure is this frame\u{2019}s own.".into()
+        }
+        Note::OwnFiltration if model.is_negative() => match &model.state.roll {
+            Some(roll) if !roll.filtered(&model.state) => roll.own_filtration(&model.state).into(),
+            _ => String::new(),
+        },
+        Note::Roll | Note::OwnFiltration => String::new(),
+        Note::NegativeDaylight => {
+            if model.is_raw && json::string(model.value("io.raw_white_balance.mode")) != "daylight" {
+                "Set White balance to Daylight for a negative on a daylight backlight; As shot can tint it.".into()
+            } else {
+                String::new()
+            }
+        }
     }
 }
 
@@ -786,46 +988,96 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
     sync_crop(app);
     let cropping = app.model.cropping();
     let ins = &mut app.inspector;
+    let current = tab(&app.model);
+    let foot = current == Tab::Output;
     unsafe {
-        for c in [ins.scope, ins.scope_mode, ins.scope_label, ins.grip, ins.pinned, ins.tabs[0], ins.tabs[1], ins.tabs[2], ins.rows_panel, ins.reset] {
+        let frame = [ins.scope, ins.scope_words[0], ins.scope_words[1], ins.scope_label, ins.grip, ins.tabs[0], ins.tabs[1], ins.tabs[2], ins.rows_panel];
+        for c in frame {
             let _ = ShowWindow(c, if cropping { SW_HIDE } else { SW_SHOWNA });
+        }
+        for c in [ins.foot_summary, ins.export] {
+            let _ = ShowWindow(c, if cropping || !foot { SW_HIDE } else { SW_SHOWNA });
+        }
+        let kinds = app.model.lightroom_kinds();
+        for (i, kind) in crate::lightroom::Kind::ALL.into_iter().enumerate() {
+            let _ = ShowWindow(ins.lightroom[i], if cropping || !foot || !kinds.contains(&kind) { SW_HIDE } else { SW_SHOWNA });
+        }
+        if ins.lightroom_shown != kinds {
+            ins.lightroom_shown = kinds;
+            ins.layout_frame();
         }
     }
     if cropping {
+        for c in ins.counts {
+            unsafe {
+                let _ = ShowWindow(c, SW_HIDE);
+            }
+        }
         app.model.show_tone_graph(false);
         return;
     }
-    let current = tab(&app.model);
+    // The Export foot on Output (§4.11).
+    if ins.foot_shown != foot {
+        ins.foot_shown = foot;
+        ins.layout_frame();
+    }
+    if foot {
+        set_text(ins.foot_summary, &export_summary(&app.model));
+        let can = app.model.can_export() && !app.model.cropping();
+        enable(ins.export, can);
+        for (i, kind) in crate::lightroom::Kind::ALL.into_iter().enumerate() {
+            enable(ins.lightroom[i], app.model.can_open_in_lightroom(kind));
+        }
+    }
+    // Each tab's count, and the header's "3 edits" and Reset.
+    let counts = EDIT_TABS.map(|t| crate::edits::count(t, &app.model));
+    if counts != ins.tab_counts {
+        ins.tab_counts = counts;
+        for (i, &count) in counts.iter().enumerate() {
+            let words = |n: usize| if n == 1 { "edit" } else { "edits" };
+            let title = TABS[i].1;
+            unsafe {
+                let _ = ShowWindow(ins.counts[i], if count > 0 { SW_SHOWNA } else { SW_HIDE });
+            }
+            set_text(ins.counts[i], &count.to_string());
+            super::accessible_name(ins.counts[i], &format!("{count} {} on {title}", words(count)));
+            super::dialogs::tooltip(ins.counts[i], &format!("Show the {} on {title}", words(count)));
+            super::accessible_name(ins.tabs[i], &if count > 0 { format!("{title}, {count} {}", words(count)) } else { title.to_string() });
+        }
+        ins.layout_frame();
+    }
+    let total = if app.model.source.is_some() { counts.iter().sum() } else { 0 };
+    super::panes::sync_edits(app.panes, total, app.model.has_catalog() && !app.model.cropping(), app.model.can_change_presets());
+    let ins = &mut app.inspector;
     unsafe {
         for (i, tab) in [Tab::Prep, Tab::Lab, Tab::Output].into_iter().enumerate() {
             SendMessageW(ins.tabs[i], BM_SETCHECK, WPARAM((current == tab) as usize), LPARAM(0));
         }
-        let _ = EnableWindow(ins.reset, app.model.has_catalog());
-        let mode = (app.model.prefs.scope_mode == "Waveform") as isize;
-        if SendMessageW(ins.scope_mode, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != mode {
-            SendMessageW(ins.scope_mode, CB_SETCURSEL, WPARAM(mode as usize), LPARAM(0));
-            super::accessible_name(ins.scope, if mode == 1 { "RGB waveform" } else { "Histogram" });
+        let waveform = app.model.prefs.scope_mode == "Waveform";
+        for (i, &word) in ins.scope_words.iter().enumerate() {
+            if (SendMessageW(word, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1) != (waveform == (i == 1)) {
+                SendMessageW(word, BM_SETCHECK, WPARAM((waveform == (i == 1)) as usize), LPARAM(0));
+                super::accessible_name(ins.scope, if waveform { "RGB waveform" } else { "Histogram" });
+            }
         }
     }
     let model = &app.model;
-    let expanded: Vec<bool> = ins.rows.iter().map(|r| matches!(r.kind, Kind::Group { .. }) && model.prefs.expanded(row_title(&r.kind))).collect();
+    let scanning = json::boolean(model.value("io.scan_film"));
+    // Scanning the film skips the print's modules: struck, their bodies hidden.
+    let expanded: Vec<bool> =
+        ins.rows.iter().map(|r| matches!(r.kind, Kind::Group { .. }) && model.prefs.expanded(row_title(&r.kind)) && !(r.print && scanning)).collect();
     // A group's rows show only below its header, on screen and open.
     let mut want = vec![false; ins.rows.len()];
     for (i, row) in ins.rows.iter().enumerate() {
-        let on_tab = row.tab == current || row.tab == Tab::Pinned;
-        let shown = on_tab && visible(row, model, &|g| want[g] && expanded[g]);
+        let shown = row.tab == current && visible(row, model, &|g| want[g] && expanded[g]);
         want[i] = shown;
     }
-    // Rows and grids appearing and going (a tab, a group, a foldout) change
-    // while the column doesn't draw, then it paints once: shown one by one,
-    // rows drew at their old places, over a part-cleared panel, before the
-    // layout moved them. The tabs used to fade the rows in instead, a
-    // layered window that blanked them first and flashed again when it ended.
-    let foldout_changed = |paper: bool| {
-        let open = model.previews.open(paper) && ins.rows.iter().zip(&want).any(|(r, w)| r.kind == Kind::Foldout(paper) && *w);
-        open != ins.grids[paper as usize].as_ref().is_some_and(|g| g.was_open)
-    };
-    let lock = !held && (want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown) || foldout_changed(false) || foldout_changed(true));
+    // Rows appearing and going (a tab, a group) change while the column
+    // doesn't draw, then it paints once: shown one by one, rows drew at
+    // their old places, over a part-cleared panel, before the layout moved
+    // them. The tabs used to fade the rows in instead, a layered window
+    // that blanked them first and flashed again when it ended.
+    let lock = !held && want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown);
     if lock {
         hold_redraw(ins.panel, true);
     }
@@ -851,58 +1103,31 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
             }
         }
     }
-    // An open foldout's tiles, built the first time it opens, and again when
-    // the catalog or the favourites change.
-    for paper in [false, true] {
-        let key = grid_key(model, paper);
-        let open = model.previews.open(paper) && ins.rows.iter().any(|r| r.kind == Kind::Foldout(paper) && r.shown);
-        // A grid rebuilt while open keeps its scroll and the tile under the
-        // pointer, rather than jumping back to the current stock.
-        let mut kept = None;
-        if ins.grids[paper as usize].as_ref().is_some_and(|g| g.key != key) {
-            if let Some(grid) = ins.grids[paper as usize].take() {
-                kept = grid.was_open.then(|| (grid.scroll, pointed_tile(&grid)));
-                // The hovered tile's position now names another tile.
-                if HOVER_TILE.get().is_some_and(|(p, _)| p == paper) {
-                    HOVER_TILE.set(None);
-                }
-                unsafe {
-                    let _ = DestroyWindow(grid.window);
-                }
-            }
-        }
-        if open && ins.grids[paper as usize].is_none() && model.has_catalog() {
-            let mut grid = build_grid(ins.pinned, &app.fonts, model, paper, key);
-            if let Some((scroll, anchor)) = kept {
-                (grid.scroll, grid.was_open, grid.anchor) = (scroll, true, anchor);
-            }
-            ins.grids[paper as usize] = Some(grid);
-            if !paper && ins.film_search.is_invalid() {
-                ins.film_search = create_film_search(ins.pinned, &app.fonts, model);
-            }
-            created = true;
-            fix_z_order(ins);
-        }
-    }
-    // The search changed elsewhere: Settings turning previews off clears it.
-    let refiltered = sync_film_search(ins, model);
     // A note's height follows its text, so set it before laying out.
     let mut note_changed = false;
     for row in ins.rows.iter().filter(|r| r.shown) {
-        if let Kind::Note(note) = row.kind {
-            let text = note_text(model, note);
-            if window_text(row.controls[0]) != text {
-                set_text(row.controls[0], &text);
+        let texts = match row.kind {
+            Kind::Note(note) => vec![(row.controls[0], note_text(model, note))],
+            Kind::ColorFilter => {
+                let (hint, warning) = color_filter_hints(model, ins.decimal);
+                vec![(row.controls[1], hint), (row.controls[2], warning)]
+            }
+            _ => continue,
+        };
+        for (control, text) in texts {
+            if window_text(control) != text {
+                set_text(control, &text);
                 note_changed = true;
             }
         }
     }
     let t1 = crate::platform::qpc();
-    if changed || created || structure || note_changed || refiltered {
+    if changed || created || structure || note_changed {
         layout_rows(ins, model);
     }
     let t2 = crate::platform::qpc();
     update_values(ins, model, &expanded);
+    let t_paint = crate::platform::qpc();
     if lock {
         hold_redraw(ins.panel, false);
     }
@@ -912,42 +1137,77 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
     app.model.show_tone_graph(graph && app.model.inspector_visible && app.model.pane() == crate::model::Pane::Adjustments);
     if created {
         let ms = |a, b| crate::platform::qpc_ms(a, b);
-        app.report.line(&format!("inspector sync: create {:.1} ms, layout {:.1} ms, values {:.1} ms", ms(t0, t1), ms(t1, t2), ms(t2, t3)));
+        app.report.line(&format!("inspector sync: create {:.1} ms, layout {:.1} ms, values {:.1} ms (painting {:.1} ms)", ms(t0, t1), ms(t1, t2), ms(t2, t3), ms(t_paint, t3)));
     }
 }
 
 fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
-    let parent = if ins.rows[index].tab == Tab::Pinned { ins.pinned } else { ins.rows_panel };
+    let parent = ins.rows_panel;
     let id = |part: u16| FIRST_ID + index as u16 * PARTS + part;
     let kind = ins.rows[index].kind;
     let hidden = WS_CHILD;
-    let label = |text: &str, font: HFONT| create(w!("STATIC"), text, hidden | WINDOW_STYLE(SS_NOTIFY.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), font);
-    let check = |text: &str| create(w!("BUTTON"), text, hidden | WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), WINDOW_EX_STYLE(0), parent, id(CHECK), fonts.ui);
+    // Owner-drawn statics in ink (`ink::draw_item`), which keep their text
+    // for UI Automation.
+    let ink_static = |text: &str, role: Role, part: u16, notify: bool| {
+        let style = SS_OWNERDRAW.0 | SS_NOPREFIX.0 | if notify { SS_NOTIFY.0 } else { 0 };
+        let c = create(w!("STATIC"), text, hidden | WINDOW_STYLE(style), WINDOW_EX_STYLE(0), parent, id(part), fonts.ui);
+        draw::set_role(c, role);
+        // Text, as the plain statics were, not a graphic.
+        super::accessible_role(c, 0x29);
+        if notify {
+            draw::track_hover(c);
+        }
+        c
+    };
+    let label = |text: &str, _: HFONT| ink_static(text, Role::Label, LABEL, true);
+    let check = |text: &str| {
+        let c = create(w!("BUTTON"), text, hidden | WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), WINDOW_EX_STYLE(0), parent, id(CHECK), fonts.ui);
+        draw::set_role(c, Role::Tick);
+        draw::track_hover(c);
+        c
+    };
     let combo = |owner_draw: bool| {
         let style = CBS_DROPDOWNLIST as u32 | WS_VSCROLL.0 | if owner_draw { (CBS_OWNERDRAWFIXED | CBS_HASSTRINGS) as u32 } else { 0 };
         let c = create(w!("COMBOBOX"), "", hidden | WS_TABSTOP | WINDOW_STYLE(style), WINDOW_EX_STYLE(0), parent, id(COMBO), fonts.ui);
         unsafe {
             SendMessageW(c, CB_SETMINVISIBLE, WPARAM(30), LPARAM(0));
+            // The closed box as tall as the row's line.
+            SendMessageW(c, CB_SETITEMHEIGHT, WPARAM(usize::MAX), LPARAM(ins.px(ink::ROW) as isize - 6));
         }
+        draw::set_role(c, Role::Choice);
         draw::paint_combo(c);
         c
     };
     let mut controls = vec![];
     match kind {
-        Kind::Section(title) => controls.push(label(title, fonts.section)),
-        Kind::Footer(text) => {
-            let footer = create(w!("STATIC"), text, hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), fonts.small);
-            controls.push(footer);
+        Kind::Section(title) => {
+            // Small capitals, read as the title.
+            let head = ink_static(&title.to_uppercase(), Role::Section, LABEL, false);
+            if !title.is_empty() {
+                super::accessible_name(head, title);
+            }
+            controls.push(head);
+        }
+        Kind::Footer(text) => controls.push(ink_static(text, Role::Hint, LABEL, false)),
+        Kind::More(_) => {
+            let more = create(w!("BUTTON"), "", hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
+            draw::set_role(more, Role::More);
+            draw::track_hover(more);
+            super::dialogs::tooltip(more, "Shows them here. View › Show All Controls shows every control.");
+            controls.push(more);
         }
         Kind::Group { title, enable } => {
             let header = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.bold);
+            draw::set_role(header, Role::Module);
             draw::track_hover(header);
             if let Some(help) = crate::help::group(title) {
                 super::dialogs::tooltip(header, help);
             }
             controls.push(header);
             if enable.is_some() {
-                let on = check("On");
+                // The module's own tick box, at the end of its line.
+                let on = check("");
+                super::accessible_name(on, &format!("{title} on"));
                 super::dialogs::tooltip(on, &format!("Turns {title} on or off, keeping its settings."));
                 controls.push(on);
             }
@@ -980,17 +1240,19 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 SendMessageW(slider, TBM_SETPAGESIZE, WPARAM(0), LPARAM((steps / 10).max(1)));
                 let _ = SetWindowSubclass(slider, Some(trackbar_subclass), 1, id(RESET) as usize);
             }
+            draw::set_role(slider, Role::InkSlider);
             draw::track_hover(slider);
             controls.push(slider);
             let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
-            draw::set_role(edit, Role::Value);
+            ink::value_box(edit);
             draw::track_hover(edit);
             super::accessible_name(edit, title);
             unsafe {
                 let _ = SetWindowSubclass(edit, Some(edit_subclass), 1, 0);
             }
             controls.push(edit);
-            let reset = create(w!("BUTTON"), "\u{E777}", hidden | WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.glyph_small);
+            let reset = create(w!("BUTTON"), "↺", hidden | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.ui);
+            draw::set_role(reset, Role::ResetMark);
             draw::track_hover(reset);
             super::accessible_name(reset, &format!("Reset {title} to Default"));
             controls.push(reset);
@@ -1016,11 +1278,6 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             controls.push(c);
         }
         Kind::MatchBrightness => controls.push(check("Match camera brightness")),
-        Kind::AllControls => {
-            let c = check("Advanced controls");
-            super::dialogs::tooltip(c, "Shows every Lab setting. Off, the Lab shows the few most photographs need, and any that you or a preset changed.");
-            controls.push(c);
-        }
         Kind::FilmFormat => {
             controls.push(label("Film format", fonts.ui));
             let c = combo(false);
@@ -1033,11 +1290,10 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             super::dialogs::tooltip(c, crate::help::text(state::FILM_FORMAT.path()).unwrap_or_default());
             controls.push(c);
         }
-        Kind::PaperSkipped => {
-            controls.push(label("Paper", fonts.ui));
-            let value = create(w!("STATIC"), "Skipped – scanning film", hidden | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
-            super::dialogs::tooltip(value, "Scan film directly is on in the Lab’s Print section.");
-            controls.push(value);
+        Kind::ColorFilter => {
+            controls.push(super::color_filter::create(parent, id(ACTION)));
+            controls.push(ink_static("", Role::Hint, LABEL, false));
+            controls.push(ink_static("", Role::Hint, EDIT, false));
         }
         Kind::ToneGraph => {
             let text = create(w!("STATIC"), "Tone graph", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.small);
@@ -1056,8 +1312,35 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 controls.push(b);
             }
         }
+        Kind::Actions(buttons) => {
+            for (i, (title, help)) in buttons.iter().enumerate() {
+                let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(i as u16), fonts.ui);
+                draw::set_role(c, Role::Outlined);
+                draw::track_hover(c);
+                super::dialogs::tooltip(c, help);
+                controls.push(c);
+            }
+        }
+        Kind::FlatField => {
+            let help = crate::negative::FlatField::HELP;
+            let text = label("Flat field", fonts.ui);
+            super::dialogs::tooltip(text, help);
+            controls.push(text);
+            let value = ink_static("Off", Role::Readout, EDIT, true);
+            super::dialogs::tooltip(value, help);
+            controls.push(value);
+            for (part, title) in [(ACTION, "Choose…"), (RESET, "Off")] {
+                let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(part), fonts.ui);
+                draw::set_role(c, Role::Outlined);
+                draw::track_hover(c);
+                super::dialogs::tooltip(c, if part == ACTION { "Choose the light frame: a frame of the bare light, shot with this roll's camera, lens and aperture." } else { "Stop dividing the scan by the light frame." });
+                controls.push(c);
+            }
+        }
         Kind::BalancePrint(title, help) => {
             let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
+            draw::set_role(c, Role::Outlined);
+            draw::track_hover(c);
             super::dialogs::tooltip(c, help);
             controls.push(c);
         }
@@ -1096,16 +1379,26 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 let _ = SetWindowSubclass(edit, Some(size_edit_subclass), 1, 0);
             }
             controls.push(edit);
-            controls.push(create(w!("STATIC"), "px", hidden | WINDOW_STYLE(SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.ui));
+            controls.push(ink_static("px", Role::Unit, RESET, false));
         }
         Kind::Photograph => {
             controls.push(label("Photograph", fonts.ui));
-            let value = create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            let value = ink_static("", Role::Readout, EDIT, true);
             super::dialogs::tooltip(value, "The exported photograph, cropped, before rotation, the border, and any export size.");
             controls.push(value);
         }
-        Kind::Note(_) => {
-            controls.push(create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), fonts.small));
+        Kind::Note(_) => controls.push(ink_static("", Role::Hint, LABEL, false)),
+        Kind::FilterLink(help) => {
+            controls.push(label("Shifts move", fonts.ui));
+            let c = combo(false);
+            for link in state::FilterLink::ALL {
+                let text = wide(link.title());
+                unsafe {
+                    SendMessageW(c, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+                }
+            }
+            super::dialogs::tooltip(c, help);
+            controls.push(c);
         }
         Kind::Choice(title, path, options) => {
             controls.push(label(title, fonts.ui));
@@ -1121,25 +1414,9 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             }
             controls.push(c);
         }
-        Kind::Stock(paper) => {
-            controls.push(label(if paper { "Paper" } else { "Film" }, fonts.ui));
-            let c = combo(true);
-            super::dialogs::tooltip(c, if paper { crate::help::PAPER } else { crate::help::FILM });
-            controls.push(c);
-        }
         Kind::DevTime(paper) => {
             controls.push(label(if paper { "Print development" } else { "Development" }, fonts.ui));
             controls.push(combo(false));
-        }
-        Kind::Foldout(paper) => {
-            let title = if paper { "Paper" } else { "Film" };
-            let header = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
-            unsafe {
-                SetWindowLongPtrW(header, GWLP_USERDATA, (paper as isize) << 1);
-            }
-            super::dialogs::tooltip(header, if paper { crate::help::PAPER } else { crate::help::FILM });
-            draw::track_hover(header);
-            controls.push(header);
         }
         Kind::BorderStyles => {
             for (i, style) in border::STYLES.iter().enumerate() {
@@ -1152,6 +1429,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         Kind::Color(line) => {
             controls.push(label(if line { "Line color" } else { "Color" }, fonts.ui));
             let b = create(w!("BUTTON"), if line { "Line color" } else { "Color" }, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.ui);
+            draw::set_role(b, Role::Well);
             draw::track_hover(b);
             controls.push(b);
         }
@@ -1160,225 +1438,261 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
 }
 
 /// Tab order follows the rows, though they were created in another order.
-/// The pinned rows and the scrolling rows are each their own panel's children.
 fn fix_z_order(ins: &Inspector) {
-    for pinned in [true, false] {
-        let mut previous = HWND_TOP;
-        for row in ins.rows.iter().filter(|r| (r.tab == Tab::Pinned) == pinned) {
-            // The Film grid's search field, then its tiles.
-            let grid: Vec<HWND> = match row.kind {
-                Kind::Foldout(paper) => {
-                    let search = (!paper && !ins.film_search.is_invalid()).then_some(ins.film_search);
-                    search.into_iter().chain(ins.grids[paper as usize].as_ref().map(|g| g.window)).collect()
-                }
-                _ => vec![],
-            };
-            for &c in row.controls.iter().chain(grid.iter()) {
-                unsafe {
-                    let _ = SetWindowPos(c, previous, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-                }
-                previous = c;
+    let mut previous = HWND_TOP;
+    for row in &ins.rows {
+        for &c in &row.controls {
+            unsafe {
+                let _ = SetWindowPos(c, previous, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
+            previous = c;
         }
     }
 }
 
+/// A hint's height wrapped at `width` pixels, in pixels.
 fn footer_height(ins: &Inspector, hwnd: HWND, width: i32) -> i32 {
-    unsafe {
-        let mut text = [0u16; 512];
-        let n = GetWindowTextW(hwnd, &mut text);
-        let dc = GetDC(hwnd);
-        let font = HFONT(SendMessageW(hwnd, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _);
-        let old = SelectObject(dc, font);
-        let mut r = RECT { left: 0, top: 0, right: width, bottom: 0 };
-        DrawTextW(dc, &mut text[..n as usize], &mut r, DT_CALCRECT | DT_WORDBREAK);
-        SelectObject(dc, old);
-        ReleaseDC(hwnd, dc);
-        r.bottom + ins.px(2.0)
-    }
+    let s = ins.dpi as f32 / 96.0;
+    let text = window_text(hwnd);
+    let height = ink::hint_height(&text, width as f32 / s);
+    (height * s).ceil() as i32
 }
 
-/// Lays out the pinned rows, which sizes their panel and moves the tabs,
-/// then the scrolling rows.
+/// Lays out the rows.
 fn layout_rows(ins: &mut Inspector, model: &Model) {
-    let pinned = place_rows(ins, model, true);
-    if pinned != ins.pinned_height {
-        ins.pinned_height = pinned;
-        ins.layout_frame();
-    }
-    place_rows(ins, model, false);
+    place_rows(ins, model);
 }
 
-/// Places one panel's rows; returns the height they take.
-fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
-    let panel = if pinned { ins.pinned } else { ins.rows_panel };
+/// Places the rows; returns the height they take. Rows are 29 DIPs from a
+/// 22 DIP gutter (`Theme.Size`); sections end 9 DIPs under their last row
+/// with a rule, and modules have a rule above them.
+fn place_rows(ins: &mut Inspector, model: &Model) -> i32 {
+    place_rows_at(ins, model, true)
+}
+
+/// `place_rows`; `fit` lets it show or hide the scroll bar first when the
+/// rows need it (or no longer do) and place them once, at the width left.
+fn place_rows_at(ins: &mut Inspector, model: &Model, fit: bool) -> i32 {
     let mut client = RECT::default();
     unsafe {
-        let _ = GetClientRect(panel, &mut client);
+        let _ = GetClientRect(ins.rows_panel, &mut client);
     }
-    let width = if pinned { ins.rect.right - ins.rect.left } else { client.right };
-    // An 8 DIP grid: rows are multiples of 8 high, and every row's control
-    // starts at one column, grouped or not.
-    let pad = ins.px(16.0);
-    let indent = ins.px(16.0);
-    let column = pad + ins.px(128.0);
-    let text = ins.px(20.0);
-    let mut y = ins.px(if pinned { 0.0 } else { 8.0 });
+    let width = client.right;
+    let gutter = ins.px(ink::GUTTER);
+    let margin = ins.px(ink::MARGIN);
+    let row_h = ins.px(ink::ROW);
+    let right = width - gutter;
+    // The labels' column, then the slider, the value and its ↺.
+    let column = gutter + ins.px(ink::SLIDER_LABEL);
+    let value = ins.px(ink::VALUE_WIDTH);
+    let reset = ins.px(ink::RESET_WIDTH);
+    let rule = ins.px(1.0).max(1);
+    let mut y = 0;
     let mut positions: Vec<(HWND, i32, i32, i32, i32)> = vec![];
-    let mut grids_shown = [false; 2];
-    let mut first = true;
-    let dpi = ins.dpi;
-    let grid_height = ins.px(GRID_HEIGHT);
+    let mut rules = vec![];
+    // Whether a section is open (its rule still to draw), and whether the
+    // last row was a section's head (a module right under it has no rule).
+    let mut in_section = false;
+    let mut after_head = false;
     for i in 0..ins.rows.len() {
         let row = &ins.rows[i];
-        if !row.shown || row.controls.is_empty() || (row.tab == Tab::Pinned) != pinned {
+        if !row.shown || row.controls.is_empty() {
             continue;
         }
-        let x = pad + if row.group.is_some() { indent } else { 0 };
-        let right = width - pad;
-        let label = (column - x - ins.px(8.0)).max(ins.px(48.0));
         let c = &row.controls;
+        // A section closes the one before it: 9 DIPs, then a rule.
+        if let Kind::Section(_) = row.kind {
+            if in_section {
+                y += ins.px(9.0);
+                rules.push(y);
+                y += rule;
+            }
+            in_section = true;
+        }
+        let was_head = std::mem::replace(&mut after_head, matches!(row.kind, Kind::Section(_)));
         let height = match row.kind {
             // An untitled section only adds a gap.
-            Kind::Section("") => ins.px(8.0),
+            Kind::Section("") => {
+                positions.push((c[0], 0, y, 0, 0));
+                ins.px(8.0)
+            }
             Kind::Section(_) => {
-                // The first section needs no space above it.
-                let top = if first { 0 } else { ins.px(16.0) };
-                positions.push((c[0], pad, y + top, right - pad, ins.px(24.0)));
-                top + ins.px(32.0)
+                positions.push((c[0], gutter, y + ins.px(8.0), right - gutter, ins.px(ink::SECTION_HEAD - 8.0)));
+                ins.px(ink::SECTION_HEAD)
             }
             Kind::Footer(_) | Kind::Note(_) => {
-                let text_height = footer_height(ins, c[0], right - x);
-                positions.push((c[0], x, y, right - x, text_height));
-                text_height + ins.px(8.0)
+                let text_height = footer_height(ins, c[0], right - gutter);
+                positions.push((c[0], gutter, y, right - gutter, text_height));
+                text_height + ins.px(7.0)
+            }
+            Kind::More(more) => {
+                // A section's line sits 6 DIPs lower, the Lab's top one 10.
+                let top = ins.px(match more {
+                    More::Module(_) => 2.0,
+                    More::Section(_) | More::Backlight => 8.0,
+                    More::All => 10.0,
+                });
+                positions.push((c[0], gutter - margin, y + top - ins.px(4.0), right - gutter + 2 * margin, ins.px(25.0)));
+                top + ins.px(17.0 + 8.0)
             }
             Kind::LongestSide => {
-                let (field, unit) = (ins.px(72.0), ins.px(24.0));
-                positions.push((c[0], x, y + ins.px(6.0), label, text));
-                let r = ins.field(right - unit - field, y + ins.px(4.0), field);
+                let (field, unit) = (ins.px(72.0), ins.px(20.0));
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                let r = ins.field(right - unit - field, y + (row_h - ins.px(24.0)) / 2, field);
                 positions.push((c[1], r.left, r.top, r.right - r.left, r.bottom - r.top));
-                positions.push((c[2], right - unit + ins.px(6.0), y + ins.px(6.0), unit - ins.px(6.0), text));
-                ins.px(32.0)
+                positions.push((c[2], right - unit + ins.px(6.0), y, unit - ins.px(6.0), row_h));
+                row_h
             }
             Kind::Photograph => {
-                positions.push((c[0], x, y + ins.px(2.0), label, text));
-                positions.push((c[1], column, y + ins.px(2.0), right - column, text));
-                ins.px(24.0)
-            }
-            Kind::PaperSkipped => {
-                // In the paper foldout's place: as tall, the title and the
-                // value where its title and its stock are.
-                let title = pad + ins.px(16.0);
-                positions.push((c[0], title, y + ins.px(6.0), column - title - ins.px(8.0), text));
-                positions.push((c[1], column, y + ins.px(6.0), right - column - ins.px(8.0), text));
-                ins.px(32.0)
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                positions.push((c[1], column, y, right - column, row_h));
+                row_h
             }
             Kind::Group { enable, .. } => {
-                let check = if enable.is_some() { ins.px(56.0) } else { 0 };
-                positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0) - check, ins.px(28.0)));
+                // A rule above, unless the section's head is right above.
+                let ruled = !was_head && y > 0;
+                let top = if ruled {
+                    rules.push(y);
+                    rule
+                } else {
+                    0
+                };
+                let line = ins.px(ink::MODULE_ROW);
+                let tick = if enable.is_some() { ins.px(13.0) + 2 * margin } else { 0 };
+                positions.push((c[0], gutter - margin, y + top, right - gutter + 2 * margin - tick, line));
                 if enable.is_some() {
-                    positions.push((c[1], right - check + ins.px(8.0), y + ins.px(4.0), check - ins.px(8.0), ins.px(24.0)));
+                    positions.push((c[1], right + margin - tick, y + top, tick, line));
                 }
-                ins.px(32.0)
+                top + line
             }
             Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset => {
-                let edit = ins.px(56.0);
-                let reset = ins.px(24.0);
-                positions.push((c[0], x, y + ins.px(2.0), right - x - reset - edit, text));
-                positions.push((c[3], right - edit - reset, y, reset, ins.px(22.0)));
-                // 26 DIPs: the thumb's focus ring, uncut.
-                positions.push((c[1], x - ins.px(8.0), y + ins.px(22.0), right - x - edit, ins.px(26.0)));
-                let r = ins.field(right - edit, y + ins.px(22.0), edit);
-                positions.push((c[2], r.left, r.top, r.right - r.left, r.bottom - r.top));
-                ins.px(48.0)
+                // One line: the label, the track, the value and its ↺.
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                let reset_x = right - ins.px(10.0);
+                let value_x = reset_x - value;
+                positions.push((c[1], column, y, (value_x - column - ins.px(4.0)).max(0), row_h));
+                let line = ins.px(24.0);
+                positions.push((c[2], value_x, y + (row_h - line) / 2, value, line));
+                positions.push((c[3], reset_x, y, reset, row_h));
+                row_h
             }
-            Kind::Toggle(..) | Kind::BorderToggle(..) | Kind::MatchBrightness | Kind::AllControls => {
-                positions.push((c[0], x, y + ins.px(4.0), right - x, ins.px(24.0)));
-                ins.px(32.0)
+            Kind::Toggle(..) | Kind::BorderToggle(..) | Kind::MatchBrightness => {
+                positions.push((c[0], gutter - margin, y, right - gutter + 2 * margin, row_h));
+                row_h
             }
             Kind::ToneGraph => {
-                // The label and the RGB | R | G | B switch on one 32 DIP
-                // line, the graph below on the grid.
+                // The label and the RGB | R | G | B switch on one line, the graph below.
                 let button = ins.px(32.0);
                 let buttons = 4 * button;
-                positions.push((c[0], x, y + ins.px(4.0), right - x - buttons - ins.px(8.0), ins.px(24.0)));
+                positions.push((c[0], gutter, y + ins.px(6.0), right - gutter - buttons - ins.px(8.0), ins.px(24.0)));
                 for (i, &b) in c[2..].iter().enumerate() {
-                    positions.push((b, right - buttons + button * i as i32, y + ins.px(4.0), button, ins.px(24.0)));
+                    positions.push((b, right - buttons + button * i as i32, y + ins.px(6.0), button, ins.px(24.0)));
                 }
-                positions.push((c[1], x, y + ins.px(32.0), right - x, ins.px(168.0)));
-                ins.px(32.0 + 168.0 + 8.0)
+                positions.push((c[1], gutter, y + ins.px(36.0), right - gutter, ins.px(168.0)));
+                ins.px(36.0 + 168.0 + 6.0)
             }
-            Kind::BalancePrint(..) => {
-                let button = ins.px(128.0).min(right - x);
-                positions.push((c[0], right - button, y + ins.px(4.0), button, ins.px(32.0)));
-                ins.px(40.0)
-            }
-            Kind::Foldout(paper) => {
-                positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0), ins.px(28.0)));
-                let header = ins.px(32.0);
-                let open = model.previews.open(paper);
-                // The Film grid's search field sits over the grid, outside its
-                // scrolling, so it stays in reach.
-                let search = (!paper && !ins.film_search.is_invalid()).then(|| (ins.film_search, ins.field(x, y + header + ins.px(4.0), right - x), ins.px(SEARCH_HEIGHT)));
-                match &mut ins.grids[paper as usize] {
-                    Some(grid) if open => {
-                        grids_shown[paper as usize] = true;
-                        let below = match search {
-                            Some((field, r, height)) => {
-                                positions.push((field, r.left, r.top, r.right - r.left, r.bottom - r.top));
-                                height
-                            }
-                            None => 0,
-                        };
-                        let height = layout_grid(grid, right - x, grid_height, dpi);
-                        positions.push((grid.window, x, y + header + below, right - x, height));
-                        header + below + height + ins.px(8.0)
+            Kind::ColorFilter => {
+                let picker = ins.px(super::color_filter::HEIGHT);
+                positions.push((c[0], 0, y, width, picker));
+                let mut height = picker;
+                for &hint in &c[1..] {
+                    let text_height = if window_text(hint).is_empty() { 0 } else { footer_height(ins, hint, right - gutter) };
+                    positions.push((hint, gutter, y + height, right - gutter, text_height));
+                    if text_height > 0 {
+                        height += text_height + ins.px(6.0);
                     }
-                    _ => header,
                 }
+                height + ins.px(4.0)
             }
-            Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
-                positions.push((c[0], x, y + ins.px(6.0), label, text));
-                positions.push((c[1], column, y + ins.px(4.0), right - column, ins.px(300.0)));
-                ins.px(32.0)
+            Kind::BalancePrint(title, _) => {
+                let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                positions.push((c[0], right - button + margin, y, button, ins.px(35.0)));
+                ins.px(35.0)
+            }
+            Kind::FlatField => {
+                // The label, the light frame's name, then Choose… and (when on) Off at the row's end.
+                let on = window_text(c[1]) != "Off";
+                let mut x = right + margin;
+                for (i, title) in [(3, "Off"), (2, "Choose…")] {
+                    let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                    if i == 3 && !on {
+                        positions.push((c[3], x, y, 0, 0));
+                        continue;
+                    }
+                    x -= button;
+                    positions.push((c[i], x, y + (row_h - ins.px(35.0)) / 2, button, ins.px(35.0)));
+                    x -= ins.px(8.0) - 2 * margin;
+                }
+                let label = (column - gutter).min(ins.px(ink::width("Flat field", &ink::LABEL) as f64 + 12.0));
+                positions.push((c[0], gutter, y, label, row_h));
+                // Clear of the buttons' windows, which paint their margins.
+                positions.push((c[1], gutter + label, y, (x - margin - gutter - label).max(0), row_h));
+                row_h.max(ins.px(39.0))
+            }
+            Kind::Actions(buttons) => {
+                // At the row's end, 8 apart, as `NegativePrep.buttons`.
+                let mut x = right + margin;
+                for (i, (title, _)) in buttons.iter().enumerate().rev() {
+                    let button = ins.px(ink::width(title, &ink::OUTLINED) as f64 + 24.0) + 2 * margin;
+                    x -= button;
+                    positions.push((c[i], x, y, button, ins.px(35.0)));
+                    x -= ins.px(8.0) - 2 * margin;
+                }
+                ins.px(39.0)
+            }
+            Kind::Choice(..) | Kind::FilterLink(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
+                // The label, and the value at the row's end; the box takes
+                // the rest of the line, so a click anywhere after the label opens it.
+                let label = (column - gutter).min(ins.px(ink::width(&window_text(c[0]), &ink::LABEL) as f64 + 12.0)).max(ins.px(60.0));
+                positions.push((c[0], gutter, y, label, row_h));
+                positions.push((c[1], gutter + label, y + ins.px(3.0), right - gutter - label + margin, ins.px(300.0)));
+                row_h
             }
             Kind::BorderStyles => {
                 let gap = ins.px(8.0);
-                let each = (right - x + gap) / 4;
+                let each = (right - gutter + gap) / 4;
                 for (i, &b) in c.iter().enumerate() {
-                    positions.push((b, x + each * i as i32, y + ins.px(4.0), each - gap, ins.px(72.0)));
+                    positions.push((b, gutter + each * i as i32, y + ins.px(6.0), each - gap, ins.px(72.0)));
                 }
-                ins.px(80.0)
+                ins.px(84.0)
             }
             Kind::Color(_) => {
-                positions.push((c[0], x, y + ins.px(6.0), label, text));
-                positions.push((c[1], column, y + ins.px(4.0), ins.px(64.0), ins.px(24.0)));
-                ins.px(32.0)
+                positions.push((c[0], gutter, y, column - gutter, row_h));
+                positions.push((c[1], column, y, right - column + margin, row_h));
+                row_h
             }
         };
-        first = false;
         y += height;
     }
-    if pinned {
-        for (grid, shown) in ins.grids.iter_mut().zip(grids_shown) {
-            if let Some(grid) = grid {
-                grid.was_open = shown;
-                unsafe {
-                    let _ = ShowWindow(grid.window, if shown { SW_SHOWNA } else { SW_HIDE });
-                }
-            }
-        }
-        if !ins.film_search.is_invalid() {
-            unsafe {
-                let _ = ShowWindow(ins.film_search, if grids_shown[0] { SW_SHOWNA } else { SW_HIDE });
-            }
-        }
-        place(&positions, 0);
-        unsafe {
-            let _ = InvalidateRect(ins.pinned, None, true);
-        }
-        return y;
+    // The last section's rule.
+    if in_section {
+        y += ins.px(9.0);
+        rules.push(y);
+        y += rule;
     }
+    if fit {
+        let content = y + ins.px(8.0);
+        let mut window = RECT::default();
+        unsafe {
+            let _ = GetWindowRect(ins.rows_panel, &mut window);
+        }
+        let has_bar = client.right < window.right - window.left;
+        if (content >= client.bottom) != has_bar {
+            let info = SCROLLINFO {
+                cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                fMask: SIF_RANGE | SIF_PAGE,
+                nMin: 0,
+                nMax: content,
+                nPage: client.bottom.max(0) as u32,
+                ..Default::default()
+            };
+            unsafe {
+                SetScrollInfo(ins.rows_panel, SB_VERT, &info, false);
+            }
+            return place_rows_at(ins, model, false);
+        }
+    }
+    ink::set_rules(ins.rows_panel, rules);
     ins.content = y + ins.px(8.0);
     let visible = client.bottom;
     ins.scroll = ins.scroll.clamp(0, (ins.content - visible).max(0));
@@ -1390,7 +1704,13 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
     let mut placed = std::collections::HashMap::new();
     unsafe {
         let mut defer = BeginDeferWindowPos(positions.len() as i32).ok();
+        // Wrapped hints repaint whole when they move: a static resized
+        // repaints only what it gained, leaving two wrappings side by side.
+        let mut hints = vec![];
         for (hwnd, x, y, w, h) in positions {
+            if draw::role_of(hwnd) == Some(Role::Hint) {
+                hints.push(hwnd);
+            }
             let top = y - ins.scroll;
             placed.insert(hwnd.0 as isize, top);
             let mut at = top;
@@ -1401,7 +1721,9 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                         at = from;
                     }
                     Some(_) => {}
-                    None => reveal.push(hwnd),
+                    // Only what shows: a hidden ↺ stays hidden after the slide.
+                    None if IsWindowVisible(hwnd).as_bool() => reveal.push(hwnd),
+                    None => {}
                 }
             }
             if let Some(d) = defer
@@ -1415,6 +1737,9 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
         }
         if let Some(d) = defer {
             let _ = EndDeferWindowPos(d);
+        }
+        for hwnd in hints {
+            let _ = InvalidateRect(hwnd, None, false);
         }
         if !moves.is_empty() {
             // Revealed rows wait until the rows below have made room.
@@ -1602,6 +1927,20 @@ fn format(value: f64, step: f64, decimal: char) -> String {
     if decimal != '.' { text.replace('.', &decimal.to_string()) } else { text }
 }
 
+/// A folded module's value: its first slider's, without trailing zeros, or
+/// its first choice's title (`summary(_ group:)`).
+fn group_summary(model: &Model, index: usize, decimal: char) -> Option<String> {
+    ADJUSTMENT_GROUPS[index].controls.iter().find_map(|control| match *control {
+        Adjustment::Slider { path, step, .. } => {
+            let text = format(json::number(model.value(path)), step, decimal);
+            let text = if text.contains(decimal) { text.trim_end_matches('0').trim_end_matches(decimal).to_string() } else { text };
+            Some(if text == "-0" { "0".into() } else { text })
+        }
+        Adjustment::Choice { path, .. } => Some(state::option_title(&json::string(model.value(path))).to_string()),
+        _ => None,
+    })
+}
+
 fn slider_value(model: &Model, kind: &Kind) -> Option<(f64, f64, f64, f64, f64)> {
     match *kind {
         Kind::ExposureOffset => {
@@ -1628,12 +1967,14 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
     let mut group_off = vec![false; ins.rows.len()];
     for (i, row) in ins.rows.iter().enumerate() {
         if let Kind::Group { enable: Some(path), .. } = row.kind {
-            group_off[i] = !json::boolean(model.value(path));
+            // The glass can be changed with the filter off (`disablesContent: false`).
+            group_off[i] = path != state::ColorFilter::PATH && !switch_on(model, path);
+        }
+        if let Kind::Group { title, .. } = row.kind {
+            group_off[i] |= negative_skips(model, title);
         }
     }
     let decimal = ins.decimal;
-    let stocks_key = format!("{}|{}", grid_key(model, false), grid_key(model, true));
-    let refill_stocks = ins.stocks_filled != stocks_key;
     for (i, row) in ins.rows.iter().enumerate() {
         if row.controls.is_empty() || !row.shown {
             continue;
@@ -1644,24 +1985,71 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             && !(row.border && !model.state.border.enabled)
             && !row.group.is_some_and(|g| group_off[g]);
         match row.kind {
-            Kind::Section(_) | Kind::Footer(_) => {
-                if let Kind::Footer("") = row.kind {
+            Kind::Section(title) => {
+                // The Lab's sections: the dot when edited, Print struck while scanning.
+                let section = [Section::Camera, Section::Film, Section::Print, Section::Scan].into_iter().find(|&s| crate::edits::section_title(s) == title);
+                let look = section.map_or_else(ink::Look::default, |s| ink::Look {
+                    edited: crate::edits::section_count(s, model) > 0,
+                    skipped: (s == Section::Print && scanning) || (s == Section::Camera && model.is_negative()),
+                    ..Default::default()
+                });
+                ink::set_look(c[0], look);
+            }
+            Kind::Footer(text) => {
+                if text.is_empty() {
                     if let Some((w, h)) = photo {
                         set_text(c[0], &format!("35mm needs a 3:2 or 3:4 photograph. This one is {}; crop it to 3:2 or 4:3 to use it.", state::ratio_name(w as f64, h as f64)));
                     }
+                    ink::set_look(c[0], ink::Look { warn: true, ..Default::default() });
                 }
             }
-            Kind::Group { enable, .. } => {
+            Kind::More(more) => {
+                if let Some((text, _)) = more_line(model, more) {
+                    set_text(c[0], &text);
+                }
+                enable(c[0], catalog);
+            }
+            Kind::Group { title, enable: switch } => {
+                let index = match row.when {
+                    When::Group(index) => Some(index),
+                    _ => None,
+                };
+                let edited = match (index, title) {
+                    (Some(index), _) => crate::edits::group_count(index, model) > 0,
+                    (None, "Output") => output_changed(model),
+                    (None, "Input Colour") => crate::edits::INPUT_PATHS.iter().any(|p| model.is_modified(p)),
+                    (None, "Color Filter") => model.is_modified(state::ColorFilter::PATH),
+                    _ => false,
+                };
+                let off = switch.is_some_and(|path| !switch_on(model, path));
+                let skipped = (row.print && scanning) || negative_skips(model, title);
+                let summary = match title {
+                    "Color Filter" => model.chosen_color_filter().map_or_else(|| "Off".into(), |f| f.name.clone()),
+                    _ => index.and_then(|index| group_summary(model, index, decimal)).unwrap_or_default(),
+                };
                 unsafe {
-                    let open = expanded[i] as isize;
+                    // Read out with its state, as the foldouts are.
+                    let open = expanded[i] as isize + 2 * skipped as isize + 4;
                     if GetWindowLongPtrW(c[0], GWLP_USERDATA) != open {
                         SetWindowLongPtrW(c[0], GWLP_USERDATA, open);
-                        let _ = InvalidateRect(c[0], None, false);
+                        let state = if skipped && model.is_negative() {
+                            "skipped on a negative"
+                        } else if skipped {
+                            "skipped while scanning film"
+                        } else if expanded[i] {
+                            "expanded"
+                        } else {
+                            "collapsed"
+                        };
+                        super::accessible_name(c[0], &format!("{title}, {state}"));
                     }
                 }
-                enable_all(c, catalog && !(row.print && scanning));
-                if let Some(path) = enable {
-                    set_check(c[1], json::boolean(model.value(path)));
+                ink::set_look(c[0], ink::Look { open: expanded[i], off, edited, skipped, summary, ..Default::default() });
+                enable(c[0], catalog);
+                if let Some(path) = switch {
+                    set_check(c[1], switch_on(model, path));
+                    enable(c[1], catalog && !skipped);
+                    ink::set_look(c[1], ink::Look { skipped, ..Default::default() });
                 }
             }
             Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset => {
@@ -1677,8 +2065,13 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     if SendMessageW(c[1], TBM_GETPOS, WPARAM(0), LPARAM(0)).0 != pos {
                         SendMessageW(c[1], TBM_SETPOS, WPARAM(1), LPARAM(pos));
                     }
+                    let text = format(value, step, decimal);
                     if GetFocus() != c[2] {
-                        set_text(c[2], &format(value, step, decimal));
+                        set_text(c[2], &text);
+                    }
+                    // The slider reads its value, as the Mac's does.
+                    if ACC_VALUES.with(|v| v.borrow_mut().insert(c[1].0 as isize, text.clone()).as_ref() != Some(&text)) {
+                        super::accessible_value(c[1], &text);
                     }
                     let modified = match row.kind {
                         Kind::Slider(Adjustment::Slider { path, .. }) => model.is_modified(path),
@@ -1688,11 +2081,14 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     let _ = ShowWindow(c[3], if modified && row.shown { SW_SHOWNA } else { SW_HIDE });
                     let tip = format!("Reset to {}", format(default, step, decimal));
                     super::dialogs::tooltip(c[3], &tip);
+                    ink::set_changed(c[0], modified);
+                    ink::set_changed(c[2], modified);
                 }
                 enable_all(c, on);
             }
             Kind::Toggle(_, path) => {
                 set_check(c[0], json::boolean(model.value(path)));
+                ink::set_changed(c[0], model.is_modified(path));
                 enable(c[0], on);
             }
             Kind::MatchBrightness => {
@@ -1706,11 +2102,8 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 set_check(c[0], model.matches_brightness());
                 enable(c[0], on);
             }
-            Kind::AllControls => {
-                set_check(c[0], model.prefs.lab_all_controls);
-                enable(c[0], catalog);
-            }
             Kind::FilmFormat => {
+                ink::set_changed(c[1], model.is_modified(state::FILM_FORMAT.path()));
                 let selected = if model.film_format_custom() {
                     state::FILM_FORMATS.len()
                 } else {
@@ -1723,7 +2116,10 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 }
                 enable_all(c, on);
             }
-            Kind::PaperSkipped => {}
+            Kind::ColorFilter => {
+                super::color_filter::update(c[0], model, on);
+                ink::set_look(c[2], ink::Look { warn: true, ..Default::default() });
+            }
             Kind::ToneGraph => {
                 // Not off with the print curves: a contrast drag turns them on.
                 let on = catalog && !scanning;
@@ -1734,12 +2130,23 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 enable_all(c, on);
                 super::tone_graph::update(c[1], model, on, ins.dpi, decimal);
             }
+            Kind::Actions(_) => enable_all(c, catalog && !model.negative_busy()),
+            Kind::FlatField => {
+                let flat = model.flat_field();
+                set_text(c[1], &flat.value());
+                ink::set_changed(c[0], flat.is_on());
+                enable_all(c, catalog && !model.negative_busy());
+                if !flat.is_on() {
+                    enable(c[3], false);
+                }
+            }
             Kind::BalancePrint(title, _) => {
                 set_text(c[0], if model.balancing_print { "Balancing…" } else { title });
                 enable(c[0], on && model.can_balance_print());
             }
             Kind::PreviewSpace => {
                 let selected = crate::model::COLOR_SPACES.iter().position(|s| *s == model.preview_space()).unwrap_or(0) as isize;
+                ink::set_changed(c[1], selected != 0);
                 unsafe {
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
                         SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
@@ -1750,6 +2157,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             Kind::SizeMode => {
                 unsafe {
                     let selected = (model.size_mode() == state::SizeMode::LongestSide) as isize;
+                    ink::set_changed(c[1], selected != 0);
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
                         SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
                     }
@@ -1779,8 +2187,8 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 set_check(c[0], [b.enabled, b.instagram, b.export][which as usize]);
                 enable(c[0], catalog && (which == 0 || b.enabled));
             }
-            Kind::Choice(_, path, options) => {
-                let index = options.iter().position(|o| *o == json::string(model.value(path))).map_or(-1, |i| i as isize);
+            Kind::FilterLink(_) => {
+                let index = state::FilterLink::ALL.iter().position(|&l| l == model.filter_link()).unwrap_or(0) as isize;
                 unsafe {
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
                         SendMessageW(c[1], CB_SETCURSEL, WPARAM(index as usize), LPARAM(0));
@@ -1788,34 +2196,15 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 }
                 enable_all(c, on);
             }
-            Kind::Stock(paper) => {
-                if refill_stocks || unsafe { SendMessageW(c[1], CB_GETCOUNT, WPARAM(0), LPARAM(0)).0 } == 0 {
-                    fill_stocks(c[1], model, paper);
-                }
-                select_stock(c[1], if paper { &model.state.paper } else { &model.state.film }, model, paper);
-                enable_all(c, catalog);
-            }
-            Kind::Foldout(paper) => {
-                let open = model.previews.open(paper);
-                let name = if paper { model.paper_name() } else { model.film_name() };
-                let title = if paper { "Paper" } else { "Film" };
-                let changed = FOLDOUT_NAMES.with(|n| std::mem::replace(&mut n.borrow_mut()[paper as usize], name.clone()) != name);
+            Kind::Choice(_, path, options) => {
+                ink::set_changed(c[1], model.is_modified(path));
+                let index = options.iter().position(|o| *o == json::string(model.value(path))).map_or(-1, |i| i as isize);
                 unsafe {
-                    let data = (paper as isize) << 1 | open as isize;
-                    if changed || GetWindowLongPtrW(c[0], GWLP_USERDATA) != data {
-                        SetWindowLongPtrW(c[0], GWLP_USERDATA, data);
-                        let _ = InvalidateRect(c[0], None, false);
-                        super::accessible_name(c[0], &format!("{title}: {name}, {}", if open { "expanded" } else { "collapsed" }));
+                    if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
+                        SendMessageW(c[1], CB_SETCURSEL, WPARAM(index as usize), LPARAM(0));
                     }
                 }
-                enable_all(c, catalog);
-                if let Some(grid) = &ins.grids[paper as usize] {
-                    select_tile(grid, if paper { &model.state.paper } else { &model.state.film });
-                    enable(grid.window, catalog);
-                }
-                if !paper && !ins.film_search.is_invalid() {
-                    enable(ins.film_search, catalog);
-                }
+                enable_all(c, on);
             }
             Kind::DevTime(paper) => {
                 let times = stock_times(model, paper);
@@ -1831,6 +2220,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     }
                 }
                 let path = if paper { "print_render.development_time" } else { "film_render.development_time" };
+                ink::set_changed(c[1], model.is_modified(path));
                 let value = model.value(path).as_f64();
                 let index = value.and_then(|v| times.iter().position(|t| (t - v).abs() < 1e-9)).map_or(0, |i| i + 1);
                 unsafe {
@@ -1847,16 +2237,21 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     }
                 }
             }
-            Kind::Color(_) => {
+            Kind::Color(line) => {
                 enable_all(c, on);
-                unsafe {
-                    let _ = InvalidateRect(c[1], None, false);
-                }
+                let b = model.state.border;
+                let color = if line { b.line_color } else { b.color };
+                let summary = match color {
+                    BorderColor::WHITE => "White".to_string(),
+                    BorderColor::BLACK => "Black".to_string(),
+                    c => c.hex().to_uppercase(),
+                };
+                let [r, g, bl] = color.0;
+                let defaults = crate::border::BorderSettings::default();
+                ink::set_changed(c[0], color != if line { defaults.line_color } else { defaults.color });
+                ink::set_look(c[1], ink::Look { summary, color: (r as u32) << 16 | (g as u32) << 8 | bl as u32, ..Default::default() });
             }
         }
-    }
-    if refill_stocks {
-        ins.stocks_filled = stocks_key;
     }
     ins.dev_times = [stock_times(model, false), stock_times(model, true)];
 }
@@ -1867,17 +2262,11 @@ fn enable_all(controls: &[HWND], on: bool) {
     }
 }
 
-/// What a grid or menu was built from: the catalog and the favourites.
-fn grid_key(model: &Model, paper: bool) -> String {
-    let catalog = model.stocks.len() + model.stocks.iter().map(|s| s.id.len()).sum::<usize>();
-    format!("{catalog}|{}", model.prefs.favorites(paper).join(","))
-}
-
 /// The film or paper menu's entries: the favourites, starred, then each
 /// group's heading (None, can't be chosen) and stocks. A favourite stays in
 /// its group too; the closed menu shows that entry, with the plain name.
-fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
-    let (films, papers) = (model.films(), model.papers());
+pub(super) fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
+    let (films, papers) = (model.listed_films(), model.papers());
     let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
     let mut entries: Vec<(String, Option<(String, bool)>)> =
         model.favorite_stocks(paper).iter().map(|s| (format!("★ {}", s.name), Some((s.id.clone(), true)))).collect();
@@ -1886,37 +2275,6 @@ fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, boo
         entries.extend(group.stocks.iter().map(|s| (s.name.clone(), Some((s.id.clone(), false)))));
     }
     entries
-}
-
-/// The film or paper list, with group names as headers that can't be chosen.
-fn fill_stocks(combo: HWND, model: &Model, paper: bool) {
-    unsafe {
-        SendMessageW(combo, CB_RESETCONTENT, WPARAM(0), LPARAM(0));
-        for (text, entry) in stock_entries(model, paper) {
-            let text = wide(&text);
-            let i = SendMessageW(combo, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize)).0;
-            if entry.is_none() {
-                SendMessageW(combo, CB_SETITEMDATA, WPARAM(i as usize), LPARAM(1));
-            }
-        }
-    }
-}
-
-/// The catalog id of the stock at `index` in the list, or None for a header.
-fn stock_at(model: &Model, paper: bool, index: usize) -> Option<String> {
-    stock_entries(model, paper).into_iter().nth(index).and_then(|(_, entry)| entry).map(|(id, _)| id)
-}
-
-fn select_stock(combo: HWND, id: &str, model: &Model, paper: bool) {
-    let index = stock_entries(model, paper)
-        .iter()
-        .position(|(_, entry)| entry.as_ref().is_some_and(|(stock, favorite)| stock == id && !favorite))
-        .map_or(-1, |i| i as isize);
-    unsafe {
-        if SendMessageW(combo, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
-            SendMessageW(combo, CB_SETCURSEL, WPARAM(index as usize), LPARAM(0));
-        }
-    }
 }
 
 fn row_of(id: u16) -> Option<(usize, u16)> {
@@ -1933,6 +2291,9 @@ pub fn parse_number(text: &str) -> Option<f64> {
 fn set_slider(app: &mut App, index: usize, value: f64) {
     let kind = app.inspector.rows[index].kind;
     match kind {
+        Kind::Slider(Adjustment::Slider { path, low, high, step, .. }) if state::FilterLink::links(path) => {
+            app.model.set_filter_shift(path, state::snap(value, low, high, step));
+        }
         Kind::Slider(Adjustment::Slider { path, low, high, step, .. }) => {
             app.model.set(path, json::num(state::snap(value, low, high, step)));
         }
@@ -1944,6 +2305,10 @@ fn set_slider(app: &mut App, index: usize, value: f64) {
 
 fn reset_row(app: &mut App, index: usize) {
     match app.inspector.rows[index].kind {
+        Kind::Slider(adjustment) if state::FilterLink::links(adjustment.path()) && DOUBLE_CLICK_RESET.get() => {
+            app.model.reset_filter_shift_after_click(adjustment.path())
+        }
+        Kind::Slider(adjustment) if state::FilterLink::links(adjustment.path()) => app.model.reset_filter_shift(adjustment.path()),
         Kind::Slider(adjustment) => app.model.reset_value(adjustment.path()),
         Kind::Toggle(_, path) | Kind::Choice(_, path, _) => app.model.reset_value(path),
         Kind::BorderSlider(_, field) => {
@@ -1975,23 +2340,17 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         }
         return;
     }
-    if id == SCOPE_MODE {
-        if code == CBN_SELCHANGE {
-            let waveform = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 } == 1;
-            app.model.prefs.scope_mode = if waveform { "Waveform" } else { "Histogram" }.into();
+    if id == SCOPE_HISTOGRAM || id == SCOPE_WAVEFORM {
+        let mode = if id == SCOPE_WAVEFORM { "Waveform" } else { "Histogram" };
+        if app.model.prefs.scope_mode != mode {
+            app.model.prefs.scope_mode = mode.into();
             app.model.prefs.save();
             app.model.dirty |= dirty::HISTOGRAM | dirty::INSPECTOR;
         }
         return;
     }
-    if id == RESET_ALL {
-        app.model.reset();
-        return;
-    }
-    if id == FILM_SEARCH {
-        if code == EN_CHANGE {
-            film_search_changed(app, window_text(hwnd));
-        }
+    if (TAB_COUNT..TAB_COUNT + 3).contains(&id) {
+        tab_edits(app, EDIT_TABS[(id - TAB_COUNT) as usize], hwnd);
         return;
     }
     let Some((index, part)) = row_of(id) else { return };
@@ -2007,12 +2366,25 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.prefs.save();
             app.model.dirty |= dirty::STRUCTURE;
         }
+        (Kind::Group { enable: Some(state::ColorFilter::PATH), .. }, CHECK) if code == BN_CLICKED => app.model.switch_color_filter(checked()),
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::MatchBrightness, CHECK) if code == BN_CLICKED => app.model.set_matches_brightness(checked()),
-        (Kind::AllControls, CHECK) if code == BN_CLICKED => {
-            app.model.prefs.lab_all_controls = checked();
-            app.model.prefs.save();
+        (Kind::More(More::Backlight), ACTION) if code == BN_CLICKED => {
+            app.model.negative.backlight_shown = true;
+            app.inspector.slide = true;
+            app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
+        }
+        (Kind::More(more), ACTION) if code == BN_CLICKED => {
+            let Some((_, action)) = more_line(&app.model, more) else { return };
+            let prefs = &mut app.model.prefs;
+            match action {
+                MoreAction::Reveal(key) => prefs.set_revealed(&key, true),
+                MoreAction::Conceal(key) => prefs.set_revealed(&key, false),
+                MoreAction::ShowFewer => prefs.lab_all_controls = false,
+            }
+            prefs.save();
+            app.inspector.slide = true;
             app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
         }
         (Kind::FilmFormat, COMBO) if code == CBN_SELCHANGE => {
@@ -2020,6 +2392,26 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.choose_film_format(usize::try_from(index).ok().filter(|&i| i < state::FILM_FORMATS.len()));
         }
         (Kind::BalancePrint(..), ACTION) if code == BN_CLICKED => app.model.balance_print(),
+        (Kind::FlatField, ACTION) if code == BN_CLICKED => {
+            let main = app.main;
+            if let Some(light) = super::dialogs::choose_light_frame(main, app.model.source.as_deref()) {
+                app.model.choose_flat_field(&light);
+            }
+        }
+        (Kind::FlatField, RESET) if code == BN_CLICKED => app.model.clear_flat_field(),
+        (Kind::Actions(buttons), p) if code == BN_CLICKED => {
+            use crate::negative::Pick;
+            match buttons.get(p as usize).map(|b| b.0) {
+                Some("Find again") => app.model.redetect_negative_base(),
+                Some("Pick from rebate") => app.model.begin_negative_pick(Pick::Base),
+                Some("Crop to picture") => app.model.crop_to_picture(),
+                Some("Auto") => app.model.auto_print_negative(),
+                Some("Pick neutral") => app.model.begin_negative_pick(Pick::Neutral),
+                Some("Use for whole roll") => app.model.use_negative_for_roll(),
+                Some("Roll\u{2019}s filtration") => app.model.use_roll_filtration(),
+                _ => {}
+            }
+        }
         (Kind::ToneGraph, p) if code == BN_CLICKED && (p as usize) < super::tone_graph::CHANNELS.len() => {
             app.model.prefs.tone_graph_channel = super::tone_graph::CHANNELS[p as usize].into();
             app.model.prefs.save();
@@ -2048,23 +2440,15 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         }
         (Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset, RESET) if code == BN_CLICKED => reset_row(app, index),
         (_, LABEL) if code == STN_DBLCLK && !draw::is_dimmed(hwnd) => reset_row(app, index),
+        (Kind::FilterLink(_), COMBO) if code == CBN_SELCHANGE => {
+            if let Some(&link) = state::FilterLink::ALL.get(selection() as usize) {
+                app.model.set_filter_link(link);
+            }
+        }
         (Kind::Choice(_, path, options), COMBO) if code == CBN_SELCHANGE => {
             if let Some(option) = options.get(selection() as usize) {
                 app.model.set(path, Value::String(option.to_string()));
             }
-        }
-        (Kind::Stock(paper), COMBO) if code == CBN_SELCHANGE => {
-            let index = selection() as usize;
-            match stock_at(&app.model, paper, index) {
-                Some(stock) if paper => app.model.choose_paper(&stock),
-                Some(stock) => app.model.choose_film(&stock),
-                // A header: back to the current stock.
-                None => app.model.dirty |= dirty::INSPECTOR,
-            }
-        }
-        (Kind::Foldout(paper), ACTION) if code == BN_CLICKED => {
-            app.inspector.slide = true;
-            app.model.toggle_foldout(paper);
         }
         (Kind::DevTime(paper), COMBO) if code == CBN_SELCHANGE => {
             let times = stock_times(&app.model, paper);
@@ -2154,22 +2538,62 @@ fn context_menu(app: &mut App, control: HWND, x: i32, y: i32) {
     }
 }
 
+/// A tab's edits under its count, each to reset on its own, then the whole
+/// tab: the Mac's popover (`TabEdits`) as a menu.
+fn tab_edits(app: &mut App, tab: crate::edits::Tab, count: HWND) {
+    let edits = crate::edits::edits(tab, &app.model, app.inspector.decimal);
+    if edits.is_empty() {
+        return;
+    }
+    let escape = |text: &str| text.replace('&', "&&");
+    let title = tab.title();
+    unsafe {
+        let menu = CreatePopupMenu().unwrap();
+        let n = edits.len();
+        let head = wide(&format!("{n} {} in {title}", if n == 1 { "edit" } else { "edits" }));
+        let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, pcwstr(&head));
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        for (i, edit) in edits.iter().enumerate() {
+            let text = wide(&format!("Reset {}\t{}", escape(&edit.title), escape(&edit.value)));
+            let _ = AppendMenuW(menu, MF_STRING, 1 + i, pcwstr(&text));
+        }
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        let all = wide(&format!("&Reset {title}"));
+        let _ = AppendMenuW(menu, MF_STRING, 1000, pcwstr(&all));
+        let mut r = RECT::default();
+        let _ = GetWindowRect(count, &mut r);
+        let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, r.left, r.bottom, 0, app.inspector.panel, None);
+        let _ = DestroyMenu(menu);
+        let chosen = chosen.0 as usize;
+        if chosen == 1000 {
+            let targets: Vec<_> = edits.iter().map(|e| e.target).collect();
+            app.model.reset_edits(&targets, format!("Reset {title}"));
+        } else if let Some(edit) = chosen.checked_sub(1).and_then(|i| edits.get(i)) {
+            app.model.reset_edits(&[edit.target], format!("Reset {}", edit.title));
+        }
+    }
+}
+
 extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
-                if id == SCOPE_MODE && matches!(code, CBN_DROPDOWN | CBN_CLOSEUP) {
-                    // The scope's menu, as the column's drop-down lists.
-                    if code == CBN_DROPDOWN && theme::dark() {
-                        theme::combo_list(HWND(lparam.0 as *mut _));
+                if id == super::id::EXPORT || (super::id::LIGHTROOM..super::id::LIGHTROOM + 2).contains(&id) {
+                    // The foot's Export is File › Export, and its Lightroom words File's.
+                    if code == BN_CLICKED {
+                        let _ = PostMessageW(GetAncestor(hwnd, GA_ROOT), WM_COMMAND, WPARAM(id as usize), LPARAM(0));
                     }
-                    let _ = InvalidateRect(HWND(lparam.0 as *mut _), None, false);
+                    return LRESULT(0);
                 }
-                if code == BN_CLICKED || (id == SCOPE_MODE && code == CBN_SELCHANGE) {
+                if code == BN_CLICKED {
                     with_app(|app| command(app, id, code, HWND(lparam.0 as *mut _)));
                 }
                 LRESULT(0)
+            }
+            WM_DRAWITEM => {
+                ink::draw_item(&*(lparam.0 as *const DRAWITEMSTRUCT));
+                LRESULT(1)
             }
             WM_CTLCOLORLISTBOX => {
                 let dc = HDC(wparam.0 as *mut _);
@@ -2188,7 +2612,12 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             }
             WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
-            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
+                // The column, and the rules about the tabs and the foot.
+                draw::paint_panel(hwnd, theme::palette().panel);
+                LRESULT(0)
+            }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
@@ -2265,7 +2694,10 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(1)
             }
             WM_DRAWITEM => {
-                draw_item(&*(lparam.0 as *const DRAWITEMSTRUCT));
+                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
+                if !ink::draw_item(item) {
+                    draw_item(item);
+                }
                 LRESULT(1)
             }
             WM_CTLCOLORBTN => draw::button_brush(),
@@ -2275,7 +2707,10 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 draw::paint_panel(hwnd, theme::palette().panel);
                 LRESULT(0)
             }
-            WM_CTLCOLOREDIT => draw::color_edit(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
+            WM_CTLCOLOREDIT => {
+                let (dc, control) = (HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _));
+                if draw::role_of(control) == Some(Role::InkValue) { ink::color_value(dc) } else { draw::color_edit(dc, control) }
+            }
             WM_CTLCOLORLISTBOX => {
                 // A drop-down list's colours.
                 let dc = HDC(wparam.0 as *mut _);
@@ -2306,7 +2741,7 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
 /// Footers are drawn grey; a static row index tells which rows are footers.
 fn with_footer(index: usize) -> bool {
     thread_local! {
-        static FOOTERS: Vec<bool> = rows().iter().map(|r| matches!(r.kind, Kind::Footer(_) | Kind::Note(_) | Kind::ToneGraph | Kind::PaperSkipped)).collect();
+        static FOOTERS: Vec<bool> = rows().iter().map(|r| matches!(r.kind, Kind::Footer(_) | Kind::Note(_) | Kind::ToneGraph)).collect();
     }
     FOOTERS.with(|f| f.get(index).copied().unwrap_or(false))
 }
@@ -2350,10 +2785,7 @@ fn draw_item(item: &DRAWITEMSTRUCT) {
         c.clear(p.panel);
         let whole = RectF::of(c.rect());
         let label_color = if disabled { p.disabled } else { p.text };
-        if part == ACTION {
-            draw::header_background(&mut c, item.hwndItem, pressed, disabled);
-            draw_foldout(&mut c, item, &title, label_color);
-        } else if part == HEADER && n > 0 && !["Color", "Line color"].contains(&title.as_str()) {
+        if part == HEADER && n > 0 && !["Color", "Line color"].contains(&title.as_str()) {
             // A group header: chevron, then the title.
             draw::header_background(&mut c, item.hwndItem, pressed, disabled);
             let open = GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) != 0;
@@ -2391,24 +2823,6 @@ fn draw_item(item: &DRAWITEMSTRUCT) {
         }
         c.present(item.hDC);
     }
-}
-
-fn with_app_fonts_glyph() -> HGDIOBJ {
-    thread_local! {
-        static GLYPH: Cell<isize> = const { Cell::new(0) };
-    }
-    GLYPH.with(|g| {
-        if g.get() == 0 {
-            unsafe {
-                let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(super::main_hwnd()).max(96) as i32;
-                let mut lf = LOGFONTW { lfHeight: -(10 * dpi / 96), ..Default::default() };
-                let face = wide("Segoe MDL2 Assets");
-                lf.lfFaceName[..face.len()].copy_from_slice(&face);
-                g.set(CreateFontIndirectW(&lf).0 as isize);
-            }
-        }
-        HGDIOBJ(g.get() as *mut _)
-    })
 }
 
 /// The drawn samples of `BorderStylePicker`: a photograph (a sky-to-sand
@@ -2469,6 +2883,9 @@ thread_local! {
     static LAST_TRACKBAR_CLICK: Cell<Option<(usize, u32, i32, i32)>> = const { Cell::new(None) };
     /// A trackbar whose reset click's button-up it must not see.
     static RESET_TRACKBAR: Cell<usize> = const { Cell::new(0) };
+    /// The reset under way is a double-click's on the track, whose first
+    /// click moved the thumb.
+    static DOUBLE_CLICK_RESET: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Whether this click on a trackbar completes a double-click. Trackbars
@@ -2505,6 +2922,19 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         if msg == WM_MOUSEWHEEL && GetFocus() != hwnd {
             return SendMessageW(GetParent(hwnd).unwrap_or_default(), msg, wparam, lparam);
         }
+        // Return types a value: it moves to the slider's value box.
+        let returned = |m: *const MSG| !m.is_null() && (*m).message == WM_KEYDOWN && (*m).wParam.0 == VK_RETURN.0 as usize;
+        if msg == WM_GETDLGCODE && returned(lparam.0 as *const MSG) {
+            return LRESULT(DefSubclassProc(hwnd, msg, wparam, lparam).0 | DLGC_WANTMESSAGE as isize);
+        }
+        if msg == WM_KEYDOWN && wparam.0 == VK_RETURN.0 as usize {
+            let parent = GetParent(hwnd).unwrap_or_default();
+            if let Ok(edit) = GetDlgItem(parent, (reset as u16 - RESET + EDIT) as i32) {
+                let _ = SetFocus(edit);
+                SendMessageW(edit, EM_SETSEL, WPARAM(0), LPARAM(-1));
+            }
+            return LRESULT(0);
+        }
         if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONDBLCLK) {
             let alt = GetKeyState(VK_MENU.0 as i32) < 0;
             let double = msg == WM_LBUTTONDBLCLK || second_click(hwnd, lparam);
@@ -2512,7 +2942,9 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 RESET_TRACKBAR.set(hwnd.0 as usize);
                 let parent = GetParent(hwnd).unwrap_or_default();
                 let button = GetDlgItem(parent, reset as i32).unwrap_or_default();
+                DOUBLE_CLICK_RESET.set(double && !alt);
                 SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | reset), LPARAM(button.0 as isize));
+                DOUBLE_CLICK_RESET.set(false);
                 return LRESULT(0);
             }
         }
@@ -2650,522 +3082,6 @@ fn commit_edit(hwnd: HWND) {
     });
 }
 
-// MARK: Film and paper previews
-
-/// An open foldout: the favourites, untitled, then headings and a
-/// two-column grid of tiles, one owner-drawn button per stock, under the
-/// menu's headings in catalog order. A favourite's tile is there twice. At
-/// most `GRID_HEIGHT` tall, it scrolls inside itself. While the Film grid
-/// searches, its matches show once each, under their groups, and the other
-/// tiles hide: they and their thumbnails stay for when the search clears.
-struct StockGrid {
-    window: HWND,
-    /// Each tile's stock id and button, in order.
-    tiles: Vec<(String, HWND)>,
-    /// Each heading (none above the favourites) and the index of the first
-    /// tile under it.
-    headings: Vec<(Option<HWND>, usize)>,
-    /// The catalog and favourites it was built from (`grid_key`).
-    key: String,
-    scroll: i32,
-    content: i32,
-    view: i32,
-    /// It was on screen at the last layout; opening it again scrolls to the
-    /// current stock.
-    was_open: bool,
-    /// The tile to keep in place at the next layout (`pointed_tile`).
-    anchor: Option<(String, bool, i32)>,
-    /// The search the tiles are filtered for, as typed, and which tiles
-    /// match it (never the favourites' copies); None while not searching.
-    query: String,
-    matches: Option<Vec<bool>>,
-    /// The Film grid's "No films match …" line.
-    no_matches: Option<HWND>,
-    /// The search was cleared: the next layout goes back to the current stock.
-    recenter: bool,
-}
-
-/// A tile as drawn.
-#[derive(Clone, Default)]
-struct TileLook {
-    image: Option<std::sync::Arc<crate::previews::Bitmap>>,
-    dimmed: bool,
-    selected: bool,
-    favorite: bool,
-}
-
-const TILE_FIRST: u16 = 100;
-/// The thumbnail's height, the caption and the gaps, in DIPs.
-const TILE_IMAGE: f64 = 92.0;
-const TILE_CAPTION: f64 = 18.0;
-const TILE_GAP: f64 = 8.0;
-const TILE_HEADING: f64 = 24.0;
-/// The star over a thumbnail's corner.
-const TILE_STAR: f64 = 24.0;
-
-fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, key: String) -> StockGrid {
-    let window = create(w!("NegsStockGrid"), if paper { "Papers" } else { "Films" }, WS_CHILD | WS_CLIPCHILDREN | WS_VSCROLL, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), parent, 0, HFONT::default());
-    unsafe {
-        SetWindowLongPtrW(window, GWLP_USERDATA, paper as isize);
-    }
-    let (films, papers) = (model.films(), model.papers());
-    let favorites = model.favorite_stocks(paper);
-    let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
-    let sections = std::iter::once((None, favorites)).chain(groups.into_iter().map(|g| (Some(g.title), g.stocks)));
-    let (mut tiles, mut headings) = (vec![], vec![]);
-    for (title, stocks) in sections {
-        if stocks.is_empty() {
-            continue;
-        }
-        let heading = title.map(|title| create(w!("STATIC"), title, WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), window, 0, fonts.small));
-        headings.push((heading, tiles.len()));
-        for stock in stocks {
-            let id = TILE_FIRST + tiles.len() as u16;
-            let tile = create(w!("BUTTON"), &stock.name, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), window, id, fonts.small);
-            draw::track_hover(tile);
-            super::dialogs::tooltip(tile, &stock.name);
-            unsafe {
-                let _ = SetWindowSubclass(tile, Some(tile_subclass), 1, 0);
-            }
-            tiles.push((stock.id.clone(), tile));
-        }
-    }
-    // Thumbnails made before the grid was (re)built show at once.
-    let looks = tiles
-        .iter()
-        .map(|(id, _)| {
-            let thumb = model.previews.thumb(&crate::previews::Target::Stock { id: id.clone(), paper });
-            TileLook { image: thumb.and_then(|t| t.image.clone()), dimmed: thumb.is_some_and(|t| t.dimmed), selected: false, favorite: model.prefs.is_favorite(id, paper) }
-        })
-        .collect();
-    TILES.with(|t| t.borrow_mut()[paper as usize] = looks);
-    // A quiet line in the grid when nothing matches; hidden until then.
-    let no_matches = (!paper).then(|| create(w!("STATIC"), "", WS_CHILD | WINDOW_STYLE(SS_CENTER.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), window, 0, fonts.ui));
-    let mut grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false, anchor: None, query: String::new(), matches: None, no_matches, recenter: false };
-    if !paper {
-        filter_grid(&mut grid, model);
-    }
-    select_tile(&grid, if paper { &model.state.paper } else { &model.state.film });
-    grid
-}
-
-/// Which of the Film grid's tiles the search shows (`state::matching`):
-/// each match once, under its group, so never the favourites' copies.
-/// None while the search is empty or only spaces.
-fn search_matches(grid: &StockGrid, model: &Model, query: &str) -> Option<Vec<bool>> {
-    if query.trim().is_empty() {
-        return None;
-    }
-    let (films, papers) = (model.films(), model.papers());
-    let matched: std::collections::HashSet<&str> =
-        state::matching(query, state::film_groups(&films, &papers)).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.as_str())).collect();
-    Some((0..grid.tiles.len()).map(|i| !among_favorites(grid, i) && matched.contains(grid.tiles[i].0.as_str())).collect())
-}
-
-/// Filters the Film grid for the model's search, hiding rather than
-/// rebuilding tiles; the next layout places what shows.
-fn filter_grid(grid: &mut StockGrid, model: &Model) {
-    let query = model.previews.film_query.clone();
-    grid.matches = search_matches(grid, model, &query);
-    if let Some(label) = grid.no_matches {
-        set_text(label, &format!("No films match \u{201c}{}\u{201d}", query.trim()));
-    }
-    // The tile under the pointer may hide.
-    if HOVER_TILE.get().is_some_and(|(paper, _)| !paper) {
-        HOVER_TILE.set(None);
-    }
-    grid.query = query;
-}
-
-/// The Film grid's search field: "Search films" until something is typed.
-fn create_film_search(parent: HWND, fonts: &super::Fonts, model: &Model) -> HWND {
-    let search = create(w!("EDIT"), &model.previews.film_query, WS_CHILD | WS_TABSTOP | WINDOW_STYLE(ES_AUTOHSCROLL as u32), WINDOW_EX_STYLE(0), parent, FILM_SEARCH, fonts.ui);
-    draw::set_role(search, Role::Field);
-    draw::track_hover(search);
-    super::accessible_name(search, "Search films");
-    let prompt = wide("Search films");
-    unsafe {
-        // Shown while focused too, as the Mac's placeholder is.
-        SendMessageW(search, EM_SETCUEBANNER, WPARAM(1), LPARAM(prompt.as_ptr() as isize));
-        let _ = SetWindowSubclass(search, Some(film_search_subclass), 1, 0);
-    }
-    search
-}
-
-/// The field and the Film grid follow the model's search when something
-/// other than typing changed it. True when the grid was filtered again.
-fn sync_film_search(ins: &mut Inspector, model: &Model) -> bool {
-    let query = &model.previews.film_query;
-    if !ins.film_search.is_invalid() && window_text(ins.film_search) != *query {
-        set_text(ins.film_search, query);
-    }
-    match ins.grids[0].as_mut() {
-        Some(grid) if grid.query != *query => {
-            filter_grid(grid, model);
-            true
-        }
-        _ => false,
-    }
-}
-
-/// Typing in the search field filters the Film grid at once, and never
-/// edits the photograph. Each search starts at the top of its matches;
-/// clearing it goes back to the current film.
-pub(crate) fn film_search_changed(app: &mut App, text: String) {
-    if app.model.previews.film_query == text {
-        return;
-    }
-    let cleared = text.is_empty();
-    app.model.previews.film_query = text;
-    // The thumbnails asked for follow the matches.
-    app.model.dirty |= dirty::PREVIEWS;
-    let ins = &mut app.inspector;
-    let (limit, dpi) = (ins.px(GRID_HEIGHT), ins.dpi);
-    let Some(grid) = ins.grids[0].as_mut() else { return };
-    filter_grid(grid, &app.model);
-    if cleared {
-        grid.recenter = true;
-    } else {
-        grid.scroll = 0;
-    }
-    grid.anchor = None;
-    // Only the grid moves: it keeps its height while searching, so the
-    // field and the rows below stay where they are, undrawn.
-    let mut r = RECT::default();
-    unsafe {
-        let _ = GetWindowRect(grid.window, &mut r);
-    }
-    if layout_grid(grid, r.right - r.left, limit, dpi) != r.bottom - r.top {
-        layout_rows(ins, &app.model);
-    }
-}
-
-/// Return in the search field chooses the first match, as listed: one
-/// undo step, as clicking its tile makes.
-pub(crate) fn choose_first_match(app: &mut App) {
-    let query = app.model.previews.film_query.clone();
-    if query.trim().is_empty() {
-        return;
-    }
-    let (films, papers) = (app.model.films(), app.model.papers());
-    let first = state::matching(&query, state::film_groups(&films, &papers)).first().and_then(|g| g.stocks.first()).map(|s| s.id.clone());
-    if let Some(id) = first {
-        app.model.choose_film(&id);
-    }
-}
-
-/// The search field: Return chooses the first match, Escape clears it.
-extern "system" fn film_search_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
-    unsafe {
-        match msg {
-            WM_GETDLGCODE if matches!(VIRTUAL_KEY(wparam.0 as u16), VK_RETURN | VK_ESCAPE) => LRESULT(DLGC_WANTALLKEYS as isize),
-            WM_KEYDOWN if wparam.0 == VK_RETURN.0 as usize => {
-                post(choose_first_match);
-                LRESULT(0)
-            }
-            WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => {
-                // Sends EN_CHANGE, which clears the search.
-                if GetWindowTextLengthW(hwnd) > 0 {
-                    set_text(hwnd, "");
-                }
-                LRESULT(0)
-            }
-            WM_CHAR if wparam.0 == 13 || wparam.0 == 27 => LRESULT(0),
-            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
-        }
-    }
-}
-
-/// Where the headings and tiles go for `width`, and the content's height:
-/// those the search shows if `filtered`, else every one. A heading shows
-/// only over tiles; with none, the "No films match" line does.
-fn grid_positions(grid: &StockGrid, width: i32, dpi: u32, filtered: bool) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
-    let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
-    let gap = px(TILE_GAP);
-    let column = ((width - gap) / 2).max(1);
-    let tile = px(TILE_IMAGE + TILE_CAPTION);
-    let matches = grid.matches.as_ref().filter(|_| filtered);
-    let mut y = 0;
-    let mut positions = vec![];
-    for (g, &(heading, first)) in grid.headings.iter().enumerate() {
-        let end = grid.headings.get(g + 1).map_or(grid.tiles.len(), |h| h.1);
-        let shown: Vec<HWND> = (first..end).filter(|&i| matches.is_none_or(|m| m[i])).map(|i| grid.tiles[i].1).collect();
-        if shown.is_empty() {
-            continue;
-        }
-        match heading {
-            Some(heading) => {
-                positions.push((heading, 0, y + px(6.0), width, px(16.0)));
-                y += px(TILE_HEADING);
-            }
-            None => y += px(4.0),
-        }
-        for (i, button) in shown.iter().enumerate() {
-            let (col, row) = (i as i32 % 2, i as i32 / 2);
-            positions.push((*button, col * (column + gap), y + row * (tile + gap), column, tile));
-        }
-        let rows = shown.len().div_ceil(2) as i32;
-        y += rows * tile + (rows - 1).max(0) * gap + px(2.0);
-    }
-    if let (Some(_), Some(label), true) = (matches, grid.no_matches, positions.is_empty()) {
-        positions.push((label, 0, px(24.0), width, px(20.0)));
-        y = px(24.0 + 20.0);
-    }
-    (positions, y)
-}
-
-/// Places the headings and tiles for `width`, at most `limit` tall with a
-/// scroll bar beyond it; returns the grid's height. Opening it shows the
-/// current stock's tile in the middle.
-fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
-    // While searching the grid keeps its height, as the Mac's fixed frame
-    // does: the rows below stay put as the matches change.
-    let view = if grid.matches.is_some() { grid_positions(grid, width, dpi, false).1.min(limit) } else { limit };
-    let (mut positions, mut content) = grid_positions(grid, width, dpi, true);
-    if content > view {
-        let bar = unsafe { windows::Win32::UI::HiDpi::GetSystemMetricsForDpi(SM_CXVSCROLL, dpi) };
-        (positions, content) = grid_positions(grid, width - bar, dpi, true);
-    }
-    grid.content = content;
-    grid.view = if grid.matches.is_some() { view } else { content.min(limit) };
-    if let Some((id, favorite, top)) = grid.anchor.take() {
-        let index = (0..grid.tiles.len()).find(|&i| grid.tiles[i].0 == id && among_favorites(grid, i) == favorite);
-        if let Some(&(_, _, y, _, _)) = index.and_then(|i| positions.iter().find(|p| p.0 == grid.tiles[i].1)) {
-            grid.scroll = y - top;
-        }
-    } else if !grid.was_open || std::mem::take(&mut grid.recenter) {
-        // The current stock's first tile on show: the favourites' copy if
-        // it is starred, unless a search hides that.
-        let selected: Vec<usize> = TILES.with(|t| {
-            let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
-            t.borrow()[paper as usize].iter().enumerate().filter(|(_, look)| look.selected).map(|(i, _)| i).collect()
-        });
-        let tile = selected.iter().find_map(|&i| positions.iter().find(|p| p.0 == grid.tiles[i].1));
-        grid.scroll = tile.map_or(0, |&(_, _, y, _, h)| y + h / 2 - grid.view / 2);
-    }
-    grid.scroll = grid.scroll.clamp(0, (grid.content - grid.view).max(0));
-    // What the search hides goes first, then the rest move, then what it
-    // brings back shows in its place.
-    let wanted = |hwnd: HWND| positions.iter().any(|p| p.0 == hwnd);
-    let children: Vec<HWND> = grid.tiles.iter().map(|t| t.1).chain(grid.headings.iter().filter_map(|h| h.0)).chain(grid.no_matches).collect();
-    for &child in &children {
-        if !wanted(child) {
-            show_child(child, false);
-        }
-    }
-    place(&positions, grid.scroll);
-    for &child in &children {
-        if wanted(child) {
-            show_child(child, true);
-        }
-    }
-    unsafe {
-        let info = SCROLLINFO {
-            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
-            fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
-            nMin: 0,
-            nMax: grid.content,
-            nPage: grid.view.max(0) as u32,
-            nPos: grid.scroll,
-            ..Default::default()
-        };
-        SetScrollInfo(grid.window, SB_VERT, &info, true);
-        let _ = InvalidateRect(grid.window, None, true);
-    }
-    grid.view
-}
-
-/// Shows or hides a grid's tile, heading or line, if it isn't already.
-fn show_child(hwnd: HWND, show: bool) {
-    unsafe {
-        let visible = GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_VISIBLE.0 != 0;
-        if visible != show {
-            let _ = ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
-        }
-    }
-}
-
-/// Whether the tile at `index` is among the favourites, the untitled section.
-fn among_favorites(grid: &StockGrid, index: usize) -> bool {
-    match grid.headings.first() {
-        Some(&(None, _)) => index < grid.headings.get(1).map_or(grid.tiles.len(), |h| h.1),
-        _ => false,
-    }
-}
-
-/// The tile under the pointer: its stock, whether it is the copy among the
-/// favourites, and its top in the grid's view. Starring adds a tile above
-/// it; the rebuilt grid scrolls so this one stays under the pointer.
-fn pointed_tile(grid: &StockGrid) -> Option<(String, bool, i32)> {
-    unsafe {
-        let mut p = POINT::default();
-        GetCursorPos(&mut p).ok()?;
-        let _ = ScreenToClient(grid.window, &mut p);
-        grid.tiles.iter().enumerate().find_map(|(i, (id, tile))| {
-            // A tile the search hides keeps its old place.
-            if GetWindowLongW(*tile, GWL_STYLE) as u32 & WS_VISIBLE.0 == 0 {
-                return None;
-            }
-            let mut r = RECT::default();
-            let _ = GetWindowRect(*tile, &mut r);
-            let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
-            MapWindowPoints(None, grid.window, &mut corners);
-            let inside = p.x >= corners[0].x && p.x < corners[1].x && p.y >= corners[0].y && p.y < corners[1].y;
-            inside.then(|| (id.clone(), among_favorites(grid, i), corners[0].y))
-        })
-    }
-}
-
-/// Scrolls an open grid to `target`.
-fn scroll_grid(grid: &mut StockGrid, target: i32) {
-    let target = target.clamp(0, (grid.content - grid.view).max(0));
-    if target == grid.scroll {
-        return;
-    }
-    let delta = grid.scroll - target;
-    grid.scroll = target;
-    unsafe {
-        ScrollWindowEx(grid.window, 0, delta, None, None, None, None, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
-        let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
-        SetScrollInfo(grid.window, SB_VERT, &info, true);
-    }
-}
-
-/// Scrolls a grid so a focused tile is in view.
-fn reveal_tile(grid: &mut StockGrid, tile: HWND) {
-    unsafe {
-        let mut r = RECT::default();
-        let _ = GetWindowRect(tile, &mut r);
-        let mut top_left = POINT { x: r.left, y: r.top };
-        let _ = windows::Win32::Graphics::Gdi::ScreenToClient(grid.window, &mut top_left);
-        let (top, height) = (top_left.y + grid.scroll, r.bottom - r.top);
-        if top < grid.scroll {
-            scroll_grid(grid, top);
-        } else if top + height > grid.scroll + grid.view {
-            scroll_grid(grid, top + height - grid.view);
-        }
-    }
-}
-
-/// Outlines the current stock's tile, and names it for screen readers.
-fn select_tile(grid: &StockGrid, selected: &str) {
-    let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
-    TILES.with(|t| {
-        let mut t = t.borrow_mut();
-        let looks = &mut t[paper as usize];
-        for (i, (id, button)) in grid.tiles.iter().enumerate() {
-            let Some(look) = looks.get_mut(i) else { continue };
-            let now = id == selected;
-            if look.selected != now {
-                look.selected = now;
-                let name = window_text(*button);
-                let favorite = if look.favorite { ", favorite" } else { "" };
-                super::accessible_name(*button, &if now { format!("{name}, current{favorite}") } else { format!("{name}{favorite}") });
-                unsafe {
-                    let _ = InvalidateRect(*button, None, false);
-                }
-            }
-        }
-    });
-}
-
-/// Brings the open grids' tiles up to date with the model's thumbnails.
-pub fn redraw_previews(app: &mut App) {
-    let ins = &app.inspector;
-    for (paper, grid) in ins.grids.iter().enumerate() {
-        let Some(grid) = grid else { continue };
-        if !unsafe { IsWindowVisible(grid.window) }.as_bool() {
-            continue;
-        }
-        TILES.with(|t| {
-            let mut t = t.borrow_mut();
-            for (look, (id, button)) in t[paper].iter_mut().zip(&grid.tiles) {
-                let thumb = app.model.previews.thumb(&crate::previews::Target::Stock { id: id.clone(), paper: paper == 1 });
-                let image = thumb.and_then(|t| t.image.clone());
-                let dimmed = thumb.is_some_and(|t| t.dimmed);
-                let same = look.dimmed == dimmed
-                    && match (&look.image, &image) {
-                        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
-                        (None, None) => true,
-                        _ => false,
-                    };
-                if !same {
-                    look.image = image;
-                    look.dimmed = dimmed;
-                    unsafe {
-                        let _ = InvalidateRect(*button, None, false);
-                    }
-                }
-            }
-        });
-    }
-}
-
-/// A foldout's header: chevron and title, the current stock at the right.
-fn draw_foldout(c: &mut Canvas, item: &DRAWITEMSTRUCT, title: &str, color: u32) {
-    unsafe {
-        let p = theme::palette();
-        let s = draw::dpi_of(item.hwndItem);
-        let data = GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA);
-        let (open, paper) = (data & 1 != 0, data & 2 != 0);
-        let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
-        let height = c.h as f32;
-        draw::chevron(c, 12.0 * s, height / 2.0, open, s, if disabled { p.disabled } else { p.secondary });
-        let font = draw::font_of(item.hwndItem);
-        let mut measure = RECT::default();
-        let mut wide_title: Vec<u16> = title.encode_utf16().collect();
-        let old = SelectObject(c.dc, font);
-        DrawTextW(c.dc, &mut wide_title, &mut measure, DT_SINGLELINE | DT_CALCRECT);
-        SelectObject(c.dc, old);
-        let left = (24.0 * s) as i32;
-        c.text(title, RECT { left, top: 0, right: c.w, bottom: c.h }, font, color, DT_SINGLELINE | DT_VCENTER);
-        let name = FOLDOUT_NAMES.with(|n| n.borrow()[paper as usize].clone());
-        let nr = RECT { left: left + measure.right + (16.0 * s) as i32, top: 0, right: c.w - (8.0 * s) as i32, bottom: c.h };
-        c.text(&name, nr, font, if disabled { p.disabled } else { p.secondary }, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
-    }
-}
-
-/// A tile: the thumbnail cropped to fill a rounded frame (grey until it
-/// arrives, dimmed while out of date), the accent outline on the current
-/// stock, and the name below, cut with an ellipsis.
-fn draw_tile(item: &DRAWITEMSTRUCT, look: &TileLook, hovered: bool) {
-    let p = theme::palette();
-    let s = draw::dpi_of(item.hwndItem);
-    let px = |dip: f64| (dip * s as f64).round() as i32;
-    let mut c = Canvas::new(item.hDC, item.rcItem);
-    c.clear(p.panel);
-    let inset = px(2.0);
-    let frame = RECT { left: inset, top: inset, right: c.w - inset, bottom: px(TILE_IMAGE) - inset };
-    let radius = 6.0 * s;
-    let hot = hovered || draw::is_hot(item.hwndItem);
-    draw_thumbnail(&mut c, frame, radius, look.image.as_deref(), look.dimmed, p.well, p.panel);
-    if look.selected {
-        c.round_frame(RectF::of(frame).inset(-inset as f32, -inset as f32), radius + inset as f32, 2.0 * s, p.accent);
-    } else if hot {
-        c.round_frame(RectF::of(frame), radius, s, p.strong_border);
-    }
-    // The star sits over the thumbnail's corner, on the photograph, so its
-    // colours don't follow the theme: on a favourite, or under the pointer.
-    if look.favorite || hot {
-        let star = RECT { left: frame.right - px(TILE_STAR), top: frame.top, right: frame.right, bottom: frame.top + px(TILE_STAR) };
-        let shadow = RECT { left: star.left + 1, top: star.top + 1, right: star.right + 1, bottom: star.bottom + 1 };
-        let glyph = if look.favorite { "\u{E735}" } else { "\u{E734}" };
-        let font = HFONT(with_app_fonts_glyph().0);
-        let center = DT_SINGLELINE | DT_VCENTER | DT_CENTER;
-        c.text(glyph, shadow, font, theme::rgb(0x20, 0x20, 0x20), center);
-        c.text(glyph, star, font, if look.favorite { theme::rgb(0xff, 0xc8, 0x00) } else { theme::rgb(0xff, 0xff, 0xff) }, center);
-    }
-    let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
-    let ink = if disabled { p.disabled } else if look.selected || hot { p.text } else { p.secondary };
-    let tr = RECT { left: inset, top: frame.bottom + px(4.0), right: c.w - inset, bottom: c.h };
-    c.text(&draw::window_text(item.hwndItem), tr, draw::font_of(item.hwndItem), ink, DT_SINGLELINE | DT_TOP | DT_LEFT | DT_END_ELLIPSIS);
-    if item.itemState.0 & ODS_FOCUS.0 != 0 && item.itemState.0 & ODS_NOFOCUSRECT.0 == 0 {
-        let whole = RectF::of(c.rect());
-        draw::focus_ring(&mut c, whole, radius, s);
-    }
-    c.present(item.hDC);
-}
-
 /// A thumbnail cropped to fill `frame` with rounded corners, or the
 /// placeholder; dimmed (55 % opacity over the background) while out of date.
 pub fn draw_thumbnail(c: &mut Canvas, frame: RECT, radius: f32, image: Option<&crate::previews::Bitmap>, dimmed: bool, placeholder: u32, background: u32) {
@@ -3221,167 +3137,6 @@ pub fn draw_thumbnail(c: &mut Canvas, frame: RECT, radius: f32, image: Option<&c
     }
 }
 
-/// The tile's grid (paper or not) and position.
-fn tile_of(hwnd: HWND) -> (bool, usize) {
-    unsafe {
-        let paper = GetWindowLongPtrW(GetParent(hwnd).unwrap_or_default(), GWLP_USERDATA) != 0;
-        (paper, (GetDlgCtrlID(hwnd) as u16).wrapping_sub(TILE_FIRST) as usize)
-    }
-}
-
-/// Whether a point in the tile's client area is on its star.
-fn on_star(hwnd: HWND, lparam: LPARAM) -> bool {
-    unsafe {
-        let mut r = RECT::default();
-        let _ = GetClientRect(hwnd, &mut r);
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as i32;
-        let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
-        let (x, y) = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
-        let right = r.right - px(2.0);
-        x >= right - px(TILE_STAR) && x < right && y >= px(2.0) && y < px(2.0) + px(TILE_STAR)
-    }
-}
-
-fn toggle_tile_favorite(hwnd: HWND) {
-    let (paper, index) = tile_of(hwnd);
-    post(move |app: &mut App| {
-        let id = app.inspector.grids[paper as usize].as_ref().and_then(|g| g.tiles.get(index)).map(|t| t.0.clone());
-        if let Some(id) = id {
-            app.model.toggle_favorite(&id, paper);
-        }
-    });
-}
-
-/// Enter chooses a focused tile, as Space does: owner-drawn buttons aren't
-/// push buttons to `IsDialogMessage`. A click on the star (or the context
-/// menu, for the keyboard) stars or unstars the stock instead; the pointer
-/// over a tile shows its star.
-extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
-    unsafe {
-        let enter = wparam.0 == VK_RETURN.0 as usize;
-        if msg == WM_GETDLGCODE && enter {
-            return LRESULT((DLGC_WANTMESSAGE | DLGC_BUTTON) as isize);
-        }
-        if msg == WM_KEYDOWN && enter {
-            let parent = GetParent(hwnd).unwrap_or_default();
-            SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | GetDlgCtrlID(hwnd) as usize), LPARAM(hwnd.0 as isize));
-            return LRESULT(0);
-        }
-        match msg {
-            // `draw_tile` covers the whole tile; erasing first blanked the
-            // thumbnails for a frame whenever the grid moved.
-            WM_ERASEBKGND => return LRESULT(1),
-            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if on_star(hwnd, lparam) => {
-                toggle_tile_favorite(hwnd);
-                return LRESULT(0);
-            }
-            WM_MOUSEMOVE => {
-                let tile = tile_of(hwnd);
-                if HOVER_TILE.get() != Some(tile) {
-                    HOVER_TILE.set(Some(tile));
-                    let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
-                    let _ = TrackMouseEvent(&mut track);
-                    let _ = InvalidateRect(hwnd, None, false);
-                }
-            }
-            WM_MOUSELEAVE => {
-                if HOVER_TILE.get() == Some(tile_of(hwnd)) {
-                    HOVER_TILE.set(None);
-                }
-                let _ = InvalidateRect(hwnd, None, false);
-            }
-            WM_CONTEXTMENU => {
-                let (paper, index) = tile_of(hwnd);
-                let favorite = TILES.with(|t| t.borrow()[paper as usize].get(index).is_some_and(|l| l.favorite));
-                let menu = CreatePopupMenu().unwrap();
-                let text = wide(if favorite { "Remove from &Favorites" } else { "Add to &Favorites" });
-                let _ = AppendMenuW(menu, MF_STRING, 1, pcwstr(&text));
-                let (mut x, mut y) = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
-                if x == -1 && y == -1 {
-                    let mut r = RECT::default();
-                    let _ = GetWindowRect(hwnd, &mut r);
-                    (x, y) = (r.left, r.bottom);
-                }
-                let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, hwnd, None);
-                let _ = DestroyMenu(menu);
-                if chosen.0 == 1 {
-                    toggle_tile_favorite(hwnd);
-                }
-                return LRESULT(0);
-            }
-            WM_SETFOCUS => {
-                let raw = hwnd.0 as isize;
-                post(move |app: &mut App| {
-                    let (paper, _) = tile_of(HWND(raw as *mut _));
-                    if let Some(grid) = app.inspector.grids[paper as usize].as_mut() {
-                        reveal_tile(grid, HWND(raw as *mut _));
-                    }
-                });
-            }
-            _ => {}
-        }
-        DefSubclassProc(hwnd, msg, wparam, lparam)
-    }
-}
-
-extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe {
-        let paper = GetWindowLongPtrW(hwnd, GWLP_USERDATA) != 0;
-        match msg {
-            WM_COMMAND if ((wparam.0 >> 16) & 0xffff) as u32 == BN_CLICKED => {
-                let index = (wparam.0 & 0xffff) as u16;
-                with_app(|app| {
-                    let Some(index) = index.checked_sub(TILE_FIRST) else { return };
-                    let Some(id) = app.inspector.grids[paper as usize].as_ref().and_then(|g| g.tiles.get(index as usize)).map(|t| t.0.clone()) else { return };
-                    if paper { app.model.choose_paper(&id) } else { app.model.choose_film(&id) }
-                });
-                LRESULT(0)
-            }
-            WM_DRAWITEM => {
-                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
-                let index = (item.CtlID as u16).wrapping_sub(TILE_FIRST) as usize;
-                let look = TILES.with(|t| t.borrow()[paper as usize].get(index).cloned()).unwrap_or_default();
-                draw_tile(item, &look, HOVER_TILE.get() == Some((paper, index)));
-                LRESULT(1)
-            }
-            WM_CTLCOLORSTATIC => {
-                let dc = HDC(wparam.0 as *mut _);
-                SetBkMode(dc, TRANSPARENT);
-                let p = theme::palette();
-                SetTextColor(dc, COLORREF(p.secondary));
-                LRESULT(theme::brush(p.panel).0 as isize)
-            }
-            WM_CTLCOLORBTN => draw::button_brush(),
-            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
-            WM_VSCROLL | WM_MOUSEWHEEL => {
-                with_app(|app| {
-                    let line = app.inspector.px(40.0);
-                    let Some(grid) = app.inspector.grids[paper as usize].as_mut() else { return };
-                    let target = if msg == WM_MOUSEWHEEL {
-                        grid.scroll - ((wparam.0 >> 16) & 0xffff) as i16 as i32 * line * 3 / 2 / 120
-                    } else {
-                        let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
-                        let _ = GetScrollInfo(hwnd, SB_VERT, &mut info);
-                        match SCROLLBAR_COMMAND((wparam.0 & 0xffff) as i32) {
-                            SB_LINEUP => info.nPos - line,
-                            SB_LINEDOWN => info.nPos + line,
-                            SB_PAGEUP => info.nPos - info.nPage as i32,
-                            SB_PAGEDOWN => info.nPos + info.nPage as i32,
-                            SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos,
-                            SB_TOP => 0,
-                            SB_BOTTOM => i32::MAX / 2,
-                            _ => info.nPos,
-                        }
-                    };
-                    scroll_grid(grid, target);
-                });
-                LRESULT(0)
-            }
-            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-        }
-    }
-}
-
 /// The scope on a dark well: the histogram's red, green and blue added, as
 /// in photo editors (overlaps mix to cyan, magenta, yellow and white), or
 /// the RGB waveform with its levels in percent at the left. Grid lines at a
@@ -3396,16 +3151,18 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 let _ = GetClientRect(hwnd, &mut r);
                 let (w, h) = (r.right.max(1) as usize, r.bottom.max(1) as usize);
                 let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as usize;
-                let well = 0x1a1a1a;
+                // The well is the window's `bg`, its grid in `line` (`scopeGrid`).
+                let hex = theme::tokens().hex;
+                let well = hex.bg;
                 let mut pixels = vec![well; w * h];
                 let (has_photo, waveform) = SCOPE.with(|scope| {
                     let scope = scope.borrow();
                     if scope.2 {
                         // The levels' column, then the raster scaled into the plot.
-                        let left = 26 * dpi / 96;
+                        let left = 32 * dpi / 96;
                         let (top, bottom) = (6 * dpi / 96, 6 * dpi / 96);
-                        let (plot_w, plot_h) = (w.saturating_sub(left + 4).max(1), h.saturating_sub(top + bottom).max(1));
-                        grid_lines(&mut pixels, w, left, top, plot_w, plot_h);
+                        let (plot_w, plot_h) = (w.saturating_sub(left + 6 * dpi / 96).max(1), h.saturating_sub(top + bottom).max(1));
+                        grid_lines(&mut pixels, w, left, top, plot_w, plot_h, hex.line);
                         if let Some(waveform) = scope.1.as_ref().filter(|wf| wf.samples > 0) {
                             let raster = waveform.raster();
                             for y in 0..plot_h {
@@ -3423,12 +3180,18 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                         }
                         (scope.0.is_some(), Some((left, top, plot_h)))
                     } else {
-                        let (inset, top) = (4, 6);
+                        let (inset, top) = (4 * dpi / 96, 6 * dpi / 96);
                         let (plot_w, plot_h) = (w.saturating_sub(2 * inset).max(1), h.saturating_sub(top).max(1));
-                        grid_lines(&mut pixels, w, inset, top, plot_w, plot_h);
+                        grid_lines(&mut pixels, w, inset, top, plot_w, plot_h, hex.line);
                         if let Some(histogram) = &scope.0 {
                             let peak = histogram.peak() as f64;
                             if peak > 0.0 {
+                                // Each channel filled at 0.4 with a 0.9 outline, the
+                                // three added together (`plusLighter` in the Mac's
+                                // canvas), then laid over the well: in light themes the
+                                // colours stay, rather than adding up to white.
+                                let colors = [[1.0, 0.42, 0.42], [0.42, 0.8, 0.47], [0.3, 0.59, 1.0]];
+                                let line = (dpi / 96).max(1);
                                 for x in 0..plot_w {
                                     let bin = x as f64 * 255.0 / (plot_w - 1).max(1) as f64;
                                     let (i, f) = (bin.floor() as usize, bin.fract());
@@ -3438,22 +3201,21 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                                         ((a * (1.0 - f) + b * f) / peak).min(1.0)
                                     };
                                     let heights = [at(&histogram.red), at(&histogram.green), at(&histogram.blue)];
-                                    let colors = [[1.0, 0.2, 0.2], [0.2, 1.0, 0.2], [0.25, 0.35, 1.0]];
-                                    for y in 0..plot_h {
-                                        let level = 1.0 - (y as f64 + 0.5) / plot_h as f64;
-                                        if heights.iter().all(|&height| height < level) {
-                                            continue;
-                                        }
-                                        let mut c = [0.1f64, 0.1, 0.1];
+                                    let tops = heights.map(|v| ((1.0 - v) * plot_h as f64).round() as usize);
+                                    let first = tops.iter().copied().min().unwrap_or(plot_h).saturating_sub(line);
+                                    for y in first..plot_h {
+                                        let p = &mut pixels[(top + y) * w + inset + x];
+                                        let (mut c, mut alpha) = ([0.0f64; 3], 0.0f64);
                                         for k in 0..3 {
-                                            if heights[k] >= level {
-                                                for j in 0..3 {
-                                                    c[j] += colors[k][j] * 0.75;
-                                                }
+                                            let weight = if y + line > tops[k] && y <= tops[k] { 0.9 } else if y > tops[k] { 0.4 } else { 0.0 };
+                                            alpha += weight;
+                                            for j in 0..3 {
+                                                c[j] += colors[k][j] * weight;
                                             }
                                         }
-                                        let byte = |v: f64| (v.min(1.0) * 255.0) as u32;
-                                        pixels[(top + y) * w + inset + x] = byte(c[0]) << 16 | byte(c[1]) << 8 | byte(c[2]);
+                                        let alpha = alpha.min(1.0);
+                                        let byte = |v: f64, shift: u32| ((v.min(1.0) * 255.0 + (*p >> shift & 0xff) as f64 * (1.0 - alpha)).round().min(255.0)) as u32;
+                                        *p = byte(c[0], 16) << 16 | byte(c[1], 8) << 8 | byte(c[2], 0);
                                     }
                                 }
                             }
@@ -3475,20 +3237,10 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 };
                 let mut c = Canvas::new(dc, r);
                 SetDIBitsToDevice(c.hdc(), 0, 0, w as u32, h as u32, 0, 0, 0, h as u32, pixels.as_ptr() as *const _, &info, DIB_RGB_COLORS);
-                // Labels on the dark well, which is dark in either theme.
-                let ink = theme::rgb(0x9a, 0x9a, 0x9a);
-                let font = HFONT(with_app_fonts_small().0);
-                if let Some((left, top, plot_h)) = waveform {
-                    for (i, level) in [100, 75, 50, 25, 0].into_iter().enumerate() {
-                        let y = (top + plot_h * i / 4) as i32;
-                        let tr = RECT { left: 2, top: y - 8, right: left as i32 - 3, bottom: y + 8 };
-                        c.text(&level.to_string(), tr, font, ink, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
-                    }
-                }
-                if !has_photo {
-                    c.text("No developed photograph", r, font, ink, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-                }
-                c.round_corners(RectF::of(r), 6.0 * draw::dpi_of(hwnd), theme::palette().panel);
+                // The levels and the empty well's words, in `dim`.
+                let s = draw::dpi_of(hwnd);
+                ink::scope_labels(&mut c, s, waveform, !has_photo);
+                c.round_corners(RectF::of(r), 3.0 * s, theme::palette().panel);
                 c.present(dc);
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
@@ -3504,28 +3256,15 @@ extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
 }
 
 /// Faint lines across the plot at a quarter, half and three quarters.
-fn grid_lines(pixels: &mut [u32], width: usize, left: usize, top: usize, plot_w: usize, plot_h: usize) {
+fn grid_lines(pixels: &mut [u32], width: usize, left: usize, top: usize, plot_w: usize, plot_h: usize, line: u32) {
     for fraction in [1, 2, 3] {
         let y = top + plot_h * fraction / 4;
         for x in left..(left + plot_w).min(width) {
             if let Some(p) = pixels.get_mut(y * width + x) {
-                *p = 0x2c2c2c;
+                *p = line;
             }
         }
     }
-}
-
-/// The small UI font, for the scope's labels.
-fn with_app_fonts_small() -> HGDIOBJ {
-    thread_local! {
-        static SMALL: Cell<isize> = const { Cell::new(0) };
-    }
-    SMALL.with(|f| {
-        if f.get() == 0 {
-            with_app(|app| f.set(app.fonts.small.0 as isize));
-        }
-        HGDIOBJ(f.get() as *mut _)
-    })
 }
 
 /// The scope's height: a grabber under it. Drag to resize (88–420 DIPs,
@@ -3554,15 +3293,16 @@ extern "system" fn grip_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 let dc = BeginPaint(hwnd, &mut ps);
                 let mut r = RECT::default();
                 let _ = GetClientRect(hwnd, &mut r);
-                // A pill in the middle, darker under the pointer or while dragged.
+                // A 32 × 3 capsule in `track`, `dim` under the pointer or while dragged.
                 let p = theme::palette();
+                let hex = theme::tokens().hex;
                 let s = draw::dpi_of(hwnd);
                 let mut c = Canvas::new(dc, r);
                 c.clear(p.panel);
-                let (cw, ch) = (32.0 * s, 4.0 * s);
+                let (cw, ch) = (32.0 * s, (3.0 * s).round());
                 let pill = RectF::new(((r.right as f32 - cw) / 2.0).round(), ((r.bottom as f32 - ch) / 2.0).round(), cw, ch);
                 let active = draw::is_hot(hwnd) || GRIP_DRAG.get().is_some();
-                c.round_rect(pill, ch / 2.0, if active { p.secondary } else { theme::mix(p.border, p.strong_border, 0.4) });
+                c.round_rect(pill, ch / 2.0, theme::gdi(if active { hex.dim } else { hex.track }));
                 if GetFocus() == hwnd && draw::focus_cues(hwnd) {
                     draw::focus_ring(&mut c, RectF::new(pill.x - 8.0 * s, 0.0, cw + 16.0 * s, r.bottom as f32), 3.0 * s, s);
                 }
@@ -3639,9 +3379,12 @@ pub fn report_geometry(app: &mut App) {
 
 // MARK: Crop panel
 
-/// Replaces the adjustments while cropping (`CropInspector`). Cancel and
-/// Done stay at the bottom, like Reset below the adjustments; the controls
-/// above them scroll when the column is short.
+/// Replaces the adjustments while cropping (`CropInspector`), in the ink:
+/// "Crop" and Reset Crop over a rule; the aspect ratios as rows with a dot
+/// and their formats in italic, Orientation as two words, the angle as an
+/// ink slider, the size and the hints; under a rule at the foot "return
+/// applies · esc cancels" over Cancel and Done, Done twice as wide. The
+/// rows between scroll when the column is short.
 struct CropPanel {
     panel: HWND,
     rows: HWND,
@@ -3650,6 +3393,8 @@ struct CropPanel {
     custom: bool,
     scroll: i32,
     content: i32,
+    /// The rules' heights in the panel: under the header, over the foot.
+    rules: (i32, i32),
 }
 
 const C_ASPECT: u16 = CROP_FIRST; // ..+8
@@ -3665,7 +3410,37 @@ const C_RESET: u16 = CROP_FIRST + 18;
 const C_DONE: u16 = CROP_FIRST + 19;
 const C_CANCEL: u16 = CROP_FIRST + 20;
 const C_SIZE_NOTE: u16 = CROP_FIRST + 21;
+/// Flip left to right (`io.flip`), a tick box.
+const C_FLIP: u16 = CROP_FIRST + 22;
 const C_LABELS: u16 = CROP_FIRST + 30;
+/// The labels: Ratio, ×, Orientation, Angle, Size, the size's hint, the
+/// instructions, and the two sections' heads.
+const L_RATIO: u16 = C_LABELS + 1;
+const L_TIMES: u16 = C_LABELS + 2;
+const L_ORIENTATION: u16 = C_LABELS + 3;
+const L_STRAIGHTEN: u16 = C_LABELS + 4;
+const L_ANGLE: u16 = C_LABELS + 5;
+const L_SIZE: u16 = C_LABELS + 6;
+const L_HINT: u16 = C_LABELS + 7;
+const L_SIZE_HINT: u16 = C_LABELS + 8;
+const L_FLIP: u16 = C_LABELS + 9;
+
+/// The foot's words, the aspect formats and the orientation words (`Crop.swift`).
+const CROP_FOOT: TextStyle = TextStyle::serif(14.0, 400).italic();
+const CROP_HEAD: TextStyle = TextStyle::ui(12.0, 500);
+const ASPECT_FORMAT: TextStyle = TextStyle::serif(13.5, 400).italic();
+const ORIENTATION_WORD: TextStyle = TextStyle::serif(14.5, 400);
+const CROP_BUTTON: TextStyle = TextStyle::serif(15.0, 600);
+
+thread_local! {
+    /// The crop panel, and its rules' heights: under the header, over the foot.
+    static CROP_RULES: Cell<(isize, i32, i32)> = const { Cell::new((0, 0, 0)) };
+}
+
+/// `text`'s width in `style`, DIPs.
+fn measure_dips(text: &str, style: &TextStyle) -> f64 {
+    super::d2d::measure_text(text, style, 0.0, theme::tokens().plain).width as f64
+}
 
 impl CropPanel {
     fn get(&self, id: u16) -> HWND {
@@ -3680,21 +3455,46 @@ fn build_crop(app: &mut App) {
     let rows = create(w!("NegsCropRows"), "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), panel, 0, HFONT::default());
     let mut controls = vec![];
     let mut add = |id: u16, class: PCWSTR, text: &str, style: WINDOW_STYLE, font: HFONT| {
-        let parent = if matches!(id, C_CANCEL | C_DONE) { panel } else { rows };
+        let parent = if matches!(id, C_CANCEL | C_DONE | C_RESET) { panel } else { rows };
         let c = create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), parent, id, font);
         controls.push((id, c));
         c
     };
-    add(C_LABELS, w!("STATIC"), "Aspect Ratio", WINDOW_STYLE(0), fonts.section);
+    let mut ink_static = |id: u16, text: &str, role: Role| {
+        let c = add(id, w!("STATIC"), text, WINDOW_STYLE(SS_OWNERDRAW.0 | SS_NOPREFIX.0), fonts.ui);
+        draw::set_role(c, role);
+        super::accessible_role(c, 0x29);
+        c
+    };
+    ink_static(C_LABELS, "ASPECT RATIO", Role::Section);
+    ink_static(L_RATIO, "Ratio", Role::Label);
+    ink_static(L_TIMES, "×", Role::Unit);
+    ink_static(L_ORIENTATION, "Orientation", Role::Label);
+    ink_static(L_STRAIGHTEN, "STRAIGHTEN", Role::Section);
+    ink_static(L_ANGLE, "Angle", Role::Label);
+    ink_static(C_ANGLE_VALUE, "0°", Role::Readout);
+    ink_static(L_FLIP, "FLIP", Role::Section);
+    ink_static(L_SIZE, "Size", Role::Label);
+    let size = ink_static(C_SIZE, "", Role::Readout);
+    super::dialogs::tooltip(size, "The exported photograph’s size, before the border.");
+    ink_static(L_SIZE_HINT, "The exported photograph’s size, before the border.", Role::Hint);
+    ink_static(C_SIZE_NOTE, "", Role::Hint);
+    ink_static(
+        L_HINT,
+        "Drag the corners or edges to crop, or inside to move it. Drag the dial under the photograph to straighten it; the arrows at its ends turn it a quarter. The border is added after cropping.",
+        Role::Hint,
+    );
+    // The aspect ratios and the orientation words, painted here (`WM_DRAWITEM`).
     for (i, aspect) in CropAspect::ALL.iter().enumerate() {
         let text = match aspect.format() {
-            Some(format) => format!("{}    {format}", aspect.title()),
+            Some(format) => format!("{}\t{format}", aspect.title()),
             None => aspect.title().to_string(),
         };
-        let group = if i == 0 { WS_GROUP | WS_TABSTOP } else { WINDOW_STYLE(0) };
-        add(C_ASPECT + i as u16, w!("BUTTON"), &text, group | WINDOW_STYLE(BS_AUTORADIOBUTTON as u32), fonts.ui);
+        let group = if i == 0 { WS_GROUP | WS_TABSTOP } else { WS_TABSTOP };
+        let c = add(C_ASPECT + i as u16, w!("BUTTON"), &text, group | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+        draw::track_hover(c);
+        super::accessible_name(c, &text.replace('\t', ", "));
     }
-    add(C_LABELS + 1, w!("STATIC"), "Ratio", WINDOW_STYLE(0), fonts.ui);
     for id in [C_WIDTH, C_HEIGHT] {
         let e = add(id, w!("EDIT"), "", WS_TABSTOP | WS_GROUP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), fonts.ui);
         draw::set_role(e, Role::Field);
@@ -3704,15 +3504,15 @@ fn build_crop(app: &mut App) {
             let _ = SetWindowSubclass(e, Some(ratio_subclass), 1, 0);
         }
     }
-    add(C_LABELS + 2, w!("STATIC"), "×", WINDOW_STYLE(SS_CENTER.0), fonts.ui);
-    add(C_LABELS + 3, w!("STATIC"), "Orientation", WINDOW_STYLE(0), fonts.ui);
-    add(C_LANDSCAPE, w!("BUTTON"), "Landscape", WS_TABSTOP | WS_GROUP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32), fonts.ui);
-    add(C_PORTRAIT, w!("BUTTON"), "Portrait", WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32), fonts.ui);
-    add(C_LABELS + 4, w!("STATIC"), "Straighten", WS_GROUP, fonts.section);
-    add(C_LABELS + 5, w!("STATIC"), "Angle", WINDOW_STYLE(0), fonts.ui);
-    add(C_ANGLE_VALUE, w!("STATIC"), "0.0°", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
-    let reset = add(C_ANGLE_RESET, w!("BUTTON"), "\u{E777}", WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), fonts.glyph_small);
+    for (id, title) in [(C_LANDSCAPE, "Landscape"), (C_PORTRAIT, "Portrait")] {
+        let group = if id == C_LANDSCAPE { WS_GROUP | WS_TABSTOP } else { WS_TABSTOP };
+        let c = add(id, w!("BUTTON"), title, group | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+        draw::track_hover(c);
+    }
+    let reset = add(C_ANGLE_RESET, w!("BUTTON"), "↺", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), fonts.ui);
+    draw::set_role(reset, Role::ResetMark);
     draw::track_hover(reset);
+    super::accessible_name(reset, "Straighten to 0°");
     super::dialogs::tooltip(reset, "Straighten to 0°");
     let angle = add(C_ANGLE, TRACKBAR_CLASSW, "Angle", WS_TABSTOP | WINDOW_STYLE(TBS_NOTICKS | TBS_HORZ | TBS_BOTH), HFONT::default());
     unsafe {
@@ -3722,49 +3522,60 @@ fn build_crop(app: &mut App) {
         SendMessageW(angle, TBM_SETPAGESIZE, WPARAM(0), LPARAM(50));
         let _ = SetWindowSubclass(angle, Some(trackbar_subclass), 1, C_ANGLE_RESET as usize);
     }
+    draw::set_role(angle, Role::InkSlider);
     draw::track_hover(angle);
     draw::set_default_pos(angle, 0);
     super::dialogs::tooltip(angle, "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.");
-    add(C_LABELS + 6, w!("STATIC"), "Size", WINDOW_STYLE(0), fonts.ui);
-    let size = add(C_SIZE, w!("STATIC"), "", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
-    super::dialogs::tooltip(size, "The exported photograph’s size, before the border.");
-    add(C_SIZE_NOTE, w!("STATIC"), "", WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), fonts.small);
-    let reset_crop = add(C_RESET, w!("BUTTON"), "Reset Crop", WS_TABSTOP | WS_GROUP, fonts.ui);
+    let flip = add(C_FLIP, w!("BUTTON"), "Flip left to right", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_CHECKBOX as u32), fonts.ui);
+    draw::set_role(flip, Role::Tick);
+    draw::track_hover(flip);
+    super::dialogs::tooltip(flip, "Mirrors the photograph, as a negative photographed from its base side needs. With a half turn it mirrors top to bottom.");
+    let reset_crop = add(C_RESET, w!("BUTTON"), "Reset Crop", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_PUSHBUTTON as u32), fonts.ui);
+    draw::set_role(reset_crop, Role::WordButton);
+    draw::track_hover(reset_crop);
     super::dialogs::tooltip(reset_crop, "Show the whole, unturned photograph again.");
-    add(
-        C_LABELS + 7,
-        w!("STATIC"),
-        "Drag the corners or edges to crop, or drag inside to move it. Drag the dial below the photograph to straighten it. Press Enter to apply or Esc to cancel. The border is added after cropping.",
-        WINDOW_STYLE(0),
-        fonts.small,
-    );
-    add(C_CANCEL, w!("BUTTON"), "Cancel", WS_TABSTOP | WS_GROUP, fonts.ui);
-    add(C_DONE, w!("BUTTON"), "Done", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), fonts.ui);
+    let cancel = add(C_CANCEL, w!("BUTTON"), "Cancel", WS_TABSTOP | WS_GROUP | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+    draw::track_hover(cancel);
+    super::dialogs::tooltip(cancel, "Discard the crop (Esc)");
+    let done = add(C_DONE, w!("BUTTON"), "Done", WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), fonts.ui);
+    draw::track_hover(done);
+    super::dialogs::tooltip(done, "Apply the crop (Return)");
     let custom = app.model.crop_session.as_ref().is_some_and(|s| s.aspect == CropAspect::Custom);
     let ins = &mut app.inspector;
     unsafe {
         let _ = MoveWindow(panel, 0, 0, ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top, false);
     }
-    ins.crop = Some(CropPanel { panel, rows, controls, custom, scroll: 0, content: 0 });
+    ins.crop = Some(CropPanel { panel, rows, controls, custom, scroll: 0, content: 0, rules: (0, 0) });
     layout_crop(ins);
 }
 
-/// Pins Cancel and Done, then places the controls above them.
+/// Places the header and the foot, then the rows between them.
 fn layout_crop(ins: &mut Inspector) {
     let Some(crop) = &ins.crop else { return };
     let (w, h) = (ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top);
-    let pad = ins.px(16.0);
-    let (button, tall) = (ins.px(88.0), ins.px(32.0));
-    let footer = h - pad - tall;
+    let gutter = ins.px(ink::GUTTER);
+    let header = ins.px(ink::PANE_HEADER);
+    // The foot: 11 above the words, 8 between them and the buttons, 16 below.
+    let tall = ins.px(36.0);
+    let foot = ins.px(11.0 + 18.0 + 8.0) + tall + ins.px(16.0);
+    let top_of_foot = h - foot;
+    let third = ((w - 2 * gutter - ins.px(10.0)) / 3).max(1);
+    let reset_width = ins.px(measure_dips("Reset Crop", &ink::WORD) + 2.0 * ink::MARGIN);
     let rows = crop.rows;
     place(
         &[
-            (rows, 0, 0, w, (footer - ins.px(8.0)).max(0)),
-            (crop.get(C_CANCEL), w - pad - 2 * button - ins.px(8.0), footer, button, tall),
-            (crop.get(C_DONE), w - pad - button, footer, button, tall),
+            (rows, 0, header + 1, w, (top_of_foot - header - 1).max(0)),
+            (crop.get(C_RESET), w - gutter - reset_width + ins.px(ink::MARGIN), ins.px(8.0), reset_width, ins.px(24.0)),
+            (crop.get(C_CANCEL), gutter, h - ins.px(16.0) - tall, third, tall),
+            (crop.get(C_DONE), gutter + third + ins.px(10.0), h - ins.px(16.0) - tall, w - 2 * gutter - third - ins.px(10.0), tall),
         ],
         0,
     );
+    if let Some(crop) = ins.crop.as_mut() {
+        crop.rules = (header, top_of_foot);
+        // For its paint, which comes while the app may be busy.
+        CROP_RULES.with(|r| r.set((crop.panel.0 as isize, header, top_of_foot)));
+    }
     // Once more when the scroll bar comes or goes, which changes the width.
     for _ in 0..2 {
         let mut client = RECT::default();
@@ -3794,68 +3605,81 @@ fn layout_crop(ins: &mut Inspector) {
             break;
         }
     }
-    // The panel draws the fields' frames, which reach past the fields.
     unsafe {
         let _ = InvalidateRect(rows, None, false);
+        if let Some(crop) = &ins.crop {
+            let _ = InvalidateRect(crop.panel, None, false);
+        }
     }
 }
 
-/// Where the controls above Cancel and Done go in a `width` wide panel,
-/// unscrolled, and the height they take.
+/// Where the rows go in a `width` wide panel, unscrolled, and the height
+/// they take: the ink's gutters and row heights.
 fn crop_rows(ins: &Inspector, width: i32) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
     let Some(crop) = &ins.crop else { return (vec![], 0) };
-    let pad = ins.px(16.0);
-    let right = width - pad;
-    let row = ins.px(24.0);
-    let mut y = ins.px(16.0);
+    let gutter = ins.px(ink::GUTTER);
+    let right = width - gutter;
+    let row = ins.px(ink::ROW);
+    let mut y = 0;
     let mut positions = vec![];
     let mut place = |id: u16, x: i32, y: i32, w: i32, h: i32| positions.push((crop.get(id), x, y, w, h));
-    place(C_LABELS, pad, y, right - pad, ins.px(24.0));
-    y += ins.px(32.0);
+    place(C_LABELS, gutter, y, right - gutter, ins.px(ink::SECTION_HEAD));
+    y += ins.px(ink::SECTION_HEAD);
     for i in 0..CropAspect::ALL.len() as u16 {
-        place(C_ASPECT + i, pad, y, right - pad, row);
-        y += row + ins.px(4.0);
+        place(C_ASPECT + i, 0, y, width, row - ins.px(3.0));
+        y += row - ins.px(3.0);
     }
-    y += ins.px(4.0);
-    for id in [C_LABELS + 1, C_WIDTH, C_LABELS + 2, C_HEIGHT] {
+    for id in [L_RATIO, C_WIDTH, L_TIMES, C_HEIGHT] {
         unsafe {
             let _ = ShowWindow(crop.get(id), if crop.custom { SW_SHOWNA } else { SW_HIDE });
         }
     }
     if crop.custom {
-        let field = ins.px(56.0);
-        place(C_LABELS + 1, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
-        let r = ins.field(pad + ins.px(96.0), y, field);
-        place(C_WIDTH, r.left, r.top, r.right - r.left, r.bottom - r.top);
-        place(C_LABELS + 2, pad + ins.px(96.0) + field, y + ins.px(2.0), ins.px(20.0), ins.px(20.0));
-        let r = ins.field(pad + ins.px(116.0) + field, y, field);
+        let field = ins.px(52.0);
+        place(L_RATIO, gutter, y, ins.px(ink::SLIDER_LABEL), row);
+        let times = ins.px(16.0);
+        let r = ins.field(right - field, y + (row - ins.px(24.0)) / 2, field);
         place(C_HEIGHT, r.left, r.top, r.right - r.left, r.bottom - r.top);
-        y += ins.px(32.0);
+        place(L_TIMES, right - field - times, y, times, row);
+        let r = ins.field(right - 2 * field - times, y + (row - ins.px(24.0)) / 2, field);
+        place(C_WIDTH, r.left, r.top, r.right - r.left, r.bottom - r.top);
+        y += row;
     }
-    place(C_LABELS + 3, pad, y + ins.px(6.0), ins.px(88.0), ins.px(20.0));
-    let half = (right - pad - ins.px(96.0)) / 2;
-    place(C_LANDSCAPE, pad + ins.px(96.0), y, half, ins.px(32.0));
-    place(C_PORTRAIT, pad + ins.px(96.0) + half, y, half, ins.px(32.0));
-    y += ins.px(48.0);
-    place(C_LABELS + 4, pad, y, right - pad, ins.px(24.0));
-    y += ins.px(32.0);
-    place(C_LABELS + 5, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
-    place(C_ANGLE_RESET, right - ins.px(24.0) - ins.px(56.0), y, ins.px(24.0), ins.px(22.0));
-    place(C_ANGLE_VALUE, right - ins.px(56.0), y + ins.px(2.0), ins.px(56.0), ins.px(20.0));
-    y += ins.px(22.0);
-    place(C_ANGLE, pad - ins.px(8.0), y, right - pad + ins.px(16.0), ins.px(26.0));
-    y += ins.px(40.0);
-    place(C_LABELS + 6, pad, y, ins.px(88.0), ins.px(20.0));
-    place(C_SIZE, pad + ins.px(88.0), y, right - pad - ins.px(88.0), ins.px(20.0));
-    y += ins.px(24.0);
-    place(C_SIZE_NOTE, pad, y, right - pad, ins.px(48.0));
-    y += ins.px(56.0);
-    place(C_RESET, pad, y, right - pad, ins.px(32.0));
-    y += ins.px(48.0);
-    // The hint wraps to as many lines as the width needs.
-    let hint = footer_height(ins, crop.get(C_LABELS + 7), right - pad);
-    place(C_LABELS + 7, pad, y, right - pad, hint);
-    y += hint + ins.px(8.0);
+    let words = ins.px(measure_dips("Landscape", &ORIENTATION_WORD) + 4.0);
+    let portrait = ins.px(measure_dips("Portrait", &ORIENTATION_WORD) + 4.0);
+    place(L_ORIENTATION, gutter, y, ins.px(ink::SLIDER_LABEL), row + ins.px(4.0));
+    place(C_PORTRAIT, right - portrait, y, portrait, row + ins.px(4.0));
+    place(C_LANDSCAPE, right - portrait - ins.px(14.0) - words, y, words, row + ins.px(4.0));
+    y += row + ins.px(4.0) + ins.px(10.0);
+    place(L_STRAIGHTEN, gutter, y, right - gutter, ins.px(ink::SECTION_HEAD));
+    y += ins.px(ink::SECTION_HEAD);
+    // As a Lab slider: the label, the slider, the value and ↺.
+    let label = ins.px(ink::SLIDER_LABEL);
+    let value = ins.px(ink::VALUE_WIDTH);
+    let reset = ins.px(ink::RESET_WIDTH);
+    place(L_ANGLE, gutter, y, label, row);
+    place(C_ANGLE, gutter + label, y, (right - gutter - label - value - reset).max(0), row);
+    place(C_ANGLE_VALUE, right - reset - value, y, value, row);
+    place(C_ANGLE_RESET, right - reset, y, reset, row);
+    y += row + ins.px(10.0);
+    place(L_FLIP, gutter, y, right - gutter, ins.px(ink::SECTION_HEAD));
+    y += ins.px(ink::SECTION_HEAD);
+    let margin = ins.px(ink::MARGIN);
+    place(C_FLIP, gutter - margin, y, right - gutter + 2 * margin, row);
+    y += row + ins.px(14.0);
+    place(L_SIZE, gutter, y, label, row);
+    place(C_SIZE, gutter + label, y, right - gutter - label, row);
+    y += row;
+    for id in [L_SIZE_HINT, C_SIZE_NOTE, L_HINT] {
+        let text_height = footer_height(ins, crop.get(id), right - gutter);
+        if text_height > 0 && !window_text(crop.get(id)).is_empty() {
+            place(id, gutter, y, right - gutter, text_height);
+            y += text_height + ins.px(6.0);
+        } else {
+            place(id, gutter, y, right - gutter, 0);
+        }
+    }
+    y += ins.px(10.0);
     (positions, y)
 }
 
@@ -3871,14 +3695,25 @@ fn sync_crop(app: &mut App) {
     app.inspector.crop_shown = cropping;
     let Some(session) = &app.model.crop_session else { return };
     let decimal = app.inspector.decimal;
-    for (i, aspect) in CropAspect::ALL.iter().enumerate() {
-        set_check(crop.get(C_ASPECT + i as u16), *aspect == session.aspect);
+    // The painted rows read the session; they repaint when it changes.
+    for i in 0..CropAspect::ALL.len() as u16 {
+        let c = crop.get(C_ASPECT + i);
+        let chosen = CropAspect::ALL[i as usize] == session.aspect;
+        super::accessible_value(c, if chosen { "Chosen" } else { "" });
+        unsafe {
+            let _ = InvalidateRect(c, None, false);
+        }
     }
     let portrait = session.orientation_portrait();
-    set_check(crop.get(C_LANDSCAPE), !portrait);
-    set_check(crop.get(C_PORTRAIT), portrait);
-    enable(crop.get(C_LANDSCAPE), session.aspect.turns());
-    enable(crop.get(C_PORTRAIT), session.aspect.turns());
+    for (id, chosen) in [(C_LANDSCAPE, !portrait), (C_PORTRAIT, portrait)] {
+        let c = crop.get(id);
+        enable(c, session.aspect.turns());
+        super::accessible_value(c, if chosen { "Chosen" } else { "" });
+        unsafe {
+            let _ = InvalidateRect(c, None, false);
+        }
+    }
+    enable(crop.get(L_ORIENTATION), session.aspect.turns());
     unsafe {
         for (id, value) in [(C_WIDTH, session.custom.width), (C_HEIGHT, session.custom.height)] {
             if GetFocus() != crop.get(id) {
@@ -3891,10 +3726,17 @@ fn sync_crop(app: &mut App) {
         }
         let _ = ShowWindow(crop.get(C_ANGLE_RESET), if session.angle != 0.0 { SW_SHOWNA } else { SW_HIDE });
     }
+    ink::set_changed(crop.get(L_ANGLE), session.angle != 0.0);
+    let flip = crop.get(C_FLIP);
+    ink::set_changed(flip, session.flip);
+    unsafe {
+        SendMessageW(flip, BM_SETCHECK, WPARAM(if session.flip { 1 } else { 0 }), LPARAM(0));
+        let _ = InvalidateRect(flip, None, false);
+    }
     set_text(crop.get(C_ANGLE_VALUE), &format!("{}°", format(session.angle, 0.1, decimal)));
     // The draft's pixels in the frame an export develops; with a target, a
     // smaller crop needs a larger frame, up to the working limit.
-    let (size, note) = match app.model.crop_draft_size() {
+    let (size, note, warn) = match app.model.crop_draft_size() {
         Some(Ok(size)) => {
             let source = app.model.source_size.0 as f64;
             let scale = size.working.0 as f64 / source;
@@ -3905,26 +3747,138 @@ fn sync_crop(app: &mut App) {
             } else {
                 format!("Image Size develops the whole frame at {} of the source.", crate::model::percent(scale))
             };
-            ((size.photo.0 as f64, size.photo.1 as f64), note)
+            ((size.photo.0 as f64, size.photo.1 as f64), note, false)
         }
         Some(Err(error)) => {
             let shown = session.shown();
-            ((shown.width, shown.height), error.to_string())
+            ((shown.width, shown.height), error.to_string(), true)
         }
         None => {
             let shown = session.shown();
-            ((shown.width, shown.height), String::new())
+            ((shown.width, shown.height), String::new(), false)
         }
     };
     set_text(crop.get(C_SIZE), &format!("{} × {} px", size.0.round() as i64, size.1.round() as i64));
+    let note_changed = window_text(crop.get(C_SIZE_NOTE)) != note;
     set_text(crop.get(C_SIZE_NOTE), &note);
+    ink::set_look(crop.get(C_SIZE_NOTE), ink::Look { warn, ..Default::default() });
     enable(crop.get(C_RESET), session.modified());
     let custom = session.aspect == CropAspect::Custom;
     if let Some(crop) = app.inspector.crop.as_mut()
-        && crop.custom != custom
+        && (crop.custom != custom || note_changed)
     {
         crop.custom = custom;
         layout_crop(&mut app.inspector);
+    }
+}
+
+/// Paints a crop row the panel draws itself: an aspect ratio (a dot, the
+/// ratio, its format in italic at the right), an orientation word (`paper`
+/// with the pencil under it when chosen), or Cancel and Done.
+fn draw_crop_item(item: &DRAWITEMSTRUCT, session: Option<&crate::crop::CropSession>) {
+    let hwnd = item.hwndItem;
+    let id = item.CtlID as u16;
+    let s = draw::dpi_of(hwnd);
+    let t = theme::tokens();
+    let r = item.rcItem;
+    let (w, h) = ((r.right - r.left) as f32 / s, (r.bottom - r.top) as f32 / s);
+    let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
+    let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
+    let focused = item.itemState.0 & ODS_FOCUS.0 != 0 && draw::focus_cues(hwnd);
+    let hot = !disabled && draw::is_hot(hwnd);
+    let alpha = if disabled { theme::DISABLED_OPACITY } else { 1.0 };
+    let gutter = ink::GUTTER as f32;
+    let text = window_text(hwnd);
+    let mut c = Canvas::new(item.hDC, r);
+    c.clear(theme::gdi(t.hex.panel));
+    c.d2d(s, t.plain, |p| {
+        match id {
+            i if (C_ASPECT..C_ASPECT + CropAspect::ALL.len() as u16).contains(&i) => {
+                let chosen = session.is_some_and(|s| s.aspect == CropAspect::ALL[(i - C_ASPECT) as usize]);
+                let (title, format) = text.split_once('\t').unwrap_or((&text, ""));
+                let ring = if chosen { t.hex.paper } else if hot { t.hex.dim } else { t.hex.track };
+                let (cx, cy) = (gutter + 4.5, h / 2.0);
+                if chosen {
+                    p.fill_ellipse(cx, cy, 4.5, 4.5, Ink::hex(t.hex.paper));
+                } else {
+                    p.stroke_round_rect(DRect::new(cx - 3.9, cy - 3.9, 7.8, 7.8), 3.9, 1.2, Ink::hex(ring));
+                }
+                let m = p.measure(title, &ink::LABEL, 0.0);
+                let y = ((h + 0.7 * ink::LABEL.size) / 2.0 - m.baseline).round();
+                p.text(title, &ink::LABEL, gutter + 19.0, y, Ink::hex(if chosen || hot { t.hex.paper } else { t.hex.label }));
+                if !format.is_empty() {
+                    let f = p.measure(format, &ASPECT_FORMAT, 0.0);
+                    p.text(format, &ASPECT_FORMAT, w - gutter - f.width, y + m.baseline - f.baseline, Ink::hex(t.hex.dim));
+                }
+            }
+            C_LANDSCAPE | C_PORTRAIT => {
+                let chosen = session.is_some_and(|s| s.orientation_portrait() == (id == C_PORTRAIT));
+                let m = p.measure(&text, &ORIENTATION_WORD, 0.0);
+                let y = ((h + 0.7 * ORIENTATION_WORD.size) / 2.0 - m.baseline).round();
+                if chosen && !disabled {
+                    p.underline(DRect::new(2.0, y + m.baseline + 3.0, m.width, 6.0), &t, false);
+                }
+                let color = if chosen { t.hex.paper } else if hot { t.hex.label } else { t.hex.dim };
+                p.text(&text, &ORIENTATION_WORD, 2.0, y, Ink::hex(color).alpha(alpha));
+            }
+            C_CANCEL => {
+                // Outlined, square-cornered, 36 tall beside Done.
+                if pressed || hot {
+                    p.fill_rect(DRect::new(0.0, 0.0, w, h), Ink::hex(t.hex.paper).alpha(if pressed { 0.09 } else { 0.04 }));
+                }
+                p.stroke_rect(DRect::new(0.5, 0.5, w - 1.0, h - 1.0), 1.0, Ink::hex(if hot || pressed { t.hex.dim } else { t.hex.track }));
+                let m = p.measure(&text, &CROP_BUTTON, 0.0);
+                p.text(&text, &CROP_BUTTON, ((w - m.width) / 2.0).round(), ((h + 0.7 * CROP_BUTTON.size) / 2.0 - m.baseline).round(), Ink::hex(t.hex.paper));
+            }
+            C_DONE => {
+                // The pencil's yellow, filled.
+                let sink = if pressed { 1.0 } else { 0.0 };
+                let face = DRect::new(0.0, sink, w, h - sink);
+                p.fill_round_rect(face, 3.0, Ink::hex(t.hex.fill));
+                if pressed {
+                    p.fill_round_rect(face, 3.0, Ink::hex(0).alpha(0.12));
+                } else if hot {
+                    p.fill_round_rect(face, 3.0, Ink::hex(0xffffff).alpha(0.08));
+                }
+                let m = p.measure(&text, &CROP_BUTTON, 0.0);
+                p.text(&text, &CROP_BUTTON, ((w - m.width) / 2.0).round(), face.y + ((h + 0.7 * CROP_BUTTON.size) / 2.0 - m.baseline).round(), Ink::hex(t.hex.on_fill));
+            }
+            _ => {}
+        }
+        if focused {
+            ink::focus_box(p, DRect::new(0.0, 0.0, w, h), &t);
+        }
+    });
+    c.present(item.hDC);
+}
+
+/// The panel's header word, its rules, and the foot's line.
+fn paint_crop_panel(hwnd: HWND) {
+    let t = theme::tokens();
+    let s = draw::dpi_of(hwnd);
+    let (_, header, foot) = CROP_RULES.with(Cell::get);
+    let rules = (header, foot);
+    unsafe {
+        let mut ps = PAINTSTRUCT::default();
+        let dc = BeginPaint(hwnd, &mut ps);
+        let mut client = RECT::default();
+        let _ = GetClientRect(hwnd, &mut client);
+        let mut c = Canvas::new(dc, client);
+        c.clear(theme::gdi(t.hex.panel));
+        let (w, _) = (client.right as f32 / s, client.bottom as f32 / s);
+        let gutter = ink::GUTTER as f32;
+        c.d2d(s, t.plain, |p| {
+            let m = p.measure("Crop", &CROP_HEAD, 0.0);
+            p.text("Crop", &CROP_HEAD, gutter, 13.0 + 12.0 * 0.8 - m.baseline + 3.0, Ink::hex(t.hex.paper));
+            let (header, foot) = (rules.0 as f32 / s, rules.1 as f32 / s);
+            p.fill_rect(DRect::new(0.0, header, w, 1.0), Ink::hex(t.hex.line));
+            p.fill_rect(DRect::new(0.0, foot, w, 1.0), Ink::hex(t.hex.line));
+            let words = "return applies · esc cancels";
+            let f = p.measure(words, &CROP_FOOT, 0.0);
+            p.text(words, &CROP_FOOT, ((w - f.width) / 2.0).round(), foot + 11.0, Ink::hex(t.hex.label));
+        });
+        c.present(dc);
+        let _ = EndPaint(hwnd, &ps);
     }
 }
 
@@ -3959,6 +3913,8 @@ fn crop_command(app: &mut App, id: u16, code: u32) {
             session.end_straightening();
         }
         C_RESET if code == BN_CLICKED => session.reset(),
+        // The edit, not the session: Done keeps it with the crop, Cancel takes it back.
+        C_FLIP if code == BN_CLICKED => return app.model.flip(),
         C_DONE if code == BN_CLICKED => return app.model.end_crop(true),
         C_CANCEL if code == BN_CLICKED => return app.model.end_crop(false),
         C_WIDTH | C_HEIGHT if code == EN_SETFOCUS => session.typing = true,
@@ -4041,17 +3997,31 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 }
                 SetBkMode(dc, TRANSPARENT);
                 let p = theme::palette();
-                let id = GetDlgCtrlID(control) as u16;
-                let footer = id == C_LABELS + 7 || id == C_SIZE_NOTE;
-                let color = if draw::is_dimmed(control) { p.disabled } else if footer { p.secondary } else { p.text };
-                SetTextColor(dc, COLORREF(color));
+                SetTextColor(dc, COLORREF(p.text));
                 LRESULT(theme::brush(p.panel).0 as isize)
+            }
+            WM_DRAWITEM => {
+                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
+                if !ink::draw_item(item) {
+                    // The session is read without the app when it's busy:
+                    // a repaint follows once it's free.
+                    if with_app(|app| draw_crop_item(item, app.model.crop_session.as_ref())).is_none() {
+                        draw_crop_item(item, None);
+                        let _ = InvalidateRect(item.hwndItem, None, false);
+                    }
+                }
+                LRESULT(1)
             }
             WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
-                draw::paint_panel(hwnd, theme::palette().panel);
+                let is_panel = CROP_RULES.with(Cell::get).0 == hwnd.0 as isize;
+                if is_panel {
+                    paint_crop_panel(hwnd);
+                } else {
+                    draw::paint_panel(hwnd, theme::palette().panel);
+                }
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -4114,58 +4084,35 @@ mod tests {
         assert_eq!(parse_number("inf"), None);
     }
 
-    /// A grid of a starred Gold (its copy among the favourites), Color
-    /// Negative's Gold and Portra, and Black & White's Tri-X. The windows are
-    /// stand-ins: laying out only reads them.
-    fn search_grid() -> StockGrid {
-        let h = |n: usize| HWND(n as *mut _);
-        StockGrid {
-            window: HWND::default(),
-            tiles: vec![("gold".into(), h(1)), ("gold".into(), h(2)), ("portra".into(), h(3)), ("trix".into(), h(4))],
-            headings: vec![(None, 0), (Some(h(10)), 1), (Some(h(11)), 3)],
-            key: String::new(),
-            scroll: 0,
-            content: 0,
-            view: 0,
-            was_open: true,
-            anchor: None,
-            query: String::new(),
-            matches: None,
-            no_matches: Some(h(20)),
-            recenter: false,
-        }
-    }
-
-    /// While searching, each match shows once under its group, without the
-    /// favourites or empty groups' headings; with none, the quiet line.
+    /// The tray's sections, as the Mac's `StockTray`: the favourites,
+    /// untitled, then each group; while searching each match once under
+    /// its group, without the favourites or empty groups.
     #[test]
     fn a_search_shows_each_match_once_under_its_group() {
         use crate::session::Preferences;
         let stock = |id: &str, name: &str, bw: bool| state::Stock {
-            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null,
+            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
         };
-        let mut model = Model::new(Preferences { favorite_films: vec!["gold".into()], ..Preferences::default() });
+        let mut model = Model::new(Preferences { previews: true, favorite_films: vec!["gold".into()], ..Preferences::default() });
         model.stocks = vec![stock("gold", "Gold 200", false), stock("portra", "Portra 400", false), stock("trix", "Tri-X 400", true)];
-        let mut grid = search_grid();
-        let shown = |grid: &StockGrid| grid_positions(grid, 200, 96, true).0.iter().map(|p| p.0.0 as usize).collect::<Vec<_>>();
-        // Not searching: the favourites first, then every group.
+        model.source = Some(std::path::PathBuf::from("photo.png"));
+        model.previews.tray = Some(crate::previews::TrayVisit::new(false, model.state.clone(), String::new()));
+        let shown = |model: &Model| -> Vec<(bool, Vec<String>)> { model.tray_sections().into_iter().map(|s| (s.favourites, s.stocks.into_iter().map(|e| e.id).collect())).collect() };
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Not searching: Scan's Your negative, the favourites, then every group.
         for query in ["", "   "] {
-            assert_eq!(search_matches(&grid, &model, query), None);
+            model.previews.tray.as_mut().unwrap().query = query.into();
+            assert_eq!(shown(&model), [(false, ids(&[crate::negative::STOCK_ID])), (true, ids(&["gold"])), (false, ids(&["gold", "portra"])), (false, ids(&["trix"]))]);
         }
-        assert_eq!(shown(&grid), [1, 10, 2, 3, 11, 4]);
+        let search = |model: &mut Model, query: &str| {
+            model.previews.tray.as_mut().unwrap().query = query.into();
+            shown(model)
+        };
         // A starred match shows once, under its group.
-        grid.matches = search_matches(&grid, &model, "GOLD");
-        assert_eq!(grid.matches, Some(vec![false, true, false, false]));
-        assert_eq!(shown(&grid), [10, 2]);
-        grid.matches = search_matches(&grid, &model, "black 400");
-        assert_eq!(shown(&grid), [11, 4]);
-        grid.matches = search_matches(&grid, &model, "400");
-        assert_eq!(shown(&grid), [10, 3, 11, 4]);
-        grid.matches = search_matches(&grid, &model, "gold 400");
-        assert_eq!(shown(&grid), [20]);
-        // The unfiltered layout, which keeps the grid's height while searching.
-        assert_eq!(grid_positions(&grid, 200, 96, false).0.len(), 6);
-        assert!(grid_positions(&grid, 200, 96, false).1 > grid_positions(&grid, 200, 96, true).1);
+        assert_eq!(search(&mut model, "GOLD"), [(false, ids(&["gold"]))]);
+        assert_eq!(search(&mut model, "black 400"), [(false, ids(&["trix"]))]);
+        assert_eq!(search(&mut model, "400"), [(false, ids(&["portra"])), (false, ids(&["trix"]))]);
+        assert!(search(&mut model, "gold 400").is_empty());
         // Searching never edits.
         assert!(model.undo_title().is_none());
     }
@@ -4182,6 +4129,10 @@ mod tests {
             for control in group.controls {
                 if let Adjustment::BalancePrint { title, .. } = control {
                     assert!(rows.iter().any(|r| matches!(r.kind, Kind::BalancePrint(t, _) if t == *title)));
+                    continue;
+                }
+                if let Adjustment::FilterLink { .. } = control {
+                    assert!(rows.iter().any(|r| matches!(r.kind, Kind::FilterLink(_))));
                     continue;
                 }
                 assert!(paths.contains(&control.path()), "{}", control.path());
@@ -4201,8 +4152,7 @@ mod tests {
         let current = tab(model);
         let mut want = vec![false; rows.len()];
         for (i, row) in rows.iter().enumerate() {
-            let on_tab = row.tab == current || row.tab == Tab::Pinned;
-            let visible = on_tab && visible(row, model, &|g| want[g]);
+            let visible = row.tab == current && visible(row, model, &|g| want[g]);
             want[i] = visible;
         }
         rows.iter().zip(want).filter(|(_, w)| *w).map(|(r, _)| r.kind).collect()
@@ -4226,26 +4176,36 @@ mod tests {
         let title = |name: &'static str| move |k: &Kind| matches!(k, Kind::Group { title, .. } if *title == name);
         let rows = shown(&model);
         assert!(rows.iter().any(slider("enlarger.print_exposure")));
-        assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fourth basic");
+        assert!(rows.iter().any(|k| matches!(k, Kind::FilterLink(..))), "Shifts move is the Enlarger's fourth basic");
+        assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fifth basic");
         assert!(!rows.iter().any(slider("enlarger.preflash_exposure")));
         assert!(!rows.iter().any(slider("camera.lens_blur_um")));
-        assert!(!rows.iter().any(title("Scanner")) && !rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
+        // Scan & Color always heads its "N more" line, as on the Mac.
+        assert!(!rows.iter().any(title("Scanner")) && rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
         assert!(!rows.iter().any(|k| matches!(k, Kind::Toggle("Scan film directly", _))));
+        assert!(rows.iter().any(|k| *k == Kind::More(More::Section(Section::Scan))));
+        // Revealing a module's hidden controls shows them, and folds back.
+        let key = "Enlarger".to_string();
+        model.prefs.set_revealed(&key, true);
+        assert!(shown(&model).iter().any(slider("enlarger.preflash_exposure")));
+        model.prefs.set_revealed(&key, false);
+        assert!(!shown(&model).iter().any(slider("enlarger.preflash_exposure")));
         // A change shows its control, and its group and section.
         crate::json::set(&mut model.state.params, "enlarger.preflash_exposure", serde_json::json!(0.1));
         crate::json::set(&mut model.state.params, "scanner.lens_blur", serde_json::json!(1.0));
         let rows = shown(&model);
         assert!(rows.iter().any(slider("enlarger.preflash_exposure")) && rows.iter().any(title("Scanner")));
-        assert!(rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
         model.prefs.lab_all_controls = true;
         let rows = shown(&model);
+        assert!(rows.iter().any(|k| *k == Kind::More(More::All)), "Showing all controls. Show fewer");
         assert!(rows.iter().any(slider("camera.lens_blur_um")) && rows.iter().any(title("Color Management")));
         assert!(rows.iter().any(|k| matches!(k, Kind::Toggle("Scan film directly", _))) && rows.iter().any(title("Output")));
         assert!(rows.iter().all(|k| !matches!(k, Kind::ExposureOffset)), "Prep's rows stay on Prep");
     }
 
     /// Prep shows the meter while matching is off or unavailable, or when
-    /// it's changed; the pinned stocks show on every tab.
+    /// it's changed. The stocks have no rows: the label under the print
+    /// chooses them, as on the Mac.
     #[test]
     fn prep_shows_the_meter_when_the_match_doesnt_set_it() {
         let mut model = model();
@@ -4260,12 +4220,8 @@ mod tests {
         assert!(meter(&shown(&model)));
         for name in ["Prep", "Lab", "Output"] {
             model.prefs.choose_tab(name);
-            assert!(shown(&model).iter().any(|k| matches!(k, Kind::Foldout(false))), "{name}");
+            assert!(shown(&model).iter().all(|k| !matches!(k, Kind::DevTime(_))) || name == "Lab", "{name}");
         }
     }
 }
 
-/// The small Segoe MDL2 Assets font the headers' chevrons use.
-pub fn glyph_font() -> HGDIOBJ {
-    with_app_fonts_glyph()
-}

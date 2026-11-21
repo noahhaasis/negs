@@ -44,6 +44,8 @@ import UserNotifications
     /// that border is chosen.
     private(set) var filmStrip: FilmStrip?
     private(set) var stocks: [Stock] = []
+    /// The camera colour filters for B&W film, in the catalog's order.
+    private(set) var colorFilters: [ColorFilter] = []
     private(set) var source: URL?
     /// The camera's facts for the caption over the photograph, read off the main actor.
     private(set) var photoFacts: PhotoFacts?
@@ -92,6 +94,10 @@ import UserNotifications
     private(set) var previewScale = 1.0
     private(set) var placeholderSize = CGSize.zero
     private(set) var imageRotation = 0
+    /// `io.flip`: mirrored left to right after the crop, before the turns.
+    private(set) var imageFlip = false
+    /// How the canvas shows the photograph, for the tray's and presets' tiles.
+    var shownOrientation: Orientation { Orientation(turns: imageRotation, flip: imageFlip) }
     private(set) var isRaw = false
     /// The colour space the preview develops in: the one Save and Export
     /// last used, so editing shows the export's gamut and Fast export and
@@ -128,6 +134,13 @@ import UserNotifications
             refreshUneditedLook()
         }
     }
+    /// Settings › Show Negs-built films, off by default.
+    var showNegsBuiltFilms = UserDefaults.standard.object(forKey: NegsBuiltFilms.key) as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(showNegsBuiltFilms, forKey: NegsBuiltFilms.key)
+            pumpPreviews()
+        }
+    }
     /// Settings › Fotufilm films.
     var fotufilmFilms = FotufilmFilms(rawValue: UserDefaults.standard.string(forKey: FotufilmFilms.key) ?? "") ?? .all {
         didSet {
@@ -147,6 +160,15 @@ import UserNotifications
     /// Settings › Save ratings and edits next to photos: each photograph's
     /// edits in its sidecar (`Sidecar.swift`). Off, nothing is remembered per
     /// photograph; sidecars already there stay untouched until it's on again.
+    /// Settings › Photographs › Show camera JPEGs separately: off, a RAW's
+    /// camera JPEG of the same name goes with it as one photograph.
+    var separateCameraJPEGs: Bool {
+        get { !library.pairsCameraPictures }
+        set {
+            UserDefaults.standard.set(newValue, forKey: PhotoFolder.separateCameraPicturesKey)
+            library.pairsCameraPictures = !newValue
+        }
+    }
     var sidecarsEnabled = UserDefaults.standard.object(forKey: "sidecars") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(sidecarsEnabled, forKey: "sidecars")
@@ -202,9 +224,49 @@ import UserNotifications
     }
     /// The grid is folding back into the strip (§4.6).
     var sheetFolding = false
+    /// Two photographs on screen together (ticket 46), in the photo view:
+    /// the open one, which the panel edits, and another or its original.
+    var comparison: Comparison?
+    /// Each compared side the open photograph doesn't show.
+    var compareSides: [Comparison.Side: CompareOther] = [:]
+    /// Side by side as the canvas last laid it out: in a row or stacked.
+    var compareArrangement = CompareArrangement.row
+    @ObservationIgnored var compareDevelop: Task<Void, Never>?
+    /// The helper that develops the other photograph, stopped on leaving.
+    @ObservationIgnored var compareEngine: EngineClient?
+    @ObservationIgnored var compareGeneration = 0
+    /// ← → stepping the edited side: its open waits for the steps to stop.
+    @ObservationIgnored var compareSteps: Task<Void, Never>?
+    /// How long each other develop took, for tests and measurements.
+    @ObservationIgnored var compareTimings: [TimeInterval] = []
+    /// Original ⌄: what the Original word does.
+    /// Original ⌄'s Show the RAW / Show the camera JPEG.
+    var originalReference = OriginalReference.load() {
+        didSet {
+            guard originalReference != oldValue else { return }
+            UserDefaults.standard.set(originalReference.rawValue, forKey: OriginalReference.key)
+            originalReferenceChanged()
+        }
+    }
+    var originalMode = OriginalMode.load() {
+        didSet { UserDefaults.standard.set(originalMode.rawValue, forKey: OriginalMode.key); if originalMode != .split { clearSplit() } }
+    }
+    /// Original ⌄ › Split line: the line is on; the original shows left of it.
+    private(set) var splitting = false
+    /// Where the split line is, as a fraction of the canvas's width.
+    var splitFraction: CGFloat = 0.5
+    /// The original under the split line, once decoded.
+    private(set) var splitOriginal: IOSurface?
     /// Grid thumbnails waiting while the grid opens or folds: a flyer is
     /// carrying them, or they fade in after.
     var sheetWaiting: Set<URL> = []
+    /// Of those, the ones a flyer carries: their boxes stay where they are
+    /// drawn in the grid rather than rising with the cell.
+    var sheetCarried: Set<URL> = []
+    /// Carried thumbnails whose boxes are hidden. They fade in as the
+    /// flyer lands and fade out as it leaves, rather than appearing with
+    /// the picture all at once.
+    var sheetBoxesWaiting: Set<URL> = []
     /// Where the strip's frames and the grid's thumbnails are drawn, for
     /// the flight between them.
     @ObservationIgnored let places = ThumbnailPlaces()
@@ -306,9 +368,21 @@ import UserNotifications
     /// Runs as each render starts, before it looks at anything, for tests.
     @ObservationIgnored var willRender: (() -> Void)?
     func killHelperForTesting() { engine?.killHelperForTesting() }
+    var compareEngineRunning: Bool { compareEngine != nil }
     var holdingFrameForMatch: Bool { heldPreview != nil }
     /// Brightness matches solved by the helper (not found in `matchCache`), for tests.
     @ObservationIgnored private(set) var matchSolves = 0
+    /// Runs before a brightness match's decode; throwing fails the decode, for tests.
+    @ObservationIgnored var matchDecodeWillRun: (() throws -> Void)?
+    /// The frame on the canvas: the edit it was rendered for, and how
+    /// (nil: the restored session's saved frame), for tests.
+    @ObservationIgnored private(set) var shownFrame: (frame: FrameID, step: RenderStep?)?
+    var currentFrame: FrameID { FrameID(revision: revision, generation: sourceGeneration) }
+    var renderScheduled: Bool { pendingRender != nil }
+    var matchDecodeFailedHere: Bool { matchDecodeFailed == currentFrame }
+    /// Each edited thumbnail or kept develop saved: the item, the look it's
+    /// filed under, and the edits it shows (`userEdits`), for tests.
+    @ObservationIgnored var thumbnailSaved: ((_ item: URL, _ look: String, _ edits: EditState, _ kind: String) -> Void)?
     #endif
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
@@ -360,12 +434,13 @@ import UserNotifications
     var hasCatalog: Bool { !stocks.isEmpty }
     var films: [Stock] { stocks.filter { !$0.paper } }
     var papers: [Stock] { stocks.filter(\.paper) }
-    /// The films the menus and the tray list (Settings › Fotufilm films).
+    /// The films the menus and the tray list (Settings › Fotufilm films and
+    /// Show Negs-built films).
     /// A hidden film in use stays listed, so a menu always shows its choice:
     /// the photograph's, and while the tray is open the one it opened on.
     var listedFilms: [Stock] { listedFilms(keeping: [film, tray?.before.film].compactMap { $0 }) }
     func listedFilms(keeping kept: [String]) -> [Stock] {
-        films.filter { fotufilmFilms.lists($0) || kept.contains($0.id) }
+        films.filter { (fotufilmFilms.lists($0) && NegsBuiltFilms.lists($0, shown: showNegsBuiltFilms)) || kept.contains($0.id) }
     }
     var filmGroups: [StockGroup] { StockGroup.films(listedFilms, papers: papers) }
     var paperGroups: [StockGroup] { StockGroup.papers(papers) }
@@ -587,15 +662,18 @@ import UserNotifications
         sidecarWrite?.cancel(); sidecarWrite = nil
         self.catalog = catalog
         stocks = catalog["profiles"].array.map(Stock.init)
+        colorFilters = catalog["color_filters"].array.map(ColorFilter.init)
         defaults = catalog["defaults"]
+        NegativeScan.defaults = Dictionary(uniqueKeysWithValues: NegativeScan.ownPaths.map { ($0, defaults[$0]) })
         // The engine leaves lens correction off for params from before it, so
         // their crops keep their place; the app corrects every new edit.
         defaults[Self.lensCorrectionPath] = .bool(true)
         // Keep anything already applied to the photograph, such as its rotation.
-        let rotation = state.params["io.rotate_cw"]
+        let rotation = state.params["io.rotate_cw"], flip = state.params["io.flip"]
         var next = state
         next.params = defaults
         if rotation != .null { next.params["io.rotate_cw"] = rotation }
+        if flip != .null { next.params["io.flip"] = flip }
         if !films.contains(where: { $0.id == next.film }), let first = films.first { next.film = first.id }
         if !papers.contains(where: { $0.id == next.paper }), let first = papers.first { next.paper = first.id }
         PreviewRules.pairFilm(in: &next, stocks: stocks)
@@ -668,11 +746,11 @@ import UserNotifications
         if paper != state.paper { paper = state.paper }
         if border != state.border { border = state.border }
         if crop != state.crop { crop = state.crop; updateHistogram() }
-        let rotation = Int(state.params["io.rotate_cw"].double)
-        if imageRotation != rotation {
-            imageRotation = rotation
+        let rotation = Int(state.params["io.rotate_cw"].double), flip = state.params["io.flip"].bool
+        if imageRotation != rotation || imageFlip != flip {
+            imageRotation = rotation; imageFlip = flip
             updateHistogram()
-            cropSession?.update(photo: shownImageSize, rotation: rotation)
+            cropSession?.update(photo: shownImageSize, rotation: rotation, flip: flip)
         }
         updateFilmStrip()
     }
@@ -689,7 +767,12 @@ import UserNotifications
         var next = state; next.params[path] = value
         apply(next, action: "Change Adjustment")
     }
-    func resetValue(_ path: String) { set(path, defaults[path]) }
+    /// A control's ↺. On a negative, its base and balance are found again.
+    func resetValue(_ path: String) {
+        let before = state, since = negativeRequest
+        set(path, defaults[path])
+        refindNegative(after: before, paths: [path], since: since)
+    }
     func number(_ path: String, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
         Binding(get: { self.value(path).double }, set: { self.set(path, .number(Self.snap($0, to: range, step: step))) })
     }
@@ -715,7 +798,9 @@ import UserNotifications
         guard filterLink != .separate else { return resetValue(path) }
         var next = state
         for shift in [FilterLink.magenta, FilterLink.yellow] { next.params[shift] = defaults[shift] }
+        let before = state, since = negativeRequest
         apply(next, action: "Change Adjustment")
+        refindNegative(after: before, paths: [FilterLink.magenta, FilterLink.yellow], since: since)
     }
     /// A double-click on a shift's track. Its first click moved the shift to
     /// the pointer, and a linked one with it: that click is undone first,
@@ -730,6 +815,17 @@ import UserNotifications
     /// Grain arrays (`film_render.grain.<field>`) are null until edited: the
     /// engine then uses the film's preset, which the catalog resolves.
     var filmIsBW: Bool { films.first { $0.id == film }?.bw ?? false }
+    /// The camera colour filter in front of the lens, or `ColorFilter.none`.
+    var colorFilter: String { value(ColorFilter.path).string }
+    /// The filter the Color Filter tick box puts back once it took it off.
+    @ObservationIgnored var lastColorFilter = "hoya_y2"
+    func setColorFilter(_ key: String) {
+        if key != ColorFilter.none { lastColorFilter = key }
+        var next = state; next.params[ColorFilter.path] = .string(key)
+        apply(next, action: key == ColorFilter.none ? "Remove Color Filter" : "Change Color Filter")
+    }
+    /// How many stops `key` takes on the current film, if it's a B&W film.
+    func colorFilterStops(_ key: String) -> Double? { films.first { $0.id == film }?.filterStops[key] }
     func stockDefaults(_ path: String) -> [Double] {
         let field = path.split(separator: ".").last.map(String.init) ?? path
         return films.first { $0.id == film }?.grain[field].array.map(\.double) ?? []
@@ -812,6 +908,11 @@ import UserNotifications
         // The drag frames were canvas-size already: letting go settles.
         quickStep = FrameID(revision: revision, generation: sourceGeneration)
         if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
+        // What waited for the release goes on: a match the drag made stale
+        // (its frames were settled ones where the canvas shows every pixel),
+        // or the render after a match that finished during the drag.
+        reconcileBrightnessMatch()
+        if matchTask == nil { settleQuickFrame(); renderAfterMatch() }
         if !previewCurrent { scheduleActivity() }
         pumpPreviews()
     }
@@ -827,47 +928,58 @@ import UserNotifications
 
     /// Opens the film or paper tray on the current stock, keeping whatever
     /// the other tray was trying.
-    func openTray(paper: Bool) {
+    func openTray(paper: Bool, readAs: Bool = false) {
         guard previews.enabled, source != nil, !cropping, mode == .photo else { return }
         if let tray {
-            if tray.paper == paper { return }
+            if tray.paper == paper, tray.readAs == readAs { return }
             endTray(keep: true)
         }
         // A slide is scanned: there's no paper to choose.
         if paper, state.params["io.scan_film"].bool { return }
-        tray = TrayVisit(paper: paper, before: state)
+        negativePick = nil
+        let films = !paper && !readAs
+        tray = TrayVisit(paper: paper, before: state, readAs: readAs, opensOnScan: films && (isNegative || looksLikeANegative))
+        if films { checkLooksNegative() }
         if paper { previews.paperOpen = true } else { previews.filmOpen = true }
         pumpPreviews()
     }
     /// A click on a name: opens its tray, or closes it keeping the stock.
-    func toggleTray(paper: Bool) {
-        if tray?.paper == paper { endTray(keep: true) } else { openTray(paper: paper) }
+    func toggleTray(paper: Bool, readAs: Bool = false) {
+        if let tray, tray.paper == paper, tray.readAs == readAs { endTray(keep: true) } else { openTray(paper: paper, readAs: readAs) }
     }
 
     /// Tries a stock on the photograph; the tray stays open. Tries aren't
     /// undo steps: keeping one is (`endTray`).
     func tryStock(_ id: String) {
         guard let tray, let source else { return }
+        if id == NegativeScan.stockID, !tray.paper, !tray.readAs {
+            // Your negative: read as a negative; the base is found as part of the try.
+            if !isNegative { replaceState(negativeState(from: state)) }
+            return
+        }
         // Only the tray's own kind: a film is never printed on as a paper.
         guard stocks.contains(where: { $0.paper == tray.paper && $0.id == id }) else { return }
-        let next = PreviewRules.choosing(id, paper: tray.paper, keepPaper: previews.keepPaper, in: state, stocks: stocks)
+        if tray.readAs, let stock = stocks.first(where: { $0.id == id }), !NegativeScan.readable(stock) { return }
+        let next = PreviewRules.choosing(id, paper: tray.paper, keepPaper: previews.keepPaper, in: state, stocks: stocks, negative: tray.readAs)
         guard next != state else { return }
-        replaceState(next)
         // The tile shows exactly this edit if it was made from the request
-        // it would be made from now.
-        guard !previewCurrent, let stock = stocks.first(where: { $0.paper == tray.paper && $0.id == id }),
-              let tile = previews.tile(id, paper: tray.paper), let image = tile.image else { return }
-        let wanted = PreviewTile.Key(generation: sourceGeneration, request: PreviewRules.request(
-            for: stock, keepPaper: previews.keepPaper, state: renderState, stocks: stocks, source: source, generation: sourceGeneration))
-        if tile.shown == wanted { trialImage = image }
+        // it's made from before the change (a negative's tile of another
+        // film or paper shows what that change finds after).
+        let request = stocks.first(where: { $0.paper == tray.paper && $0.id == id }).map {
+            PreviewRules.request(for: $0, keepPaper: previews.keepPaper, state: renderState, stocks: stocks, source: source,
+                                 generation: sourceGeneration, negative: tray.readAs, negativePoint: negativeTilePoint,
+                                 negativeBounds: negativeTileBounds)
+        }
+        replaceState(next)
+        guard !previewCurrent, let request, let tile = previews.tile(id, paper: tray.paper), let image = tile.image else { return }
+        if tile.shown == PreviewTile.Key(generation: sourceGeneration, request: request) { trialImage = image }
     }
 
     /// ← →: the previous or next stock, in the tray's order, through the
     /// favourites and on into the groups; among the matches while searching.
     func stepTray(by offset: Int) {
         guard let tray else { return }
-        let sections = StockTrayRules.sections(tray.paper ? paperGroups : filmGroups,
-                                               favorites: previews.favorites(in: tray.paper ? papers : listedFilms, paper: tray.paper), query: tray.query)
+        let sections = StockTray.sections(model: self, visit: tray)
         guard let place = StockTrayRules.step(from: tray.paper ? paper : film, inFavourites: tray.inFavourites, by: offset,
                                               in: StockTrayRules.places(sections)) else { return }
         tray.inFavourites = place.favourite
@@ -883,8 +995,15 @@ import UserNotifications
         self.tray = nil
         previews.filmOpen = false; previews.paperOpen = false
         let before = withPreferences(tray.before)
+        let cropPending = negativeCropPending == sourceGeneration
+        if cropPending { negativeCropPending = nil }
         if keep {
-            if state != before { registerUndo(restoring: tray.before, action: tray.action) }
+            // Your negative, kept from the tray: now its crop to the picture,
+            // within the tray's undo step (the visit is one step), so the
+            // step is named for reading the negative, undo and redo alike.
+            if cropPending, let cropped = croppedToFoundPicture() { replaceState(cropped) }
+            let read = isNegative && tray.before.params["workflow.route"].string != NegativeScan.route
+            if state != before { registerUndo(restoring: tray.before, action: read ? "Read as Negative" : tray.action) }
         } else if state != before {
             replaceState(tray.before)
         }
@@ -929,10 +1048,15 @@ import UserNotifications
         var next = state; next.params = defaults
         next.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
+        next.params["io.flip"] = state.params["io.flip"]
         next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
         customFilmFormat = false
+        // Like the film, reading a negative stays; its base and balance are found again.
+        if isNegative { next = negativeState(from: next) }
+        let before = state, since = negativeRequest
         apply(next, action: "Reset Adjustments")
+        refindNegative(after: before, paths: nil, since: since)
     }
     /// Puts the controls `targets` name back to their defaults, in one undo
     /// step (the ↺ on a tab's list of edits, and Reset on the tab).
@@ -970,7 +1094,10 @@ import UserNotifications
             let atPreset = values.count == preset.count && zip(values, preset).allSatisfy { abs($0 - $1) <= 1e-6 * max(1, abs($1)) }
             next.params[path] = atPreset ? .null : .array(values.map(JSONValue.number))
         }
+        let before = state, since = negativeRequest
         apply(next, action: action)
+        // On a negative, a reset of its base or balance finds them again.
+        refindNegative(after: before, paths: targets.compactMap { if case .param(let path) = $0 { path } else { nil } }, since: since)
         if space { choosePreviewSpace(SaveSettings.colorSpaces[0]) }
     }
     /// Reset on one tab: every control the tab's count stands for.
@@ -998,9 +1125,11 @@ import UserNotifications
         let render = next.rendered != state.rendered
         // The enlarged tile was of the edit before.
         if render { trialImage = nil }
+        let old = state
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
+        followNegative(from: old)
         reconcileBrightnessMatch()
         scheduleSidecarWrite()
     }
@@ -1043,7 +1172,13 @@ import UserNotifications
             apply(next, action: "Change Image Size")
         case .longestSide:
             guard imageSizeMode != .longestSide else { return }
-            _ = setLongestSide(ImageSize.remembered ?? nativeLongestSide)
+            // The remembered value is the app's, but whether it fits depends
+            // on this photograph and its crop. One that doesn't (a smaller
+            // crop needs a larger frame) gives way to the crop's own longest
+            // side, which always fits, so the choice is never refused (#20).
+            let remembered = ImageSize.remembered
+            if let remembered, setLongestSide(remembered) == nil { return }
+            setLongestSide(nativeLongestSide, remember: remembered == nil)
         }
     }
 
@@ -1055,7 +1190,9 @@ import UserNotifications
     }
 
     /// Sets a Longest side target; returns why it can't be used, changing nothing.
-    @discardableResult func setLongestSide(_ pixels: Int) -> String? {
+    /// `remember` keeps `pixels` as the value offered next time; a fallback
+    /// the person didn't type leaves their remembered value alone.
+    @discardableResult func setLongestSide(_ pixels: Int, remember: Bool = true) -> String? {
         guard ImageSize.range.contains(pixels) else {
             return "Enter a whole number from \(ImageSize.range.lowerBound) to \(ImageSize.range.upperBound.formatted()) px."
         }
@@ -1063,7 +1200,7 @@ import UserNotifications
             let working = ImageSize.working(source: sourceSize, target: pixels, crop: crop)
             if ImageSize.exceedsLimit(working: working, source: sourceSize) { return ImageSize.limitMessage(working: working) }
         }
-        ImageSize.remembered = pixels
+        if remember { ImageSize.remembered = pixels }
         var next = state; next.params[ImageSize.targetPath] = .number(Double(pixels))
         apply(next, action: "Change Image Size")
         return nil
@@ -1096,14 +1233,15 @@ import UserNotifications
 
     /// Shows the whole developed photograph, without the border, to crop it.
     func beginCrop() {
-        guard !cropping, image != nil, imageSize != .zero else { return }
+        guard !cropping, image != nil, imageSize != .zero, comparison == nil else { return }
         holdOriginal(false)
+        clearSplit()
         holdUpsideDown(false)
         // Its tools are in the inspector and the status line.
         leaveImageOnly()
         // The straighten dial takes the label's place.
         endTray(keep: true)
-        cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
+        cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, flip: imageFlip, source: sourceSize)
     }
     /// A quarter turn, which happens only while cropping (§4.10): from the
     /// menu, or ⌘R / ⌥⌘R, it starts cropping first. Done keeps it with the
@@ -1114,6 +1252,17 @@ import UserNotifications
         let turns = (Int(value("io.rotate_cw").double) + (clockwise ? 1 : 3)) % 4
         var next = state; next.params["io.rotate_cw"] = .number(Double(turns)); replaceState(next)
     }
+    /// Flip: mirrors the photograph left to right as shown, as a negative
+    /// photographed from its base side needs. Like a quarter turn it
+    /// happens while cropping; Done keeps it, Cancel takes it back.
+    func flip() {
+        if !cropping { beginCrop() }
+        guard cropping else { return }
+        let flipped = Orientation(params: state.params).flippedAsShown
+        var next = state
+        next.params["io.rotate_cw"] = .number(Double(flipped.turns)); next.params["io.flip"] = .bool(flipped.flip)
+        replaceState(next)
+    }
 
     /// Done applies the crop, and any rotation while cropping, as one undo
     /// step. Cancel restores the rotation and keeps the previous crop.
@@ -1122,15 +1271,20 @@ import UserNotifications
         // A crop too small for the Longest side stays a draft, with its error shown.
         if apply, session.sizeError != nil { NSSound.beep(); return }
         cropSession = nil
-        let rotation = session.start.params["io.rotate_cw"]
+        let rotation = session.start.params["io.rotate_cw"], flip = session.start.params["io.flip"]
         if apply {
-            var previous = state; previous.crop = session.start.crop; previous.params["io.rotate_cw"] = rotation
+            var previous = state; previous.crop = session.start.crop
+            previous.params["io.rotate_cw"] = rotation; previous.params["io.flip"] = flip
             var next = state; next.crop = session.settings
             if next != previous { registerUndo(restoring: previous, action: "Crop") }
             replaceState(next)
-        } else if state.params["io.rotate_cw"] != rotation {
-            var next = state; next.params["io.rotate_cw"] = rotation; replaceState(next)
+        } else if state.params["io.rotate_cw"] != rotation || state.params["io.flip"] != flip {
+            var next = state; next.params["io.rotate_cw"] = rotation; next.params["io.flip"] = flip; replaceState(next)
         }
+        // What waited for the crop goes on, Done or Cancel: a match an edit
+        // made stale meanwhile, or the render after one.
+        reconcileBrightnessMatch()
+        if matchTask == nil { renderAfterMatch() }
         zoom(fit: true)
     }
 
@@ -1175,7 +1329,10 @@ import UserNotifications
             if source == first { showGrid() }
             return
         }
+        // A RAW's camera JPEG opens the RAW: the two are one photograph.
+        if let raw = PhotoFolder.pairedRAW(of: url) { return open(raw) }
         explicitOpenRequested = true
+        if comparison != nil { leaveCompare(toGrid: false) }
         mode = .photo
         // During launch it undoes a restore at launch; later it supersedes it.
         if launching { discardLaunchRestore() } else { launchRestore = nil }
@@ -1206,6 +1363,9 @@ import UserNotifications
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         sourceDeleted = false
         source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
+        #if DEBUG
+        shownFrame = nil
+        #endif
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -1213,10 +1373,13 @@ import UserNotifications
         updateHistogram()
         interactionStart = nil; cropSession = nil
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
+        splitting = false; splitOriginal = nil
         sourceGeneration += 1
         let generation = sourceGeneration
         customFilmFormat = false
         photoFacts = nil
+        // The last photograph's film base said nothing about this one.
+        negativeBaseRecords = []; negativeSurveys = []; negativePick = nil
         Task.detached(priority: .utility) { [weak self] in
             let facts = PhotoFacts.read(url)
             await self?.adopt(facts, generation: generation)
@@ -1242,12 +1405,12 @@ import UserNotifications
         // Read off the main actor at once, with its histogram. At launch the
         // main actor stays busy building the window, which takes the frame
         // through `finishLaunching` before it first appears.
-        let crop = state.crop, rotation = Int(state.params["io.rotate_cw"].double)
+        let crop = state.crop, rotation = Int(state.params["io.rotate_cw"].double), flip = state.params["io.flip"].bool
         let cachedFrame = session != nil ? paths.map { paths in
             LaunchFrame {
                 guard let frame = await cache.load(source: url, state: snapshot, paths: paths) else { return nil }
-                return LaunchFrame.Loaded(frame: frame, scopes: ImageScopes.of(frame.surface, crop: crop, rotation: rotation),
-                                         scopesCrop: crop, scopesRotation: rotation)
+                return LaunchFrame.Loaded(frame: frame, scopes: ImageScopes.of(frame.surface, crop: crop, rotation: rotation, flip: flip),
+                                         scopesCrop: crop, scopesRotation: rotation, scopesFlip: flip)
             }
         } : nil
         launchFrame = restoringAtLaunch ? cachedFrame.map { ($0, generation, snapshot.rendered) } : nil
@@ -1298,8 +1461,11 @@ import UserNotifications
         sourceSize = frame.sourceSize; workingSize = frame.workingSize
         previewScale = frame.workingSize.width > 0 ? Double(frame.surface.width) / frame.workingSize.width : 1
         showingCachedPreview = true; placeholder = nil; standIn = nil; hideActivity()
+        #if DEBUG
+        shownFrame = (FrameID(revision: revision, generation: generation), nil)
+        #endif
         // Counted with the frame for the crop it was read with.
-        if crop == cached.scopesCrop, imageRotation == cached.scopesRotation {
+        if crop == cached.scopesCrop, imageRotation == cached.scopesRotation, imageFlip == cached.scopesFlip {
             histogramRequest += 1; histogram = cached.scopes.histogram; waveform = cached.scopes.waveform
         } else { updateHistogram() }
         updateFilmStrip()
@@ -1391,7 +1557,7 @@ import UserNotifications
     }
 
     /// Chooses the film new photographs open with. Its own paper comes with
-    /// it unless Settings › Keep paper when changing film, as in the inspector.
+    /// it unless the paper lock is closed, as in the label.
     func setNewPhotoFilm(_ film: String) {
         var choice = EditState(); choice.film = newPhotoFilm; choice.paper = newPhotoPaper
         let chosen = PreviewRules.choosing(film, paper: false, keepPaper: previews.keepPaper, in: choice, stocks: stocks)
@@ -1410,17 +1576,32 @@ import UserNotifications
 
     /// The open photograph takes a new default film and paper while it has no
     /// edits of its own, so it shows what its thumbnail does. Not an edit: no
-    /// undo step, and nothing is written beside it.
+    /// undo step, and nothing is written beside it. Edited since it opened,
+    /// it keeps its film and paper, but what it would be without edits takes
+    /// the new ones: undoing every edit then leaves it edited, its film kept
+    /// in its sidecar, rather than unedited showing another film.
     private func followNewPhotoStocks() {
-        guard source != nil, !closing, !cropping, !interacting, var context = photoSidecar, context.photo == source,
-              !context.editedAtOpen, context.blocked == nil, Self.userEdits(state) == context.opened else { return }
-        var next = state
-        next.film = newPhotoFilm; next.paper = newPhotoPaper
-        next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        guard source != nil, !closing, var context = photoSidecar, context.photo == source,
+              !context.editedAtOpen, context.blocked == nil else { return }
+        guard Self.userEdits(state) == context.opened else {
+            context.opened = withNewPhotoStocks(context.opened)
+            photoSidecar = context
+            return
+        }
+        guard !cropping, !interacting else { return }
+        let next = withNewPhotoStocks(state)
         guard next != state else { return }
         replaceState(next)
         context.opened = Self.userEdits(state)
         photoSidecar = context
+    }
+
+    /// `edits` with the film and paper of Settings › New photographs.
+    private func withNewPhotoStocks(_ edits: EditState) -> EditState {
+        var next = edits
+        next.film = newPhotoFilm; next.paper = newPhotoPaper
+        next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        return next
     }
 
     /// The state a photograph without saved edits opens with: the defaults,
@@ -1438,11 +1619,13 @@ import UserNotifications
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
         next.border = BorderSettings()
         next.params["io.rotate_cw"] = .number(0)
+        next.params["io.flip"] = .bool(false)
         let interpretation = defaults["io.input_interpretation"]
         if interpretation != .null { next.params["io.input_interpretation"] = interpretation }
         next.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
         next.crop = CropSettings()
         next.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
+        next.roll = nil
         return withPreferences(next)
     }
 
@@ -1645,6 +1828,8 @@ import UserNotifications
 
     private func sidecarFailed(_ photo: URL, _ reason: String) {
         if photoSidecar?.photo.standardizedFileURL == photo.standardizedFileURL { photoSidecar?.blocked = reason }
+        // The library showed the change as it was queued: back to what the file keeps.
+        library.reload(library.files.first { $0.url.standardizedFileURL == photo.standardizedFileURL }?.url ?? photo)
         let folder = photo.deletingLastPathComponent().standardizedFileURL
         guard !closing, unwritableFolders.insert(folder).inserted else { return }
         error = "Edits to photographs in “\(folder.lastPathComponent)” can’t be saved beside them: \(reason)"
@@ -1758,6 +1943,8 @@ import UserNotifications
     /// the one before at the end. With none left the grid shows that
     /// nothing matches, as it does for a filter nothing passes.
     private func moveOn(after targets: [URL], order: [URL]) {
+        // Compare keeps its two on screen, and doesn't advance.
+        guard comparison == nil else { return }
         let dropped = library.filter.active ? Set(targets.filter { !library.filter.includes(library.summary(for: $0)) }) : []
         if !dropped.isEmpty {
             let current = mode == .photo ? sourceItem : selection.current
@@ -1935,6 +2122,7 @@ import UserNotifications
     func band(_ photos: [URL], adding base: Set<URL>) { selection.band(photos, adding: base) }
 
     func showGrid() {
+        if comparison != nil { return leaveCompare(toGrid: true) }
         guard let source = sourceItem, !cropping, mode != .grid else { return }
         holdOriginal(false)
         holdUpsideDown(false)
@@ -1965,6 +2153,20 @@ import UserNotifications
         // once a filter shows it.
         if mode == .grid, selection.current == nil, let open = sourceItem, !sourceDeleted,
            library.shown(current: nil).contains(where: { $0.url == open }) { selection.select(open) }
+        // A filter that leaves out the grid's current photograph takes it
+        // away too: the nearest selected one still shown becomes current,
+        // or else the next one shown (the one before at the end).
+        if mode == .grid, let current = selection.current, !library.filter.includes(library.summary(for: current)) {
+            let order = library.items.map(\.url)
+            let gone = Set(order.filter { !library.filter.includes(library.summary(for: $0)) })
+            if selection.selected.contains(where: { $0 != current && !gone.contains($0) }) {
+                selection.toggle(current, in: order.filter { !gone.contains($0) || $0 == current })
+            } else if let next = Self.next(after: current, in: order, skipping: gone) {
+                selection.select(next)
+            } else {
+                selection = LibrarySelection()
+            }
+        }
         selection.prune(to: Set(library.shown(current: selection.current).map(\.url)))
     }
 
@@ -2079,7 +2281,7 @@ import UserNotifications
     }
 
     /// A photograph without edits, not following any other.
-    private var plainState: EditState { newPhotoState(after: EditState()) }
+    var plainState: EditState { newPhotoState(after: EditState()) }
 
     /// After pasting `groups` from a photograph without edits: `pasted` has
     /// none either when everything else is as a photograph without edits
@@ -2105,11 +2307,16 @@ import UserNotifications
     /// and one whose edits were all in them without any.
     private func changeEdits(_ items: [URL], action: String, note: String, reset: Bool = false, fromUnedited: Set<EditGroup>? = nil,
                              _ transform: (EditState) -> EditState) {
+        changeEdits(items, action: action, note: note, reset: reset, fromUnedited: fromUnedited) { transform($1) }
+    }
+    /// `changeEdits`, with a change of its own for each photograph.
+    private func changeEdits(_ items: [URL], action: String, note: String, reset: Bool = false, fromUnedited: Set<EditGroup>? = nil,
+                             _ transform: (URL, EditState) -> EditState) {
         guard canChangeEdits, !items.isEmpty else { return }
         let open = sourceItem
         guard sidecarsEnabled, let sidecars, sidecars.writes, let lookup = sidecarLookup else {
             // Nothing is saved per photograph: only the open one changes, as any edit would.
-            if let open, items.contains(open) { apply(reset ? newPhotoState(after: state) : transform(state), action: action) }
+            if let open, items.contains(open) { apply(reset ? newPhotoState(after: state) : transform(open, state), action: action) }
             let unsaved = items.contains { $0 != open } ? (sidecarsEnabled ? "Not saved" : "Not saved: Settings › Save ratings and edits is off") : nil
             libraryNote = LibraryNote(text: note, detail: unsaved, count: items.count, serial: (libraryNote?.serial ?? 0) + 1)
             return
@@ -2128,12 +2335,14 @@ import UserNotifications
                     }
                     // Nothing pasted onto nothing.
                     if fromUnedited != nil, !openPhotographEdited { continue }
-                    let pasted = transform(state)
+                    let pasted = transform(item, state)
                     let cleared = fromUnedited.map { holdsNoEdits(pasted, pasting: $0) } ?? false
                     if before[photo] == nil { before[photo] = .some(raw) }
                     openChanged = true
                     if reset || cleared {
-                        replaceState(reset ? newPhotoState(after: state) : pasted)
+                        // Without edits it shows what a new photograph does now,
+                        // not the film and paper the copy had then.
+                        replaceState(newPhotoState(after: state))
                         // Unedited from here on: a later edit is measured from this.
                         sidecarWrite?.cancel(); sidecarWrite = nil
                         sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, edits: .some(nil),
@@ -2159,7 +2368,7 @@ import UserNotifications
                 if !reset {
                     let saved = try variant?.edits.map { try PhotoSidecar.decodeEdits($0, table: table) }
                     let base = saved.map { restoredState($0.state, legacy: false) } ?? plainState
-                    let pasted = transform(base)
+                    let pasted = transform(item, base)
                     // Its match, if on, is solved again when it opens: the edits it was solved for changed.
                     if !(fromUnedited.map { holdsNoEdits(pasted, pasting: $0) } ?? false) {
                         edits = PhotoSidecar.encodeEdits(pasted, matchSolved: false, table: table)
@@ -2232,6 +2441,18 @@ import UserNotifications
     /// The batch's helper, for Match camera brightness; quit when it ends.
     @ObservationIgnored private var batchEngine: EngineClient?
     @ObservationIgnored private var batchGeneration = 0
+
+    /// The Lightroom apps installed (ticket 48): what the last detection
+    /// found, until this launch has looked off the main actor.
+    var lightroomApps = Lightroom.remembered
+    /// "Starting Lightroom…", then "Sent 3 photographs to Lightroom" for a
+    /// few seconds, in the status line and the grid's foot.
+    var lightroomWords: String?
+    @ObservationIgnored var lightroomDetected: Date?
+    /// Cleanup checks after a send, while TIFFs wait for Lightroom.
+    @ObservationIgnored var lightroomCleanup: Task<Void, Never>?
+    /// Its TIFFs are being renamed and handed over: no cleanup meanwhile.
+    @ObservationIgnored var lightroomHandingOver = false
 
     // MARK: Edited thumbnails
 
@@ -2452,14 +2673,17 @@ import UserNotifications
     private func saveOpenThumbnail() {
         guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
               !brightnessMatchPending, let look = thumbnailLook(for: item), thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
-              library.looks[item] != nil || Self.uneditedLook(of: state) == look,
+              library.looks[item] != nil ? shownEditsSaved : Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
-        let size = imageSize, crop = crop, rotation = imageRotation, border = state.border, texture = filmTexture, strip = filmStrip
+        #if DEBUG
+        thumbnailSaved?(item, look, Self.userEdits(state), "thumbnail")
+        #endif
+        let size = imageSize, crop = crop, rotation = imageRotation, flip = imageFlip, border = state.border, texture = filmTexture, strip = filmStrip
         let store = editedThumbnails, loose = store.looseKey(for: file, look: look)
         let shown = surface
         Task { [weak self] in
             guard let photo = await Task.detached(priority: .utility, operation: { ThumbnailComposer.image(of: shown) }).value,
-                  let composed = ThumbnailComposer.compose(photo, size: size, crop: crop, cut: false, rotation: rotation, border: border, texture: texture,
+                  let composed = ThumbnailComposer.compose(photo, size: size, crop: crop, cut: false, rotation: rotation, flip: flip, border: border, texture: texture,
                                                            strip: strip, space: photo.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) else { return }
             let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key, loose: loose)) != nil }.value
             if saved { self?.thumbnailMade(item, look: look) }
@@ -2472,8 +2696,11 @@ import UserNotifications
     private func saveOpenRender() {
         guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
               !brightnessMatchPending, let look = thumbnailLook(for: item),
-              library.looks[item] != nil || Self.uneditedLook(of: state) == look,
+              library.looks[item] != nil ? shownEditsSaved : Self.uneditedLook(of: state) == look,
               let file = library.items.first(where: { $0.url == item }), let key = renderArchive.key(for: file, look: look) else { return }
+        #if DEBUG
+        thumbnailSaved?(item, look, Self.userEdits(state), "kept develop")
+        #endif
         let archive = renderArchive, size = imageSize, shown = surface, loose = archive.looseKey(for: file, look: look)
         Task.detached(priority: .utility) {
             guard !archive.contains(key),
@@ -2482,11 +2709,19 @@ import UserNotifications
         }
     }
 
+    /// The open photograph shows the edits its sidecar keeps: nothing waits
+    /// to be sent, and nothing failed to be written. Only then is its preview
+    /// filed under its stored edits' look.
+    private var shownEditsSaved: Bool {
+        guard let context = photoSidecar, context.photo == source else { return true }
+        return context.blocked == nil && !context.awaitingCatalog && sidecarEditsToSend(context) == nil
+    }
+
     /// The background renderer can use the machine: nothing is being edited,
     /// developed, exported or saved in the window.
     private var thumbnailsMayRun: Bool {
         !closing && !interacting && !rendering && pendingRender == nil && !exporting && !batchRunning && !saving && !cropping && matchTask == nil
-            && (mode == .grid || source == nil || previewCurrent || renderFailed)
+            && comparison == nil && (mode == .grid || source == nil || previewCurrent || renderFailed)
     }
 
     /// Develops the next items without a current thumbnail, edited or not,
@@ -2692,12 +2927,16 @@ import UserNotifications
             guard !closing else { return false }
             let strip = state.border.style == .film35 ? FilmFormat(state.crop.size(of: size)).flatMap { FilmStrip.load(data: paths.data, film: state.film, format: $0) } : nil
             guard let composed = ThumbnailComposer.compose(developed, size: size, crop: state.crop, cut: true, rotation: Int(state.params["io.rotate_cw"].double),
+                                                           flip: state.params["io.flip"].bool,
                                                            border: state.border, texture: filmTexture, strip: strip,
                                                            space: developed.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!),
                   let key = editedThumbnails.key(for: file, look: finalLook) else { return false }
             let store = editedThumbnails, loose = store.looseKey(for: file, look: finalLook)
             try await Task.detached(priority: .utility) { try store.save(composed, as: key, loose: loose) }.value
             thumbnailMade(item, look: finalLook)
+            #if DEBUG
+            thumbnailSaved?(item, finalLook, Self.userEdits(state), "background thumbnail")
+            #endif
             if finalLook != look { library.reload(photo) }
             return true
         } catch {
@@ -2738,7 +2977,9 @@ import UserNotifications
     /// The folder's rejected photographs and duplicates, filtered out or not.
     var rejected: [URL] { library.items.map(\.url).filter { library.summary(for: $0).flag == .reject } }
 
-    func deletePlan(_ items: [URL]) -> DeletePlan { DeletePlan(items) { library.duplicates[$0] ?? [] } }
+    func deletePlan(_ items: [URL]) -> DeletePlan {
+        DeletePlan(items, duplicates: { library.duplicates[$0] ?? [] }, companion: { library.companion(of: $0) })
+    }
 
     /// ⌫ asks first and ⌘⌫ doesn't. Without a Trash it always asks, as
     /// nothing could be put back.
@@ -2762,8 +3003,9 @@ import UserNotifications
     }
 
     /// Moves `plan`'s photographs to the Trash with their sidecars, and
-    /// removes its duplicates from theirs, as one undo step. If what was
-    /// current goes, the next photograph shown becomes current.
+    /// removes the rest from theirs, as one undo step. If what was current
+    /// goes, the next photograph shown becomes current; a duplicate that
+    /// takes its photograph's place is that photograph from then on.
     func delete(_ plan: DeletePlan, permanent: Bool = false) {
         guard canDelete, !plan.isEmpty else { return }
         // The open photograph's last edits go to its sidecar first, and so
@@ -2771,6 +3013,9 @@ import UserNotifications
         flushSidecar()
         var gone = Set(plan.items)
         for file in plan.files { for id in library.duplicates[file] ?? [] { gone.insert(file.variant(id)) } }
+        // One of the two going to the Trash, or renamed, ends compare.
+        let changes = { (item: URL) in gone.contains(item) || plan.after(item) != item }
+        if let comparison, changes(comparison.first.item) || changes(comparison.second.item) { leaveCompare() }
         let current = mode == .grid ? selection.current : sourceItem
         let next = current.flatMap { current -> URL?? in
             guard gone.contains(current) else { return nil }
@@ -2778,17 +3023,22 @@ import UserNotifications
                 ?? Self.next(after: current, in: library.items.map(\.url), skipping: gone))
         }
         let open = sourceItem, openGone = sourceItem.map(gone.contains) ?? false
+        // The open duplicate takes its photograph's place: it opens again as that.
+        let openRenamed = open.map(plan.after).flatMap { $0 != open ? $0 : nil }
         // Nothing more is written for it.
-        if openGone { sidecarWrite?.cancel(); sidecarWrite = nil; photoSidecar = nil }
+        if openGone || openRenamed != nil { sidecarWrite?.cancel(); sidecarWrite = nil; photoSidecar = nil }
 
-        // A duplicate of a photograph that stays leaves its sidecar.
+        // What is chosen of a photograph that stays leaves its sidecar: a
+        // duplicate, or the photograph's own variant, the first.
         var before: [URL: JSONValue?] = [:], failure: String?
         if let sidecars, sidecars.writes {
             for item in plan.duplicates {
-                guard let id = item.variantID else { continue }
                 let photo = item.photoFile
                 do {
                     guard let raw = try sidecars.readPending(photo: photo) else { continue }
+                    var first: String?
+                    if case .string(let primary) = raw["variants.0.id"] { first = primary }
+                    guard let id = item.variantID ?? first else { continue }
                     let removed = try PhotoSidecar.removing(variant: id, from: raw)
                     if before[photo] == nil { before[photo] = .some(raw) }
                     sidecars.enqueue(SidecarPatch(variant: id, replacement: .some(removed), defaultsVersion: SidecarDefaults.latest,
@@ -2802,7 +3052,8 @@ import UserNotifications
         library.remove(plan.files)
 
         // The selection moves on.
-        switch next {
+        for (from, to) in plan.renamed { selection.rename(from, to: to) }
+        switch next.map({ $0.map(plan.after) }) {
         case .some(.some(let next)):
             if mode == .grid { selection.select(next) } else { self.open(next, restoring: nil) }
         case .some(.none):
@@ -2811,18 +3062,19 @@ import UserNotifications
             selection = LibrarySelection(); mode = .photo
         case .none:
             selection.prune(to: Set(library.items.map(\.url)))
+            if let openRenamed, mode == .photo { self.open(openRenamed, restoring: nil) }
         }
-        if openGone, mode == .grid { sourceDeleted = true }
+        if openGone || openRenamed != nil, mode == .grid { sourceDeleted = true }
 
         let record = TrashRecord()
         if !permanent || !before.isEmpty {
-            let reopen = openGone ? open : nil
+            let reopen = openGone || openRenamed != nil ? open : nil
             undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in
                 MainActor.assumeIsolated { self?.undoDelete(permanent ? plan.withoutFiles : plan, record: record, sidecars: before, reopen: reopen) }
             }
             undoManager?.setActionName(plan.actionName)
         }
-        let files = plan.files, trash = self.trash, sidecars = self.sidecars, removing = failure
+        let files = plan.files, companions = plan.companions, trash = self.trash, sidecars = self.sidecars, removing = failure
         record.task = Task { [weak self] in
             // Everything queued is written first, so nothing writes a sidecar
             // beside a photograph that's gone.
@@ -2831,7 +3083,9 @@ import UserNotifications
                 var moves: [(original: URL, trashed: URL)] = [], failure: String?
                 for file in files {
                     let sidecar = PhotoSidecar.url(for: file)
-                    for item in [file, sidecar] where item == file || FileManager.default.fileExists(atPath: item.path) {
+                    // A RAW's camera JPEG goes with it.
+                    let picture = companions[file].map { [$0, PhotoSidecar.url(for: $0)] } ?? []
+                    for item in [file, sidecar] + picture where item == file || FileManager.default.fileExists(atPath: item.path) {
                         do {
                             if permanent { try trash.remove(item) } else { moves.append((item, try trash.trash(item))) }
                         } catch {
@@ -2870,6 +3124,10 @@ import UserNotifications
             sidecars?.enqueue(SidecarPatch(variant: "", replacement: .some(raw), defaultsVersion: SidecarDefaults.latest, app: Self.appVersion), for: photo)
             library.reload(photo)
         }
+        // A duplicate open in its photograph's place shows the photograph's
+        // own edits again at once, so its preview is never filed under them.
+        let promoted = sourceItem.map { Set(plan.renamed.values).contains($0) } ?? false
+        if promoted, !sourceDeleted { showRestoredEdits() }
         Task { [weak self] in
             await record.task?.value
             let moves = record.moves
@@ -2888,7 +3146,7 @@ import UserNotifications
             if let failure { self.error = failure }
             self.library.unhide(plan.files)
             let restored = plan.items.filter { FileManager.default.fileExists(atPath: $0.photoFile.path) }
-            if self.mode == .photo, let reopen, restored.contains(reopen) || restored.contains(reopen.photoFile) {
+            if self.mode == .photo, let reopen, !(promoted && reopen == self.sourceItem), restored.contains(reopen) || restored.contains(reopen.photoFile) {
                 self.open(reopen, restoring: nil)
             } else if self.source == nil, let first = restored.first {
                 self.open(first, restoring: nil)
@@ -2933,18 +3191,23 @@ import UserNotifications
         if let current = selection.current, let id = current.variantID, library.duplicates[current.photoFile]?.contains(id) != true {
             selection.select(current.photoFile)
         }
-        if let source, files.keys.contains(source) {
-            if let id = sourceVariant, library.duplicates[source]?.contains(id) != true {
-                open(source, restoring: nil)
-            } else {
-                cancelBrightnessMatch(); brightnessMatchFailure = nil
-                customFilmFormat = false
-                adoptEdits(for: source, restore: readSidecar(source, variant: sourceVariant), legacy: nil, previous: state)
-                undoManager?.removeAllActions(withTarget: self)
-                changed()
-            }
-        }
+        if let source, files.keys.contains(source) { showRestoredEdits() }
         writeSidecars()
+    }
+
+    /// The open photograph's sidecar was put back: it shows the edits
+    /// restored, or its photograph opens if it was a duplicate that's gone.
+    private func showRestoredEdits() {
+        guard let source else { return }
+        if let id = sourceVariant, library.duplicates[source]?.contains(id) != true {
+            open(source, restoring: nil)
+        } else {
+            cancelBrightnessMatch(); brightnessMatchFailure = nil
+            customFilmFormat = false
+            adoptEdits(for: source, restore: readSidecar(source, variant: sourceVariant), legacy: nil, previous: state)
+            undoManager?.removeAllActions(withTarget: self)
+            changed()
+        }
     }
 
     /// Writes every queued sidecar change.
@@ -2968,8 +3231,52 @@ import UserNotifications
     static let lensCorrectionPath = "io.lens_correction.enabled"
     /// The original is framed like the developed image only with the same lens correction.
     @ObservationIgnored private var originalLensCorrection = false
+    /// The decoded original is the camera JPEG.
+    @ObservationIgnored private var originalIsCameraJPEG = false
     private func dropStaleOriginal() {
-        if originalLensCorrection != value(Self.lensCorrectionPath).bool { originalCache = nil }
+        if originalLensCorrection != value(Self.lensCorrectionPath).bool || originalIsCameraJPEG != showsCameraJPEG { originalCache = nil }
+    }
+
+    /// The open photograph's camera JPEG (RAW+JPEG shooting), if it has one.
+    var cameraJPEG: URL? { isRaw ? sourceItem.flatMap(library.companion(of:)) : nil }
+    /// Original shows the camera JPEG rather than the RAW.
+    var showsCameraJPEG: Bool { originalReference == .cameraJPEG && cameraJPEG != nil }
+    /// What Original is called: the word in the status line, the compare
+    /// side's name, Loading ….
+    var originalWord: String { showsCameraJPEG ? "Camera JPEG" : "Original" }
+    /// The same within a sentence: "original" or "camera JPEG".
+    var originalPhrase: String { showsCameraJPEG ? "camera JPEG" : "original" }
+
+    /// Decodes the original as Original shows it, at the developed preview's
+    /// resolution (so it is as sharp at actual size), never above the
+    /// source's own: Image Size can enlarge the preview.
+    func originalLoader() -> (@Sendable () -> IOSurface?)? {
+        guard let source, let image else { return nil }
+        let sourceLong = Int(max(sourceSize.width, sourceSize.height))
+        let maxPixels = sourceLong > 0 ? min(max(image.width, image.height), sourceLong) : max(image.width, image.height)
+        if showsCameraJPEG, let picture = cameraJPEG {
+            let frame = sourceSize.width > 0 ? sourceSize : CGSize(width: image.width, height: image.height)
+            return { OriginalImage.loadCameraPicture(picture, frame: frame, maxPixels: maxPixels) }
+        }
+        let raw = isRaw, lensCorrection = value(Self.lensCorrectionPath).bool
+        return { OriginalImage.load(source, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels) }
+    }
+
+    /// Show the RAW / Show the camera JPEG changed: a split line or held
+    /// original shows the other one.
+    private func originalReferenceChanged() {
+        guard cameraJPEG != nil else { return }
+        originalLoad?.cancel(); originalLoad = nil
+        originalCache = nil
+        if splitting { splitOriginal = nil; loadOriginal() }
+        if holdingOriginal { original = nil; loadOriginal() }
+        reloadComparedOriginal()
+    }
+
+    /// The original is asked for, held or split, and still being decoded:
+    /// the photograph's tag says Loading original meanwhile.
+    var loadingOriginal: Bool {
+        (holdingOriginal && original == nil) || (splitting && splitOriginal == nil)
     }
 
     /// Shows the original in place of the developed photograph while held.
@@ -2982,7 +3289,7 @@ import UserNotifications
                 // Core Animation may still be compositing it for a frame.
                 Task { [weak self] in
                     try? await Task.sleep(for: .seconds(1))
-                    guard let self, !self.holdingOriginal, self.originalCache === shown else { return }
+                    guard let self, !self.holdingOriginal, !self.splitting, self.originalCache === shown else { return }
                     shown.makeVolatile()
                 }
             }
@@ -3001,29 +3308,84 @@ import UserNotifications
     /// Decodes at the developed preview's resolution, so it is as sharp at
     /// actual size.
     private func loadOriginal() {
-        guard originalLoad == nil, let source, let image else { return }
-        // Never above the source's own resolution: Image Size can enlarge the preview.
-        let sourceLong = Int(max(sourceSize.width, sourceSize.height))
-        let raw = isRaw, maxPixels = sourceLong > 0 ? min(max(image.width, image.height), sourceLong) : max(image.width, image.height), generation = sourceGeneration
-        let lensCorrection = value(Self.lensCorrectionPath).bool
+        guard originalLoad == nil, let source, let load = originalLoader() else { return }
+        let generation = sourceGeneration
+        let lensCorrection = value(Self.lensCorrectionPath).bool, cameraJPEG = showsCameraJPEG, word = originalPhrase
         originalLoad = Task { [weak self] in
-            let surface = await Task.detached(priority: .userInitiated) {
-                OriginalImage.load(source, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels)
-            }.value
+            let surface = await Task.detached(priority: .userInitiated, operation: load).value
             guard let self, generation == self.sourceGeneration, !Task.isCancelled else { return }
             self.originalLoad = nil
             self.originalLensCorrection = lensCorrection
+            self.originalIsCameraJPEG = cameraJPEG
             guard let surface else {
+                if self.splitting { self.splitting = false }
                 if self.holdingOriginal {
                     self.holdingOriginal = false
-                    self.status = "The original of \(source.lastPathComponent) couldn’t be shown"
+                    self.status = "The \(word) of \(source.lastPathComponent) couldn’t be shown"
                 }
                 return
             }
             self.originalCache = surface
-            if self.holdingOriginal { self.original = surface } else { surface.makeVolatile() }
+            if self.holdingOriginal { self.original = surface }
+            if self.splitting { self.splitOriginal = surface }
+            if !self.holdingOriginal, !self.splitting { surface.makeVolatile() }
         }
     }
+
+    /// A click on Original, by Original ⌄'s choice: holding is the press
+    /// itself; Split line toggles the line; Side by side compares.
+    func clickOriginal() {
+        switch originalMode {
+        case .hold: break
+        case .split: splitting ? clearSplit() : startSplit()
+        case .sideBySide: compareWithOriginal()
+        }
+    }
+
+    /// The split line over the photograph, with the original left of it.
+    private func startSplit() {
+        guard canShowOriginal, comparison == nil, !splitting else { return }
+        splitting = true
+        dropStaleOriginal()
+        if let cached = originalCache {
+            if cached.makeNonVolatile() { splitOriginal = cached; return }
+            originalCache = nil
+        }
+        loadOriginal()
+    }
+
+    func clearSplit() {
+        guard splitting else { return }
+        splitting = false
+        let shown = splitOriginal
+        splitOriginal = nil
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, let shown, !self.holdingOriginal, !self.splitting, self.originalCache === shown else { return }
+            shown.makeVolatile()
+        }
+    }
+
+    // MARK: Compare (ticket 46): the model's own state Compare.swift reads
+
+    var enginePaths: EnginePaths? { engine?.paths }
+    var closingForCompare: Bool { closing }
+    var sourceDeletedForCompare: Bool { sourceDeleted }
+    /// The open photograph has settled: nothing renders, solves, saves or
+    /// exports, so the other photograph's develop can have the machine.
+    var editedSettled: Bool {
+        !rendering && pendingRender == nil && matchTask == nil && !interacting && !exporting && !saving && heldPreview == nil
+            && (previewCurrent || renderFailed || source == nil)
+    }
+    /// Opens `item` for editing in compare: the photo view, and its session.
+    func openForCompare(_ item: URL) {
+        if mode == .grid { mode = .photo }
+        open(item, restoring: nil)
+    }
+    func setPhotoMode() { mode = .photo }
+    func restoreSelection(_ restored: LibrarySelection) { if selection != restored { selection = restored } }
+    func pauseThumbnailsForCompare() {}
+    func resumeThumbnailsAfterCompare() { pumpThumbnails() }
 
     // MARK: Rendering
 
@@ -3117,6 +3479,10 @@ import UserNotifications
         willRender?()
         #endif
         guard !rendering, !closing, let source, let engine else { return }
+        // The edit's settled frame shows already: a render scheduled before
+        // it landed (on a slider's release) would only replace it. Every
+        // edit clears `previewCurrent`.
+        guard !previewCurrent else { return }
         let currentRevision = revision, snapshot = renderState, generation = sourceGeneration
         let frame = FrameID(revision: currentRevision, generation: generation)
         // A quick frame's settled render waits for a solve that started after
@@ -3146,6 +3512,12 @@ import UserNotifications
             if generation == sourceGeneration { decodedFor = (generation, decoded.map { CGSize(width: $0["source_width"].double, height: $0["source_height"].double) } ?? .zero) }
             guard !closing else { return }
             guard revision == currentRevision, generation == sourceGeneration else { return scheduleRender() }
+            // Matching turned on during the decode (at exposure 0, no new
+            // edit) is solved first too.
+            if !interacting, !cropping, brightnessMatchPending, matchDecodeFailed != frame {
+                reconcileBrightnessMatch()
+                if matchTask != nil { return }
+            }
         }
         let buffer = engine.directory.appendingPathComponent("preview.rgba")
         var command: [String: JSONValue] = [
@@ -3207,7 +3579,11 @@ import UserNotifications
             // A quick frame of an earlier edit still shows while edits keep
             // coming (Undo held down); the current one renders next.
             let quick = step.isQuick
-            func showable() -> Bool { quick ? !closing && generation == sourceGeneration : shouldShow(currentRevision, generation) }
+            // A canvas-size frame never replaces the current edit's settled one.
+            func showable() -> Bool {
+                (quick ? !closing && generation == sourceGeneration : shouldShow(currentRevision, generation))
+                    && (step == .settled || !previewCurrent)
+            }
             guard showable() else { return }
             let width = Int(result["width"].double), height = Int(result["height"].double)
             let display = result["display_color_space"].string
@@ -3229,16 +3605,21 @@ import UserNotifications
                 showingInteractiveFrame = interactiveScale != nil
                 quickFrame = quick ? frame : nil
                 image = developed; placeholder = nil; standIn = nil
+                #if DEBUG
+                shownFrame = (frame, step)
+                #endif
                 if revision == currentRevision { trialImage = nil }
                 updateHistogram()
                 let film = FilmHistogram(result["film_histogram"])
                 if film != filmHistogram { filmHistogram = film }
-                cropSession?.update(photo: shownImageSize, rotation: imageRotation)
+                cropSession?.update(photo: shownImageSize, rotation: imageRotation, flip: imageFlip)
                 updateFilmStrip()
                 if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
                 lensCorrectionSupported = result["lens_correction_supported"].bool
+                noteFlatField(result["flat_field"])
                 if revision == currentRevision, interactiveScale == nil {
                     renderID = id; previewCurrent = true; hideActivity()
+                    surveyNegativeIfNeeded()
                     showingCachedPreview = false
                     renderAtExportSize = result["export_resolution"].bool
                     renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
@@ -3259,7 +3640,8 @@ import UserNotifications
             // in. A stale match is solved before rendering, so this is only a
             // match that went stale while the frame rendered (turned on at
             // exposure 0, which is no new edit).
-            if !step.isDrag, revision == currentRevision, !interacting, !cropping, brightnessMatchPending {
+            // Not for an edit whose match decode failed: no solve would show it.
+            if !step.isDrag, revision == currentRevision, !interacting, !cropping, brightnessMatchPending, matchDecodeFailed != frame {
                 heldPreview = (currentRevision, generation, show)
             } else {
                 show()
@@ -3297,9 +3679,9 @@ import UserNotifications
     private func updateHistogram() {
         histogramRequest += 1
         guard let image else { histogram = nil; waveform = nil; return }
-        let request = histogramRequest, crop = crop, rotation = imageRotation
+        let request = histogramRequest, crop = crop, rotation = imageRotation, flip = imageFlip
         Task.detached(priority: .userInitiated) { [weak self] in
-            let counted = ImageScopes.of(image, crop: crop, rotation: rotation)
+            let counted = ImageScopes.of(image, crop: crop, rotation: rotation, flip: flip)
             await self?.showHistogram(counted, request: request)
         }
     }
@@ -3375,7 +3757,7 @@ import UserNotifications
         }
     }
 
-    /// Settings › Keep paper when changing film. The film tiles show what a
+    /// The paper lock (the label's "printed on", the paper tray's foot). The film tiles show what a
     /// click would develop, so they go stale (their key holds the paper).
     func setKeepPaper(_ keep: Bool) {
         guard keep != previews.keepPaper else { return }
@@ -3396,21 +3778,26 @@ import UserNotifications
         var entries: [StockEntry] = []
         if previews.filmOpen, previews.filmShown {
             let listed = Set(listedFilms.map(\.id))
-            entries += previews.filmsFavoritesFirst.filter { listed.contains($0.stock.id) }
+            let readAs = tray?.readAs ?? false
+            entries += previews.filmsFavoritesFirst.filter { listed.contains($0.stock.id) && (!readAs || NegativeScan.readable($0.stock)) }
         }
         if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papersFavoritesFirst }
         for entry in entries {
             let command = PreviewRules.request(for: entry.stock, keepPaper: previews.keepPaper, state: rendered, stocks: stocks,
-                                               source: source, generation: generation)
+                                               source: source, generation: generation, negative: tray?.readAs ?? false,
+                                               negativePoint: negativeTilePoint, negativeBounds: negativeTileBounds)
             wanted.append((entry.tile, PreviewTile.Key(generation: generation, request: command), command, entry.stock.id))
         }
         if previews.presetsShown, checkingPresets == 0 {
             let kept = catalog["preset_kept"].array.map(\.string)
-            let ordered = PreviewRules.renderOrder(presets, raw: isRaw, whiteBalance: { self.presetWhiteBalances[$0] },
+            // A preset keeps a negative's white balance: none decodes again.
+            let negative = rendered.params["workflow.route"].string == NegativeScan.route
+            let ordered = PreviewRules.renderOrder(presets, raw: isRaw, whiteBalance: { negative ? nil : self.presetWhiteBalances[$0] },
                                                         photo: rendered.params["io.raw_white_balance"])
             for preset in ordered {
                 guard case .valid = presetStatus[preset], let text = presetTexts[preset], let tile = previews.tile(preset: preset.url) else { continue }
-                let command = PreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation)
+                let command = PreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation,
+                                                         negativeBounds: negativeTileBounds)
                 wanted.append((tile, PreviewRules.presetKey(command, kept: kept.isEmpty ? nil : kept, generation: generation), command, preset.name))
             }
         }
@@ -3586,7 +3973,7 @@ import UserNotifications
     /// can't change it. A change re-solves the match; Prep edits never do.
     func matchInputs(_ state: EditState) -> JSONValue {
         var params = state.params
-        for path in ["prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.crop",
+        for path in ["prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.flip", "io.crop",
                      "io.crop_center", "io.crop_size", "io.output_color_space", "io.output_cctf_encoding",
                      "settings.serial_grain"] {
             params[path] = .null
@@ -3653,6 +4040,9 @@ import UserNotifications
                 // pipeline the solve and the render use.
                 let decoded: JSONValue
                 do {
+                    #if DEBUG
+                    try self?.matchDecodeWillRun?()
+                    #endif
                     decoded = try await engine.request(decode).1
                 } catch {
                     try stillWanted()
@@ -3700,7 +4090,7 @@ import UserNotifications
     }
 
     /// The match cache's name for solving `request` on `file` in the helper at `paths`.
-    private func matchCacheKey(_ file: URL, request: EditState, paths: EnginePaths) -> String? {
+    func matchCacheKey(_ file: URL, request: EditState, paths: EnginePaths) -> String? {
         if matchEngine?.helper != paths.helper || matchEngine?.data != paths.data {
             matchEngine = (paths.helper, paths.data, BrightnessMatchCache.engineStamp(paths))
         }
@@ -3834,6 +4224,736 @@ import UserNotifications
         }
     }
 
+    // MARK: Your negative (ticket 33)
+
+    /// The photograph is a scan of a colour negative: upstream's
+    /// convert-film route reads it back to the film's dyes, then prints.
+    var isNegative: Bool { value("workflow.route").string == NegativeScan.route }
+    /// Where the film base now shown came from, for Prep's Film base line:
+    /// what the detection that made it said, else how it compares with
+    /// what a detection finds on this reading (`negativeSurvey`). Nil while
+    /// that isn't known yet. Undo, redo and resets bring back a base, so
+    /// it's looked up by the base itself, never kept from the last answer.
+    var negativeBase: NegativeScan.BaseStatus? {
+        guard isNegative else { return nil }
+        let base = state.params["film_render.base"]
+        if let record = negativeBaseRecords.last(where: { $0.generation == sourceGeneration && NegativeScan.sameBase($0.base, base) }) {
+            return record.status
+        }
+        // Put back to the default, to be found again.
+        guard !NegativeScan.sameBase(base, NegativeScan.defaults["film_render.base"] ?? .null),
+              let survey = negativeSurvey, survey.base != .null else { return nil }
+        if NegativeScan.sameBase(survey.base, base) { return NegativeScan.BaseStatus(found: survey.found, picked: false, edge: survey.edge) }
+        // Not what a detection finds: a frame of a roll without clear film
+        // of its own has the roll's; otherwise it was picked or set by hand.
+        return NegativeScan.BaseStatus(found: false, picked: false, from: state.roll != nil && !survey.found ? .roll : .hand)
+    }
+    /// What each base found or picked on this photograph was found from,
+    /// newest last.
+    private var negativeBaseRecords: [BaseRecord] = []
+    private struct BaseRecord {
+        var generation: Int
+        /// `film_render.base` as the answer wrote it.
+        var base: JSONValue
+        var status: NegativeScan.BaseStatus
+    }
+    private func recordBase(_ base: JSONValue, _ status: NegativeScan.BaseStatus, generation: Int) {
+        negativeBaseRecords.removeAll { $0.generation != generation || NegativeScan.sameBase($0.base, base) }
+        negativeBaseRecords.append(BaseRecord(generation: generation, base: base, status: status))
+        if negativeBaseRecords.count > 32 { negativeBaseRecords.removeFirst() }
+    }
+    /// A request about the negative is running (a base detection, a
+    /// balance, Auto, a pick, Crop to picture, the roll): what Prep says
+    /// meanwhile. Only the newest request clears it.
+    private(set) var negativeWorking: String?
+    /// The canvas takes the next click as a point to read.
+    var negativePick: NegativeScan.Pick? {
+        didSet { if negativePick != nil { endTray(keep: true) } }
+    }
+    /// Where the base was picked on this photograph, kept for a re-detect
+    /// after a change of film, paper or scan light.
+    @ObservationIgnored private var negativeBasePoint: (generation: Int, point: CGPoint)?
+    /// Where the base was picked on this photograph, for the read-as tiles.
+    private var negativeTilePoint: CGPoint? { negativeBasePoint.flatMap { $0.generation == sourceGeneration ? $0.point : nil } }
+    /// The picture a paper tile's Auto reads in, as choosing the paper does.
+    private var negativeTileBounds: JSONValue? { negativeSurvey.flatMap { NegativeScan.bounds(picture: $0.picture) } }
+    /// Counts requests about the negative: the newest supersedes the others,
+    /// so a late answer never lands on a newer edit or on a newer request's.
+    @ObservationIgnored private var negativeRequest = 0
+    /// The newest request finds the base (and balances the print for it).
+    @ObservationIgnored private var negativeDetecting = false
+    /// Answers folded into the edit that asked for them, newest last: undo
+    /// or redo putting that edit back (one made before the answer came)
+    /// puts its answer back with it.
+    @ObservationIgnored private var negativeFolded: [NegativeFold] = []
+    private struct NegativeFold {
+        var generation: Int
+        /// The edit as it was when it asked.
+        var asked: EditState
+        var changes: [String: JSONValue]
+    }
+    /// What the rebate finder read on this photograph, for each way of
+    /// reading it lately, newest last.
+    private var negativeSurveys: [NegativeScan.Survey] = []
+    /// What the rebate finder read on this photograph as it's read now: the
+    /// picture, whether it looks like a negative, the base a detection finds.
+    var negativeSurvey: NegativeScan.Survey? {
+        guard let key = negativeKey(state) else { return nil }
+        return negativeSurveys.last { $0.generation == sourceGeneration && $0.key == key }
+    }
+    private func keepSurvey(_ survey: NegativeScan.Survey) {
+        negativeSurveys.removeAll { $0.generation != survey.generation || $0.key == survey.key }
+        negativeSurveys.append(survey)
+        if negativeSurveys.count > 8 { negativeSurveys.removeFirst() }
+    }
+    /// Surveys running, by source generation and reading: never two alike.
+    @ObservationIgnored private var negativeSurveying: Set<String> = []
+    /// Your negative was tried in the tray: crop to the picture if it's kept.
+    @ObservationIgnored private var negativeCropPending: Int?
+
+    /// The film a negative is read as: the current one if it's a colour
+    /// negative, else Portra 400 (decision 2: say so, no averaged profile).
+    private func negativeFilm(for state: EditState) -> String? {
+        if let film = films.first(where: { $0.id == state.film }), NegativeScan.readable(film) { return film.id }
+        if films.contains(where: { $0.id == NegativeScan.defaultFilm }) { return NegativeScan.defaultFilm }
+        return films.first(where: NegativeScan.readable)?.id
+    }
+
+    /// `state` read as a negative.
+    func negativeState(from state: EditState) -> EditState {
+        var next = state
+        next.params["workflow.route"] = .string(NegativeScan.route)
+        next.params["io.scan_film"] = .bool(false)
+        if let film = negativeFilm(for: state), film != state.film {
+            next = PreviewRules.choosing(film, paper: false, keepPaper: previews.keepPaper, in: next, stocks: stocks, negative: true)
+            // Entering, from a slide say, the film's own paper comes too
+            // (unless Keep paper); changing the read-as film later keeps it.
+            PreviewRules.pairFilm(in: &next, stocks: stocks, paper: !previews.keepPaper)
+        }
+        // The camera's preview is of the orange negative: nothing to match.
+        next.brightnessMatch = nil
+        return next
+    }
+
+    /// Whether this photograph looks like a colour negative (the helper's
+    /// `negative_check`), for its source generation: asked only when the
+    /// film menu or tray opens, kept in memory so opening it again doesn't ask.
+    @ObservationIgnored private(set) var looksNegative: (generation: Int, looks: Bool)?
+    @ObservationIgnored private var checkingNegative: Int?
+
+    /// The helper found the photograph looks like a colour negative: the
+    /// film tray opens on Scan. False while that isn't known yet.
+    var looksLikeANegative: Bool { looksNegative.map { $0.generation == sourceGeneration && $0.looks } ?? false }
+
+    /// Asks whether the photograph looks like a colour negative, read as the
+    /// film it would be read as, with its own white balance, lens correction
+    /// and interpretation, from the source its preview decoded. Once per
+    /// source generation; an open film tray moves to Scan on a yes.
+    func checkLooksNegative() {
+        let generation = sourceGeneration
+        // Only once a develop has decoded the source, so the check never
+        // decodes it again, smaller, for the develop to decode once more.
+        guard looksNegative?.generation != generation, checkingNegative != generation, image != nil, !showingCachedPreview,
+              let engine, let source, let film = negativeFilm(for: state) else { return }
+        checkingNegative = generation
+        let command: [String: JSONValue] = ["command": .string("negative_check"), "input": .string(source.path),
+                                            "source_generation": .number(Double(generation)), "film": .string(film),
+                                            "params": renderState.params]
+        Task {
+            defer { if checkingNegative == generation { checkingNegative = nil } }
+            guard let (_, result) = try? await engine.request(command), generation == sourceGeneration else { return }
+            looksNegative = (generation, result["looks_negative"].bool)
+            if looksLikeANegative, let tray, !tray.paper, !tray.readAs { tray.opensOnScan = true }
+        }
+    }
+
+    /// The label's "Your negative" outside the tray: reads the photograph
+    /// as a negative, finds its base and balances the print, one undo step.
+    func chooseNegative() {
+        guard !isNegative, canChangeEdits else { return }
+        apply(negativeState(from: state), action: "Read as Negative")
+    }
+
+    /// The film a negative is read as, from the plain menu.
+    func chooseNegativeFilm(_ stock: String) {
+        apply(PreviewRules.choosing(stock, paper: false, keepPaper: previews.keepPaper, in: state, stocks: stocks, negative: true),
+              action: "Change Negative Film")
+    }
+
+    /// What a base was found for: changing any of it finds it again. The
+    /// paper isn't: a new paper only prints it as Auto again.
+    private func negativeKey(_ state: EditState) -> String? {
+        guard state.params["workflow.route"].string == NegativeScan.route else { return nil }
+        return [state.film, state.params["film_render.convert.scan_illuminant"].string,
+                "\(state.params["io.raw_white_balance"])", "\(state.params["io.input_interpretation"])",
+                "\(state.params["io.lens_correction"])", state.params[NegativeScan.flatFieldPath].string].joined(separator: "|")
+    }
+
+    /// The helper's last word on the flat field (`flat_field` of a render
+    /// or a base detection): `{path, used, reason}` and the photograph it
+    /// was about (`input`), or null.
+    private(set) var flatFieldAnswer: JSONValue = .null
+
+    /// Prep's Flat field row: this frame's light frame and whether it was used.
+    var flatField: NegativeScan.FlatField {
+        let answer = flatFieldAnswer["input"].string == source?.path ? flatFieldAnswer : .null
+        return NegativeScan.FlatField(path: value(NegativeScan.flatFieldPath).string, answer: answer)
+    }
+
+    /// Keeps the helper's answer about the flat field for this photograph,
+    /// when it gave one.
+    func noteFlatField(_ answer: JSONValue) {
+        guard answer != .null, let source else { return }
+        var answer = answer
+        answer["input"] = .string(source.path)
+        if answer != flatFieldAnswer { flatFieldAnswer = answer }
+    }
+
+    /// Prep › Flat field › Choose…: the light frame for this negative (and,
+    /// with Use for whole roll, its roll). Finding the base again follows.
+    func chooseFlatField(_ url: URL) {
+        guard isNegative, canChangeEdits else { return }
+        var next = state
+        next.params[NegativeScan.flatFieldPath] = .string(url.path)
+        apply(next, action: "Choose Flat Field")
+    }
+
+    /// Prep › Flat field › Off.
+    func clearFlatField() {
+        guard isNegative, canChangeEdits, flatField.isOn else { return }
+        var next = state
+        next.params[NegativeScan.flatFieldPath] = .string("")
+        apply(next, action: "Flat Field Off")
+    }
+
+    func chooseFlatFieldPanel() {
+        let panel = Self.makeOpenPanel()
+        panel.title = "Choose Light Frame"
+        panel.message = "A frame of the bare light, shot with this roll's camera, lens and aperture."
+        panel.canChooseDirectories = false
+        if let source { panel.directoryURL = source.deletingLastPathComponent() }
+        panel.begin { [weak self] response in
+            if response == .OK, let url = panel.url { self?.chooseFlatField(url) }
+        }
+    }
+    /// What an answer about the base or balance was asked for.
+    private func negativeAnswerKey(_ state: EditState) -> String? { negativeKey(state).map { "\($0)|\(state.paper)" } }
+
+    /// Starts a request about the negative, superseding any running: their
+    /// answers are dropped and they no longer clear `negativeWorking`.
+    private func beginNegative(_ working: String, detecting: Bool = false) -> Int {
+        negativeRequest += 1
+        negativeWorking = working
+        negativeDetecting = detecting
+        return negativeRequest
+    }
+
+    /// `request` has ended: Prep's buttons come back if it's still the newest.
+    private func endNegative(_ request: Int) {
+        guard negativeRequest == request else { return }
+        negativeWorking = nil
+        negativeDetecting = false
+    }
+
+    /// `request`'s answer still fits: it's the newest, for this photograph,
+    /// and the negative is read as when it asked (`key`, `negativeAnswerKey`).
+    private func negativeCurrent(_ request: Int, generation: Int, key: String?) -> Bool {
+        negativeRequest == request && generation == sourceGeneration && negativeAnswerKey(state) == key
+    }
+
+    /// Folds `changes`, the answer to `asked`, into the current edit, and
+    /// keeps them for an undo or redo that puts `asked` back.
+    private func foldNegative(_ changes: [String: JSONValue], asked: EditState, generation: Int) {
+        negativeFolded.removeAll { $0.generation != generation || $0.asked == asked }
+        negativeFolded.append(NegativeFold(generation: generation, asked: asked, changes: changes))
+        if negativeFolded.count > 16 { negativeFolded.removeFirst() }
+        var next = state
+        for (path, value) in changes { next.params[path] = value }
+        replaceState(next)
+    }
+
+    /// Undo or redo put back a negative's edit: one undone before its answer
+    /// came gets that answer back; one with a base never found (its answer
+    /// was dropped) finds it now. Never an orange print.
+    private func restoreNegativeAnswer() {
+        guard isNegative else { return }
+        if let fold = negativeFolded.last(where: { $0.generation == sourceGeneration && $0.asked == state }) {
+            var next = state
+            for (path, value) in fold.changes { next.params[path] = value }
+            replaceState(next)
+        } else if state.params["film_render.base"] == NegativeScan.defaults["film_render.base"] {
+            detectNegativeBase(undoable: false)
+        }
+    }
+
+    /// After a reset on a negative that put back its base, balance or print
+    /// exposure (`paths`, nil for all): they're this frame's measurements,
+    /// not settings with a default, so they're found again as part of the
+    /// reset, unless the reset's own change of how the scan is read has a
+    /// detection running already (`since`: `negativeRequest` before it).
+    private func refindNegative(after before: EditState, paths: [String]?, since: Int) {
+        guard isNegative, state != before else { return }
+        if let paths, !paths.contains(where: NegativeScan.isFound) { return }
+        if negativeRequest != since, negativeDetecting { return }
+        detectNegativeBase(undoable: false)
+    }
+
+    /// After an edit: entering negative mode, or a new film, scan light or
+    /// white balance, finds the base and balance again; a new paper (a
+    /// preset's, say) prints it as Auto does there, on the same base. Both are
+    /// part of that edit (no undo step of their own). Entering also crops to
+    /// the picture, as a step of its own.
+    private func followNegative(from old: EditState) {
+        guard let key = negativeKey(state) else {
+            if negativeKey(old) != nil {
+                negativePick = nil
+                // Back to a scene: Match camera brightness as for a new photograph.
+                if state.brightnessMatch == nil, autoPlaceNewImages, old.params["workflow.route"] != state.params["workflow.route"] {
+                    var next = state; next.brightnessMatch = BrightnessMatch(); replaceState(next)
+                }
+            }
+            return
+        }
+        // Undo and redo put back a state whose base and balance were found
+        // for it already (a roll frame's filtration among them), or bring
+        // its answer back (`restoreNegativeAnswer`).
+        if undoManager?.isUndoing == true || undoManager?.isRedoing == true { restoreNegativeAnswer(); return }
+        let before = negativeKey(old)
+        if key != before {
+            detectNegativeBase(undoable: false, cropToPicture: before == nil)
+        } else if state.paper != old.paper {
+            // A detection still running balances for the old paper: find
+            // the base again, which balances for the new one.
+            if negativeDetecting {
+                detectNegativeBase(undoable: false)
+            } else if Self.filtration(state) == Self.filtration(old) {
+                // The filtration came along to the new paper: Auto for this
+                // frame there, whatever it was printed with before. One that
+                // came with the paper (Esc in the tray putting the frame
+                // back) is the paper's already.
+                autoPrintForPaper()
+            }
+        }
+    }
+
+    /// A negative's magenta and yellow.
+    private static func filtration(_ state: EditState) -> [JSONValue?] {
+        [state.params["enlarger.m_filter_shift"], state.params["enlarger.y_filter_shift"]]
+    }
+
+    /// The scan doesn't look like a colour negative, in Prep's words.
+    var negativeWarning: String? {
+        guard isNegative, let survey = negativeSurvey, survey.generation == sourceGeneration, !survey.looksNegative else { return nil }
+        return NegativeScan.notNegative(raw: isRaw)
+    }
+
+    /// Finds the film base (or reads it at `point`, fractions of the whole
+    /// photograph), balances the print for it and meters the print
+    /// exposure. `undoable`: its own undo step (Detect again, a pick); else
+    /// folded into the edit that asked, after a moment's wait so trying
+    /// film after film reads only the last. `cropToPicture`: then crops to
+    /// the picture found, as its own undo step, unless the photograph is cropped.
+    func detectNegativeBase(at point: CGPoint? = nil, undoable: Bool = true, cropToPicture: Bool = false) {
+        guard isNegative, let engine, let source else { return }
+        let generation = sourceGeneration
+        if let point { negativeBasePoint = (generation, point) }
+        let point = point ?? negativeBasePoint.flatMap { $0.generation == generation ? $0.point : nil }
+        let request = beginNegative(point == nil ? "Finding the film base…" : "Reading the base…", detecting: true)
+        let asked = state, snapshot = renderState, key = negativeAnswerKey(state)
+        var command = negativeRequestCommand("negative_base", source: source, generation: generation, state: snapshot)
+        if let point { command["point"] = .array([.number(point.x), .number(point.y)]) }
+        // Found without a point, the answer is this reading's survey too.
+        let surveying = point == nil ? negativeKey(asked).map { "\(generation)|\($0)" } : nil
+        if let surveying { negativeSurveying.insert(surveying) }
+        // A frame of a roll keeps the roll's filtration (§9.2): its base is
+        // measured afresh, its print exposure metered for that filtration.
+        // On another paper than the roll's, it's balanced for its own paper.
+        let roll = asked.roll, filtration = roll.flatMap { $0.paper == nil || $0.paper == asked.paper ? $0 : nil }
+        Task {
+            defer {
+                endNegative(request)
+                if let surveying { negativeSurveying.remove(surveying) }
+            }
+            do {
+                if !undoable { try await Task.sleep(for: Self.negativeSettle) }
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                let (_, result) = try await engine.request(command)
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                noteFlatField(result["flat_field"])
+                if point == nil { keepSurvey(NegativeScan.Survey(generation: generation, key: negativeKey(asked), result: result)) }
+                var changes: [String: JSONValue] = [
+                    "film_render.base": result["base"], "film_render.convert.exposure_compensation_ev": result["exposure_ev"],
+                    "enlarger.m_filter_shift": filtration.map { .number($0.magenta) } ?? result["m_filter_shift"],
+                    "enlarger.y_filter_shift": filtration.map { .number($0.yellow) } ?? result["y_filter_shift"],
+                ]
+                // Each frame gets its own print exposure, as a printer exposes each frame.
+                if let exposure = await meterNegative(snapshot, changes, engine: engine, source: source, generation: generation) {
+                    changes["enlarger.print_exposure"] = exposure
+                }
+                guard negativeCurrent(request, generation: generation, key: key), state.roll == roll else { return }
+                let base = NegativeScan.BaseStatus(found: result["found"].bool, picked: result["picked"].bool,
+                                                   edge: result["edge"].string.isEmpty ? nil : result["edge"].string)
+                recordBase(result["base"], base, generation: generation)
+                if undoable {
+                    var next = state
+                    for (path, value) in changes { next.params[path] = value }
+                    apply(next, action: point == nil ? "Detect Film Base" : "Pick Film Base")
+                } else {
+                    foldNegative(changes, asked: asked, generation: generation)
+                }
+                status = base.sentence(as: Orientation(params: state.params))
+                if cropToPicture {
+                    // Trying Your negative in the tray: crop once it's kept.
+                    if tray != nil { negativeCropPending = generation } else { cropToFoundPicture() }
+                }
+            } catch { if negativeRequest == request { report(error) } }
+        }
+    }
+
+    /// The crop to the picture last found, as its own undo step, unless the
+    /// photograph is cropped already (its crop is the user's).
+    private func cropToFoundPicture() {
+        if let cropped = croppedToFoundPicture() { apply(cropped, action: "Crop to Picture") }
+    }
+
+    /// The state cropped to the picture last found; nil if there's none or
+    /// the photograph is cropped already.
+    private func croppedToFoundPicture() -> EditState? {
+        guard isNegative, !state.crop.cropped, canChangeEdits, let survey = negativeSurvey, survey.generation == sourceGeneration,
+              let crop = NegativeScan.crop(picture: survey.picture) else { return nil }
+        var cropped = state; cropped.crop = crop
+        return cropped
+    }
+
+    /// A helper request about this negative, as it's read in `state`.
+    private func negativeRequestCommand(_ name: String, source: URL, generation: Int, state: EditState) -> [String: JSONValue] {
+        ["command": .string(name), "input": .string(source.path), "source_generation": .number(Double(generation)),
+         "film": .string(state.film), "paper": .string(state.paper), "params": state.params]
+    }
+
+    /// Reads this photograph's film edge, as `state` reads the scan, if no
+    /// base detection has: the picture, whether it looks like a negative
+    /// and the base a detection finds (a negative opened again, say).
+    /// Changes no setting.
+    private func surveyNegative(engine: EngineClient, source: URL, generation: Int, state: EditState) async throws -> NegativeScan.Survey? {
+        let key = negativeKey(state)
+        if let survey = negativeSurveys.last(where: { $0.generation == generation && $0.key == key }) { return survey }
+        let (_, result) = try await engine.request(negativeRequestCommand("negative_base", source: source, generation: generation, state: state))
+        guard generation == sourceGeneration else { return nil }
+        let survey = NegativeScan.Survey(generation: generation, key: key, result: result)
+        keepSurvey(survey)
+        return survey
+    }
+
+    /// A negative shown without its survey (opened again, at launch, or put
+    /// back by undo with another reading) is surveyed once its preview is
+    /// in, so Prep's warning and Film base line are there unasked. Not
+    /// while a detection that answers it runs.
+    private func surveyNegativeIfNeeded() {
+        guard isNegative, negativeSurvey == nil, let engine, let source, let key = negativeKey(state) else { return }
+        let generation = sourceGeneration, tag = "\(generation)|\(key)"
+        guard !negativeSurveying.contains(tag) else { return }
+        negativeSurveying.insert(tag)
+        let snapshot = renderState
+        Task {
+            defer { negativeSurveying.remove(tag) }
+            _ = try? await surveyNegative(engine: engine, source: source, generation: generation, state: snapshot)
+        }
+    }
+
+    /// The print exposure `state` with `changes` meters to, in the picture
+    /// when the rebate finder found one (else the frame less a border).
+    /// Nil if it can't be metered: the exposure then stays.
+    private func meterNegative(_ state: EditState, _ changes: [String: JSONValue], engine: EngineClient, source: URL,
+                               generation: Int) async -> JSONValue? {
+        var metered = state
+        for (path, value) in changes { metered.params[path] = value }
+        var command = negativeRequestCommand("negative_meter", source: source, generation: generation, state: metered)
+        let survey = try? await surveyNegative(engine: engine, source: source, generation: generation, state: state)
+        if let bounds = survey.flatMap({ NegativeScan.bounds(picture: $0.picture) }) { command["bounds"] = bounds }
+        guard let (_, result) = try? await engine.request(command), result["print_exposure"] != .null else { return nil }
+        return result["print_exposure"]
+    }
+
+    /// A new paper on the same base: the frame printed as Auto prints it
+    /// there (Prep › Auto), so a picked grey or a hand-set filter gives way
+    /// to it; folded into the edit that changed the paper. The paper tiles
+    /// show the same (`PreviewRules.request`'s `auto_negative`).
+    private func autoPrintForPaper() {
+        guard isNegative, let engine, let source else { return }
+        let request = beginNegative("Printing like a minilab…")
+        let generation = sourceGeneration, asked = state, snapshot = renderState, key = negativeAnswerKey(state)
+        Task {
+            defer { endNegative(request) }
+            do {
+                // Trying paper after paper prints only the last.
+                try await Task.sleep(for: Self.negativeSettle)
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                var command = negativeRequestCommand("negative_auto", source: source, generation: generation, state: snapshot)
+                if let bounds = try await negativeBounds(engine: engine, source: source, generation: generation, state: snapshot) {
+                    command["bounds"] = bounds
+                }
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                let (_, result) = try await engine.request(command)
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                let changes = ["enlarger.m_filter_shift": result["m_filter_shift"], "enlarger.y_filter_shift": result["y_filter_shift"],
+                               "enlarger.print_exposure": result["print_exposure"]]
+                foldNegative(changes, asked: asked, generation: generation)
+                status = Self.balanceSentence(changes)
+            } catch { if negativeRequest == request { report(error) } }
+        }
+    }
+
+    /// The picture Auto and the meter read in, from the survey: left, top,
+    /// right, bottom of the whole photograph; nil for the frame less a border.
+    private func negativeBounds(engine: EngineClient, source: URL, generation: Int, state: EditState) async throws -> JSONValue? {
+        try await surveyNegative(engine: engine, source: source, generation: generation, state: state)
+            .flatMap { NegativeScan.bounds(picture: $0.picture) }
+    }
+
+    /// How long a detection or balance that follows an edit waits for the next.
+    static let negativeSettle = Duration.milliseconds(200)
+
+    /// Prep › Find the base again, forgetting a picked point.
+    func redetectNegativeBase() {
+        negativeBasePoint = nil
+        detectNegativeBase()
+    }
+
+    /// Prep › Crop to picture: crops to the picture inside the clear film,
+    /// levelled by the rebate, as one undo step.
+    func cropToPicture() {
+        guard isNegative, negativeWorking == nil, canChangeEdits, let engine, let source else { return }
+        let request = beginNegative("Finding the picture…")
+        let generation = sourceGeneration, snapshot = renderState, key = negativeAnswerKey(state)
+        Task {
+            defer { endNegative(request) }
+            do {
+                guard let survey = try await surveyNegative(engine: engine, source: source, generation: generation, state: snapshot),
+                      negativeCurrent(request, generation: generation, key: key), canChangeEdits else { return }
+                guard let crop = NegativeScan.crop(picture: survey.picture) else {
+                    status = "No clear film round the picture to crop to: crop it by hand."
+                    return
+                }
+                var next = state; next.crop = crop
+                apply(next, action: "Crop to Picture")
+            } catch { if negativeRequest == request { report(error) } }
+        }
+    }
+
+    /// Prep › Auto: a minilab's print of this frame. Writes the enlarger's
+    /// magenta, yellow and print exposure, where Lab shows them.
+    func autoPrintNegative() {
+        negativeCommand("negative_auto", point: nil, working: "Printing like a minilab…", action: "Auto Print")
+    }
+
+    /// The neutral picker: the magenta and yellow that print this point
+    /// grey, then the print exposure metered for them.
+    func neutralPrintNegative(at point: CGPoint) {
+        negativeCommand("negative_neutral", point: point, working: "Balancing on the grey…", action: "Pick Neutral")
+    }
+
+    private func negativeCommand(_ name: String, point: CGPoint?, working: String, action: String) {
+        guard isNegative, negativeWorking == nil, let engine, let source else { return }
+        let request = beginNegative(working)
+        let generation = sourceGeneration, snapshot = renderState, key = negativeAnswerKey(state)
+        var command = negativeRequestCommand(name, source: source, generation: generation, state: snapshot)
+        if let point { command["point"] = .array([.number(point.x), .number(point.y)]) }
+        Task {
+            defer { endNegative(request) }
+            do {
+                if point == nil, let bounds = try await negativeBounds(engine: engine, source: source, generation: generation, state: snapshot) {
+                    command["bounds"] = bounds
+                }
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                let (_, result) = try await engine.request(command)
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                var changes = ["enlarger.m_filter_shift": result["m_filter_shift"], "enlarger.y_filter_shift": result["y_filter_shift"]]
+                if result["print_exposure"] != .null {
+                    changes["enlarger.print_exposure"] = result["print_exposure"]
+                } else if let exposure = await meterNegative(snapshot, changes, engine: engine, source: source, generation: generation) {
+                    changes["enlarger.print_exposure"] = exposure
+                }
+                guard negativeCurrent(request, generation: generation, key: key) else { return }
+                var next = state
+                for (path, value) in changes { next.params[path] = value }
+                apply(next, action: action)
+                status = Self.balanceSentence(changes)
+            } catch { if negativeRequest == request { report(error) } }
+        }
+    }
+
+    /// "Magenta 4.4, yellow −1.8, print exposure 0.87".
+    private static func balanceSentence(_ changes: [String: JSONValue]) -> String {
+        let f = { (v: JSONValue?) in (v?.double ?? 0).formatted(.number.precision(.fractionLength(1))) }
+        let exposure = changes["enlarger.print_exposure"].map { ", print exposure \($0.double.formatted(.number.precision(.fractionLength(2))))" } ?? ""
+        return "Magenta \(f(changes["enlarger.m_filter_shift"])), yellow \(f(changes["enlarger.y_filter_shift"]))\(exposure)"
+    }
+
+    /// A click on the canvas while picking: `point` is a fraction of the
+    /// whole, uncropped photograph, from its top left.
+    func pickedNegativePoint(_ point: CGPoint) {
+        guard let pick = negativePick else { return }
+        negativePick = nil
+        guard (0...1).contains(point.x), (0...1).contains(point.y) else { return }
+        switch pick {
+        case .base: detectNegativeBase(at: point)
+        case .neutral: neutralPrintNegative(at: point)
+        }
+    }
+
+    // MARK: Darkroom roll (§9.2, §9.3)
+
+    /// Prep › Roll's filtration: a frame that set its own goes back to the
+    /// roll's magenta and yellow, its exposure metered again.
+    func useRollFiltration() {
+        guard isNegative, negativeWorking == nil, let roll = state.roll, !roll.filtered(state), let engine, let source else { return }
+        let request = beginNegative("Metering the print…")
+        let generation = sourceGeneration, snapshot = renderState, key = negativeAnswerKey(state)
+        Task {
+            defer { endNegative(request) }
+            var changes: [String: JSONValue] = ["enlarger.m_filter_shift": .number(roll.magenta), "enlarger.y_filter_shift": .number(roll.yellow)]
+            if let exposure = await meterNegative(snapshot, changes, engine: engine, source: source, generation: generation) {
+                changes["enlarger.print_exposure"] = exposure
+            }
+            guard negativeCurrent(request, generation: generation, key: key), state.roll == roll else { return }
+            var next = state
+            for (path, value) in changes { next.params[path] = value }
+            apply(next, action: "Use Roll’s Filtration")
+            status = Self.balanceSentence(changes)
+        }
+    }
+
+    /// What reading one frame of a roll found for it.
+    private struct RollFrame {
+        /// Its own base (from its rebate) or the roll's exposure shifted
+        /// by its EXIF, and its metered print exposure.
+        var changes: [String: JSONValue] = [:]
+        /// The crop to its picture, for a frame not cropped yet.
+        var crop: CropSettings?
+        /// Read with the roll's settings, it looks like a colour negative;
+        /// one that doesn't is left as it was.
+        var looksNegative = true
+    }
+
+    /// Prep › Use for whole roll: every photograph in view is printed as a
+    /// frame of this roll (§9.2), as one undo step. The film, paper,
+    /// backlight, base tuning and filtration are this frame's; a frame of
+    /// the roll that set its own filtration keeps it. Each other frame is
+    /// read first: its base from its own rebate when it shows clear film,
+    /// else this frame's with the exposure shifted by the camera's
+    /// settings (§9.3); its print exposure metered; and, if uncropped, the
+    /// crop to its picture. A photograph that doesn't look like a colour
+    /// negative read so is skipped: left as it was. This one is checked
+    /// too; if it doesn't, nothing changes.
+    func useNegativeForRoll() {
+        guard isNegative, negativeWorking == nil, canChangeEdits, let engine, let open = sourceItem, let source else { return }
+        let paths = engine.paths
+        var items = shownPhotos.map(\.url)
+        if !items.contains(open) { items.insert(open, at: 0) }
+        let reference = state
+        let roll = NegativeRoll(id: reference.roll?.id ?? SidecarRestore.newVariantID(),
+                                magenta: reference.params["enlarger.m_filter_shift"].double,
+                                yellow: reference.params["enlarger.y_filter_shift"].double, paper: reference.paper)
+        // Without sidecars only the open photograph changes (`changeEdits`).
+        let others = sidecarLookup == nil ? [] : items.filter { $0 != open }
+        let facts = photoFacts ?? PhotoFacts.read(source)
+        let request = beginNegative("Reading the roll…")
+        let generation = sourceGeneration, key = negativeAnswerKey(state)
+        Task {
+            defer { endNegative(request) }
+            var frames: [URL: RollFrame] = [:]
+            // This frame is checked like the others, never taken on trust.
+            let survey: NegativeScan.Survey?
+            do { survey = try await surveyNegative(engine: engine, source: source, generation: generation, state: reference) } catch {
+                if negativeRequest == request { report(error) }; return
+            }
+            guard let survey, negativeRequest == request else { return }
+            // Its film, base and filtration would print the roll: not from
+            // a photograph that doesn't look like a negative.
+            guard survey.looksNegative else {
+                status = "The roll wasn't shared: this photograph doesn't look like a negative."
+                libraryNote = LibraryNote(text: "Roll Not Shared", detail: "this photograph doesn't look like a negative",
+                                          serial: (libraryNote?.serial ?? 0) + 1)
+                return
+            }
+            if !others.isEmpty {
+                do {
+                    // A helper of its own, so the open photograph's decode stays.
+                    let helper = try EngineClient(paths: paths)
+                    defer { Task.detached(priority: .utility) { helper.stop() } }
+                    for (index, item) in others.enumerated() {
+                        guard negativeRequest == request else { break }
+                        negativeWorking = "Reading frame \(index + 1) of \(others.count)…"
+                        guard let target = openingState(of: item) else { continue }
+                        frames[item] = try await readRollFrame(item.photoFile, target: target, generation: index + 1, roll: roll,
+                                                               reference: reference, facts: facts, helper: helper)
+                    }
+                } catch { if negativeRequest == request { report(error) }; return }
+            }
+            guard sourceItem == open, canChangeEdits, negativeCurrent(request, generation: generation, key: key) else {
+                status = "The roll wasn't changed: the photograph changed meanwhile."; return
+            }
+            let skipped = items.filter { frames[$0]?.looksNegative == false }
+            let joining = items.filter { !skipped.contains($0) }
+            defer {
+                if !skipped.isEmpty {
+                    let words = NegativeScan.skipped(skipped.count)
+                    status = words
+                    if var note = libraryNote {
+                        note.detail = [note.detail, String(words.dropLast())].compactMap { $0 }.joined(separator: " · ")
+                        libraryNote = note
+                    }
+                }
+            }
+            changeEdits(joining, action: "Use for Whole Roll", note: "Roll Shared") { item, target in
+                guard item != open else { var next = target; next.roll = roll; return next }
+                var next = NegativeScan.joining(roll, from: reference, into: target)
+                if let frame = frames[item] {
+                    for (path, value) in frame.changes { next.params[path] = value }
+                    if let crop = frame.crop, !next.crop.cropped { next.crop = crop }
+                }
+                return next
+            }
+        }
+    }
+
+    /// One frame of a roll, read with the roll's settings.
+    private func readRollFrame(_ photo: URL, target: EditState, generation: Int, roll: NegativeRoll, reference: EditState,
+                               facts: PhotoFacts?, helper: EngineClient) async throws -> RollFrame {
+        let joined = NegativeScan.joining(roll, from: reference, into: target)
+        let (_, found) = try await helper.request(negativeRequestCommand("negative_base", source: photo, generation: generation, state: joined))
+        var frame = RollFrame()
+        frame.looksNegative = found["looks_negative"].bool
+        guard frame.looksNegative else { return frame }
+        if found["found"].bool {
+            frame.changes["film_render.base"] = found["base"]
+            frame.changes["film_render.convert.exposure_compensation_ev"] = found["exposure_ev"]
+        } else {
+            let stops = NegativeScan.scanStops(of: PhotoFacts.read(photo), from: facts)
+            frame.changes["film_render.convert.exposure_compensation_ev"] =
+                .number(NegativeScan.exposureEV(roll: reference.params["film_render.convert.exposure_compensation_ev"].double, scanStops: stops))
+        }
+        var metered = joined
+        for (path, value) in frame.changes { metered.params[path] = value }
+        var command = negativeRequestCommand("negative_meter", source: photo, generation: generation, state: metered)
+        if let bounds = NegativeScan.bounds(picture: found["picture"]) { command["bounds"] = bounds }
+        if let (_, result) = try? await helper.request(command), result["print_exposure"] != .null {
+            frame.changes["enlarger.print_exposure"] = result["print_exposure"]
+        }
+        if !target.crop.cropped { frame.crop = NegativeScan.crop(picture: found["picture"]) }
+        return frame
+    }
+
+    /// `item`'s edits as it opens with them; nil if its sidecar can't be read.
+    private func openingState(of item: URL) -> EditState? {
+        if item == sourceItem { return state }
+        guard let lookup = sidecarLookup else { return plainState }
+        let restore = SidecarRestore.read(photo: item.photoFile, variant: item.variantID, store: lookup.store, data: lookup.data)
+        guard restore.problem == nil else { return nil }
+        return restore.edits.map { restoredState($0.state, legacy: false) } ?? plainState
+    }
+
     func exportLUTPanel() {
         guard canExportLUT else { return }
         let panel = NSSavePanel()
@@ -3939,10 +5059,11 @@ import UserNotifications
         return x.isEqual(y)
     }
 
-    /// Saves the current preview with the crop, rotation, border, size, and encoding.
+    /// Saves the current preview with the crop, flip, rotation, border, size, and encoding.
     private func saveCommand(to url: URL, size: ExportSize, save: SaveSettings) -> [String: JSONValue] {
         var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path),
-                                            "rotate_cw": .number(Double(imageRotation)), "save_options": save.json]
+                                            "rotate_cw": .number(Double(imageRotation)), "flip": .bool(imageFlip),
+                                            "save_options": save.json]
         if let crop = Self.cropJSON(state.crop) { command["crop"] = crop }
         if let border = state.border.exported(for: photoSize) {
             command["border"] = .string(border.style.rawValue)
@@ -4059,6 +5180,19 @@ import UserNotifications
         batchPanel(exportTargets)
     }
 
+    /// The context menu's Export…: what Export acts on, or the batch panel
+    /// for the right-clicked photographs.
+    func exportPanel(_ targets: [URL]) {
+        guard !targets.isEmpty else { return }
+        if targets == exportTargets { return exportPanel() }
+        guard canStartBatch, ready, !saving, !cropping else { return }
+        batchPanel(targets)
+    }
+    /// Whether the context menu's Export… can start now.
+    func canExport(_ targets: [URL]) -> Bool {
+        targets == exportTargets ? canExport && !cropping : !targets.isEmpty && ready && !saving && !cropping && canStartBatch
+    }
+
     /// Picks a folder for `targets`, or for a single photograph that isn't
     /// open a file as today's single export does, then starts the batch.
     private func batchPanel(_ targets: [URL]) {
@@ -4148,7 +5282,7 @@ import UserNotifications
     }
 
     /// One exporter at a time: not during a single export either.
-    private var canStartBatch: Bool { !closing && !batchRunning && !exporting && hasCatalog && engine != nil }
+    var canStartBatch: Bool { !closing && !batchRunning && !exporting && hasCatalog && engine != nil }
 
     /// Each target's edits as they are now, and the name it gets.
     func batchItems(_ targets: [URL], options: BatchOptions) -> [BatchItem] {
@@ -4358,6 +5492,7 @@ import UserNotifications
             + (failed > 0 ? "; \(failed) failed" : "") + (run.skipped.isEmpty ? "" : "; \(run.skipped.count) skipped")
         status = run.cancelled ? "Export cancelled. " + text : text
         if !run.needsAttention, !batchPopoverShown { batch = nil }
+        if let kind = run.journal.options.lightroom { return lightroomBatchFinished(run, kind: kind) }
         if Self.notificationsAvailable, NSApp?.isActive == false, !run.cancelled { notifyBatchFinished(exported: exported, failed: failed, folder: folder) }
     }
 
@@ -4375,8 +5510,10 @@ import UserNotifications
             guard let self, !self.closing, self.batch == nil else { return }
             guard journal.remaining > 0 else { return BatchJournal.remove(at: url) }
             let count = journal.remaining
+            let photographs = count == 1 ? "1 photograph" : "\(count) photographs"
             let answer = await self.ask(AppAlert(
-                title: "Resume exporting \(count == 1 ? "1 photograph" : "\(count) photographs") to “\(journal.destination.lastPathComponent)”?",
+                title: journal.options.lightroom.map { "Resume sending \(photographs) to \($0.title)?" }
+                    ?? "Resume exporting \(photographs) to “\(journal.destination.lastPathComponent)”?",
                 detail: "Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export.",
                 buttons: [.init(title: "Resume"), .init(title: "Discard")]))
             guard answer.button == 0 else { return BatchJournal.remove(at: url) }
@@ -4487,6 +5624,8 @@ import UserNotifications
                     }
                     var next = state
                     next.film = film; next.paper = paper; next.params = result["params"]
+                    // A negative stays as it's read (decision 6).
+                    next = NegativeScan.keepingNegative(next, from: state)
                     apply(next, action: "Apply Preset “\(preset.name)”")
                     notePresetApplied(preset.url)
                     status = "Applied preset “\(preset.name)”"
@@ -4671,6 +5810,7 @@ import UserNotifications
         matchCache.flush()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
+        stopCompareDevelop()
         if let powerStateObserver { NotificationCenter.default.removeObserver(powerStateObserver); self.powerStateObserver = nil }
         thumbnailTask?.cancel(); thumbnailIdle?.cancel()
         thumbnailsDeveloping.values.forEach { $0.task.cancel() }; thumbnailEngines.values.forEach { $0.stop() }

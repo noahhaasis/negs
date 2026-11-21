@@ -86,11 +86,12 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         case unrated
     }
     enum Flag: String, Codable, CaseIterable, Sendable { case pick, unflagged, reject }
+    enum Edits: String, Codable, Sendable { case any, edited, unedited }
 
     var rating: Rating = .any
     /// The flags shown; empty shows every one.
     var flags: Set<Flag> = []
-    var editedOnly = false
+    var edits: Edits = .any
 
     var active: Bool { self != LibraryFilter() }
 
@@ -104,10 +105,36 @@ struct LibraryFilter: Codable, Equatable, Sendable {
             let flag: Flag = switch summary.flag { case .pick: .pick; case .reject: .reject; case nil: .unflagged }
             if !flags.contains(flag) { return false }
         }
-        return !editedOnly || summary.edited
+        switch edits {
+        case .any: return true
+        case .edited: return summary.edited
+        case .unedited: return !summary.edited
+        }
     }
 
     static let defaultsKey = "libraryFilter"
+
+    init(rating: Rating = .any, flags: Set<Flag> = [], edits: Edits = .any) {
+        self.rating = rating; self.flags = flags; self.edits = edits
+    }
+
+    private enum CodingKeys: String, CodingKey { case rating, flags, edits, editedOnly }
+
+    /// Reads filters saved before `edits`, which had only `editedOnly`.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rating = try container.decodeIfPresent(Rating.self, forKey: .rating) ?? .any
+        flags = try container.decodeIfPresent(Set<Flag>.self, forKey: .flags) ?? []
+        if let edits = try container.decodeIfPresent(Edits.self, forKey: .edits) { self.edits = edits }
+        else { edits = try container.decodeIfPresent(Bool.self, forKey: .editedOnly) == true ? .edited : .any }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rating, forKey: .rating)
+        try container.encode(flags, forKey: .flags)
+        try container.encode(edits, forKey: .edits)
+    }
 
     static func load(_ defaults: UserDefaults = .standard) -> LibraryFilter {
         defaults.data(forKey: defaultsKey).flatMap { try? JSONDecoder().decode(LibraryFilter.self, from: $0) } ?? LibraryFilter()
@@ -128,6 +155,9 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     private(set) var files: [PhotoFile] = []
     /// Each photograph's duplicates, by variant id, in the sidecar's order.
     private(set) var duplicates: [URL: [String]] = [:]
+    /// Each RAW's camera JPEG (or HEIF) of the same name, which goes with
+    /// it rather than being a photograph of its own. Empty when pairing is off.
+    private(set) var companions: [URL: URL] = [:]
     private(set) var loading = false
     private(set) var failed = false
     /// Every sidecar of the listing has been read.
@@ -141,6 +171,11 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     private(set) var readOnly = false
     var filter: LibraryFilter {
         didSet { if filter != oldValue { filter.save(defaults); filterChanged?() } }
+    }
+    /// A RAW's camera JPEG goes with it (Settings › Photographs › Show
+    /// camera JPEGs separately, off). Changing it lists the folder again.
+    var pairsCameraPictures: Bool {
+        didSet { if pairsCameraPictures != oldValue { refreshNow() } }
     }
 
     /// Where sidecars are read, pending writes included; nil with sidecars off.
@@ -171,12 +206,18 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// Photographs being deleted: never listed, even while their files are
     /// still on their way to the Trash.
     @ObservationIgnored private var hidden: Set<URL> = []
+    /// The camera JPEGs hidden with them, by photograph.
+    @ObservationIgnored private var hiddenCompanions: [URL: URL] = [:]
 
     init(store: SidecarStore? = nil, defaults: UserDefaults = .standard) {
         self.store = store
         self.defaults = defaults
         filter = LibraryFilter.load(defaults)
+        pairsCameraPictures = !defaults.bool(forKey: PhotoFolder.separateCameraPicturesKey)
     }
+
+    /// The camera JPEG that goes with `item` (a RAW, or a duplicate of one).
+    func companion(of item: URL) -> URL? { companions[item.photoFile] }
 
     func summary(for photo: URL) -> LibrarySummary { summaries[photo] ?? LibrarySummary() }
 
@@ -241,10 +282,12 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         if summaries[photo] == nil { summaries[photo] = summary }
     }
 
-    /// Stops listing `photos`, with their duplicates, before their files go.
+    /// Stops listing `photos`, with their duplicates and camera JPEGs,
+    /// before their files go.
     func remove(_ photos: [URL]) {
         guard !photos.isEmpty else { return }
         hidden.formUnion(photos)
+        for photo in photos { if let companion = companions[photo] { hiddenCompanions[photo] = companion; hidden.insert(companion) } }
         let gone = Set(photos)
         files.removeAll { gone.contains($0.url) }
         for photo in photos {
@@ -257,13 +300,15 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// or come back.
     func unhide(_ photos: [URL]) {
         hidden.subtract(photos)
+        for photo in photos { if let companion = hiddenCompanions.removeValue(forKey: photo) { hidden.remove(companion) } }
         refreshNow()
     }
 
     /// The photographs the strip and grid show: those the filter lets
-    /// through, and always `current`, so a filter chosen while it's open
-    /// never hides it. A rating or flag that leaves it out moves on to the
-    /// next instead (`EditorModel.changeLibrary`).
+    /// through, and always `current`, so the open photograph never vanishes
+    /// under the edit view. In the grid a filter or a rating that leaves the
+    /// current one out moves on instead (`EditorModel.filterChanged`,
+    /// `EditorModel.moveOn`).
     func shown(current: URL?) -> [PhotoFile] {
         let items = items
         guard filter.active else { return items }
@@ -284,7 +329,7 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         if self.directory != directory {
             self.directory = directory
             files = []; sidecarFiles = [:]; summariesLoaded = false; failed = false
-            duplicates = [:]
+            duplicates = [:]; companions = [:]
             // The open photograph's summary stays.
             summaries = summaries.filter { $0.key.photoFile.deletingLastPathComponent().path == directory.path }
             looks = looks.filter { $0.key.photoFile.deletingLastPathComponent().path == directory.path }
@@ -312,10 +357,11 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         defer {
             if self.directory == directory, files != filesBefore || looks != looksBefore || summaries != summariesBefore { looksChanged?() }
         }
+        let pairing = pairsCameraPictures
         let scan = Task.detached(priority: .utility) {
-            (try PhotoFolder.listing(in: directory), !PhotoLibrary.canWrite(in: directory))
+            (try PhotoFolder.listing(in: directory, pairing: pairing), !PhotoLibrary.canWrite(in: directory))
         }
-        let listing: (photos: [PhotoFile], sidecars: [String: PhotoFile]), readOnly: Bool
+        let listing: PhotoFolder.Listing, readOnly: Bool
         do {
             (listing, readOnly) = try await withTaskCancellationHandler { try await scan.value } onCancel: { scan.cancel() }
             try Task.checkCancellation()
@@ -327,6 +373,7 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         guard self.directory == directory else { return }
         let photos = hidden.isEmpty ? listing.photos : listing.photos.filter { !hidden.contains($0.url) }
         if files != photos { files = photos }
+        if companions != listing.companions { companions = listing.companions }
         if self.readOnly != readOnly { self.readOnly = readOnly }
         failed = false; loading = false
         guard let store else { summariesLoaded = true; return }

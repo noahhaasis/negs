@@ -9,11 +9,13 @@ members = [
     "crates/spektrafilm-cli",
     "crates/spektrafilm-native",
     "crates/spektrafilm-wasm",
+    "crates/negs-library",
+    "crates/negs-libraw",
 ]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.15.0"
+version = "0.17.0"
 edition = "2024"
 license = "GPL-3.0-only"
 rust-version = "1.89"
@@ -24,6 +26,7 @@ spektrafilm-gpu = { path = "crates/spektrafilm-gpu" }
 spektrafilm-math = { path = "crates/spektrafilm-math" }
 spektrafilm-model = { path = "crates/spektrafilm-model" }
 spektrafilm-io = { path = "crates/spektrafilm-io" }
+negs-libraw = { path = "crates/negs-libraw" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -50,6 +53,10 @@ web-time = "1"
 [profile.dev]
 debug = 1
 
+# Shipping settings (CI, web/build.sh). Claude sessions build --release without
+# LTO, with 16 codegen units and incremental (.claude/settings.json): ~10× faster
+# rebuilds, byte-identical renders (all 496 golden renders, 2026-11-17), and
+# render times within 1%. Benchmark against shipped speed with those unset.
 [profile.release]
 lto = "thin"
 codegen-units = 1

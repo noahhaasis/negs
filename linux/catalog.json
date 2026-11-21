@@ -127,7 +127,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_pro_160ns",
@@ -191,7 +192,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_pro_400h",
@@ -255,7 +257,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_superia_1600",
@@ -287,7 +290,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_superia_200",
@@ -383,7 +387,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_xtra_400",
@@ -991,7 +996,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_astia_100f",
@@ -1087,7 +1093,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_provia_400x",
@@ -1119,7 +1126,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_sensia_100",
@@ -1151,7 +1159,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_sensia_200",
@@ -1183,7 +1192,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_sensia_400",
@@ -1215,7 +1225,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_velvia_100",
@@ -1279,7 +1290,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_velvia_50",
@@ -1535,7 +1547,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_eterna_250d",
@@ -1567,7 +1580,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_eterna_400",
@@ -1599,7 +1613,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_eterna_500",
@@ -1663,7 +1678,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_eterna_vivid_250d",
@@ -1695,7 +1711,8 @@
           0.97,
           0.97
         ]
-      }
+      },
+      "negs_built": true
     },
     {
       "id": "fujifilm_eterna_vivid_500",

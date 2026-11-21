@@ -57,6 +57,17 @@ final class LightTableTests: XCTestCase {
         XCTAssertNil(LightTable.light(sheet: 0x808080, edge: 0x000000), "black on mid grey reads")
     }
 
+    /// A white mat on each light theme's own sheet: the shade around it
+    /// must be dark enough to show the mat's edge (it was 1.1 : 1 on Light
+    /// table's white, where the mat vanished).
+    func testWhiteMatShowsOnEveryLightThemesSheet() throws {
+        for theme in AppTheme.allCases where !theme.palette.dark {
+            let sheet = theme.palette.hex.bg
+            let shade = try XCTUnwrap(LightTable.light(sheet: sheet, edge: 0xffffff), theme.title)
+            XCTAssertGreaterThan(Theme.contrast(0xffffff, shade), 1.4, theme.title)
+        }
+    }
+
     func testMix() {
         XCTAssertEqual(LightTable.mix(0x000000, 0xffffff, 0), 0x000000)
         XCTAssertEqual(LightTable.mix(0x000000, 0xffffff, 1), 0xffffff)

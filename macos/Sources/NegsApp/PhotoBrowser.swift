@@ -36,6 +36,14 @@ struct PhotoFile: Hashable, Sendable {
 enum PhotoFolder {
     static let extensions = Set(["jpg", "jpeg", "png", "tif", "tiff"] + EditorModel.rawExtensions)
 
+    /// The camera's own picture beside a RAW of the same name (RAW+JPEG
+    /// shooting). HEIF is only ever a camera picture: Negs doesn't develop it.
+    static let cameraPictureExtensions = Set(["jpg", "jpeg", "heic", "heif", "hif"])
+
+    /// Settings › Photographs › Show camera JPEGs separately, off by default.
+    static let separateCameraPicturesKey = "separateCameraJPEGs"
+    nonisolated static var pairsCameraPictures: Bool { !UserDefaults.standard.bool(forKey: separateCameraPicturesKey) }
+
     static func images(in directory: URL) throws -> [URL] {
         try snapshot(in: directory).map(\.url)
     }
@@ -44,25 +52,71 @@ enum PhotoFolder {
         try listing(in: directory).photos
     }
 
-    /// The folder's photographs in name order, and the sidecars beside them
-    /// (by the photograph's file name), from one directory listing.
-    static func listing(in directory: URL) throws -> (photos: [PhotoFile], sidecars: [String: PhotoFile]) {
+    /// One folder listing: its photographs in name order, the sidecars
+    /// beside them (by the photograph's file name), and, when `pairing`,
+    /// each RAW's camera picture, which is then not a photograph of its own.
+    struct Listing: Sendable {
+        var photos: [PhotoFile] = []
+        var sidecars: [String: PhotoFile] = [:]
+        /// RAW → its camera JPEG (or HEIF).
+        var companions: [URL: URL] = [:]
+    }
+
+    static func listing(in directory: URL, pairing: Bool = pairsCameraPictures) throws -> Listing {
         let files = try FileManager.default.contentsOfDirectory(at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles])
-        var photos: [PhotoFile] = [], sidecars: [String: PhotoFile] = [:]
+        var listing = Listing(), heifs: [URL] = []
         for url in files {
             try Task.checkCancellation()
             let ext = url.pathExtension.lowercased()
             let sidecar = ext == PhotoSidecar.fileExtension
-            guard sidecar || extensions.contains(ext),
+            let heif = pairing && !extensions.contains(ext) && cameraPictureExtensions.contains(ext)
+            guard sidecar || heif || extensions.contains(ext),
                   let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]),
                   values.isRegularFile == true else { continue }
             // Preserve the opened folder's spelling through symlinks.
-            let file = PhotoFile(url: directory.appendingPathComponent(url.lastPathComponent), values: values)
-            if sidecar { sidecars[url.deletingPathExtension().lastPathComponent] = file } else { photos.append(file) }
+            let spelled = directory.appendingPathComponent(url.lastPathComponent)
+            if heif { heifs.append(spelled); continue }
+            let file = PhotoFile(url: spelled, values: values)
+            if sidecar { listing.sidecars[url.deletingPathExtension().lastPathComponent] = file } else { listing.photos.append(file) }
         }
-        photos.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return (photos, sidecars)
+        listing.photos.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if pairing { pair(&listing, heifs: heifs) }
+        return listing
+    }
+
+    /// The name a RAW and its camera picture share: `img_0412` for both
+    /// `IMG_0412.CR3` and `IMG_0412.jpg`.
+    private static func stem(_ url: URL) -> String { url.deletingPathExtension().lastPathComponent.lowercased() }
+
+    /// Takes each RAW's camera picture out of the photographs: the first in
+    /// name order with the RAW's name, unless it has a sidecar (ratings or
+    /// edits of its own), which keeps it a photograph.
+    private static func pair(_ listing: inout Listing, heifs: [URL]) {
+        var raws: [String: URL] = [:]
+        for photo in listing.photos where EditorModel.rawExtensions.contains(photo.url.pathExtension.lowercased()) {
+            let stem = stem(photo.url)
+            if raws[stem] == nil { raws[stem] = photo.url }
+        }
+        guard !raws.isEmpty else { return }
+        let pictures = listing.photos.map(\.url).filter { cameraPictureExtensions.contains($0.pathExtension.lowercased()) }
+            + heifs.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        var taken = Set<URL>()
+        for picture in pictures {
+            guard let raw = raws[stem(picture)], listing.companions[raw] == nil,
+                  listing.sidecars[picture.lastPathComponent] == nil else { continue }
+            listing.companions[raw] = picture
+            taken.insert(picture)
+        }
+        if !taken.isEmpty { listing.photos.removeAll { taken.contains($0.url) } }
+    }
+
+    /// The RAW `picture` is the camera picture of, when it is one: what
+    /// opening it opens instead.
+    static func pairedRAW(of picture: URL) -> URL? {
+        guard pairsCameraPictures, cameraPictureExtensions.contains(picture.pathExtension.lowercased()),
+              let listing = try? listing(in: picture.deletingLastPathComponent()) else { return nil }
+        return listing.companions.first { $0.value.lastPathComponent == picture.lastPathComponent }?.key
     }
 }
 
@@ -174,6 +228,9 @@ struct PhotoBrowser: View {
     @State private var watch = ScrollWatch()
     /// The strip's width, once it has one.
     @State private var viewWidth: CGFloat?
+    /// The photograph a click in the strip just opened: it stays where it
+    /// was clicked rather than the row jumping to put it in the middle.
+    @State private var clickedOpen: URL?
 
     /// The pencil under the current frame: as heavy as the grid's yellow
     /// box, so it still reads under a pick's box (round 21). It sits 3 pt
@@ -257,6 +314,7 @@ struct PhotoBrowser: View {
                     StripFrame(file: file, width: layout.widths[frame.index],
                                current: file.url == model.sourceItem, selected: selected.contains(file.url),
                                summary: library.summary(for: file.url), readOnly: library.readOnly,
+                               cameraJPEG: library.companion(of: file.url),
                                edited: model.editedThumbnail(for: file.url)) { visible in
                         model.thumbnailShown(file, visible)
                     } loaded: { image in
@@ -266,7 +324,9 @@ struct PhotoBrowser: View {
                     } open: {
                         let modifiers = NSEvent.modifierFlags
                         focused = true
+                        let before = model.sourceItem
                         model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
+                        if model.sourceItem != before { clickedOpen = model.sourceItem }
                     }
                     .contextMenu { LibraryContextMenu(model: model, item: file.url) }
                     .offset(x: layout.xs[frame.index])
@@ -297,10 +357,15 @@ struct PhotoBrowser: View {
             })
         }
         .scrollIndicators(.never)
-        // Centred when it changes, not held there. A resize keeps the row
-        // where it is; once it's over, the current frame glides back to the
-        // middle (`StripSettling`).
-        .onChange(of: model.sourceItem) { _, _ in Self.centre(model, in: watch) }
+        // Centred when it changes, not held there, unless a click in the
+        // strip changed it: the row stays put under the pointer. A resize
+        // keeps the row where it is; once it's over, the current frame
+        // glides back to the middle (`StripSettling`).
+        .onChange(of: model.sourceItem) { _, item in
+            let clicked = item != nil && item == clickedOpen
+            clickedOpen = nil
+            if !clicked { Self.centre(model, in: watch) }
+        }
         .onChange(of: library.loading) { _, loading in if !loading { Self.centre(model, in: watch) } }
         .onChange(of: library.filtering) { _, filtering in if !filtering { Self.centre(model, in: watch) } }
         .onChange(of: layout) { old, new in Self.hold(model, from: old, to: new, in: watch) }
@@ -493,7 +558,7 @@ private struct EnclosingScrollView: NSViewRepresentable {
 
 private struct StripNote: View {
     let text: String
-    var body: some View { Text(text).font(Theme.serif(14, italic: true)).foregroundStyle(Theme.dim) }
+    var body: some View { Text(text).font(Theme.serif(14, italic: true)).foregroundStyle(Theme.Film.dim) }
 }
 
 /// One frame of the strip: the picture, dimmed unless it's current, and the
@@ -507,6 +572,7 @@ private struct StripFrame: View {
     let selected: Bool
     let summary: LibrarySummary
     let readOnly: Bool
+    let cameraJPEG: URL?
     let edited: EditedThumbnail?
     /// On and off screen: what's shown is developed first.
     let shown: (Bool) -> Void
@@ -523,13 +589,13 @@ private struct StripFrame: View {
         Button(action: open) {
             VStack(spacing: 0) {
                 StripPicture(image: image, width: width, current: current, selected: selected, rejected: summary.flag == .reject)
-                    .overlay { PhotoMarks(summary: summary, name: file.name) }
+                    .overlay { PhotoMarks(summary: summary, name: file.name, cameraJPEG: cameraJPEG, inStrip: true) }
                     .modifier(PlaceReport(image: image, placed: placed))
                 ZStack(alignment: .top) {
                     if current {
-                        PencilStroke().pencil(width: PhotoBrowser.pencilWidth).frame(height: Theme.pencilHeight).padding(.top, 3)
+                        PencilStroke().pencil(onFilm: true, lift: 0, width: PhotoBrowser.pencilWidth).frame(height: Theme.pencilHeight).padding(.top, 3)
                     } else if selected {
-                        Rectangle().fill(Theme.label).frame(height: 1.5).padding(.top, 3)
+                        Rectangle().fill(Theme.Film.label).frame(height: 1.5).padding(.top, 3)
                     }
                 }
                 .frame(width: width, height: Theme.Size.stripRebate, alignment: .top)
@@ -537,8 +603,8 @@ private struct StripFrame: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(StripFrameStyle())
-        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly))
-        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary))
+        .help(PhotoMarks.help(file.name, summary: summary, readOnly: readOnly, cameraJPEG: cameraJPEG))
+        .accessibilityLabel(PhotoMarks.accessibilityLabel(file.name, summary: summary, cameraJPEG: cameraJPEG))
         .accessibilityAddTraits(current || selected ? [.isSelected] : [])
         .onAppear { visible = true; shown(true) }
         .onDisappear { visible = false; image = nil; shown(false) }
@@ -573,7 +639,7 @@ private struct StripPicture: View {
             if let image {
                 Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
             } else {
-                Theme.blank
+                Theme.Film.blank
             }
         }
         .frame(width: width, height: PhotoBrowser.pictureHeight)
@@ -608,9 +674,12 @@ private struct StripFrameStyle: ButtonStyle {
     }
 }
 
-/// The grid's handle (§4.4): at the strip's right end the film rises into a
-/// tongue cut on the slant, like the start of a roll, with an arrow pointing
-/// up. It rises a little under the pointer. A click, or G, opens the grid.
+/// The strip's handle (§4.4): at the strip's right end the film rises into a
+/// tongue cut on the slant, like the start of a roll. It rises a little under
+/// the pointer. Its arrow points down while the strip shows and a click (or
+/// ⌥⌘F) hides it; with the strip hidden the tongue stands on the status line,
+/// its arrow pointing up, and a click brings the strip back. The view switch
+/// in the title bar opens the grid.
 struct StripLeader: View {
     let model: EditorModel
     @State private var hovered = false
@@ -623,14 +692,16 @@ struct StripLeader: View {
     static let slant: CGFloat = 28
 
     var body: some View {
-        Button { model.showGrid() } label: {
+        let shown = model.filmstripVisible
+        Button { model.toggleFilmstrip() } label: {
             LeaderShape()
                 .fill(Theme.film)
                 .frame(width: Self.width, height: hovered ? Self.raised : Self.height)
                 .overlay(alignment: .topTrailing) {
                     LeaderArrow()
-                        .stroke(hovered ? Theme.paper : Theme.label, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                        .stroke(hovered ? Theme.Film.paper : Theme.Film.label, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
                         .frame(width: 12.7, height: 6.4)
+                        .rotationEffect(.degrees(shown ? 180 : 0))
                         // The arrow's box: 9 pt square, 22 pt from the right, 10 from the top.
                         .padding(.trailing, 22 + 4.5 - 6.35)
                         .padding(.top, 10 + 4.5 - 6.36 - (hovered ? 1 : 0))
@@ -642,8 +713,8 @@ struct StripLeader: View {
         .onHover { over in
             withAnimation(reduceMotion ? nil : .timingCurve(0.3, 1.5, 0.5, 1, duration: 0.28)) { hovered = over }
         }
-        .help("Show all photographs (G)")
-        .accessibilityLabel("Show all photographs")
+        .help(shown ? "Hide Film Strip (⌥⌘F)" : "Show Film Strip (⌥⌘F)")
+        .accessibilityLabel(shown ? "Hide Film Strip" : "Show Film Strip")
     }
 }
 
@@ -660,15 +731,13 @@ private struct LeaderShape: Shape {
     }
 }
 
-/// A chevron, its point at the top middle of the rect; turned over, it points down.
-struct LeaderArrow: Shape {
-    var down = false
+/// A chevron, its point at the top middle of the rect.
+private struct LeaderArrow: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let (top, bottom) = down ? (rect.maxY, rect.minY) : (rect.minY, rect.maxY)
-        path.move(to: CGPoint(x: rect.minX, y: bottom))
-        path.addLine(to: CGPoint(x: rect.midX, y: top))
-        path.addLine(to: CGPoint(x: rect.maxX, y: bottom))
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         return path
     }
 }
@@ -684,8 +753,13 @@ struct LibraryContextMenu: View {
         let targets = model.contextTargets(item)
         let several = targets.count > 1 ? " to \(targets.count) Photographs" : ""
         let editing = model.canChangeEdits
+        let compare = model.compareOffer(for: item)
         if model.mode == .grid {
             Button("Edit Photograph") { model.click(item); model.editCurrent() }
+            compareItem(compare)
+            Divider()
+        } else {
+            compareItem(compare)
             Divider()
         }
         Menu("Rating") {
@@ -703,6 +777,14 @@ struct LibraryContextMenu: View {
         Button("Paste Edits" + several) { model.pasteEdits(onto: targets) }.disabled(!editing || model.copiedEdits == nil)
         Button("Paste from Previous" + several) { model.pasteFromPrevious(onto: targets) }.disabled(!editing || model.previousEdits == nil)
         Divider()
+        // Ticket 48: the batch panel for these, and Lightroom when installed.
+        Button(targets.count > 1 ? "Export \(targets.count) Photographs…" : "Export…") { model.exportPanel(targets) }
+            .disabled(!model.canExport(targets))
+        ForEach(model.lightroomKinds, id: \.self) { kind in
+            Button(EditorModel.lightroomTitle(kind, count: targets.count)) { model.openInLightroom(kind, targets: targets) }
+                .disabled(!model.canOpenInLightroom(kind, targets: targets))
+        }
+        Divider()
         Button(targets.count > 1 ? "Duplicate \(targets.count) Photographs" : "Duplicate") { model.duplicate(targets) }.disabled(!editing)
         Button(targets.count > 1 ? "Reset Edits of \(targets.count) Photographs" : "Reset Edits") { model.resetEdits(of: targets) }.disabled(!editing)
         Divider()
@@ -711,5 +793,19 @@ struct LibraryContextMenu: View {
         }.disabled(!model.canDelete)
         Divider()
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(Array(Set(targets.map(\.photoFile)))) }
+    }
+
+    /// Compare 7 and 8, Compare with 7, or Compare with Original (ticket 46).
+    @ViewBuilder private func compareItem(_ offer: EditorModel.CompareOffer) -> some View {
+        let button = Button(offer.title) {
+            if let (first, second) = offer.pair { model.compare(first, second) } else if offer.withOriginal { model.compareWithOriginal() }
+        }
+        .disabled(!offer.enabled)
+        // The key compares the two selected.
+        if offer.pair != nil, model.contextTargets(item).count == 2 {
+            button.keyboardShortcut("c", modifiers: [])
+        } else {
+            button
+        }
     }
 }

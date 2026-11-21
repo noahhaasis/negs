@@ -270,7 +270,7 @@ private struct PresetTile: View {
             .aspectRatio(3 / 2, contentMode: .fit)
             .overlay {
                 if let image = tile?.image, invalid == nil {
-                    Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                    OrientedTileImage(image: image, orientation: model.shownOrientation)
                         .opacity(tile?.dimmed == true ? 0.55 : 1)
                 } else if invalid != nil {
                     Text("can’t be read").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim)
@@ -281,7 +281,7 @@ private struct PresetTile: View {
                 if applied {
                     PencilRing().pencil(width: PencilRing.lineWidth)
                         .padding(EdgeInsets(top: -6, leading: -7, bottom: -6, trailing: -7))
-                        .rotationEffect(.degrees(-1))
+                        .rotationEffect(PencilRing.tilt(-1))
                         .allowsHitTesting(false)
                 }
             }
@@ -392,8 +392,10 @@ private struct NameField: NSViewRepresentable {
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = Theme.serifFont(15) as NSFont
-        field.textColor = Theme.NS.paper
+        Theme.follow(field) { [weak field] in
+            field?.font = Theme.serifFont(15) as NSFont
+            field?.textColor = Theme.NS.paper
+        }
         field.cell?.isScrollable = true
         field.cell?.wraps = false
         field.setAccessibilityLabel("Preset name")

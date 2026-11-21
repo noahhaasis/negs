@@ -92,6 +92,14 @@ import XCTest
         let scanning = PrintLabelLayout.kind(scanning: true)
         XCTAssertEqual(scanning, "not printed — scanning the film")
         XCTAssertGreaterThan(PrintLabelLayout.paperWidth(endura, kind: scanning), PrintLabelLayout.paperWidth(endura, kind: kind))
+
+        // The paper lock is measured at its widest, "always printed on" and
+        // the open lock, so clicking it never moves the label to two rows.
+        let locked = PrintLabelLayout.paperWidth(endura, kind: PrintLabelLayout.keptKind, lock: true)
+        XCTAssertGreaterThan(locked, PrintLabelLayout.paperWidth(endura, kind: kind) + PrintLabelLayout.lockWidth)
+        let lockedPair = PrintLabelLayout.filmWidth(gold) + PrintLabelLayout.gap + locked
+        XCTAssertTrue(PrintLabelLayout.fitsOneRow(film: gold, paper: endura, kind: PrintLabelLayout.keptKind, width: lockedPair, lock: true))
+        XCTAssertFalse(PrintLabelLayout.fitsOneRow(film: gold, paper: endura, kind: PrintLabelLayout.keptKind, width: lockedPair - 1, lock: true))
     }
 
     func testTheBandUnderThePhotographHoldsTwoRows() throws {

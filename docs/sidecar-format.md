@@ -90,6 +90,7 @@ paper, which are always written.
 | `crop` | Differences from the table's `crop`: `rect` `[[x, y], [width, height]]` as fractions of the photo before rotation, `aspect` (`original`, `freeform`, `square`, `16:9`, `3:2`, `4:3`, `5:4`, `7:5`, `custom`), `custom` `[width, height]`, `angle` in degrees (±45). |
 | `border` | Differences from the table's `border`: `enabled`, `style` (`white` is the solid mat, `keyline`, `film`, `film35`), `export`, `instagram`, `width`, `filmWidth`, `line` (fractions of the long edge), `color`, `lineColor` (`#rrggbb`). |
 | `brightnessMatch` | Present while Prep › *Match camera brightness* is on. `ev`: the solved exposure, if solved; `params.prep.exposure_ev` holds the total the engine sees (the match plus the user's own exposure). `highlightLimited`: the solve held exposure back for the highlights. `solved: false`: the stored `ev` was solved for earlier settings, so solve again on opening; absent means the `ev` belongs to these edits and is not solved again. |
+| `roll` | A scanned negative printed as a frame of a darkroom roll (Prep › *Use for whole roll*). `id`: the roll's, shared by its frames. `magenta`, `yellow`: the roll's enlarger filtration; a frame whose `params.enlarger` shifts differ set its own. `paper` (optional): the paper that filtration is balanced for; a frame on another paper has its own. The frame's `params` hold everything it prints with, so a reader that ignores `roll` renders it the same. |
 
 ### Reading the edits
 
@@ -101,8 +102,8 @@ paper, which are always written.
    any saved edit (`JSONValue.restoring` in `Parameters.swift`).
 
 Check the result: crop rectangle within `[0, 1]` with positive size, angle
-within ±45°, `io.rotate_cw` a whole number 0–3. A sidecar that fails is not
-applied and not written over.
+within ±45°, `io.rotate_cw` a whole number 0–3, `io.flip` (if there) true or
+false. A sidecar that fails is not applied and not written over.
 
 ## Defaults tables
 

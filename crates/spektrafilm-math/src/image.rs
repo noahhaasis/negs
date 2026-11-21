@@ -159,6 +159,22 @@ impl ImageBuf {
         };
         self.oriented(tag)
     }
+
+    /// Mirrored left to right if `flip`, then turned `quarter_turns` × 90°
+    /// clockwise: every orientation a photograph can have. A mirror top to
+    /// bottom is `flip` with a half turn. Unflipped, it is `rotated_cw`.
+    pub fn flipped_rotated_cw(self, flip: bool, quarter_turns: i32) -> Self {
+        if !flip {
+            return self.rotated_cw(quarter_turns);
+        }
+        let tag = match quarter_turns.rem_euclid(4) {
+            1 => 7,
+            2 => 4,
+            3 => 5,
+            _ => 2,
+        };
+        self.oriented(tag)
+    }
 }
 
 impl std::fmt::Debug for ImageBuf {
@@ -268,6 +284,27 @@ mod tests {
         assert_eq!(src_at(&t, 1, 2), (2, 1));
         let tv = coord_img().oriented(7);
         assert_eq!(src_at(&tv, 0, 0), (2, 1));
+    }
+
+    #[test]
+    fn test_flip_then_turn() {
+        // Flipped alone: the top-left pixel is the old top-right.
+        let f = coord_img().flipped_rotated_cw(true, 0);
+        assert_eq!((f.width, f.height), (3, 2));
+        assert_eq!(src_at(&f, 0, 0), (2, 0));
+        // Every turn of the flipped image is the mirror, then the turn.
+        for turns in -4..8 {
+            let mirrored = coord_img().flipped_rotated_cw(true, 0);
+            assert_eq!(coord_img().flipped_rotated_cw(true, turns).data, mirrored.rotated_cw(turns).data, "{turns}");
+            assert_eq!(coord_img().flipped_rotated_cw(false, turns).data, coord_img().rotated_cw(turns).data);
+        }
+        // A mirror top to bottom is a flip and a half turn, pixel for pixel.
+        let v = coord_img().flipped_rotated_cw(true, 2);
+        for y in 0..2 {
+            for x in 0..3 {
+                assert_eq!(src_at(&v, x, y), (x, 1 - y));
+            }
+        }
     }
 
     #[test]

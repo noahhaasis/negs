@@ -324,6 +324,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -1006,6 +1008,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.2",
+ "libc",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1447,6 +1459,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c196769dd60fd4f363e11d948139556a344e79d451aeb2fa2fd040738ef7691"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "negs-library"
+version = "0.17.0"
+
+[[package]]
+name = "negs-libraw"
+version = "0.17.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -2163,7 +2186,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "spektrafilm-cli"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2183,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-core"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "blas-src",
  "cblas",
@@ -2205,7 +2228,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-gpu"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "accelerate-src",
  "blas-src",
@@ -2228,12 +2251,13 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
  "cc",
  "image",
+ "negs-libraw",
  "rawler",
  "rayon",
  "serde",
@@ -2244,7 +2268,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "byteorder",
  "half",
@@ -2259,7 +2283,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-model"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "rand",
  "rand_distr",
@@ -2274,7 +2298,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-native"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "image",
@@ -2290,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-wasm"
-version = "0.15.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",

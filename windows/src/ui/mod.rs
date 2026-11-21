@@ -1,5 +1,6 @@
-//! The editing window: menu bar, toolbar, the canvas column (photograph or
-//! empty state, film strip), the adjustments column and the status bar.
+//! The editing window: the title bar with its menus, the canvas column
+//! (photograph or empty state, film strip, status line) and the adjustments
+//! column. No toolbar: its items are in the menus and the status line.
 //! Win32 with the common controls (docs/cross-platform-port.md, Windows UI).
 //!
 //! All state lives in one `App` on the UI thread. Window procedures reach it
@@ -8,21 +9,40 @@
 //! threads waits until the app is free. The canvas keeps its view state
 //! separately (`canvas::VIEW`) so it can paint at any time.
 
+mod alert;
+pub mod batch;
 pub mod canvas;
-mod chrome;
+mod color_filter;
+pub mod compare;
+mod d2d;
+mod dialog_look;
 mod dialogs;
 mod draw;
 mod drop;
 mod empty;
-mod folder_watch;
+mod grid;
+mod grid_bench;
+mod ink;
+pub mod folder_watch;
 pub mod inspector;
+mod library;
 mod motion;
 mod panes;
 mod presets;
+mod sampler;
+mod settings;
+mod sheet;
+mod status;
 mod strip;
+mod surface;
 mod theme;
+mod thumbs;
 mod titlebar;
 mod tone_graph;
+mod tray;
+mod tray_access;
+mod view_modes;
+mod view_switch;
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -37,7 +57,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Ole::OleInitialize;
-use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -47,20 +67,45 @@ use windows::core::{PCWSTR, w};
 
 use crate::model::{Model, dirty};
 use crate::platform::{self, pcwstr, wide};
-use crate::session::{EditorSession, Preferences, SessionStore};
+use crate::session::{Preferences, SessionStore};
 
 /// Annotate icon buttons and numeric editors without changing their visual text.
 pub fn accessible_name(hwnd: HWND, name: &str) {
-    use windows::Win32::UI::Accessibility::{CAccPropServices, IAccPropServices, PROPID_ACC_NAME};
+    use windows::Win32::UI::Accessibility::PROPID_ACC_NAME;
+    with_props(|service| {
+        let name = wide(name);
+        unsafe { let _ = service.SetHwndPropStr(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_NAME, pcwstr(&name)); }
+    });
+}
+
+/// Gives `hwnd` an accessible value: a slider reads its value, not the
+/// trackbar's step.
+pub fn accessible_value(hwnd: HWND, value: &str) {
+    use windows::Win32::UI::Accessibility::PROPID_ACC_VALUE;
+    with_props(|service| {
+        let value = wide(value);
+        unsafe { let _ = service.SetHwndPropStr(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_VALUE, pcwstr(&value)); }
+    });
+}
+
+/// Gives `hwnd` an accessible role (`ROLE_SYSTEM_*`): owner-drawn statics
+/// otherwise read as graphics.
+pub fn accessible_role(hwnd: HWND, role: u32) {
+    use windows::Win32::UI::Accessibility::PROPID_ACC_ROLE;
+    with_props(|service| unsafe {
+        let _ = service.SetHwndProp(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_ROLE, &windows_core::VARIANT::from(role as i32));
+    });
+}
+
+fn with_props(f: impl FnOnce(&windows::Win32::UI::Accessibility::IAccPropServices)) {
+    use windows::Win32::UI::Accessibility::{CAccPropServices, IAccPropServices};
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     thread_local! {
         static PROPS: std::cell::OnceCell<Option<IAccPropServices>> = const { std::cell::OnceCell::new() };
     }
     PROPS.with(|cell| {
-        let service = cell.get_or_init(|| unsafe { CoCreateInstance(&CAccPropServices, None, CLSCTX_INPROC_SERVER).ok() });
-        if let Some(service) = service {
-            let name = wide(name);
-            unsafe { let _ = service.SetHwndPropStr(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_NAME, pcwstr(&name)); }
+        if let Some(service) = cell.get_or_init(|| unsafe { CoCreateInstance(&CAccPropServices, None, CLSCTX_INPROC_SERVER).ok() }) {
+            f(service);
         }
     });
 }
@@ -84,6 +129,8 @@ pub mod id {
     pub const IMPORT_PRESETS: u16 = 107;
     pub const PRESETS_FOLDER: u16 = 108;
     pub const RECENT: u16 = 110; // ..119
+    /// Open in Lightroom, Open in Lightroom Classic (`lightroom::Kind::ALL`).
+    pub const LIGHTROOM: u16 = 130; // ..131
     pub const UNDO: u16 = 200;
     pub const REDO: u16 = 201;
     pub const CUT: u16 = 202;
@@ -101,10 +148,26 @@ pub mod id {
     pub const FULL_SCREEN: u16 = 306;
     pub const PRESETS: u16 = 307;
     pub const PANEL: u16 = 308;
+    /// Every control in every module of the Lab (`toggleAllControls`).
+    pub const ALL_CONTROLS: u16 = 309;
+    pub const IMAGE_ONLY: u16 = 310;
+    /// View › Theme, in `ThemeName::ALL`'s order.
+    pub const THEME: u16 = 320; // ..325
+    /// View › Viewer Sheet, in `ViewerSheet::ALL`'s order.
+    pub const SHEET: u16 = 330; // ..337
     pub const ROTATE: u16 = 400;
     pub const CROP: u16 = 401;
     pub const CROP_DONE: u16 = 402;
     pub const CROP_CANCEL: u16 = 403;
+    /// View › Flip Horizontal: mirrors as shown, while cropping (`io.flip`).
+    pub const FLIP: u16 = 404;
+    pub const COMPARE: u16 = 405;
+    pub const GRID: u16 = 406;
+    pub const COMPARE_OFFER: u16 = 407;
+    /// The title bar's Grid · Photo · Compare (`view_switch`).
+    pub const VIEW_GRID: u16 = 408;
+    pub const VIEW_PHOTO: u16 = 409;
+    pub const VIEW_COMPARE: u16 = 410;
     pub const UPDATES: u16 = 500;
     pub const ABOUT: u16 = 501;
     pub const CANCEL_EXPORT: u16 = 600;
@@ -116,7 +179,6 @@ pub mod id {
 
 // Constants windows-rs 0.58 lacks.
 pub const TBM_GETPOS: u32 = WM_USER;
-pub const TBM_SETRANGE_MIN_MAX: u32 = WM_USER + 6;
 
 type Task = Box<dyn FnOnce(&mut App) + Send>;
 static QUEUE: Mutex<VecDeque<Task>> = Mutex::new(VecDeque::new());
@@ -124,10 +186,10 @@ static TIMED: Mutex<Vec<(Instant, usize)>> = Mutex::new(Vec::new());
 static MAIN: AtomicIsize = AtomicIsize::new(0);
 
 /// The narrowest canvas column and adjustments column, in DIPs (the Mac's
-/// split-view minimums). The window keeps room for both, or for the canvas
-/// alone while the adjustments are hidden.
-const CANVAS_MINIMUM: f64 = 680.0;
-const INSPECTOR_MINIMUM: f64 = 300.0;
+/// split-view minimums, `EditorWindowController`). The window keeps room
+/// for both, or for the canvas alone while the adjustments are hidden.
+const CANVAS_MINIMUM: f64 = 640.0;
+const INSPECTOR_MINIMUM: f64 = 340.0;
 const INSPECTOR_MAXIMUM: f64 = 440.0;
 const SPLITTER: f64 = 5.0;
 const MINIMUM_HEIGHT: f64 = 520.0;
@@ -310,19 +372,16 @@ pub mod testing {
             App {
                 model,
                 main: none,
-                tools: none,
-                actions: none,
                 menubar: none,
                 status: none,
-                progress: none,
-                cancel: none,
                 canvas: none,
                 empty: none,
                 strip: none,
                 panes: none,
                 inspector: inspector::Inspector::headless(),
                 presets_view: None,
-                fonts: Fonts { ui: font, bold: font, section: font, small: font, title: font, glyph: font, glyph_small: font, line: 16 },
+                settings: None,
+                fonts: Fonts { ui: font, bold: font, small: font, line: 16 },
                 dpi: 96,
                 menu: HMENU::default(),
                 accelerators: HACCEL::default(),
@@ -330,11 +389,13 @@ pub mod testing {
                 splitter_drag: None,
                 full_screen: None,
                 strip_view: strip::Strip::default(),
+                thumbs: thumbs::Thumbs::default(),
+                grid: None,
                 empty_view: empty::Empty::default(),
                 taskbar: None,
                 original_key: None,
                 drop_target_active: false,
-                started: Instant::now(),
+                view: Default::default(),
                 quitting: false,
                 preview_monitor: 0,
             }
@@ -386,12 +447,7 @@ pub struct Fonts {
     pub ui: HFONT,
     /// Group headers: the UI size, semibold.
     pub bold: HFONT,
-    /// Section titles: semibold and a little larger.
-    pub section: HFONT,
     pub small: HFONT,
-    pub title: HFONT,
-    pub glyph: HFONT,
-    pub glyph_small: HFONT,
     /// The UI font's line height in pixels.
     pub line: i32,
 }
@@ -410,24 +466,14 @@ impl Fonts {
             // The system's size (so text scaling applies) in Segoe UI
             // Variable where Windows 11 has it, unless the face was changed.
             let mut base = metrics.lfMessageFont;
-            let mut display = base;
             if platform::from_wide(&base.lfFaceName) == "Segoe UI" && font_exists("Segoe UI Variable Text") {
                 set_face(&mut base, "Segoe UI Variable Text");
-                set_face(&mut display, "Segoe UI Variable Display");
             }
             let ui = CreateFontIndirectW(&base);
             let bold = CreateFontIndirectW(&LOGFONTW { lfWeight: 600, ..base });
-            let section = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 115 / 100, lfWeight: 600, ..display });
             let small = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 85 / 100, ..base });
-            let title = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 19 / 10, lfWeight: 600, ..display });
-            let glyph_face = icon_face();
-            let mut glyph = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
-            let face = wide(glyph_face);
-            glyph.lfFaceName[..face.len()].copy_from_slice(&face);
-            let glyph_font = CreateFontIndirectW(&glyph);
-            let glyph_small = CreateFontIndirectW(&LOGFONTW { lfHeight: -(11 * dpi as i32 / 96), ..glyph });
             let line = line_height(ui);
-            Fonts { ui, bold, section, small, title, glyph: glyph_font, glyph_small, line }
+            Fonts { ui, bold, small, line }
         }
     }
 }
@@ -448,11 +494,6 @@ fn set_face(font: &mut LOGFONTW, face: &str) {
     let w = wide(face);
     font.lfFaceName = [0; 32];
     font.lfFaceName[..w.len()].copy_from_slice(&w);
-}
-
-/// Segoe Fluent Icons on Windows 11, MDL2 Assets on Windows 10.
-pub fn icon_face() -> &'static str {
-    if font_exists("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" }
 }
 
 /// Whether a font family is installed (asked once per face).
@@ -488,15 +529,10 @@ fn enumerate_font(face: &str) -> bool {
 pub struct App {
     pub model: Model,
     pub main: HWND,
-    /// Open, after the menus; Export and the panel's button, before the
-    /// caption buttons.
-    tools: HWND,
-    actions: HWND,
-    /// The menu bar in the title bar.
+    /// The menu row in the title bar.
     menubar: HWND,
+    /// The status line under the canvas column.
     status: HWND,
-    progress: HWND,
-    cancel: HWND,
     pub canvas: HWND,
     empty: HWND,
     strip: HWND,
@@ -505,6 +541,8 @@ pub struct App {
     pub inspector: inspector::Inspector,
     /// Created the first time the Presets panel shows.
     presets_view: Option<presets::Panel>,
+    /// File › Settings…, built the first time it opens.
+    settings: Option<settings::Settings>,
     pub fonts: Fonts,
     pub dpi: u32,
     menu: HMENU,
@@ -513,17 +551,36 @@ pub struct App {
     splitter_drag: Option<(i32, f64)>,
     full_screen: Option<(WINDOWPLACEMENT, i32)>,
     pub strip_view: strip::Strip,
+    pub thumbs: thumbs::Thumbs,
+    /// The grid, made on first use.
+    pub grid: Option<grid::Grid>,
     pub empty_view: empty::Empty,
     taskbar: Option<ITaskbarList3>,
     original_key: Option<u32>,
     pub drop_target_active: bool,
-    started: Instant,
+    /// Image Only and the photograph held upside down.
+    pub view: view_modes::ViewModes,
     quitting: bool,
     /// The monitor the thumbnails were last made for.
     preview_monitor: isize,
 }
 
 impl App {
+    /// The strip and grid's device, after the canvas's: launch never waits
+    /// for it, and the two drivers' set-ups don't contend. Until it's made
+    /// the strip is bare film, and no thumbnail is read.
+    pub fn prepare_surfaces(&mut self) {
+        surface::prepare(|app, ms, hardware| {
+            crate::trace::event("surface_ready", || serde_json::json!({"ms": ms, "hardware": hardware}));
+            app.surfaces_ready();
+        });
+    }
+
+    /// The strip and grid's device is made (again): they repaint through it.
+    pub fn surfaces_ready(&mut self) {
+        strip::surfaces_ready(self);
+    }
+
     pub fn scale(&self) -> f64 {
         self.dpi as f64 / 96.0
     }
@@ -533,6 +590,7 @@ impl App {
 
     /// Updates every part the model marked as changed.
     pub fn refresh(&mut self) {
+        view_modes::sync(self);
         let flags = std::mem::take(&mut self.model.dirty);
         if flags == 0 {
             return;
@@ -557,7 +615,8 @@ impl App {
             empty::sync_recent(self);
             crate::updates::set_busy(self.model.exporting || self.model.saving);
         }
-        if flags & dirty::STATUS != 0 {
+        // While cropping it says the draft's aspect and size.
+        if flags & (dirty::STATUS | dirty::CROP) != 0 {
             self.update_status();
         }
         if flags & (dirty::LAYOUT | dirty::CHROME) != 0 {
@@ -570,16 +629,37 @@ impl App {
         if flags & (dirty::PRESETS | dirty::CHROME | dirty::LAYOUT) != 0 {
             presets::sync(self);
         }
+        settings::sync(self);
         // The canvas's tools follow the chrome (the film strip's button).
         if flags & (dirty::CANVAS | dirty::ZOOM | dirty::CROP | dirty::CHROME) != 0 {
             canvas::update_scene(self);
             if self.model.image.is_some() && !self.model.first_render_shown {
                 self.model.first_render_shown = true;
                 self.report.stamp("first_image_scene");
+                // The strip's thumbnails waited for it.
+                self.model.dirty |= dirty::STRIP;
+                crate::film_cache_release::watch_memory_pressure();
+                // A batch the last session didn't finish, once launch has settled.
+                batch::offer_resume(self);
+                // Which Lightroom is installed, off the launch path (ticket 48).
+                self.model.refresh_lightroom(std::time::Duration::from_secs(2));
             }
         }
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
+            let started = Instant::now();
             strip::sync(self);
+            let strip_ms = started.elapsed().as_secs_f64() * 1000.0;
+            grid::sync(self);
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            if ms > 4.0 {
+                crate::trace::event("sync_slow", || serde_json::json!({"strip_ms": strip_ms, "ms": ms}));
+            }
+        }
+        if flags & (dirty::COMPARE | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME) != 0 {
+            compare::sync(self);
+        }
+        if flags & (dirty::TRAY | dirty::PREVIEWS | dirty::CANVAS | dirty::LAYOUT | dirty::CHROME | dirty::STRUCTURE) != 0 {
+            tray::sync(self);
         }
         // What the preview tiles show follows the edit, the panels and the main render.
         let previews = dirty::PREVIEWS | dirty::INSPECTOR | dirty::STRUCTURE | dirty::CHROME | dirty::LAYOUT | dirty::PRESETS | dirty::CANVAS;
@@ -589,7 +669,7 @@ impl App {
                 self.follow_preview_monitor();
             }
             if self.model.pump_previews() || flags & dirty::PREVIEWS != 0 {
-                inspector::redraw_previews(self);
+                tray::redraw(self);
                 presets::redraw_previews(self);
             }
         }
@@ -609,8 +689,14 @@ impl App {
 
     fn update_chrome(&mut self) {
         let model = &self.model;
-        let title = match &model.source {
-            Some(path) => format!("{} - Negs", crate::model::file_name(path)),
+        // In the grid the selected photograph's name (else the open one's),
+        // as on the Mac (`EditorWindowController.update`).
+        let selected = model.shelf.in_grid.then(|| model.shelf.selection.current()).flatten();
+        let file = selected
+            .map(|item| model.shelf.library.as_ref().map_or_else(|| item.file_name(), |library| library.name(item)))
+            .or_else(|| model.source.as_deref().map(crate::model::file_name));
+        let title = match &file {
+            Some(name) => format!("{name} - Negs"),
             None => "Negs".into(),
         };
         // Only a new title: setting it hides the window for a moment (see
@@ -622,40 +708,81 @@ impl App {
                 let _ = SetWindowTextW(self.main, pcwstr(&title));
             }
         }
-        unsafe {
-            SendMessageW(self.actions, TB_ENABLEBUTTON, WPARAM(id::EXPORT as usize), LPARAM(model.can_export() as isize));
-            SendMessageW(self.actions, TB_CHECKBUTTON, WPARAM(id::PANEL as usize), LPARAM(model.inspector_visible as isize));
-        }
+        // The band says the file's name alone (`TitleBar.swift`).
+        let name = model.compare_title().or(file).unwrap_or_else(|| "Negs".into());
+        titlebar::set_title(self.main, &name);
         panes::sync(self.panes, model.pane() == crate::model::Pane::Presets);
-        let exporting = model.exporting;
-        unsafe {
-            let _ = ShowWindow(self.progress, if exporting { SW_SHOWNA } else { SW_HIDE });
-            let _ = ShowWindow(self.cancel, if exporting { SW_SHOWNA } else { SW_HIDE });
-        }
         self.update_taskbar();
+        view_switch::sync(self);
     }
 
+    /// The status line (§4.7): what's happening on the left, the canvas's
+    /// tools on the right.
     fn update_status(&mut self) {
+        use status::{Span, Tone};
         let model = &self.model;
-        let mut text = model.status.clone();
-        if model.status == "Starting…" && model.source.is_none() {
-            text.clear();
+        let mut left = vec![];
+        let batch = model.batch.as_ref();
+        let batch_running = batch.is_some_and(|b| b.running);
+        let mut progress = None;
+        let mut show = false;
+        if let Some(words) = library::status_words(self) {
+            // "Edits pasted", "★★★": a library action's note, for a moment.
+            left = words;
+        } else if let Some(run) = batch.filter(|b| b.running) {
+            // "Exporting 5 of 12 photographs" and its rule.
+            left.push(Span::new(run.progress_words(), Tone::Label));
+            progress = Some(run.fraction());
+        } else if let Some(words) = &model.lightroom.words {
+            // "Sending 3 photographs to Lightroom…", "Starting Lightroom…".
+            left.push(Span::new(words.clone(), Tone::Label));
+        } else if let Some(run) = batch.filter(|b| b.needs_attention()) {
+            // "Exported 10 of 12 · 2 failed  Show".
+            let (words, failed) = run.outcome_words();
+            left.push(Span::new(words, Tone::Label));
+            if let Some(failed) = failed {
+                left.push(Span::new("·", Tone::Label));
+                left.push(Span::strong(failed, Tone::Paper));
+            }
+            show = true;
+        } else if model.exporting {
+            let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_default();
+            left.push(Span::new(format!("Exporting {name}"), Tone::Label));
+            left.push(Span::new(format!("· {} s", model.export_started.elapsed().as_secs()), Tone::Dim));
+        } else if model.render_failed && model.develop_error.is_some() {
+            let name = model.source.as_deref().map(crate::model::file_name).unwrap_or_default();
+            left.push(Span::strong("Couldn’t develop", Tone::Label));
+            left.push(Span::new(name, Tone::Dim));
+        } else if let Some(session) = &model.crop_session {
+            // "Cropping · Original · 6016 × 4016 px": the draft's aspect and
+            // the pixels an export develops, as the crop pane's Size says.
+            let size = match model.crop_draft_size() {
+                Some(Ok(size)) => (size.photo.0 as f64, size.photo.1 as f64),
+                _ => (session.shown().width, session.shown().height),
+            };
+            left.push(Span::new(
+                format!("Cropping · {} · {} × {} px", session.aspect.title(), size.0.round() as i64, size.1.round() as i64),
+                Tone::Dim,
+            ));
+        } else if let Some(c) = model.comparison() {
+            let differences = compare::differences(self);
+            let summary = model.compare_summary();
+            left.push(Span::new(if differences.is_empty() { summary } else { format!("{summary} · differ in {differences}") }, Tone::Label));
+            if !c.against_original() && model.shown_items().len() > 2 {
+                let place = if compare::stacked(self) { "bottom" } else { "right" };
+                left.push(Span::hint(format!("    ← → steps the {place} one"), Tone::Dim));
+            }
+        } else if !(model.status == "Starting…" && model.source.is_none()) && !model.status.is_empty() {
+            left.push(Span::new(model.status.clone(), Tone::Dim));
         }
-        let set = |part: usize, s: &str| unsafe {
-            let w = wide(s);
-            SendMessageW(self.status, SB_SETTEXTW, WPARAM(part), LPARAM(w.as_ptr() as isize));
-        };
-        set(0, &text);
-        let stocks = if model.source.is_none() || !model.ready {
-            String::new()
-        } else if crate::json::boolean(model.value("io.scan_film")) {
-            model.film_name()
-        } else {
-            format!("{} → {}", model.film_name(), model.paper_name())
-        };
-        set(1, &stocks);
-        let export = if model.exporting { format!("Exporting · {} s", model.export_started.elapsed().as_secs()) } else { String::new() };
-        set(2, &export);
+        let tools = (model.source.is_some() && !batch_running).then(|| status::Tools {
+            original: model.can_show_original() && !model.cropping(),
+            holding: model.holding_original,
+            cropping: model.cropping(),
+            failed: model.render_failed && model.develop_error.is_some(),
+            compare: model.comparison().map(|c| c.layout == crate::compare::Layout::Slider),
+        });
+        status::set(status::Line { left, cancel: model.exporting || batch_running, tools, progress, show });
         unsafe {
             if model.exporting {
                 SetTimer(self.main, TIMER_EXPORT, 1000, None);
@@ -696,53 +823,72 @@ impl App {
     /// Lays out the toolbar, the canvas column, the adjustments and the status bar.
     pub fn layout(&mut self) {
         unsafe {
-            INSPECTOR_SHOWN.with(|s| s.set(self.model.inspector_visible));
+            // Image Only leaves the photograph alone in the window.
+            let image_only = self.view.image_only;
+            let shows_inspector = self.model.inspector_visible && !image_only;
+            INSPECTOR_SHOWN.with(|s| s.set(shows_inspector));
             // Make room before the adjustments appear, so neither column is
             // squeezed below its minimum.
             self.fit_minimum();
             let mut client = RECT::default();
             let _ = GetClientRect(self.main, &mut client);
-            titlebar::layout(self.main, self.menubar, self.tools, self.actions);
-            SendMessageW(self.status, WM_SIZE, WPARAM(0), LPARAM(0));
-            let height = |hwnd: HWND| {
-                let mut r = RECT::default();
-                let _ = GetWindowRect(hwnd, &mut r);
-                if IsWindowVisible(hwnd).as_bool() { r.bottom - r.top } else { 0 }
-            };
+            titlebar::layout(self.main, self.menubar);
             let top = titlebar::height(self.main);
-            let bottom = client.bottom - height(self.status);
-            let inspector_width = if self.model.inspector_visible {
+            let bottom = client.bottom;
+            let inspector_width = if shows_inspector {
                 self.px(inspector_width(self.model.prefs.inspector_width, client.right as f64 / self.scale()))
             } else {
                 0
             };
-            let splitter = if self.model.inspector_visible { self.px(SPLITTER) } else { 0 };
+            let splitter = if shows_inspector { self.px(SPLITTER) } else { 0 };
             let column = (client.right - inspector_width - splitter).max(0);
-            let show_strip = self.model.prefs.filmstrip_visible && self.model.source.is_some();
-            let strip_height = if show_strip { self.px(112.0) } else { 0 };
-            let canvas_bottom = (bottom - strip_height).max(top);
             let photo = self.model.source.is_some();
+            // The film or paper tray takes the strip's and the status line's place.
+            let shows_tray = photo && !self.drop_target_active && self.model.tray_shown().is_some();
+            let tray_height = if shows_tray { self.px(crate::tray_rules::HEIGHT) } else { 0 };
+            // The status line under the strip, with a photograph open; both
+            // step aside in Image Only and while a file is dragged in.
+            let chrome = photo && !image_only && !self.drop_target_active && !shows_tray;
+            let status_height = if chrome { self.px(status::HEIGHT) } else { 0 };
+            // Compare has no strip: its height goes to the photographs.
+            let comparing = photo && self.model.comparison().is_some();
+            let show_strip = self.model.prefs.filmstrip_visible && chrome && !comparing;
+            // 158 + 28: the tray's 186, so the canvas keeps its size when it opens.
+            let strip_height = if show_strip { self.px(crate::sheet_rules::BAND) - status_height } else { 0 };
+            let canvas_bottom = (bottom - status_height - strip_height - tray_height).max(top);
+            tray::layout(self, RECT { left: 0, top: bottom - tray_height, right: column, bottom }, shows_tray);
             let _ = MoveWindow(self.canvas, 0, top, column, canvas_bottom - top, true);
-            let _ = MoveWindow(self.empty, 0, top, column, canvas_bottom - top, true);
-            let _ = ShowWindow(self.canvas, if photo { SW_SHOWNA } else { SW_HIDE });
+            let _ = MoveWindow(self.empty, 0, top, column, bottom - top, true);
+            // Compare takes the canvas's place.
+            compare::layout(self, RECT { left: 0, top, right: column, bottom: canvas_bottom }, comparing);
+            let _ = ShowWindow(self.canvas, if photo && !comparing { SW_SHOWNA } else { SW_HIDE });
             let _ = ShowWindow(self.empty, if photo { SW_HIDE } else { SW_SHOWNA });
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
+            // The leader stands on the strip's top edge, or the status line's.
+            strip::layout_leader(self, column, canvas_bottom, chrome && !self.model.cropping() && !comparing);
+            grid::layout(self, RECT { left: 0, top, right: client.right, bottom });
+            let _ = MoveWindow(self.status, 0, bottom - status_height, column, status_height, true);
+            let _ = ShowWindow(self.status, if chrome { SW_SHOWNA } else { SW_HIDE });
+            titlebar::set_inspector_edge(self.main, if shows_inspector { column + splitter } else { 0 });
             let shows_presets = presets::shown(&self.model);
             // The switch between the panels; cropping has the column to itself.
-            let shows_panes = self.model.inspector_visible && !self.model.cropping();
+            let shows_panes = shows_inspector && !self.model.cropping();
             let panes_height = if shows_panes { self.px(panes::HEIGHT) } else { 0 };
             let _ = MoveWindow(self.panes, column + splitter, top, inspector_width, panes_height, true);
             let _ = ShowWindow(self.panes, if shows_panes { SW_SHOWNA } else { SW_HIDE });
-            let panel_top = top + panes_height;
-            self.inspector.layout(column + splitter, panel_top, inspector_width, bottom - panel_top, self.model.inspector_visible && !shows_presets);
+            // Which photograph the panel edits, while comparing.
+            let note_height = if shows_panes && comparing { self.px(compare::NOTE_HEIGHT) } else { 0 };
+            let note = RECT { left: column + splitter, top: top + panes_height, right: column + splitter + inspector_width, bottom: top + panes_height + note_height };
+            compare::layout_note(self, note, note_height > 0);
+            let panel_top = top + panes_height + note_height;
+            self.inspector.layout(column + splitter, panel_top, inspector_width, bottom - panel_top, shows_inspector && !shows_presets);
             let rect = RECT { left: column + splitter, top: panel_top, right: column + splitter + inspector_width, bottom };
-            presets::layout(self, rect, shows_presets);
+            presets::layout(self, rect, shows_presets && !image_only);
             canvas::resized(self.canvas);
             // Their own WM_SIZE arrives while the app is busy here.
             empty::layout(self);
             strip::resized(self);
-            self.layout_status();
         }
     }
 
@@ -778,33 +924,34 @@ impl App {
         }
     }
 
-    fn layout_status(&mut self) {
-        unsafe {
-            let mut client = RECT::default();
-            let _ = GetClientRect(self.status, &mut client);
-            let export = if self.model.exporting { self.px(250.0) } else { 0 };
-            let stocks = self.px(280.0);
-            let right = client.right - self.px(18.0);
-            let parts = [(right - export - stocks).max(self.px(80.0)), right - export, -1];
-            SendMessageW(self.status, SB_SETPARTS, WPARAM(parts.len()), LPARAM(parts.as_ptr() as isize));
-            let mut part = RECT::default();
-            SendMessageW(self.status, SB_GETRECT, WPARAM(2), LPARAM(&mut part as *mut _ as isize));
-            let inset = self.px(2.0);
-            let bar = self.px(90.0);
-            let cancel = self.px(64.0);
-            let _ = MoveWindow(self.progress, part.right - cancel - bar - inset * 2, part.top + inset * 2, bar, part.bottom - part.top - inset * 4, true);
-            let _ = MoveWindow(self.cancel, part.right - cancel - inset, part.top + inset / 2, cancel, part.bottom - part.top - inset, true);
-        }
-    }
-
     pub fn command(&mut self, command: u16) {
+        // A command keeps the stock being tried and closes the tray, but
+        // editing the text being typed doesn't. The library's commands too
+        // (Undo with a library step on top undoes after the visit's step).
+        let editing = matches!(command, id::CUT | id::COPY | id::PASTE | id::DELETE | id::SELECT_ALL) && text_focus();
+        if !editing {
+            self.model.end_tray(true);
+        }
+        if library::command(self, command) {
+            return;
+        }
         let model = &mut self.model;
         match command {
             id::OPEN | id::EMPTY_OPEN => dialogs::open(self),
             id::SAVE_PREVIEW => dialogs::save(self, false),
-            id::EXPORT => dialogs::save(self, true),
+            id::EXPORT => {
+                // The grid's selection exports as a batch (`dialogs::batch`).
+                if self.model.exports_single() {
+                    dialogs::save(self, true)
+                } else {
+                    dialogs::batch(self)
+                }
+            }
+            c if (id::LIGHTROOM..id::LIGHTROOM + 2).contains(&c) => {
+                model.open_in_lightroom(crate::lightroom::Kind::ALL[(c - id::LIGHTROOM) as usize]);
+            }
             id::EXPORT_LUT => dialogs::export_lut(self),
-            id::SETTINGS => dialogs::settings(self),
+            id::SETTINGS => settings::open(self),
             id::EXIT => unsafe {
                 let _ = PostMessageW(self.main, WM_CLOSE, WPARAM(0), LPARAM(0));
             },
@@ -830,6 +977,11 @@ impl App {
             id::ADJUSTMENTS => model.toggle_pane(crate::model::Pane::Adjustments),
             id::PRESETS => model.toggle_pane(crate::model::Pane::Presets),
             id::PANEL => model.toggle_inspector(),
+            id::ALL_CONTROLS => {
+                model.prefs.lab_all_controls = !model.prefs.lab_all_controls;
+                model.prefs.save();
+                model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR | dirty::CHROME;
+            }
             id::ORIGINAL => {
                 let shown = model.holding_original;
                 model.hold_original(!shown);
@@ -848,7 +1000,18 @@ impl App {
             id::ZOOM_IN if model.source.is_some() && !model.cropping() => canvas::zoom_by(1.25),
             id::ZOOM_OUT if model.source.is_some() && !model.cropping() => canvas::zoom_by(0.8),
             id::FULL_SCREEN => self.toggle_full_screen(),
-            id::ROTATE if model.source.is_some() => model.rotate(),
+            id::ROTATE if model.source.is_some() => {
+                // As on the Mac, a turn starts cropping, where Cancel undoes it.
+                model.begin_crop();
+                model.rotate()
+            }
+            // Like a turn, a flip starts cropping, where Cancel undoes it.
+            id::FLIP if model.source.is_some() => model.flip(),
+            id::COMPARE => compare::toggle(self),
+            id::COMPARE_OFFER => compare::take_offer(self),
+            id::GRID => grid::toggle(self),
+            id::VIEW_GRID | id::VIEW_PHOTO | id::VIEW_COMPARE => view_switch::act(self, command),
+            id::IMAGE_ONLY => view_modes::toggle_image_only(self),
             id::CROP => {
                 if model.cropping() {
                     model.end_crop(true)
@@ -860,8 +1023,17 @@ impl App {
             id::CROP_CANCEL => model.end_crop(false),
             id::UPDATES => crate::updates::check(true),
             id::ABOUT => dialogs::about(self.main),
-            id::CANCEL_EXPORT => model.cancel_export(),
-            id::COPY_STATUS => copy_text(self.main, &self.model.status),
+            id::CANCEL_EXPORT => {
+                model.cancel_export();
+                model.cancel_batch();
+            }
+            id::COPY_STATUS => copy_text(self.main, &status::text()),
+            c if (id::THEME..id::THEME + theme::ThemeName::ALL.len() as u16).contains(&c) => {
+                self.choose_theme(theme::ThemeName::ALL[(c - id::THEME) as usize]);
+            }
+            c if (id::SHEET..id::SHEET + sheet::ViewerSheet::ALL.len() as u16).contains(&c) => {
+                self.choose_sheet(sheet::ViewerSheet::ALL[(c - id::SHEET) as usize]);
+            }
             _ => {}
         }
     }
@@ -903,7 +1075,10 @@ impl App {
         };
         let editing = focused_class().as_deref() == Some("Edit");
         enable(id::SAVE_PREVIEW, model.can_save());
-        enable(id::EXPORT, model.can_export());
+        enable(id::EXPORT, model.can_export_any());
+        retitle(id::EXPORT, &format!("&{}\tCtrl+Shift+E", model.export_title()));
+        // Ticket 48: after Export, only the Lightroom apps installed.
+        batch::lightroom_items(self, menu, id::EXPORT_LUT, false);
         enable(id::EXPORT_LUT, model.can_export_lut());
         enable(id::UPDATES, crate::updates::configured());
         retitle(id::UNDO, &match model.undo_title() {
@@ -923,17 +1098,39 @@ impl App {
         check(id::FILMSTRIP, model.prefs.filmstrip_visible);
         check(id::ADJUSTMENTS, model.inspector_visible && !presets::shown(model));
         check(id::PRESETS, presets::shown(model));
+        check(id::ALL_CONTROLS, model.prefs.lab_all_controls);
         enable(id::NEW_PRESET, model.can_change_presets());
         enable(id::IMPORT_PRESETS, model.can_change_presets());
         check(id::FULL_SCREEN, self.full_screen.is_some());
+        check(id::IMAGE_ONLY, self.view.image_only);
+        enable(id::IMAGE_ONLY, photo && !model.cropping());
         check(id::ORIGINAL, model.holding_original);
         enable(id::ORIGINAL, model.can_show_original() && !model.cropping());
         for c in [id::FIT, id::ACTUAL, id::ZOOM_IN, id::ZOOM_OUT] {
             enable(c, photo && !model.cropping());
         }
         enable(id::ROTATE, photo);
-        retitle(id::CROP, if model.cropping() { "Done &Cropping\tC" } else { "&Crop\tC" });
+        enable(id::FLIP, photo);
+        enable(id::COMPARE, model.can_toggle_compare());
+        retitle(id::COMPARE, crate::compare::menu_title(model.comparison().is_some()));
+        enable(id::GRID, model.shelf.library.is_some() && !model.cropping());
+        retitle(id::CROP, if model.cropping() { "Done &Cropping\tCtrl+K" } else { "&Crop\tCtrl+K" });
         enable(id::CROP, model.cropping() || model.image.is_some());
+        // View › Theme: the one chosen ticked, as a radio choice (an
+        // environment override shows what it forces).
+        let shown = if theme::forced_by_environment() { theme::shown() } else { theme::chosen() };
+        let count = theme::ThemeName::ALL.len() as u32;
+        unsafe {
+            if let Some(i) = theme::ThemeName::ALL.iter().position(|&t| t == shown) {
+                let _ = CheckMenuRadioItem(menu, id::THEME as u32, id::THEME as u32 + count - 1, id::THEME as u32 + i as u32, MF_BYCOMMAND.0);
+            }
+            // View › Viewer Sheet, likewise.
+            let count = sheet::ViewerSheet::ALL.len() as u32;
+            if let Some(i) = sheet::ViewerSheet::ALL.iter().position(|&s| s == sheet::chosen()) {
+                let _ = CheckMenuRadioItem(menu, id::SHEET as u32, id::SHEET as u32 + count - 1, id::SHEET as u32 + i as u32, MF_BYCOMMAND.0);
+            }
+        }
+        library::update_menu(self, menu);
     }
 
     fn update_recent_menu(&self, menu: HMENU) {
@@ -1000,6 +1197,17 @@ impl App {
             }
         }
         self.save_window();
+        // The open photograph's edits go to its sidecar first; Negs stays open
+        // if they can't, as it does for the session. Quitting keeps the
+        // stock the tray is trying, as any other command does.
+        self.model.end_tray(true);
+        if let Err(error) = self.model.library_save_now() {
+            if !ending_session {
+                self.model.error = Some(error);
+                self.model.dirty |= dirty::ERROR;
+                return false;
+            }
+        }
         if let Some(session) = self.model.session().filter(|_| std::env::var_os("SPEKTRAFILM_BENCHMARK_PHOTO").is_none()) {
             if let Err(error) = SessionStore::default().save(&session) {
                 if !ending_session {
@@ -1027,7 +1235,8 @@ impl App {
             let show = if placement.showCmd == SW_SHOWMAXIMIZED.0 as u32 { 3 } else { 1 };
             let s = self.scale();
             // Saved in DIPs, so a monitor with another scale restores the same size.
-            self.model.prefs.window = Some([show, r.left, r.top, ((r.right - r.left) as f64 / s) as i32, ((r.bottom - r.top) as f64 / s) as i32]);
+            self.model.prefs.window = Some([show, r.left, r.top, ((r.right - r.left) as f64 / s).round() as i32, ((r.bottom - r.top) as f64 / s).round() as i32]);
+            self.model.prefs.window_pixels = Some([self.dpi as i32, r.right - r.left, r.bottom - r.top]);
             self.model.prefs.save();
         }
     }
@@ -1142,10 +1351,12 @@ fn build_menu() -> (HMENU, HMENU) {
             let _ = AppendMenuW(bar, MF_POPUP, menu.0 as usize, pcwstr(&w));
             menu
         };
+        // ⌘ is Ctrl and ⌥ is Alt; ⌥⌘ shortcuts (Ctrl+Alt is AltGr on many
+        // keyboards) keep Windows' own keys: F6, F7, F8.
         let file = popup("&File");
-        add(file, id::OPEN, "&Open Photograph…\tCtrl+O");
+        add(file, id::OPEN, "&Open…\tCtrl+O");
         let recent = CreatePopupMenu().unwrap();
-        let w = wide("Recent &Photographs");
+        let w = wide("Open &Recent");
         let _ = AppendMenuW(file, MF_POPUP, recent.0 as usize, pcwstr(&w));
         separator(file);
         add(file, id::SAVE_PREVIEW, "&Save Preview…\tCtrl+S");
@@ -1154,8 +1365,9 @@ fn build_menu() -> (HMENU, HMENU) {
         separator(file);
         add(file, id::NEW_PRESET, "&New Preset\tCtrl+Shift+S");
         add(file, id::IMPORT_PRESETS, "&Import Presets…\tCtrl+Shift+O");
+        add(file, id::PRESETS_FOLDER, "Show Presets &Folder");
         separator(file);
-        add(file, id::SETTINGS, "Se&ttings…");
+        add(file, id::SETTINGS, "Se&ttings…\tCtrl+,");
         separator(file);
         add(file, id::EXIT, "E&xit\tAlt+F4");
         let edit = popup("&Edit");
@@ -1167,24 +1379,44 @@ fn build_menu() -> (HMENU, HMENU) {
         add(edit, id::PASTE, "&Paste\tCtrl+V");
         add(edit, id::DELETE, "&Delete\tDel");
         add(edit, id::SELECT_ALL, "Select &All\tCtrl+A");
-        separator(edit);
-        add(edit, id::RESET_ALL, "Reset All A&djustments\tCtrl+Shift+R");
+        let photo = popup("&Photo");
+        add(photo, id::ORIGINAL, "Show &Original\tHold O");
+        // Ratings, flags, copying edits, Reset Edits and the rest.
+        library::add_menu(photo);
         let view = popup("&View");
         add(view, id::FILMSTRIP, "&Film Strip\tF6");
         add(view, id::ADJUSTMENTS, "&Adjustments\tF7");
         add(view, id::PRESETS, "&Presets\tF8");
+        add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
+        add(view, id::IMAGE_ONLY, "&Image Only\tF");
+        // Grid · Photo · Compare, as the Mac's title bar switch (ticket 46).
+        add(view, id::GRID, "&Grid\tG");
+        add(view, id::COMPARE, crate::compare::menu_title(false));
+        // Every control in every module, as the Lab's Advanced controls switch did.
+        add(view, id::ALL_CONTROLS, "Show A&ll Controls");
         separator(view);
         add(view, id::FIT, "Fi&t Photograph\tCtrl+0");
         add(view, id::ACTUAL, "Actual &Size\tCtrl+1");
         add(view, id::ZOOM_IN, "Zoom &In\tCtrl+=");
         add(view, id::ZOOM_OUT, "Zoom &Out\tCtrl+-");
         separator(view);
-        add(view, id::ORIGINAL, "Show &Original\tHold O");
+        add(view, id::ROTATE, "&Rotate Clockwise\tCtrl+R");
+        add(view, id::FLIP, "Flip &Horizontal");
+        add(view, id::CROP, "&Crop\tCtrl+K");
         separator(view);
-        add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
-        let image = popup("&Image");
-        add(image, id::ROTATE, "&Rotate Clockwise\tCtrl+R");
-        add(image, id::CROP, "&Crop\tC");
+        let themes = CreatePopupMenu().unwrap();
+        for (i, name) in theme::ThemeName::ALL.into_iter().enumerate() {
+            add(themes, id::THEME + i as u16, name.title());
+        }
+        let w = wide("T&heme");
+        let _ = AppendMenuW(view, MF_POPUP, themes.0 as usize, pcwstr(&w));
+        // The same sheets as Settings › Look › Viewer.
+        let sheets = CreatePopupMenu().unwrap();
+        for (i, s) in sheet::ViewerSheet::ALL.into_iter().enumerate() {
+            add(sheets, id::SHEET + i as u16, s.title());
+        }
+        let w = wide("&Viewer Sheet");
+        let _ = AppendMenuW(view, MF_POPUP, sheets.0 as usize, pcwstr(&w));
         let help = popup("&Help");
         add(help, id::UPDATES, "Check for &Updates…");
         separator(help);
@@ -1221,119 +1453,14 @@ fn accelerators() -> HACCEL {
         (ctrl, VK_SUBTRACT.0, id::ZOOM_OUT),
         (ctrl, 'R' as u16, id::ROTATE),
         (ctrl, 'K' as u16, id::CROP),
-        (FVIRTKEY, 'C' as u16, id::CROP),
+        // C compares, as on the Mac; Ctrl+K crops.
+        (FVIRTKEY, 'C' as u16, id::COMPARE),
+        (FVIRTKEY, 'F' as u16, id::IMAGE_ONLY),
+        (ctrl, VK_OEM_COMMA.0, id::SETTINGS),
     ];
-    let accels: Vec<ACCEL> = table.iter().map(|&(f, key, cmd)| ACCEL { fVirt: f, key, cmd }).collect();
+    let mut accels: Vec<ACCEL> = table.iter().map(|&(f, key, cmd)| ACCEL { fVirt: f, key, cmd }).collect();
+    accels.extend(library::accelerators());
     unsafe { CreateAcceleratorTableW(&accels).unwrap_or_default() }
-}
-
-/// Segoe icon glyphs drawn at the window's DPI: they size the toolbar's
-/// buttons (`chrome` paints them from the palette).
-fn toolbar_images(dpi: u32) -> HIMAGELIST {
-    let glyphs = chrome::TOOL_GLYPHS;
-    let size = (20 * dpi / 96) as i32;
-    unsafe {
-        let list = ImageList_Create(size, size, ILC_COLOR32, glyphs.len() as i32, 0);
-        let screen = GetDC(None);
-        let dc = CreateCompatibleDC(screen);
-        ReleaseDC(None, screen);
-        let face = icon_face();
-        let mut lf = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: ANTIALIASED_QUALITY, ..Default::default() };
-        let w = wide(face);
-        lf.lfFaceName[..w.len()].copy_from_slice(&w);
-        let font = CreateFontIndirectW(&lf);
-        for glyph in glyphs {
-            let info = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: size,
-                    biHeight: -size,
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let mut bits = std::ptr::null_mut();
-            let Ok(bitmap) = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) else { continue };
-            let old = SelectObject(dc, bitmap);
-            let old_font = SelectObject(dc, font);
-            SetBkColor(dc, COLORREF(0));
-            SetTextColor(dc, COLORREF(0xffffff));
-            let mut r = RECT { left: 0, top: 0, right: size, bottom: size };
-            let mut text: Vec<u16> = glyph.to_string().encode_utf16().collect();
-            DrawTextW(dc, &mut text, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            let _ = GdiFlush();
-            // White on black → dark glyph with the coverage as alpha (premultiplied).
-            let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (size * size * 4) as usize);
-            for p in pixels.chunks_exact_mut(4) {
-                let a = p[1];
-                let ink = (0x20u16 * a as u16 / 255) as u8;
-                p[0] = ink;
-                p[1] = ink;
-                p[2] = ink;
-                p[3] = a;
-            }
-            SelectObject(dc, old_font);
-            SelectObject(dc, old);
-            ImageList_Add(list, bitmap, None);
-            let _ = DeleteObject(bitmap);
-        }
-        let _ = DeleteObject(font);
-        let _ = DeleteDC(dc);
-        list
-    }
-}
-
-/// The title bar's tooltips, by command.
-fn tool_tip(command: u16) -> &'static str {
-    match command {
-        id::OPEN => "Open photograph (Ctrl+O)",
-        id::EXPORT => "Export photograph (Ctrl+Shift+E)",
-        _ => "Show or hide the panel (F7 adjustments, F8 presets)",
-    }
-}
-
-/// A toolbar in the title bar, of (glyph, command, check button). Buttons
-/// with a label (`chrome::TOOL_LABELS`) show it; the tools for the
-/// photograph are on the canvas (`canvas::Tool`).
-fn build_toolbar(main: HWND, dpi: u32, font: HFONT, buttons: &[(i32, u16, bool)]) -> HWND {
-    unsafe {
-        let toolbar = create(
-            TOOLBARCLASSNAMEW,
-            "",
-            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | CCS_NODIVIDER as u32 | CCS_NOPARENTALIGN as u32 | CCS_NORESIZE as u32),
-            WINDOW_EX_STYLE(0),
-            main,
-            0,
-            font,
-        );
-        SendMessageW(toolbar, TB_BUTTONSTRUCTSIZE, WPARAM(std::mem::size_of::<TBBUTTON>()), LPARAM(0));
-        SendMessageW(toolbar, TB_SETEXTENDEDSTYLE, WPARAM(0), LPARAM(0x80 /* TBSTYLE_EX_DOUBLEBUFFER */));
-        SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
-        // A label shows and names the button (the toolbar keeps a pointer
-        // to it, so it lives as long as the toolbar).
-        let label = |image: i32| chrome::TOOL_LABELS.get(image as usize).copied().flatten();
-        let texts: &'static [Option<Vec<u16>>] =
-            Box::leak(buttons.iter().map(|&(image, _, _)| label(image).map(wide)).collect::<Vec<_>>().into_boxed_slice());
-        let buttons: Vec<TBBUTTON> = buttons
-            .iter()
-            .zip(texts)
-            .map(|(&(image, cmd, check), text)| TBBUTTON {
-                iBitmap: image,
-                idCommand: cmd as i32,
-                fsState: TBSTATE_ENABLED as u8,
-                fsStyle: ((if check { BTNS_CHECK } else { BTNS_BUTTON }) | if text.is_some() { BTNS_AUTOSIZE } else { 0 }) as u8,
-                iString: text.as_ref().map_or(-1, |t| t.as_ptr() as isize),
-                ..Default::default()
-            })
-            .collect();
-        SendMessageW(toolbar, TB_ADDBUTTONSW, WPARAM(buttons.len()), LPARAM(buttons.as_ptr() as isize));
-        titlebar::add_tips(toolbar, buttons.iter().map(|b| (b.idCommand as u16, tool_tip(b.idCommand as u16))).collect());
-        titlebar::tool_metrics(main, toolbar);
-        toolbar
-    }
 }
 
 /// Another Negs is running: hand it the photograph and bring it forward.
@@ -1364,6 +1491,33 @@ pub fn run() {
     // The installer/uninstaller waits for every app to stop before touching data.
     let _app_lifetime_mutex = unsafe { CreateMutexW(None, false, w!("Local\\Negs.AppLifetime")) };
     let launched = platform::qpc();
+    if grid_bench::run_if_asked() {
+        return;
+    }
+    if sampler::run_if_asked() {
+        return;
+    }
+    // Direct2D, DirectWrite and Newsreader, on their own thread from the
+    // start: the title bar's first paint sets the file name with them.
+    let drawing_started = platform::qpc();
+    d2d::prepare(move |shared| {
+        let cost = shared.cost;
+        d2d::warm(&[
+            ("Negs DSC_0001.NEF", titlebar::NAME),
+            ("Open a photograph", empty::HEADING),
+            ("Explore film stocks, shape the print", empty::TAGLINE),
+            ("or drop a RAW, TIFF, PNG or JPEG file here", empty::HINT),
+            ("6016 × 4016 · developed in 1.2 s Original Fit 100%", status::WORDS),
+        ]);
+        let at = platform::qpc();
+        post(move |app: &mut App| {
+            app.report.line(&format!("drawing_started {drawing_started}"));
+            app.report.line(&format!("drawing_ready {at}"));
+            app.report.line(&format!("drawing_cost d2d_us {} dwrite_us {} fonts_us {}", cost.d2d.as_micros(), cost.dwrite.as_micros(), cost.fonts.as_micros()));
+            // A photograph shown before now has no caption or label yet.
+            canvas::drawing_ready(app.canvas);
+        });
+    });
     let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| !p.to_string_lossy().starts_with('-') && p.is_file());
     let path = path.map(|p| std::path::absolute(&p).unwrap_or(p));
     if std::env::var_os("NEGS_ALLOW_MULTIPLE").is_none() && forward_to_running(path.as_deref()) {
@@ -1411,8 +1565,19 @@ pub fn run() {
         strip::register();
         inspector::register();
         tone_graph::register();
+        color_filter::register();
         presets::register();
+        status::register();
 
+        // View › Theme, unless NEGS_THEME forces one. A new user starts on
+        // Plain or Plain dark, as Windows is, kept from then on.
+        if model.prefs.app_theme.is_empty() {
+            model.prefs.app_theme = theme::first_launch_theme().key().to_string();
+            model.prefs.save();
+        }
+        if let Some(chosen) = theme::ThemeName::parse(&model.prefs.app_theme) {
+            theme::set_chosen(chosen);
+        }
         theme::init();
         let (menu, recent) = build_menu();
         let main = CreateWindowExW(
@@ -1439,22 +1604,12 @@ pub fn run() {
         let fonts = Fonts::new(dpi);
         report.stamp("fonts");
         let menubar = titlebar::create_menubar(main, menu, fonts.ui);
-        titlebar::set_fonts(fonts.ui, fonts.glyph_small);
-        let tools = build_toolbar(main, dpi, fonts.ui, &[(0, id::OPEN, false)]);
-        let actions = build_toolbar(main, dpi, fonts.ui, &[(1, id::EXPORT, false), (2, id::PANEL, true)]);
-        for toolbar in [tools, actions] {
-            chrome::subclass_toolbar(toolbar, fonts.glyph);
-        }
+        titlebar::set_fonts(fonts.ui);
         report.stamp("toolbar");
-        let status = create(STATUSCLASSNAMEW, "", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WINDOW_STYLE(SBARS_SIZEGRIP), WINDOW_EX_STYLE(0), main, 0, fonts.ui);
-        empty::subclass_status(status);
-        chrome::subclass_status(status);
-        let progress = create(PROGRESS_CLASSW, "", WS_CHILD | WINDOW_STYLE(PBS_MARQUEE), WINDOW_EX_STYLE(0), status, 0, HFONT::default());
-        SendMessageW(progress, PBM_SETMARQUEE, WPARAM(1), LPARAM(30));
-        let cancel = create(w!("BUTTON"), "Cancel", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), status, id::CANCEL_EXPORT, fonts.ui);
+        let status = status::create(main);
         let canvas = create(w!("NegsCanvas"), "Photograph preview", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
         let empty = create(w!("NegsEmpty"), "", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
-        let strip = create(w!("NegsStrip"), "Film Strip", WS_CHILD | WS_TABSTOP | WS_HSCROLL, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
+        let strip = create(w!("NegsStrip"), "Film Strip", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
         let panes = panes::create(main, fonts.ui);
         let inspector = inspector::Inspector::create(main, &fonts, dpi);
         canvas::init(canvas, dpi);
@@ -1462,18 +1617,15 @@ pub fn run() {
         let mut app = App {
             model,
             main,
-            tools,
-            actions,
             menubar,
             status,
-            progress,
-            cancel,
             canvas,
             empty,
             strip,
             panes,
             inspector,
             presets_view: None,
+            settings: None,
             fonts,
             dpi,
             menu,
@@ -1482,17 +1634,19 @@ pub fn run() {
             splitter_drag: None,
             full_screen: None,
             strip_view: strip::Strip::default(),
+            grid: None,
+            thumbs: thumbs::Thumbs::default(),
             empty_view: empty::Empty::default(),
             taskbar: None,
             original_key: None,
             drop_target_active: false,
-            started: Instant::now(),
+            view: Default::default(),
             quitting: false,
             preview_monitor: 0,
         };
         let _ = recent;
         empty::build(&mut app);
-        canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
+        sheet::set_chosen(sheet::from_prefs(&app.model.prefs));
         app.layout();
         app.update_chrome();
         app.update_status();
@@ -1520,9 +1674,18 @@ pub fn run() {
             // scroll the inspector to the newly focused control.
             let keyed = matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR | WM_SYSCHAR);
             let before = keyed.then(|| GetFocus());
+            let started = crate::trace::enabled().then(Instant::now);
             if !pre_translate(&msg) {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+            // The UI thread held up: what by, for the trace.
+            if let Some(ms) = started.map(|s| s.elapsed().as_secs_f64() * 1000.0).filter(|ms| *ms > 12.0) {
+                crate::trace::event("ui_slow", || {
+                    let mut class = [0u16; 64];
+                    let n = GetClassNameW(msg.hwnd, &mut class).max(0) as usize;
+                    serde_json::json!({"message": msg.message, "ms": ms, "class": String::from_utf16_lossy(&class[..n]), "wparam": msg.wParam.0})
+                });
             }
             if before.is_some_and(|before| GetFocus() != before) {
                 with_app(inspector::reveal_focus);
@@ -1535,7 +1698,12 @@ pub fn run() {
 fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
     let Some([_, x, y, w, h]) = prefs.window else { return default_height(main, dpi) };
     let s = dpi as f64 / 96.0;
-    let rect = RECT { left: x, top: y, right: x + (w as f64 * s) as i32, bottom: y + (h as f64 * s) as i32 };
+    // At the DPI it was saved at, the very pixels; else the DIPs scaled.
+    let (w, h) = match prefs.window_pixels {
+        Some([saved, pw, ph]) if saved == dpi as i32 && pw > 0 && ph > 0 => (pw, ph),
+        _ => ((w as f64 * s).round() as i32, (h as f64 * s).round() as i32),
+    };
+    let rect = RECT { left: x, top: y, right: x + w, bottom: y + h };
     unsafe {
         // A monitor that is gone leaves the default placement.
         if MonitorFromRect(&rect, MONITOR_DEFAULTTONULL).is_invalid() {
@@ -1571,15 +1739,29 @@ fn default_height(main: HWND, dpi: u32) {
 fn pre_translate(msg: &MSG) -> bool {
     let main = main_hwnd();
     draw::hover_message(msg);
+    // The Settings window's keys are its own.
+    if let Some(handled) = settings::pre_translate(msg) {
+        return handled;
+    }
     if titlebar::keys(main, msg) {
         return true;
     }
+    leave_field_on_click(main, msg);
     let mut accelerators = None;
     let handled = with_app(|app| {
         if matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MOUSEWHEEL) {
             app.report.stamp("first_input_received");
         }
-        if app.original_key(msg) {
+        // The tray's keys come first (§5.2: after an alert and typing), and
+        // a press outside it keeps its stock and closes it.
+        if tray::key(app, msg) {
+            return true;
+        }
+        if matches!(msg.message, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) && app.model.tray().is_some() && !tray::keeps_open(app, msg) {
+            app.model.end_tray(true);
+        }
+        // Rating keys never reach the library while typing (in the tray's Search too).
+        if app.original_key(msg) || view_modes::key(app, msg, text_focus()) || grid::key(app, msg, text_focus()) || library::key(app, msg) {
             return true;
         }
         if msg.message == WM_KEYDOWN && app.model.cropping() && !text_focus() {
@@ -1591,6 +1773,22 @@ fn pre_translate(msg: &MSG) -> bool {
                 app.model.end_crop(false);
                 return true;
             }
+        }
+        // Compare's keys: S, the arrows, Esc.
+        if !text_focus() && compare::key(app, msg) {
+            return true;
+        }
+        // ← and → open the neighbours wherever the focus is, as on the Mac.
+        if strip::arrows_to_step(app, msg) {
+            return true;
+        }
+        // A picker waiting for a click on the negative.
+        if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && app.model.cancel_negative_pick() {
+            return true;
+        }
+        // Escape's next use (§5.2): leaving Image Only.
+        if msg.message == WM_KEYDOWN && msg.wParam.0 == VK_ESCAPE.0 as usize && !text_focus() && view_modes::escape(app) {
+            return true;
         }
         if msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN {
             let focus = focused_class();
@@ -1618,6 +1816,43 @@ fn pre_translate(msg: &MSG) -> bool {
         }
     }
     unsafe { IsDialogMessageW(main, msg).as_bool() }
+}
+
+/// A press outside the text field being typed in ends the typing, as on the
+/// Mac (`EditorWindow.sendEvent`), even where nothing takes the focus: the
+/// inspector's empty space, labels, the title bar. The fields apply their
+/// value when they lose the focus; that runs before the press is dispatched,
+/// so the clicked control sees the typed value.
+fn leave_field_on_click(main: HWND, msg: &MSG) {
+    if !matches!(
+        msg.message,
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_NCLBUTTONDOWN | WM_NCRBUTTONDOWN | WM_NCMBUTTONDOWN
+    ) {
+        return;
+    }
+    unsafe {
+        let focus = GetFocus();
+        if focus.0.is_null() || focused_class().as_deref() != Some("Edit") || msg.hwnd == focus {
+            return;
+        }
+        // A keyed-out field's own box: the window under it hands the press on.
+        if draw::keyed::covers(focus, msg.pt) {
+            return;
+        }
+        // Only the main window's fields, and only for presses inside it.
+        if !IsChild(main, focus).as_bool() || !(msg.hwnd == main || IsChild(main, msg.hwnd).as_bool()) {
+            return;
+        }
+        // An editable combo box's arrow belongs to its field.
+        if let Ok(parent) = GetParent(focus) {
+            if parent == msg.hwnd && draw::class_of(parent) == "ComboBox" {
+                return;
+            }
+        }
+        let _ = SetFocus(main);
+    }
+    // The commit was posted from WM_KILLFOCUS; apply it before the press.
+    drain();
 }
 
 extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -1700,6 +1935,11 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| app.layout());
                 LRESULT(0)
             }
+            // The fitted view's exact picture waits until sizing ends.
+            WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
+                canvas::set_live_resize(msg == WM_ENTERSIZEMOVE);
+                LRESULT(0)
+            }
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             WM_SETTINGCHANGE | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
                 // The app theme ("ImmersiveColorSet"), high contrast or the accent.
@@ -1743,20 +1983,15 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 if let Some(result) = titlebar::dropdown(hwnd, lparam) {
                     return result;
                 }
-                let header = &*(lparam.0 as *const NMHDR);
-                if header.code == NM_CLICK || header.code == NM_RETURN {
-                    if let Ok(id) = u16::try_from(header.idFrom) {
-                        if (id::EMPTY_RECENT..id::EMPTY_RECENT + 5).contains(&id) {
-                            with_app(|app| app.command(id));
-                        }
-                    }
+                if let Some(result) = view_switch::notify(lparam) {
+                    return result;
                 }
-                if header.code == NM_RCLICK && header.hwndFrom != HWND::default() {
-                    with_app(|app| {
-                        if header.hwndFrom == app.status {
-                            app.status_menu();
-                        }
-                    });
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_ENTERMENULOOP => {
+                // A menu keeps the stock being tried and closes the tray.
+                if with_app(|app| app.model.end_tray(true)).is_none() {
+                    post(|app: &mut App| app.model.end_tray(true));
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
@@ -1789,10 +2024,26 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             WM_ACTIVATE => {
                 if wparam.0 & 0xffff == WA_INACTIVE as usize {
-                    with_app(|app| app.release_original());
+                    with_app(|app| {
+                        app.release_original();
+                        view_modes::release(app);
+                    });
                     titlebar::deactivated(hwnd);
+                } else {
+                    alert::reclaim_focus();
                 }
                 titlebar::invalidate(hwnd);
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_ACTIVATEAPP if wparam.0 != 0 => {
+                // Back from another app: the folder as it left it (`refresh`),
+                // and Lightroom installed meanwhile or photos added there.
+                post(|app: &mut App| {
+                    app.model.library_refresh();
+                    if app.model.lightroom_detected() {
+                        app.model.refresh_lightroom(std::time::Duration::ZERO);
+                    }
+                });
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_MOVE | WM_DISPLAYCHANGE => {
@@ -1896,18 +2147,11 @@ impl App {
         self.dpi = dpi;
         self.fonts = Fonts::new(dpi);
         unsafe {
-            for toolbar in [self.tools, self.actions] {
-                SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
-                SendMessageW(toolbar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
-                chrome::subclass_toolbar(toolbar, self.fonts.glyph);
-                titlebar::tool_metrics(self.main, toolbar);
-            }
             panes::set_font(self.panes, self.fonts.ui);
             SendMessageW(self.menubar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             titlebar::set_metrics(self.main, self.menubar);
-            titlebar::set_fonts(self.fonts.ui, self.fonts.glyph_small);
-            SendMessageW(self.status, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
-            SendMessageW(self.cancel, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
+            titlebar::set_fonts(self.fonts.ui);
+            let _ = InvalidateRect(self.status, None, false);
         }
         canvas::set_dpi(dpi);
         inspector::dpi_changed(self);
@@ -1916,17 +2160,37 @@ impl App {
         self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::CANVAS | dirty::STRIP;
     }
 
-    /// Follows a change of the system's theme, contrast or accent.
+    /// Follows a change of the system's theme (Plain follows it), contrast
+    /// or accent, or of View › Theme.
     fn retheme(&mut self) {
         if !theme::refresh() {
             return;
         }
         theme::apply_all();
         presets::retheme(self);
+        settings::retheme(self);
         unsafe {
-            let _ = InvalidateRect(self.canvas, None, false);
+            let _ = RedrawWindow(self.main, None, None, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME);
         }
-        self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::STRIP | dirty::CANVAS;
+        self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::STRIP | dirty::CANVAS | dirty::CHROME;
+    }
+
+    /// View › Theme: shows `name` and remembers it in Settings.
+    fn choose_theme(&mut self, name: theme::ThemeName) {
+        theme::set_chosen(name);
+        self.model.prefs.app_theme = name.key().to_string();
+        self.model.prefs.save();
+        self.retheme();
+    }
+
+    /// View › Viewer Sheet and Settings › Look › Viewer: shows `sheet`
+    /// behind the photograph and remembers it.
+    fn choose_sheet(&mut self, sheet: sheet::ViewerSheet) {
+        sheet::set_chosen(sheet);
+        self.model.prefs.viewer_sheet = sheet.key().into();
+        self.model.prefs.save();
+        canvas::sheet_changed(self.canvas);
+        empty::sheet_changed(self);
     }
 
     fn status_menu(&mut self) {
@@ -1941,9 +2205,6 @@ impl App {
         }
     }
 
-    pub fn elapsed_ms(&self) -> f64 {
-        self.started.elapsed().as_secs_f64() * 1000.0
-    }
 }
 
 pub fn dwm_flush() {
@@ -1951,16 +2212,6 @@ pub fn dwm_flush() {
         let _ = DwmFlush();
     }
 }
-
-pub fn current_process_id() -> u32 {
-    unsafe { GetCurrentProcessId() }
-}
-
-pub fn session_store() -> SessionStore {
-    SessionStore::default()
-}
-
-pub fn _unused(_: EditorSession) {}
 
 #[cfg(test)]
 mod tests {
@@ -1970,7 +2221,7 @@ mod tests {
     #[test]
     fn minimum_width_follows_the_adjustments() {
         assert_eq!(minimum_width(true), 985.0);
-        assert_eq!(minimum_width(false), 680.0);
+        assert_eq!(minimum_width(false), 640.0);
     }
 
     /// A narrow window narrows the adjustments before the canvas, down to
@@ -1978,8 +2229,10 @@ mod tests {
     #[test]
     fn adjustments_give_way_to_the_canvas() {
         assert_eq!(inspector_width(340.0, 1400.0), 340.0);
-        assert_eq!(inspector_width(440.0, 1000.0), 315.0);
-        assert_eq!(inspector_width(440.0, 900.0), 300.0);
+        assert_eq!(inspector_width(440.0, 1000.0), 355.0);
+        assert_eq!(inspector_width(440.0, 900.0), 340.0);
         assert_eq!(inspector_width(500.0, 2000.0), 440.0);
+        // A width saved under the old 300 minimum shows at the new one.
+        assert_eq!(inspector_width(300.0, 1400.0), 340.0);
     }
 }

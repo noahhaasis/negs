@@ -167,8 +167,8 @@ private struct RecentFile: View {
     }
 }
 
-/// The Developing or Updating tag at the top centre of the photograph,
-/// 16 pt below its top edge (§4.14): the sheet's dark, the word in italic
+/// The Developing, Updating or Loading original tag at the top centre of the photograph,
+/// 16 pt below its top edge (§4.14): the theme's sheet, the word in italic
 /// `paper`, and a short yellow mark running along a line under it.
 struct DevelopTag: View {
     let title: String
@@ -180,9 +180,9 @@ struct DevelopTag: View {
         }
         .fixedSize()
         .padding(EdgeInsets(top: 7, leading: 16, bottom: 9, trailing: 16))
-        .background(RoundedRectangle(cornerRadius: 3).fill(Color(red: 12 / 255, green: 11 / 255, blue: 10 / 255).opacity(0.78)))
+        .background(RoundedRectangle(cornerRadius: 3).fill(Theme.bg.opacity(0.78)))
         .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.paper.opacity(0.08), lineWidth: 1))
-        .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.4 * Theme.shadowStrength), radius: 8, y: 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityAddTraits(.updatesFrequently)
@@ -190,11 +190,13 @@ struct DevelopTag: View {
 }
 
 /// What the tag says: Developing until the photograph's first develop is
-/// in, Updating once an edit takes long enough to notice, else nothing.
+/// in, Loading original while a held original is still being decoded,
+/// Updating once an edit takes long enough to notice, else nothing.
 enum DevelopTagTitle {
-    static func title(source: Bool, failed: Bool, developed: Bool, slow: Bool) -> String? {
+    static func title(source: Bool, failed: Bool, developed: Bool, slow: Bool, loadingOriginal: Bool, original: String = "original") -> String? {
         guard source, !failed else { return nil }
         if !developed { return "Developing" }
+        if loadingOriginal { return "Loading \(original)" }
         return slow ? "Updating" : nil
     }
 }
@@ -231,6 +233,7 @@ struct DevelopFailure: View {
 /// under it. A click on one, or a drag inward, starts cropping. Each takes
 /// clicks ±9 pt round its line.
 struct CropTrimMarks: View {
+    let model: EditorModel
     let print: CGRect
     /// The pointer is over the photograph.
     let lit: Bool
@@ -245,6 +248,11 @@ struct CropTrimMarks: View {
                 let handle = CropGeometry.Handle(x: mark.midX < print.midX ? -1 : 1, y: mark.midY < print.midY ? -1 : 1)
                 TrimMark(lit: lit, handle: handle, crop: crop)
                     .frame(width: mark.width + 8, height: mark.height + 18)
+                    // A click here isn't a click outside an open tray: that
+                    // would close it at once, and with the strip hidden the
+                    // photograph would grow from under the click, which then
+                    // never reaches the mark. Cropping closes it instead.
+                    .background(TrayHitArea(model: model))
                     .offset(x: mark.minX - 4, y: mark.minY - 9)
             }
         }

@@ -1,7 +1,7 @@
-//! Open and save dialogs, error and question dialogs, Settings and About.
-//! Export's options live inside the save dialog (§20.4, decided): the file
-//! type filter picks the format, `IFileDialogCustomize` adds Engine, Size and
-//! the message.
+//! Open and save dialogs and About (Settings is `settings.rs`); errors and questions go to the
+//! alert card (`alert.rs`). Export's options live inside the save dialog
+//! (§20.4, decided): the file type filter picks the format,
+//! `IFileDialogCustomize` adds Engine, Size and the message.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -10,13 +10,13 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::Controls::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement};
+use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement, w};
 
 use super::App;
+use super::alert::Alert;
 use crate::engine::ExportEngine;
 use crate::model::{COLOR_SPACES, Edge, ExportSize, IMAGE_EXTENSIONS, OutputFormat, PIXEL_RANGE, PROPHOTO, QUALITY_RANGE, RAW_EXTENSIONS, SaveSettings};
 use crate::platform::{pcwstr, wide};
@@ -32,12 +32,14 @@ const PRESET_EXPORT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d
 thread_local! {
     static TOOLTIP: Cell<isize> = const { Cell::new(0) };
     static TIPS: RefCell<Vec<(isize, Vec<u16>)>> = const { RefCell::new(Vec::new()) };
+    /// The tips over parts of a window: its handle, the part, the text.
+    static AREAS: RefCell<Vec<(isize, usize, Vec<u16>)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Sets `hwnd`'s tooltip, sharing one tooltip window.
-pub fn tooltip(hwnd: HWND, text: &str) {
+/// The one tooltip window, made the first time, with the app's delays.
+fn shared_tip() -> HWND {
     unsafe {
-        let tip = TOOLTIP.with(|t| {
+        TOOLTIP.with(|t| {
             if t.get() == 0 {
                 let tip = CreateWindowExW(
                     WS_EX_TOPMOST,
@@ -65,7 +67,63 @@ pub fn tooltip(hwnd: HWND, text: &str) {
                 t.set(tip.0 as isize);
             }
             HWND(t.get() as *mut _)
+        })
+    }
+}
+
+/// Sets the tooltip over part of `owner`: `rect`, in its client pixels
+/// (empty while the part isn't there). It shows after the app's delay
+/// while the pointer rests there, and a press hides it, as on a control.
+pub fn area_tooltip(owner: HWND, part: usize, rect: RECT, text: &str) {
+    unsafe {
+        let tip = shared_tip();
+        let text = wide(text);
+        let key = owner.0 as isize;
+        // None: new; Some(changed text).
+        let known = AREAS.with(|areas| {
+            let mut areas = areas.borrow_mut();
+            match areas.iter_mut().find(|(h, p, _)| *h == key && *p == part) {
+                // The same text keeps its buffer: the tooltip points at it.
+                Some((_, _, existing)) if *existing == text => Some(false),
+                Some((_, _, existing)) => {
+                    *existing = text.clone();
+                    Some(true)
+                }
+                None => {
+                    areas.push((key, part, text.clone()));
+                    None
+                }
+            }
         });
+        // The text pointer stays valid: AREAS keeps it.
+        let pointer = AREAS.with(|areas| areas.borrow().iter().find(|(h, p, _)| *h == key && *p == part).map(|(_, _, t)| t.as_ptr()).unwrap());
+        let info = TTTOOLINFOW {
+            cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+            uFlags: TTF_SUBCLASS,
+            hwnd: owner,
+            uId: part,
+            rect,
+            lpszText: PWSTR(pointer as *mut _),
+            ..Default::default()
+        };
+        match known {
+            None => {
+                SendMessageW(tip, TTM_ADDTOOLW, WPARAM(0), LPARAM(&info as *const _ as isize));
+            }
+            Some(changed) => {
+                if changed {
+                    SendMessageW(tip, TTM_UPDATETIPTEXTW, WPARAM(0), LPARAM(&info as *const _ as isize));
+                }
+                SendMessageW(tip, TTM_NEWTOOLRECTW, WPARAM(0), LPARAM(&info as *const _ as isize));
+            }
+        }
+    }
+}
+
+/// Sets `hwnd`'s tooltip, sharing one tooltip window.
+pub fn tooltip(hwnd: HWND, text: &str) {
+    unsafe {
+        let tip = shared_tip();
         let text = wide(text);
         let known = TIPS.with(|tips| {
             let mut tips = tips.borrow_mut();
@@ -129,42 +187,28 @@ fn task_dialog(owner: HWND, instruction: &str, content: &str, details: Option<&s
     pressed
 }
 
-/// An error, with an exporter log as expandable details.
+/// An error, in the alert card; an exporter's log offered to copy.
 pub fn error(owner: HWND, message: &str) {
-    let (first, rest) = message.split_once('\n').unwrap_or((message, ""));
-    let details = (!rest.trim().is_empty()).then_some(rest.trim());
-    task_dialog(owner, first, "", details, TD_WARNING_ICON, &[], TASKDIALOG_FLAGS(0));
+    super::alert::error(owner, message);
 }
 
-/// A short message with an explanation below it.
+/// A short message with an explanation below it, in the alert card.
 pub fn notice(owner: HWND, instruction: &str, content: &str) {
-    task_dialog(owner, instruction, content, None, TD_WARNING_ICON, &[], TASKDIALOG_FLAGS(0));
+    super::alert::notice(owner, instruction, content);
 }
 
 /// True to delete the preset.
 pub fn confirm_delete_preset(owner: HWND, name: &str) -> bool {
-    task_dialog(
-        owner,
-        &format!("Delete the preset “{name}”?"),
-        "This can’t be undone. Photographs edited with it keep their settings.",
-        None,
-        TD_WARNING_ICON,
-        &[(100, "Delete"), (IDCANCEL.0, "Cancel")],
-        TDF_ALLOW_DIALOG_CANCELLATION,
-    ) == 100
+    let alert = Alert::new(format!("Delete the preset “{name}”?"), Some("This can’t be undone. Photographs edited with it keep their settings.".into()))
+        .buttons(&["Delete", "Cancel"], Some(1));
+    super::alert::ask(owner, alert) == 0
 }
 
 /// True to quit and cancel the export.
 pub fn confirm_quit_during_export(owner: HWND) -> bool {
-    task_dialog(
-        owner,
-        "An export is still in progress.",
-        "Quitting cancels it. Any existing file at the destination is left unchanged.",
-        None,
-        TD_WARNING_ICON,
-        &[(100, "Continue exporting"), (101, "Quit")],
-        TDF_USE_COMMAND_LINKS,
-    ) == 101
+    let alert = Alert::new("An export is still in progress.", Some("Quitting cancels it. Any existing file at the destination is left unchanged.".into()))
+        .buttons(&["Continue Exporting", "Quit"], Some(0));
+    super::alert::ask(owner, alert) == 1
 }
 
 pub fn about(owner: HWND) {
@@ -173,324 +217,6 @@ pub fn about(owner: HWND) {
         env!("CARGO_PKG_VERSION")
     );
     task_dialog(owner, "Negs", &content, None, TD_INFORMATION_ICON, &[], TASKDIALOG_FLAGS(0));
-}
-
-const SETTINGS_PREVIEWS: u16 = 10;
-const SETTINGS_AUTOMATIC: u16 = 11;
-const SETTINGS_CHECK: u16 = 12;
-const SETTINGS_KEEP_PAPER: u16 = 13;
-const SETTINGS_NEW_PHOTOS: u16 = 14;
-const SETTINGS_MATCH: u16 = 15;
-const SETTINGS_LIMIT: u16 = 16;
-const SETTINGS_LOW_MEMORY: u16 = 17;
-const SETTINGS_NEW_NOTE: u16 = 18;
-const SETTINGS_BACKGROUND: u16 = 19;
-const SETTINGS_BACKGROUND_COLOR: u16 = 20;
-
-/// Settings › New photographs: what each choice does.
-const NEW_PHOTOS_NOTES: [&str; 2] = [
-    "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.",
-    "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay.",
-];
-
-thread_local! {
-    /// The open Settings dialog's result: None while open, then whether OK closed it.
-    static SETTINGS_DONE: Cell<Option<bool>> = const { Cell::new(None) };
-    /// The dialog's descriptions, drawn grey.
-    static SETTINGS_NOTES: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
-    /// The viewer background colour chosen in the open dialog, and its swatch.
-    static SETTINGS_SWATCH: Cell<(isize, [u8; 3])> = const { Cell::new((0, [0; 3])) };
-}
-
-/// Settings (the Mac's Settings window): previews, keeping the paper, new
-/// photographs, the preview and export, and updates, in a modal dialog with
-/// OK and Cancel. Updates show only in builds that have them.
-pub fn settings(app: &mut App) {
-    let configured = crate::updates::configured();
-    let px = |dip: f64| app.px(dip);
-    let fonts = &app.fonts;
-    unsafe {
-        let class = WNDCLASSEXW {
-            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-            lpfnWndProc: Some(settings_proc),
-            hInstance: super::instance(),
-            lpszClassName: windows::core::w!("NegsSettings"),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            ..Default::default()
-        };
-        RegisterClassExW(&class);
-    }
-    let (width, pad) = (px(448.0), px(24.0));
-    let inner = width - 2 * pad;
-    let title = wide("Settings");
-    let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
-    let ex = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
-    let dialog = unsafe {
-        CreateWindowExW(ex, windows::core::w!("NegsSettings"), pcwstr(&title), style, 0, 0, width, px(200.0), app.main, None, super::instance(), None).unwrap_or_default()
-    };
-    super::theme::apply_window(dialog);
-    let make = |class: PCWSTR, text: &str, style: WINDOW_STYLE, id: u16, font| super::create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), dialog, id, font);
-    let label = |text: &str, font| make(windows::core::w!("STATIC"), text, WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFT.0 | windows::Win32::System::SystemServices::SS_NOPREFIX.0), 0, font);
-    let check = |text: &str, id: u16, on: bool| {
-        let c = make(windows::core::w!("BUTTON"), text, WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), id, fonts.ui);
-        unsafe {
-            SendMessageW(c, BM_SETCHECK, WPARAM(on as usize), LPARAM(0));
-        }
-        c
-    };
-    // Each row: the control, its height (None: measure the wrapped text), its
-    // indent, the gap after it, and a width other than the whole row's.
-    let mut rows: Vec<(HWND, Option<i32>, i32, i32, Option<i32>)> = vec![];
-    let mut notes = vec![];
-    rows.push((label("Film & Paper", fonts.section), Some(px(24.0)), 0, px(8.0), None));
-    let previews = check("Film, paper and preset previews", SETTINGS_PREVIEWS, app.model.prefs.previews);
-    rows.push((previews, Some(px(24.0)), 0, 0, None));
-    let note = label("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.", fonts.small);
-    notes.push(note);
-    rows.push((note, None, px(24.0), px(16.0), None));
-    let keep_paper = check("Keep paper when changing film", SETTINGS_KEEP_PAPER, app.model.prefs.keep_paper);
-    rows.push((keep_paper, Some(px(24.0)), 0, 0, None));
-    let note = label("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.", fonts.small);
-    notes.push(note);
-    rows.push((note, None, px(24.0), px(24.0), None));
-    rows.push((label("New Photographs", fonts.section), Some(px(24.0)), 0, px(8.0), None));
-    let new_photos = make(windows::core::w!("COMBOBOX"), "", WS_TABSTOP | WS_VSCROLL | WINDOW_STYLE(CBS_DROPDOWNLIST as u32), SETTINGS_NEW_PHOTOS, fonts.ui);
-    for title in ["Keep the previous edits", "Start fresh"] {
-        let text = wide(title);
-        unsafe {
-            SendMessageW(new_photos, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
-        }
-    }
-    let fresh = app.model.prefs.fresh_edits;
-    unsafe {
-        SendMessageW(new_photos, CB_SETCURSEL, WPARAM(fresh as usize), LPARAM(0));
-    }
-    super::draw::paint_combo(new_photos);
-    super::accessible_name(new_photos, "New photographs");
-    // The drop-down's height is its list's; the next row starts 32 below.
-    rows.push((new_photos, Some(px(200.0)), 0, px(32.0) - px(200.0), Some(px(224.0))));
-    // The note's text follows the choice; it is laid out for the longer one.
-    let note = make(windows::core::w!("STATIC"), NEW_PHOTOS_NOTES[1], WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFT.0 | windows::Win32::System::SystemServices::SS_NOPREFIX.0), SETTINGS_NEW_NOTE, fonts.small);
-    notes.push(note);
-    rows.push((note, None, 0, px(16.0), None));
-    let match_new = check("Match new photographs to camera brightness", SETTINGS_MATCH, app.model.prefs.match_new_photos);
-    rows.push((match_new, Some(px(24.0)), 0, 0, None));
-    let note = label("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.", fonts.small);
-    notes.push(note);
-    rows.push((note, None, px(24.0), px(24.0), None));
-    rows.push((label("Preview & Export", fonts.section), Some(px(24.0)), 0, px(8.0), None));
-    let prefs = &app.model.prefs;
-    let custom_background = check("Custom viewer background", SETTINGS_BACKGROUND, prefs.viewer_background_custom);
-    rows.push((custom_background, Some(px(24.0)), 0, px(4.0), None));
-    let choose = make(windows::core::w!("BUTTON"), "Choose Colour…", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), SETTINGS_BACKGROUND_COLOR, fonts.ui);
-    super::accessible_name(choose, "Viewer background colour");
-    unsafe {
-        let _ = EnableWindow(choose, prefs.viewer_background_custom);
-    }
-    rows.push((choose, Some(px(32.0)), px(24.0), px(4.0), Some(px(160.0))));
-    // The colour, beside its button.
-    let swatch = make(windows::core::w!("STATIC"), "", WS_BORDER, 0, fonts.ui);
-    let color = crate::border::BorderColor::from_hex(&prefs.viewer_background).map_or([0x24; 3], |c| c.0);
-    SETTINGS_SWATCH.with(|s| s.set((swatch.0 as isize, color)));
-    let note = label("The colour behind the photograph. Off, it follows the light or dark theme.", fonts.small);
-    notes.push(note);
-    rows.push((note, None, px(24.0), px(16.0), None));
-    let limit = check("Limit preview to 12 MP", SETTINGS_LIMIT, app.model.prefs.limits_preview());
-    rows.push((limit, Some(px(24.0)), 0, 0, None));
-    let note = label("Develops the preview faster on large photographs. Export keeps the full Image Size.", fonts.small);
-    notes.push(note);
-    rows.push((note, None, px(24.0), px(16.0), None));
-    let low_memory = check("Use less memory for export", SETTINGS_LOW_MEMORY, app.model.prefs.low_memory_export);
-    rows.push((low_memory, Some(px(24.0)), 0, 0, None));
-    let note = label("Develops the grain one colour at a time. Same result, less memory, longer export.", fonts.small);
-    notes.push(note);
-    rows.push((note, None, px(24.0), px(24.0), None));
-    rows.push((label("Updates", fonts.section), Some(px(24.0)), 0, px(8.0), None));
-    let mut automatic = HWND::default();
-    if configured {
-        automatic = check("Automatically check for updates", SETTINGS_AUTOMATIC, crate::updates::automatic());
-        rows.push((automatic, Some(px(24.0)), 0, 0, None));
-        let last = crate::updates::last_check().unwrap_or_else(|| "never".into());
-        let note = label(&format!("Updates are installed only when you choose to restart Negs. Last checked: {last}."), fonts.small);
-        notes.push(note);
-        rows.push((note, None, px(24.0), px(16.0), None));
-        let button = make(windows::core::w!("BUTTON"), "Check for Updates…", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), SETTINGS_CHECK, fonts.ui);
-        rows.push((button, Some(px(32.0)), px(24.0), px(8.0), Some(px(160.0))));
-    } else {
-        let note = label("Updates are not configured for this build.", fonts.small);
-        notes.push(note);
-        rows.push((note, None, 0, px(4.0), None));
-    }
-    SETTINGS_NOTES.with(|n| *n.borrow_mut() = notes.iter().map(|h| h.0 as isize).collect());
-    let mut y = pad;
-    for (control, height, indent, gap, fixed) in rows {
-        let w = fixed.unwrap_or(inner - indent);
-        let h = height.unwrap_or_else(|| wrapped_height(control, w));
-        unsafe {
-            let _ = MoveWindow(control, pad + indent, y, w, h, false);
-            if control == choose {
-                let side = px(20.0);
-                let _ = MoveWindow(swatch, pad + indent + w + px(12.0), y + (h - side) / 2, side, side, false);
-            }
-        }
-        y += h + gap;
-    }
-    set_new_photos_note(dialog, fresh);
-    let (button_w, button_h) = (px(88.0), px(32.0));
-    y += px(16.0);
-    let ok = make(windows::core::w!("BUTTON"), "OK", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), IDOK.0 as u16, fonts.ui);
-    let cancel = make(windows::core::w!("BUTTON"), "Cancel", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), IDCANCEL.0 as u16, fonts.ui);
-    unsafe {
-        let _ = MoveWindow(ok, width - pad - 2 * button_w - px(8.0), y, button_w, button_h, false);
-        let _ = MoveWindow(cancel, width - pad - button_w, y, button_w, button_h, false);
-        // Size the window around the client area, centred on the editor.
-        let mut frame = RECT { left: 0, top: 0, right: width, bottom: y + button_h + pad };
-        let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(&mut frame, style, false, ex, app.dpi);
-        let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
-        let mut owner = RECT::default();
-        let _ = GetWindowRect(app.main, &mut owner);
-        let (x, top) = (owner.left + (owner.right - owner.left - fw) / 2, owner.top + (owner.bottom - owner.top - fh) / 3);
-        let _ = SetWindowPos(dialog, None, x, top.max(owner.top), fw, fh, SWP_NOZORDER | SWP_NOACTIVATE);
-        SETTINGS_DONE.with(|d| d.set(None));
-        let _ = EnableWindow(app.main, false);
-        let _ = ShowWindow(dialog, SW_SHOW);
-        let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(previews);
-        let mut msg = MSG::default();
-        while SETTINGS_DONE.with(Cell::get).is_none() {
-            if !GetMessageW(&mut msg, None, 0, 0).as_bool() {
-                // WM_QUIT: leave it for the main loop.
-                PostQuitMessage(msg.wParam.0 as i32);
-                break;
-            }
-            if !IsDialogMessageW(dialog, &msg).as_bool() {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        }
-        let accepted = SETTINGS_DONE.with(Cell::get).unwrap_or(false);
-        let checked = |c: HWND| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
-        let (previews_on, keep_paper_on, automatic_on) = (checked(previews), checked(keep_paper), configured && checked(automatic));
-        let fresh_on = SendMessageW(new_photos, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 == 1;
-        let (match_on, limit_on, low_memory_on) = (checked(match_new), checked(limit), checked(low_memory));
-        let background_on = checked(custom_background);
-        let background = crate::border::BorderColor(SETTINGS_SWATCH.with(Cell::get).1);
-        let _ = EnableWindow(app.main, true);
-        let _ = DestroyWindow(dialog);
-        let _ = SetForegroundWindow(app.main);
-        if !accepted {
-            return;
-        }
-        if configured {
-            crate::updates::set_automatic(automatic_on);
-            app.model.prefs.check_for_updates = automatic_on;
-            app.model.prefs.save();
-        }
-        app.model.set_previews(previews_on);
-        app.model.set_keep_paper(keep_paper_on);
-        app.model.set_fresh_edits(fresh_on);
-        app.model.set_match_new_photos(match_on);
-        app.model.set_limit_preview(limit_on);
-        app.model.set_low_memory_export(low_memory_on);
-        let prefs = &mut app.model.prefs;
-        if prefs.viewer_background_custom != background_on || prefs.viewer_background != background.hex() {
-            prefs.viewer_background_custom = background_on;
-            prefs.viewer_background = background.hex();
-            prefs.save();
-        }
-        super::canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
-    }
-}
-
-/// The New photographs note for the choice in the open dialog.
-fn set_new_photos_note(dialog: HWND, fresh: bool) {
-    unsafe {
-        if let Ok(note) = GetDlgItem(dialog, SETTINGS_NEW_NOTE as i32) {
-            let text = wide(NEW_PHOTOS_NOTES[fresh as usize]);
-            let _ = SetWindowTextW(note, pcwstr(&text));
-        }
-    }
-}
-
-/// The height `control`'s text needs, wrapped at `width`.
-fn wrapped_height(control: HWND, width: i32) -> i32 {
-    use windows::Win32::Graphics::Gdi::*;
-    unsafe {
-        let mut text = [0u16; 512];
-        let n = GetWindowTextW(control, &mut text) as usize;
-        let dc = GetDC(control);
-        let font = HFONT(SendMessageW(control, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _);
-        let old = SelectObject(dc, font);
-        let mut r = RECT { left: 0, top: 0, right: width, bottom: 0 };
-        DrawTextW(dc, &mut text[..n], &mut r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-        SelectObject(dc, old);
-        ReleaseDC(control, dc);
-        r.bottom
-    }
-}
-
-extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    use windows::Win32::Graphics::Gdi::*;
-    unsafe {
-        match msg {
-            WM_COMMAND => {
-                let id = (wparam.0 & 0xffff) as i32;
-                if id == IDOK.0 || id == IDCANCEL.0 {
-                    SETTINGS_DONE.with(|d| d.set(Some(id == IDOK.0)));
-                } else if id == SETTINGS_NEW_PHOTOS as i32 && ((wparam.0 >> 16) & 0xffff) as u32 == CBN_DROPDOWN {
-                    super::theme::combo_list(HWND(lparam.0 as *mut _));
-                } else if id == SETTINGS_NEW_PHOTOS as i32 && ((wparam.0 >> 16) & 0xffff) as u32 == CBN_SELCHANGE {
-                    let fresh = SendMessageW(HWND(lparam.0 as *mut _), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 == 1;
-                    set_new_photos_note(hwnd, fresh);
-                } else if id == SETTINGS_CHECK as i32 {
-                    crate::updates::check(true);
-                } else if id == SETTINGS_BACKGROUND as i32 {
-                    let on = SendMessageW(HWND(lparam.0 as *mut _), BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
-                    if let Ok(choose) = GetDlgItem(hwnd, SETTINGS_BACKGROUND_COLOR as i32) {
-                        let _ = EnableWindow(choose, on);
-                    }
-                    let _ = InvalidateRect(HWND(SETTINGS_SWATCH.with(Cell::get).0 as *mut _), None, true);
-                } else if id == SETTINGS_BACKGROUND_COLOR as i32 {
-                    let (swatch, color) = SETTINGS_SWATCH.with(Cell::get);
-                    if let Some(chosen) = super::inspector::choose_color(hwnd, crate::border::BorderColor(color)) {
-                        SETTINGS_SWATCH.with(|s| s.set((swatch, chosen.0)));
-                        let _ = InvalidateRect(HWND(swatch as *mut _), None, true);
-                    }
-                }
-                LRESULT(0)
-            }
-            WM_CLOSE => {
-                SETTINGS_DONE.with(|d| d.set(Some(false)));
-                LRESULT(0)
-            }
-            WM_CTLCOLORLISTBOX => {
-                // The New Photographs list, as the column's lists.
-                let dc = HDC(wparam.0 as *mut _);
-                let p = super::theme::palette();
-                SetTextColor(dc, COLORREF(p.text));
-                SetBkColor(dc, COLORREF(p.control));
-                LRESULT(super::theme::brush(p.control).0 as isize)
-            }
-            WM_CTLCOLORSTATIC if lparam.0 == SETTINGS_SWATCH.with(Cell::get).0 => {
-                // The chosen colour, faded while the custom background is off.
-                let (_, [r, g, b]) = SETTINGS_SWATCH.with(Cell::get);
-                let on = GetDlgItem(hwnd, SETTINGS_BACKGROUND as i32).is_ok_and(|c| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1);
-                let p = super::theme::palette();
-                let color = if on { r as u32 | (g as u32) << 8 | (b as u32) << 16 } else { p.disabled };
-                LRESULT(super::theme::brush(color).0 as isize)
-            }
-            WM_CTLCOLORSTATIC => {
-                let dc = HDC(wparam.0 as *mut _);
-                SetBkMode(dc, TRANSPARENT);
-                let note = SETTINGS_NOTES.with(|n| n.borrow().contains(&lparam.0));
-                let p = super::theme::palette();
-                SetTextColor(dc, COLORREF(if note { p.secondary } else { p.text }));
-                LRESULT(super::theme::brush(p.panel).0 as isize)
-            }
-            WM_NOTIFY => super::draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
-            WM_ERASEBKGND => super::draw::erase(hwnd, wparam, super::theme::palette().panel),
-            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-        }
-    }
 }
 
 fn shell_item(path: &std::path::Path) -> Option<IShellItem> {
@@ -508,7 +234,101 @@ fn result_path(dialog: &IFileDialog) -> Option<PathBuf> {
     }
 }
 
-/// Starts in the current photograph's folder with it selected.
+/// Prep › Flat field › Choose…: the light frame, from the photograph's folder.
+pub fn choose_light_frame(owner: HWND, photo: Option<&std::path::Path>) -> Option<PathBuf> {
+    let photos: String = RAW_EXTENSIONS.iter().chain(IMAGE_EXTENSIONS).map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
+    let filters = [("Photographs", photos), ("All files", "*.*".into())];
+    let wide_filters: Vec<(Vec<u16>, Vec<u16>)> = filters.iter().map(|(n, p)| (wide(n), wide(p))).collect();
+    let specs: Vec<COMDLG_FILTERSPEC> = wide_filters.iter().map(|(n, p)| COMDLG_FILTERSPEC { pszName: pcwstr(n), pszSpec: pcwstr(p) }).collect();
+    unsafe {
+        (|| -> Option<PathBuf> {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            dialog.SetFileTypes(&specs).ok()?;
+            let title = wide("Choose Light Frame");
+            let _ = dialog.SetTitle(pcwstr(&title));
+            let _ = dialog.SetOptions(FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+            if let Some(folder) = photo.and_then(|p| p.parent()).and_then(shell_item) {
+                let _ = dialog.SetFolder(&folder);
+            }
+            dialog.Show(owner).ok()?;
+            result_path(&dialog.cast().ok()?)
+        })()
+    }
+}
+
+/// Ctrl+O's Open Folder button. Windows' open dialog picks files or
+/// folders, never either (the Mac's picks either), so the button opens the
+/// folder selected in it, else the one it shows.
+const OPEN_FOLDER: u32 = 1;
+
+#[implement(IFileDialogEvents, IFileDialogControlEvents)]
+struct OpenEvents {
+    folder: Rc<RefCell<Option<PathBuf>>>,
+}
+
+/// The folder an item is, if it is one on disk (not a zip file).
+fn folder_path(item: &IShellItem) -> Option<PathBuf> {
+    unsafe {
+        let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = PathBuf::from(name.to_string().ok()?);
+        CoTaskMemFree(Some(name.0 as *const _));
+        path.is_dir().then_some(path)
+    }
+}
+
+impl IFileDialogEvents_Impl for OpenEvents_Impl {
+    fn OnFileOk(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnFolderChanging(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnFolderChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnSelectionChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnShareViolation(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<FDE_SHAREVIOLATION_RESPONSE> {
+        Ok(FDESVR_DEFAULT)
+    }
+    fn OnTypeChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnOverwrite(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<FDE_OVERWRITE_RESPONSE> {
+        Ok(FDEOR_DEFAULT)
+    }
+}
+
+impl IFileDialogControlEvents_Impl for OpenEvents_Impl {
+    fn OnItemSelected(&self, _: Option<&IFileDialogCustomize>, _: u32, _: u32) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnButtonClicked(&self, customize: Option<&IFileDialogCustomize>, control: u32) -> windows::core::Result<()> {
+        if control != OPEN_FOLDER {
+            return Ok(());
+        }
+        let Some(dialog) = customize.and_then(|c| c.cast::<IFileDialog>().ok()) else { return Ok(()) };
+        unsafe {
+            let selected = dialog.GetCurrentSelection().ok().and_then(|item| folder_path(&item));
+            let folder = selected.or_else(|| dialog.GetFolder().ok().and_then(|item| folder_path(&item)));
+            if folder.is_some() {
+                *self.folder.borrow_mut() = folder;
+                let _ = dialog.Close(windows::core::HRESULT::from_win32(ERROR_CANCELLED.0));
+            }
+        }
+        Ok(())
+    }
+    fn OnCheckButtonToggled(&self, _: Option<&IFileDialogCustomize>, _: u32, _: BOOL) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnControlActivating(&self, _: Option<&IFileDialogCustomize>, _: u32) -> windows::core::Result<()> {
+        Ok(())
+    }
+}
+
+/// Starts in the current photograph's folder with it selected. Opens a
+/// photograph, or a folder with the Open Folder button.
 pub fn open(app: &mut App) {
     let photos: String = RAW_EXTENSIONS.iter().chain(IMAGE_EXTENSIONS).map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
     let raw: String = RAW_EXTENSIONS.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
@@ -522,14 +342,19 @@ pub fn open(app: &mut App) {
     ];
     let wide_filters: Vec<(Vec<u16>, Vec<u16>)> = filters.iter().map(|(n, p)| (wide(n), wide(p))).collect();
     let specs: Vec<COMDLG_FILTERSPEC> = wide_filters.iter().map(|(n, p)| COMDLG_FILTERSPEC { pszName: pcwstr(n), pszSpec: pcwstr(p) }).collect();
+    let folder = Rc::new(RefCell::new(None));
+    let events: IFileDialogEvents = OpenEvents { folder: folder.clone() }.into();
     let chosen = unsafe {
         (|| -> Option<PathBuf> {
             let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
             dialog.SetClientGuid(&OPEN_GUID).ok()?;
             dialog.SetFileTypes(&specs).ok()?;
-            let title = wide("Open Photograph");
+            let title = wide("Open Photograph or Folder");
             let _ = dialog.SetTitle(pcwstr(&title));
             let _ = dialog.SetOptions(FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+            if let Ok(customize) = dialog.cast::<IFileDialogCustomize>() {
+                let _ = customize.AddPushButton(OPEN_FOLDER, w!("Open Folder"));
+            }
             if let Some(source) = &app.model.source {
                 if let Some(folder) = source.parent().and_then(shell_item) {
                     let _ = dialog.SetFolder(&folder);
@@ -537,12 +362,32 @@ pub fn open(app: &mut App) {
                 let name = wide(source.file_name().unwrap_or_default());
                 let _ = dialog.SetFileName(pcwstr(&name));
             }
-            dialog.Show(app.main).ok()?;
+            let cookie = dialog.Advise(&events).ok();
+            let shown = dialog.Show(app.main);
+            if let Some(cookie) = cookie {
+                let _ = dialog.Unadvise(cookie);
+            }
+            if let Some(folder) = folder.borrow_mut().take() {
+                return Some(folder);
+            }
+            shown.ok()?;
             result_path(&dialog.cast().ok()?)
         })()
     };
     if let Some(path) = chosen {
-        app.model.open(&path);
+        open_path(app, &path);
+    }
+}
+
+/// Opens a photograph, or a folder on its first photograph in the grid
+/// (Mac `open(_:)`): from Ctrl+O and from a drop.
+pub fn open_path(app: &mut App, path: &std::path::Path) {
+    if path.is_dir() {
+        if app.model.open_folder(path) {
+            super::grid::open(app);
+        }
+    } else {
+        app.model.open(path);
     }
 }
 
@@ -555,11 +400,54 @@ const DEPTH: u32 = 6;
 const SPACE: u32 = 7;
 const QUALITY: u32 = 8;
 const QUALITY_RANGE_TEXT: u32 = 9;
-const GROUP_ENGINE: u32 = 10;
-const GROUP_SIZE: u32 = 11;
-const GROUP_DEPTH: u32 = 12;
-const GROUP_SPACE: u32 = 13;
-const GROUP_QUALITY: u32 = 14;
+// Each control's label, a text of its own above it: the dialog draws
+// visual groups' labels itself, too dim to read in its dark mode. Each
+// label and its control share a visual group without a label (the label's
+// id + IN_GROUP), which keeps them in one column.
+const LABEL_ENGINE: u32 = 10;
+const LABEL_SIZE: u32 = 11;
+const LABEL_DEPTH: u32 = 12;
+const LABEL_SPACE: u32 = 13;
+const LABEL_QUALITY: u32 = 14;
+// A batch's own rows (`batch`).
+const FORMAT: u32 = 15;
+const NAMING: u32 = 16;
+const CUSTOM: u32 = 17;
+const EXAMPLE: u32 = 18;
+const EXISTING: u32 = 19;
+const LABEL_FORMAT: u32 = 20;
+const LABEL_NAMING: u32 = 21;
+const LABEL_EXISTING: u32 = 22;
+const IN_GROUP: u32 = 100;
+const BATCH_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a007);
+
+/// A batch's File Name and If a File Exists rows (the Mac's `BatchRows`):
+/// the first photograph's name shows what the naming does.
+struct BatchRows {
+    count: usize,
+    /// The first photograph's `{name}` and `{film}`.
+    first: (String, String),
+    naming: Cell<crate::batch::Naming>,
+    custom: RefCell<String>,
+    existing: Cell<crate::batch::Existing>,
+}
+
+impl BatchRows {
+    fn example(&self, format: OutputFormat) -> String {
+        let options = crate::batch::Options { format: format.key().into(), naming: self.naming.get(), custom: self.custom.borrow().clone(), ..Default::default() };
+        format!("For example: {}", options.file_name(&self.first.0, &self.first.1))
+    }
+}
+
+fn edit_text(customize: &IFileDialogCustomize, id: u32) -> Option<String> {
+    unsafe {
+        customize.GetEditBoxText(id).ok().map(|p| {
+            let text = PWSTR(p).to_string().unwrap_or_default();
+            CoTaskMemFree(Some(p as *const _));
+            text
+        })
+    }
+}
 
 /// The dialog's message, from what the model says about this save.
 struct Messages {
@@ -611,6 +499,22 @@ struct SaveEvents {
     messages: Messages,
     encoding: Rc<Encoding>,
     extras: String,
+    /// A batch: the format is a list, and the naming rows show.
+    batch: Option<Rc<BatchRows>>,
+    /// Whether the dialog's own controls were found once it showed
+    /// (`dialog_look::dress`), and the batch's example among them.
+    dressed: Cell<bool>,
+    example: Cell<Option<HWND>>,
+}
+
+/// The pixel field and its "px" show only for a long or short edge, as on
+/// the Mac.
+fn show_pixels(customize: &IFileDialogCustomize, size: ExportSize) {
+    let state = if size.edge == Edge::Full { CDCS_INACTIVE } else { CDCS_ENABLEDVISIBLE };
+    unsafe {
+        let _ = customize.SetControlState(PIXELS, state);
+        let _ = customize.SetControlState(PX, state);
+    }
 }
 
 impl SaveEvents {
@@ -623,10 +527,12 @@ impl SaveEvents {
         encoding.updating.set(true);
         unsafe {
             let _ = customize.SetSelectedControlItem(DEPTH, if settings.bit_depth == 16 { 1 } else { 0 });
-            let _ = customize.SetControlState(DEPTH, if jpeg { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            for id in [LABEL_DEPTH, DEPTH] {
+                let _ = customize.SetControlState(id, if jpeg { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            }
             let _ = customize.SetControlItemState(SPACE, PROPHOTO as u32, if settings.bit_depth == 16 { CDCS_ENABLEDVISIBLE } else { CDCS_VISIBLE });
             let _ = customize.SetSelectedControlItem(SPACE, settings.color_space as u32);
-            for id in [GROUP_QUALITY, QUALITY, QUALITY_RANGE_TEXT] {
+            for id in [LABEL_QUALITY + IN_GROUP, LABEL_QUALITY, QUALITY, QUALITY_RANGE_TEXT] {
                 let _ = customize.SetControlState(id, if jpeg { CDCS_ENABLEDVISIBLE } else { CDCS_INACTIVE });
             }
         }
@@ -642,6 +548,24 @@ impl SaveEvents {
                 None
             };
             let size = read_size(customize);
+            if let Some(rows) = &self.batch {
+                // The batch's own words (`batch::message`), and its naming's example.
+                let custom = rows.naming.get() == crate::batch::Naming::Custom;
+                let _ = customize.SetControlState(CUSTOM, if custom { CDCS_ENABLEDVISIBLE } else { CDCS_INACTIVE });
+                if let Some(text) = edit_text(customize, CUSTOM) {
+                    *rows.custom.borrow_mut() = text;
+                }
+                let example = rows.example(self.encoding.format.get());
+                let _ = customize.SetControlLabel(EXAMPLE, pcwstr(&wide(&example)));
+                if let Some(shown) = self.example.get() {
+                    super::dialog_look::set_fitted(shown, &example);
+                }
+                let settings = self.encoding.settings(customize);
+                let text = wide(crate::batch::message(rows.count, engine.unwrap_or(ExportEngine::Fast), size, settings, &self.encoding.preview_space));
+                let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
+                show_pixels(customize, size);
+                return;
+            }
             let lead = match engine {
                 Some(ExportEngine::Reference) => &self.messages.reference,
                 Some(ExportEngine::Fast) => &self.messages.fast,
@@ -651,7 +575,7 @@ impl SaveEvents {
             let space = self.encoding.settings(customize).summary(self.export, &self.encoding.preview_space).map(|s| format!(" {s}.")).unwrap_or_default();
             let text = wide(format!("{lead}{}{summary}{space}", self.extras));
             let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
-            let _ = customize.SetControlState(PIXELS, if size.edge == Edge::Full { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
+            show_pixels(customize, size);
         }
     }
 }
@@ -695,13 +619,31 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
     fn OnFileOk(&self, dialog: Option<&IFileDialog>) -> windows::core::Result<()> {
         if let Some(customize) = dialog.and_then(|d| d.cast::<IFileDialogCustomize>().ok()) {
             self.encoding.typed.set(Some((read_size(&customize), read_quality(&customize))));
+            if let Some(rows) = &self.batch {
+                if let Some(text) = edit_text(&customize, CUSTOM) {
+                    *rows.custom.borrow_mut() = text;
+                }
+                let existing = unsafe { customize.GetSelectedControlItem(EXISTING) }.unwrap_or(0) as usize;
+                rows.existing.set(crate::batch::Existing::ALL[existing.min(2)]);
+            }
         }
         Ok(())
     }
     fn OnFolderChanging(&self, _: Option<&IFileDialog>, _: Option<&IShellItem>) -> windows::core::Result<()> {
         Ok(())
     }
-    fn OnFolderChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
+    /// The first is once the dialog is up: its own controls are found and,
+    /// in a dark theme, recoloured, and the example is fitted.
+    fn OnFolderChange(&self, dialog: Option<&IFileDialog>) -> windows::core::Result<()> {
+        let Some(dialog) = dialog else { return Ok(()) };
+        if self.dressed.replace(true) {
+            return Ok(());
+        }
+        let dressed = super::dialog_look::dress(dialog);
+        self.example.set(dressed.example);
+        if let Ok(customize) = dialog.cast::<IFileDialogCustomize>() {
+            self.message(&customize);
+        }
         Ok(())
     }
     fn OnSelectionChange(&self, _: Option<&IFileDialog>) -> windows::core::Result<()> {
@@ -759,6 +701,16 @@ impl IFileDialogControlEvents_Impl for SaveEvents_Impl {
             SPACE => {
                 encoding.chosen_space.set(item as usize);
                 self.sync(customize);
+            }
+            FORMAT => {
+                encoding.format.set(OutputFormat::ALL[(item as usize).min(2)]);
+                self.sync(customize);
+            }
+            NAMING => {
+                if let Some(rows) = &self.batch {
+                    rows.naming.set(crate::batch::Naming::ALL[(item as usize).min(2)]);
+                }
+                self.message(customize);
             }
             _ => self.message(customize),
         }
@@ -840,6 +792,9 @@ pub fn save(app: &mut App, export: bool) {
         messages: Messages { reference: lead(Some(ExportEngine::Reference)), fast: lead(Some(ExportEngine::Fast)), preview: lead(None) },
         encoding: encoding.clone(),
         extras,
+        batch: None,
+        dressed: Cell::new(false),
+        example: Cell::new(None),
     }
     .into();
     let name = model.default_name(format);
@@ -867,7 +822,8 @@ pub fn save(app: &mut App, export: bool) {
             let customize: IFileDialogCustomize = dialog.cast().ok()?;
             if export {
                 let label = wide("Engine:");
-                let _ = customize.StartVisualGroup(GROUP_ENGINE, pcwstr(&label));
+                let _ = customize.StartVisualGroup(LABEL_ENGINE + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_ENGINE, pcwstr(&label));
                 let _ = customize.AddComboBox(ENGINE);
                 for (i, e) in ExportEngine::ALL.iter().enumerate() {
                     let t = wide(e.title());
@@ -877,7 +833,8 @@ pub fn save(app: &mut App, export: bool) {
                 let _ = customize.EndVisualGroup();
             }
             let label = wide("Size:");
-            let _ = customize.StartVisualGroup(GROUP_SIZE, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_SIZE + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_SIZE, pcwstr(&label));
             let _ = customize.AddComboBox(SIZE);
             for (i, edge) in Edge::ALL.iter().enumerate() {
                 let t = wide(edge.title());
@@ -890,7 +847,8 @@ pub fn save(app: &mut App, export: bool) {
             let _ = customize.AddText(PX, pcwstr(&px));
             let _ = customize.EndVisualGroup();
             let label = wide("Bit depth:");
-            let _ = customize.StartVisualGroup(GROUP_DEPTH, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_DEPTH + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_DEPTH, pcwstr(&label));
             let _ = customize.AddComboBox(DEPTH);
             for (i, title) in ["8-bit", "16-bit"].iter().enumerate() {
                 let t = wide(title);
@@ -898,7 +856,8 @@ pub fn save(app: &mut App, export: bool) {
             }
             let _ = customize.EndVisualGroup();
             let label = wide("Colour space:");
-            let _ = customize.StartVisualGroup(GROUP_SPACE, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_SPACE + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_SPACE, pcwstr(&label));
             let _ = customize.AddComboBox(SPACE);
             for (i, title) in COLOR_SPACES.iter().enumerate() {
                 let t = wide(if i == PROPHOTO { "ProPhoto RGB (16-bit)" } else { title });
@@ -906,7 +865,8 @@ pub fn save(app: &mut App, export: bool) {
             }
             let _ = customize.EndVisualGroup();
             let label = wide("JPEG quality:");
-            let _ = customize.StartVisualGroup(GROUP_QUALITY, pcwstr(&label));
+            let _ = customize.StartVisualGroup(LABEL_QUALITY + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_QUALITY, pcwstr(&label));
             let text = wide(quality.to_string());
             let _ = customize.AddEditBox(QUALITY, pcwstr(&text));
             let range = wide(format!("({}–{})", QUALITY_RANGE.0, QUALITY_RANGE.1));
@@ -950,6 +910,164 @@ pub fn save(app: &mut App, export: bool) {
     } else {
         app.model.save_preview(path, size, settings);
     }
+}
+
+/// Export from the grid's selection (the Mac's batch panel): a folder, the
+/// format, engine, size and encoding of a single export, and how the files
+/// are named and what happens when one of that name exists. Each
+/// photograph then develops with its own edits (`Model::export_batch`).
+pub fn batch(app: &mut App) {
+    use crate::batch::{Existing, Naming, Options};
+    let model = &app.model;
+    let targets = model.export_targets();
+    if !model.can_start_batch() || targets.is_empty() {
+        return;
+    }
+    let prefs = &model.prefs;
+    let format = OutputFormat::from_key(&prefs.output_format);
+    let engine = ExportEngine::from_key(&prefs.export_engine);
+    let size = ExportSize { edge: Edge::from_key(&prefs.export_edge), pixels: prefs.export_edge_pixels.clamp(PIXEL_RANGE.0, PIXEL_RANGE.1) };
+    let depth = |d: u32| if d == 16 { 16 } else { 8 };
+    let encoding = Rc::new(Encoding {
+        format: Cell::new(format),
+        chosen_space: Cell::new(COLOR_SPACES.iter().position(|s| *s == prefs.color_space).unwrap_or(0)),
+        preview_space: model.preview_space().to_string(),
+        png_depth: Cell::new(depth(prefs.png_bit_depth)),
+        tiff_depth: Cell::new(depth(prefs.tiff_bit_depth)),
+        updating: Cell::new(false),
+        typed: Cell::new(None),
+    });
+    let quality = prefs.jpeg_quality.clamp(QUALITY_RANGE.0, QUALITY_RANGE.1);
+    // The first photograph's name, to show what the naming does.
+    let first = model.batch_items(&targets[..1], &Options::default()).into_iter().next();
+    let first = first.map(|i| (crate::batch::batch_name(&i.photo, &i.title), i.state.film)).unwrap_or_default();
+    let rows = Rc::new(BatchRows {
+        count: targets.len(),
+        first,
+        naming: Cell::new(Naming::from_key(&prefs.batch_naming)),
+        custom: RefCell::new(if prefs.batch_custom_name.is_empty() { "{name}_{film}".into() } else { prefs.batch_custom_name.clone() }),
+        existing: Cell::new(Existing::from_key(&prefs.batch_existing)),
+    });
+    let events: IFileDialogEvents = SaveEvents {
+        export: true,
+        messages: Messages { reference: String::new(), fast: String::new(), preview: String::new() },
+        encoding: encoding.clone(),
+        extras: String::new(),
+        batch: Some(rows.clone()),
+        dressed: Cell::new(false),
+        example: Cell::new(None),
+    }
+    .into();
+    let folder = prefs.save_folder().map(|p| p.to_path_buf());
+    let main = app.main;
+    let count = targets.len();
+    let chosen = unsafe {
+        (|| -> Option<(PathBuf, ExportEngine, ExportSize, SaveSettings)> {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            dialog.SetClientGuid(&BATCH_GUID).ok()?;
+            let _ = dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+            let title = wide(if count == 1 { "Export Photograph".to_string() } else { format!("Export {count} Photographs") });
+            let _ = dialog.SetTitle(pcwstr(&title));
+            let ok = wide("Export");
+            let _ = dialog.SetOkButtonLabel(pcwstr(&ok));
+            if let Some(folder) = folder.as_deref().and_then(shell_item) {
+                let _ = dialog.SetFolder(&folder);
+            }
+            let customize: IFileDialogCustomize = dialog.cast().ok()?;
+            let combo = |label_id: u32, label: &str, id: u32, items: &[&str], selected: usize| {
+                let label = wide(label);
+                let _ = customize.StartVisualGroup(label_id + IN_GROUP, w!(""));
+                let _ = customize.AddText(label_id, pcwstr(&label));
+                let _ = customize.AddComboBox(id);
+                for (i, title) in items.iter().enumerate() {
+                    let t = wide(title);
+                    let _ = customize.AddControlItem(id, i as u32, pcwstr(&t));
+                }
+                let _ = customize.SetSelectedControlItem(id, selected as u32);
+            };
+            let formats: Vec<&str> = OutputFormat::ALL.iter().map(|f| f.title()).collect();
+            combo(LABEL_FORMAT, "Format:", FORMAT, &formats, OutputFormat::ALL.iter().position(|f| *f == format).unwrap_or(0));
+            let _ = customize.EndVisualGroup();
+            let engines: Vec<&str> = ExportEngine::ALL.iter().map(|e| e.title()).collect();
+            combo(LABEL_ENGINE, "Engine:", ENGINE, &engines, if engine == ExportEngine::Reference { 0 } else { 1 });
+            let _ = customize.EndVisualGroup();
+            let edges: Vec<&str> = Edge::ALL.iter().map(|e| e.title()).collect();
+            combo(LABEL_SIZE, "Size:", SIZE, &edges, Edge::ALL.iter().position(|e| *e == size.edge).unwrap_or(0));
+            let pixels = wide(size.pixels.to_string());
+            let _ = customize.AddEditBox(PIXELS, pcwstr(&pixels));
+            let px = wide("px");
+            let _ = customize.AddText(PX, pcwstr(&px));
+            let _ = customize.EndVisualGroup();
+            combo(LABEL_DEPTH, "Bit depth:", DEPTH, &["8-bit", "16-bit"], 0);
+            let _ = customize.EndVisualGroup();
+            let spaces: Vec<&str> = COLOR_SPACES.iter().enumerate().map(|(i, s)| if i == PROPHOTO { "ProPhoto RGB (16-bit)" } else { s }).collect();
+            combo(LABEL_SPACE, "Colour space:", SPACE, &spaces, encoding.chosen_space.get());
+            let _ = customize.EndVisualGroup();
+            let label = wide("JPEG quality:");
+            let _ = customize.StartVisualGroup(LABEL_QUALITY + IN_GROUP, w!(""));
+                let _ = customize.AddText(LABEL_QUALITY, pcwstr(&label));
+            let text = wide(quality.to_string());
+            let _ = customize.AddEditBox(QUALITY, pcwstr(&text));
+            let range = wide(format!("({}–{})", QUALITY_RANGE.0, QUALITY_RANGE.1));
+            let _ = customize.AddText(QUALITY_RANGE_TEXT, pcwstr(&range));
+            let _ = customize.EndVisualGroup();
+            let namings: Vec<&str> = Naming::ALL.iter().map(|n| n.title()).collect();
+            combo(LABEL_NAMING, "File name:", NAMING, &namings, Naming::ALL.iter().position(|n| *n == rows.naming.get()).unwrap_or(0));
+            let custom = wide(rows.custom.borrow().as_str());
+            let _ = customize.AddEditBox(CUSTOM, pcwstr(&custom));
+            let empty = wide("");
+            let _ = customize.AddText(EXAMPLE, pcwstr(&empty));
+            let _ = customize.EndVisualGroup();
+            let existing: Vec<&str> = Existing::ALL.iter().map(|e| e.title()).collect();
+            combo(LABEL_EXISTING, "If a file exists:", EXISTING, &existing, Existing::ALL.iter().position(|e| *e == rows.existing.get()).unwrap_or(0));
+            let _ = customize.EndVisualGroup();
+            let _ = customize.AddText(MESSAGE, pcwstr(&empty));
+            let cookie = dialog.Advise(&events).ok();
+            // The encoding controls, the example and the message before it shows.
+            if let Ok(inner) = events.cast::<IFileDialogControlEvents>() {
+                let _ = inner.OnItemSelected(&customize, FORMAT, OutputFormat::ALL.iter().position(|f| *f == format).unwrap_or(0) as u32);
+            }
+            let shown = dialog.Show(main);
+            if let Some(cookie) = cookie {
+                let _ = dialog.Unadvise(cookie);
+            }
+            shown.ok()?;
+            let path = result_path(&dialog.cast().ok()?)?;
+            let chosen_engine = if customize.GetSelectedControlItem(ENGINE).unwrap_or(1) == 0 { ExportEngine::Reference } else { ExportEngine::Fast };
+            Some((path, chosen_engine, encoding.size(&customize), encoding.settings(&customize)))
+        })()
+    };
+    let Some((folder, chosen_engine, size, settings)) = chosen else { return };
+    let format = encoding.format.get();
+    let prefs = &mut app.model.prefs;
+    prefs.output_format = format.key().into();
+    prefs.color_space = COLOR_SPACES[encoding.chosen_space.get()].into();
+    prefs.png_bit_depth = encoding.png_depth.get();
+    prefs.tiff_bit_depth = encoding.tiff_depth.get();
+    prefs.jpeg_quality = settings.jpeg_quality;
+    prefs.export_edge = size.edge.key().into();
+    prefs.export_edge_pixels = size.pixels;
+    prefs.last_save_folder = Some(folder.clone());
+    prefs.export_engine = chosen_engine.key().into();
+    prefs.batch_naming = rows.naming.get().key().into();
+    prefs.batch_custom_name = rows.custom.borrow().clone();
+    prefs.batch_existing = rows.existing.get().key().into();
+    prefs.save();
+    let options = Options {
+        format: format.key().into(),
+        engine: chosen_engine.key().into(),
+        edge: size.edge.key().into(),
+        pixels: size.pixels,
+        bit_depth: settings.bit_depth,
+        color_space: settings.color_space,
+        jpeg_quality: settings.jpeg_quality,
+        naming: rows.naming.get(),
+        custom: rows.custom.borrow().clone(),
+        existing: rows.existing.get(),
+        low_memory: prefs.low_memory_export,
+        lightroom: None,
+    };
+    app.model.export_batch(targets, folder, options, None);
 }
 
 /// Import Presets…: several files, saved by Negs or by spektrafilm.

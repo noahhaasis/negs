@@ -87,7 +87,8 @@ struct Photo {
     clip: vec4f,
     // the quad drawn, on screen
     quad: vec4f,
-    // x: dimming outside the crop while cropping, y: 1 for a Rec. 2020 proxy
+    // x: the shade's opacity outside the crop while cropping, y: 1 for a Rec. 2020 proxy,
+    // z: 1 when mirrored left to right before the quarter turns (io.flip)
     extra: vec4f,
 };
 @group(2) @binding(0) var<uniform> photo: Photo;
@@ -131,18 +132,23 @@ fn photo_fs(in: PhotoOut) -> @location(0) vec4f {
     for (var i = 0u; i < turns; i++) {
         f = vec2f(f.y, 1.0 - f.x);
     }
+    if (photo.extra.z > 0.5) {
+        f.x = 1.0 - f.x;
+    }
     var rgb = textureSample(image, image_sampler, f).rgb;
     if (photo.extra.y > 0.5) {
         rgb = REC2020_TO_SRGB * rgb;
     }
+    var shown = present(rgb);
     if (photo.shown.w > 0.5) {
         let clip = photo.clip;
         let outside = t.x < clip.x || t.y < clip.y || t.x > clip.x + clip.z || t.y > clip.y + clip.w;
         if (outside) {
-            rgb = rgb * photo.extra.x;
+            // rgba(8, 7, 6, .6) over it, as Core Animation blends: encoded.
+            shown = mix(shown, present(decode_srgb(vec3f(8.0, 7.0, 6.0) / 255.0)), photo.extra.x);
         }
     }
-    return vec4f(present(rgb), alpha);
+    return vec4f(shown, alpha);
 }
 
 // MARK: Quads
@@ -152,7 +158,8 @@ struct Quad {
     @location(1) uv: vec4f,
     // sRGB-encoded colour and alpha
     @location(2) color: vec4f,
-    // x: corner radius, y: stroke width (0 fills), z: flags (1 textured, 2 turned anticlockwise, 4 coverage mask)
+    // x: corner radius, y: stroke width (0 fills), z: flags (1 textured, 2 turned anticlockwise, 4 coverage mask),
+    // w: a Gaussian blur's deviation (the rectangle reaches 3 of them past the shape)
     @location(3) params: vec4f,
 };
 
@@ -188,6 +195,17 @@ fn rounded_box(p: vec2f, half: vec2f, radius: f32) -> f32 {
     return length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - radius;
 }
 
+// The error function, to within 3e-7 (Abramowitz and Stegun 7.1.26's
+// sharper cousin, 7.1.28).
+fn erf(x: f32) -> f32 {
+    let a = abs(x);
+    let t = 1.0 + a * (0.0705230784 + a * (0.0422820123 + a * (0.0092705272 + a * (0.0001520143 + a * (0.0002765672 + a * 0.0000430638)))));
+    let t2 = t * t;
+    let t4 = t2 * t2;
+    let t8 = t4 * t4;
+    return sign(x) * (1.0 - 1.0 / (t8 * t8));
+}
+
 @fragment
 fn quad_fs(in: QuadOut) -> @location(0) vec4f {
     let flags = u32(in.params.z + 0.5);
@@ -202,7 +220,12 @@ fn quad_fs(in: QuadOut) -> @location(0) vec4f {
     }
     let radius = in.params.x;
     let stroke = in.params.y;
-    if (radius > 0.0 || stroke > 0.0) {
+    let blur = in.params.w;
+    if (blur > 0.0) {
+        // A blurred rounded rectangle: its edge, a Gaussian across.
+        let d = rounded_box(in.local - in.size * 0.5, in.size * 0.5 - 3.0 * blur, radius);
+        color.a = color.a * 0.5 * (1.0 - erf(d / (blur * 1.41421356)));
+    } else if (radius > 0.0 || stroke > 0.0) {
         let d = rounded_box(in.local - in.size * 0.5, in.size * 0.5, radius);
         var coverage = clamp(0.5 - d, 0.0, 1.0);
         if (stroke > 0.0) {
@@ -234,6 +257,81 @@ fn mip_fs(in: MipOut) -> @location(0) vec4f {
     return textureSampleLevel(image, image_sampler, in.uv, 0.0);
 }
 "#;
+
+/// The fitted view's exact-size picture (ticket 38, `exact_fit.rs`):
+/// Pillow's Lanczos-3 along one axis, in linear light, reading mip 0.
+const LANCZOS_SHADER: &str = r#"
+struct Params {
+    // the input's and the output's size, in pixels
+    sizes: vec4f,
+    // x: 0 across, 1 down
+    axis: vec4f,
+};
+@group(0) @binding(0) var source: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> params: Params;
+
+@vertex
+fn lanczos_vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
+    let uv = vec2f(f32((index << 1u) & 2u), f32(index & 2u));
+    return vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
+}
+
+fn sinc(x: f32) -> f32 {
+    if (x == 0.0) {
+        return 1.0;
+    }
+    let p = x * 3.14159265358979;
+    return sin(p) / p;
+}
+
+@fragment
+fn lanczos_fs(@builtin(position) position: vec4f) -> @location(0) vec4f {
+    let p = vec2i(floor(position.xy));
+    let across = params.axis.x < 0.5;
+    let input = select(params.sizes.y, params.sizes.x, across);
+    let output = select(params.sizes.w, params.sizes.z, across);
+    let o = select(p.y, p.x, across);
+    // Pillow's precompute_coeffs: the kernel widened by the reduction, cut
+    // at the edges and renormalised.
+    let scale = input / output;
+    let filterscale = max(scale, 1.0);
+    let support = 3.0 * filterscale;
+    let ss = 1.0 / filterscale;
+    let center = (f32(o) + 0.5) * scale;
+    let first = max(i32(center - support + 0.5), 0);
+    let last = min(i32(center + support + 0.5), i32(input));
+    var sum = vec3f(0.0);
+    var total = 0.0;
+    for (var i = first; i < last; i++) {
+        let x = (f32(i) - center + 0.5) * ss;
+        var w = 0.0;
+        if (x >= -3.0 && x < 3.0) {
+            w = sinc(x) * sinc(x / 3.0);
+        }
+        let at = select(vec2i(p.x, i), vec2i(i, p.y), across);
+        sum += w * textureLoad(source, at, 0).rgb;
+        total += w;
+    }
+    if (total != 0.0) {
+        sum = sum / total;
+    }
+    return vec4f(sum, 1.0);
+}
+"#;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default, Debug)]
+struct LanczosParams {
+    sizes: [f32; 4],
+    axis: [f32; 4],
+}
+
+/// The two passes, made the first time a fitted view wants them.
+struct Lanczos {
+    layout: wgpu::BindGroupLayout,
+    across: wgpu::RenderPipeline,
+    down: wgpu::RenderPipeline,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Default, Debug)]
@@ -279,6 +377,11 @@ impl QuadInstance {
     pub fn text(rect: [f32; 4], color: [f32; 4]) -> Self {
         Self { rect, uv: [0.0, 0.0, 1.0, 1.0], color, params: [0.0, 0.0, TEXTURED + MASK, 0.0] }
     }
+    /// A rounded rectangle blurred with a Gaussian of deviation `blur`:
+    /// `rect` reaches 3 deviations past the shape on every side.
+    pub fn blurred(rect: [f32; 4], color: [f32; 4], radius: f32, blur: f32) -> Self {
+        Self { rect, uv: [0.0, 0.0, 1.0, 1.0], color, params: [radius, 0.0, 0.0, blur] }
+    }
 }
 
 /// A texture ready to draw.
@@ -288,7 +391,10 @@ pub struct GpuImage {
 }
 
 pub struct Gpu {
+    // Held for as long as the device, never read.
+    #[allow(dead_code)]
     pub instance: wgpu::Instance,
+    #[allow(dead_code)]
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -304,6 +410,7 @@ pub struct Gpu {
     photo_pipeline: wgpu::RenderPipeline,
     quad_pipeline: wgpu::RenderPipeline,
     white: OnceLock<GpuImage>,
+    lanczos: OnceLock<Lanczos>,
 }
 
 static SHARED: OnceLock<Arc<Gpu>> = OnceLock::new();
@@ -491,7 +598,137 @@ impl Gpu {
             photo_pipeline,
             quad_pipeline,
             white: OnceLock::new(),
+            lanczos: OnceLock::new(),
         }
+    }
+
+    fn lanczos_passes(&self) -> &Lanczos {
+        self.lanczos.get_or_init(|| {
+            let device = &self.device;
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("lanczos"), source: wgpu::ShaderSource::Wgsl(LANCZOS_SHADER.into()) });
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("lanczos"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                        count: None,
+                    },
+                ],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("lanczos"), bind_group_layouts: &[&layout], push_constant_ranges: &[] });
+            let pipeline = |format: wgpu::TextureFormat| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("lanczos"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState { module: &module, entry_point: Some("lanczos_vs"), compilation_options: Default::default(), buffers: &[] },
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("lanczos_fs"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(format.into())],
+                    }),
+                    multiview: None,
+                    cache: None,
+                })
+            };
+            Lanczos { across: pipeline(wgpu::TextureFormat::Rgba16Float), down: pipeline(PHOTO_FORMAT), layout }
+        })
+    }
+
+    /// `source` (`sw` × `sh`) resampled to exactly `tw` × `th` with
+    /// Lanczos-3 in linear light (ticket 38): across into a half-float
+    /// texture, then down into an sRGB one with no mips, for drawing 1:1.
+    pub fn lanczos(&self, source: &GpuImage, sw: u32, sh: u32, tw: u32, th: u32) -> GpuImage {
+        let passes = self.lanczos_passes();
+        let device = &self.device;
+        let texture = |label, w, h, format| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        };
+        let middle = texture("lanczos across", tw, sh, wgpu::TextureFormat::Rgba16Float);
+        let exact = texture("exact fit", tw, th, PHOTO_FORMAT);
+        let source_view = source.texture.create_view(&wgpu::TextureViewDescriptor { base_mip_level: 0, mip_level_count: Some(1), ..Default::default() });
+        let middle_view = middle.create_view(&Default::default());
+        let exact_view = exact.create_view(&Default::default());
+        let sizes = [sw as f32, sh as f32, tw as f32, th as f32];
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("lanczos") });
+        for (axis, input, target, pipeline) in [(0.0, &source_view, &middle_view, &passes.across), (1.0, &middle_view, &exact_view, &passes.down)] {
+            let params = LanczosParams { sizes: if axis == 0.0 { sizes } else { [tw as f32, sh as f32, tw as f32, th as f32] }, axis: [axis, 0.0, 0.0, 0.0] };
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM });
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &passes.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(input) },
+                    wgpu::BindGroupEntry { binding: 1, resource: buffer.as_entire_binding() },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        let bind_group = self.bind_image(&exact_view, &self.sampler);
+        GpuImage { texture: exact, bind_group }
+    }
+
+    /// An RGBA8 texture's level 0, read back (for checking the exact fit
+    /// against Pillow; `NEGS_EXACT_FIT_DUMP`).
+    pub fn read_back(&self, texture: &wgpu::Texture) -> Vec<u8> {
+        let size = texture.size();
+        let (w, h) = (size.width, size.height);
+        let row = (w * 4).div_ceil(256) * 256;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: row as u64 * h as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        self.queue.submit(Some(encoder.finish()));
+        let slice = buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        let _ = self.device.poll(wgpu::Maintain::Wait);
+        let data = slice.get_mapped_range();
+        let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+        for y in 0..h as usize {
+            out.extend_from_slice(&data[y * row as usize..y * row as usize + w as usize * 4]);
+        }
+        out
     }
 
     fn bind_image(&self, view: &wgpu::TextureView, sampler: &wgpu::Sampler) -> wgpu::BindGroup {
@@ -516,7 +753,7 @@ impl Gpu {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: PHOTO_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         self.queue.write_texture(
@@ -616,10 +853,12 @@ impl Gpu {
 pub enum Item<'a> {
     Photo(&'a GpuImage, PhotoUniform),
     Quad(Option<&'a GpuImage>, QuadInstance),
+    /// What follows draws only inside x, y, width, height (pixels); None: anywhere.
+    Clip(Option<[u32; 4]>),
 }
 
-/// Draws `items` over `clear` into the surface texture.
-pub fn draw(gpu: &Gpu, target: &wgpu::TextureView, globals: &wgpu::BindGroup, clear: [f32; 3], items: &[Item]) {
+/// Draws `items` over `clear` into the surface texture, `size` pixels.
+pub fn draw(gpu: &Gpu, target: &wgpu::TextureView, size: (u32, u32), globals: &wgpu::BindGroup, clear: [f32; 3], items: &[Item]) {
     let align = gpu.device.limits().min_uniform_buffer_offset_alignment.max(256) as usize;
     let photos: Vec<&PhotoUniform> = items.iter().filter_map(|i| if let Item::Photo(_, u) = i { Some(u) } else { None }).collect();
     let mut uniform_bytes = vec![0u8; photos.len().max(1) * align];
@@ -697,6 +936,12 @@ pub fn draw(gpu: &Gpu, target: &wgpu::TextureView, globals: &wgpu::BindGroup, cl
                     pass.set_bind_group(0, &image.unwrap_or(white).bind_group, &[]);
                     pass.set_vertex_buffer(0, instances.slice(..));
                     pass.draw(0..4, start..quad_index);
+                }
+                Item::Clip(clip) => {
+                    let [x, y, w, h] = clip.unwrap_or([0, 0, size.0, size.1]);
+                    let (x, y) = (x.min(size.0), y.min(size.1));
+                    pass.set_scissor_rect(x.min(size.0 - 1), y.min(size.1 - 1), w.min(size.0 - x).max(1), h.min(size.1 - y).max(1));
+                    i += 1;
                 }
             }
         }

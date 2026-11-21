@@ -10,14 +10,21 @@ struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            StatusWords(model: model)
+            if model.comparison != nil, model.libraryNote == nil, !model.exporting, model.batch?.running != true {
+                CompareWords(model: model)
+            } else {
+                StatusWords(model: model)
+            }
             Spacer(minLength: 12)
             if let run = model.batch, run.running {
                 StatusLink(title: "Cancel", help: "Stop exporting", action: run.cancel)
             } else if model.exporting {
                 StatusLink(title: "Cancel", help: "Stop exporting", action: model.cancelExport)
             }
-            if model.source != nil, model.mode == .photo, !model.exporting, model.batch?.running != true {
+            if model.comparison != nil, model.mode == .photo, !model.exporting, model.batch?.running != true {
+                // The tools keep their words; the summary on the left gives way.
+                CompareTools(model: model).fixedSize()
+            } else if model.source != nil, model.mode == .photo, !model.exporting, model.batch?.running != true {
                 StatusTools(model: model)
             }
         }
@@ -39,11 +46,9 @@ private struct StatusWords: View {
         if let note = model.libraryNote {
             NoteWords(note: note)
         } else if let run = model.batch, run.running {
-            HStack(spacing: 14) {
-                Text(StatusText.exporting(run.finished, of: run.total))
-                ProgressRule(fraction: run.fraction)
-            }
-            .foregroundStyle(Theme.label)
+            BatchProgress(run: run)
+        } else if let words = model.lightroomWords {
+            Text(words).foregroundStyle(Theme.label)
         } else if let run = model.batch, run.needsAttention {
             BatchOutcome(model: model, run: run)
         } else if model.exporting {
@@ -66,9 +71,11 @@ private struct StatusWords: View {
 
 /// The status line's words, apart from the views so they can be tested.
 enum StatusText {
-    /// "Exporting 5 of 12 photographs": the one under way, counted from 1.
-    static func exporting(_ finished: Int, of total: Int) -> String {
-        "Exporting \(min(finished + 1, total)) of \(total) " + (total == 1 ? "photograph" : "photographs")
+    /// "Exporting 5 of 12 photographs": the one under way, counted from 1;
+    /// "Sending 5 of 12 photographs to Lightroom" for Open in Lightroom.
+    static func exporting(_ finished: Int, of total: Int, to lightroom: LightroomKind? = nil) -> String {
+        (lightroom == nil ? "Exporting " : "Sending ") + "\(min(finished + 1, total)) of \(total) " + (total == 1 ? "photograph" : "photographs")
+            + (lightroom.map { " to \($0.title)" } ?? "")
     }
 
     /// "Cropping · 3:2 · 3936 × 2624 px".
@@ -145,6 +152,20 @@ private struct BatchOutcome: View {
                 if let view = anchor.view { model.presentBatch(view) }
             }
             .background(AnchorView(anchor: anchor))
+        }
+        .foregroundStyle(Theme.label)
+    }
+}
+
+/// "Exporting 5 of 12 photographs" and the rule, in the status line and
+/// the grid's foot.
+struct BatchProgress: View {
+    let run: BatchRun
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(StatusText.exporting(run.finished, of: run.total, to: run.journal.options.lightroom))
+            ProgressRule(fraction: run.fraction)
         }
         .foregroundStyle(Theme.label)
     }
@@ -236,34 +257,171 @@ private struct ZoomWord: View {
 
 /// Press and hold to compare with the photograph before developing, like
 /// Lightroom's Show Original. The decode starts when the pointer arrives.
-/// While it's held the word is in `paper` with the pencil under it.
+/// While it's held the word is in `paper` with the pencil under it. Its ⌄
+/// (Original ⌄, ticket 46) chooses what a press does instead: a split line,
+/// or compare side by side. Holding \ always holds.
 private struct OriginalWord: View {
     let model: EditorModel
     @State private var pressed = false
     @State private var hovered = false
+    @State private var anchor = MenuAnchor()
 
     var body: some View {
         let enabled = model.canShowOriginal
-        let on = model.holdingOriginal
-        Text("Original")
-            .foregroundStyle(on ? Theme.paper : hovered && enabled ? Theme.label : Theme.dim)
-            .overlay(alignment: .bottom) {
-                if on { PencilStroke().pencil().frame(height: 5).offset(y: 5) }
+        let mode = model.originalMode
+        let on = model.holdingOriginal || model.splitting
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(model.originalWord)
+                .foregroundStyle(on ? Theme.paper : hovered && enabled ? Theme.label : Theme.dim)
+                .overlay(alignment: .bottom) {
+                    if on { PencilStroke().pencil().frame(height: 5).offset(y: 5) }
+                }
+                .contentShape(Rectangle())
+                .opacity(enabled ? 1 : 0.38)
+                .onHover { over in hovered = over; if over { model.prepareOriginal() } }
+                .gesture(DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        guard !pressed else { return }
+                        pressed = true
+                        if mode == .hold { model.holdOriginal(true) }
+                    }
+                    .onEnded { _ in
+                        pressed = false
+                        if mode == .hold { model.holdOriginal(false) } else { model.clickOriginal() }
+                    })
+                .allowsHitTesting(enabled)
+                .help(Self.help(mode, model.originalPhrase))
+                .accessibilityElement()
+                .accessibilityLabel("Show \(model.originalWord)")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityValue(on ? "On" : "Off")
+                // VoiceOver can't hold, so activating it toggles.
+                .accessibilityAction { mode == .hold ? model.holdOriginal(!model.holdingOriginal) : model.clickOriginal() }
+            Button { OriginalMenu(model: model).popUp(above: anchor.view) } label: {
+                Text("⌄").font(Theme.ui(11)).foregroundStyle(Theme.dim).offset(y: -2)
+                    .frame(width: 12).contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
-            .opacity(enabled ? 1 : 0.38)
-            .onHover { over in hovered = over; if over { model.prepareOriginal() } }
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in if !pressed { pressed = true; model.holdOriginal(true) } }
-                .onEnded { _ in pressed = false; model.holdOriginal(false) })
-            .allowsHitTesting(enabled)
-            .help("Hold to show the original (\\). Hold T to turn the photograph upside down.")
-            .accessibilityElement()
-            .accessibilityLabel("Show Original")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityValue(on ? "On" : "Off")
-            // VoiceOver can't hold, so activating it toggles.
-            .accessibilityAction { model.holdOriginal(!model.holdingOriginal) }
+            .buttonStyle(.plain)
+            .background(AnchorView(anchor: anchor))
+            .help("Choose what Original does")
+            .accessibilityLabel("Original options")
+        }
+    }
+
+    static func help(_ mode: OriginalMode, _ original: String = "original") -> String {
+        switch mode {
+        case .hold: "Hold to show the \(original) (\\). Hold T to turn the photograph upside down."
+        case .split: "Show the \(original) left of a line you can drag. Hold \\ to see the whole \(original)."
+        case .sideBySide: "Compare with the \(original), side by side. Hold \\ to see the whole \(original)."
+        }
+    }
+}
+
+/// Original ⌄: what pressing Original does, ticked, in the display italic.
+@MainActor final class OriginalMenu: NSObject {
+    private let model: EditorModel
+    init(model: EditorModel) { self.model = model }
+
+    func popUp(above view: NSView?) {
+        guard let view else { return }
+        let menu = NSMenu(title: "Original")
+        menu.appearance = Theme.appearance
+        let font = Theme.serifFont(15, italic: true) as NSFont
+        for mode in OriginalMode.allCases {
+            let item = menu.addItem(withTitle: mode.title, action: #selector(choose(_:)), keyEquivalent: "")
+            item.attributedTitle = NSAttributedString(string: mode.title, attributes: [.font: font])
+            item.target = self; item.representedObject = mode.rawValue
+            item.state = model.originalMode == mode ? .on : .off
+        }
+        // A RAW shot as RAW+JPEG: which of the two Original shows.
+        if model.cameraJPEG != nil {
+            menu.addItem(.separator())
+            for reference in OriginalReference.allCases {
+                let item = menu.addItem(withTitle: reference.title, action: #selector(show(_:)), keyEquivalent: "")
+                item.attributedTitle = NSAttributedString(string: reference.title, attributes: [.font: font])
+                item.target = self; item.representedObject = reference.rawValue
+                item.state = model.originalReference == reference ? .on : .off
+            }
+        }
+        // Opens upward from the status line, over the canvas.
+        let y = view.isFlipped ? view.bounds.minY - 4 : view.bounds.maxY + 4
+        withExtendedLifetime(self) {
+            menu.popUp(positioning: menu.items.first { $0.state == .on && $0.action == #selector(choose(_:)) }, at: NSPoint(x: view.bounds.minX - 14, y: y), in: view)
+        }
+    }
+
+    @objc private func choose(_ item: NSMenuItem) {
+        guard let raw = item.representedObject as? String, let mode = OriginalMode(rawValue: raw) else { return }
+        model.originalMode = mode
+    }
+
+    @objc private func show(_ item: NSMenuItem) {
+        guard let raw = item.representedObject as? String, let reference = OriginalReference(rawValue: raw) else { return }
+        model.originalReference = reference
+    }
+}
+
+/// The status line's words in compare: who's compared and what differs,
+/// then which side ← → step, when there's a roll to step through. Short of
+/// room, the hint goes first, so what differs can be read to the end.
+private struct CompareWords: View {
+    let model: EditorModel
+
+    var body: some View {
+        if let comparison = model.comparison {
+            let summary = Text(model.compareSummary).foregroundStyle(Theme.label)
+            if !comparison.againstOriginal, model.shownPhotos.count > 2 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        summary.fixedSize()
+                        Text("← → steps the \(comparison.layout == .slider ? "right" : model.compareArrangement == .column ? "bottom" : "right") one")
+                            .font(Theme.serif(13, italic: true))
+                            .fixedSize()
+                    }
+                    summary.truncationMode(.tail)
+                }
+            } else {
+                summary.truncationMode(.tail)
+            }
+        }
+    }
+}
+
+/// Side by side · Slider (S) | Swap | Fit · 100% | Done (Esc).
+private struct CompareTools: View {
+    let model: EditorModel
+
+    var body: some View {
+        let layout = model.comparison?.layout ?? .sideBySide
+        HStack(spacing: 14) {
+            HStack(spacing: 12) {
+                ZoomWord(title: "Side by side", help: "Show the two side by side (S)", on: layout == .sideBySide) { model.setCompareLayout(.sideBySide) }
+                ZoomWord(title: "Slider", help: "Show the two in one frame, a line between them (S)", on: layout == .slider) { model.setCompareLayout(.slider) }
+                Key(text: "S")
+            }
+            Rectangle().fill(Theme.track).frame(width: 1, height: 10)
+            ZoomWord(title: "Swap", help: "Swap the two photographs' places", on: false, action: model.swapCompared)
+            Rectangle().fill(Theme.track).frame(width: 1, height: 10)
+            HStack(spacing: 14) {
+                ZoomWord(title: "Fit", help: "Fit both photographs (⌘0)", on: model.fitImage) { model.zoom(fit: true) }
+                ZoomWord(title: "100%", help: "Both at actual size (⌘1)", on: !model.fitImage) { model.zoom(fit: false) }
+            }
+            Rectangle().fill(Theme.track).frame(width: 1, height: 10)
+            HStack(spacing: 6) {
+                ZoomWord(title: "Done", help: "Stop comparing (Esc)", on: false) { model.leaveCompare() }
+                Key(text: "Esc")
+            }
+        }
+    }
+
+    private struct Key: View {
+        let text: String
+        var body: some View {
+            Text(text).font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.track, lineWidth: 1))
+                .accessibilityHidden(true)
+        }
     }
 }
 

@@ -54,7 +54,10 @@ function english() {
     for (const c of section.controls ?? []) for (const label of [c.label, c.bw, c.help]) if (label) strings.add(label);
     for (const group of section.groups ?? []) {
       strings.add(group.title);
-      for (const c of group.controls) for (const label of [c.label, c.bw, c.help]) if (label) strings.add(label);
+      for (const c of group.controls) {
+        for (const label of [c.label, c.bw, c.help]) if (label) strings.add(label);
+        for (const { name, effect } of Object.values(c.filters ?? {})) add(name, effect);
+      }
     }
   }
   strings.add("Stock");

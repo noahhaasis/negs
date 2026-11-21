@@ -1,6 +1,6 @@
 # macOS installation, updates, and releases
 
-Negs is currently **0.15.0, build 16**, before the public 1.0 release. The
+Negs is currently **0.17.0, build 18**, before the public 1.0 release. The
 installer is a universal app for Apple silicon and Intel Macs on macOS 14+. The source repository
 and downloads will be public from the first release. No remote repository has
 been configured or release published by this implementation.
@@ -108,6 +108,12 @@ renames. Keep the installed feed URL working if hosting changes.
   CI rejects tag/version mismatches and missing update configuration.
 - Tags beginning with `v` run the release pipeline. Manual workflow dispatch
   builds downloadable CI artifacts without publishing or signing a live feed.
+- Push the release commit to main and tag that same commit; the two can go
+  together. The tag waits for main's run of the commit and, if it is green
+  with every platform's artifacts, reuses its engines and Windows and Linux
+  packages, skips the tests it passed, and only repackages the Mac app with
+  the update feed (a few minutes). A tag on any other commit builds and tests
+  every platform again (about 20 minutes).
 - GitHub marks `0.x` releases as prereleases. The update feed still offers these
   versions to pre-1.0 users; it does not use GitHub's “latest release” shortcut.
 
@@ -153,7 +159,7 @@ swift test --package-path macos --force-resolved-versions
 python3 -m unittest discover -s scripts -p 'test_macos_release.py'
 ```
 
-The local package is `dist/releases/Negs-0.15.0-macos-universal.dmg`; the folder
+The local package is `dist/releases/Negs-0.17.0-macos-universal.dmg`; the folder
 also includes the update ZIP, source archive, installation instructions, build
 information, and SHA-256 checksums. `scripts/verify_macos_package.py` audits an
 extracted ZIP independently of the build tree. No production key is necessary

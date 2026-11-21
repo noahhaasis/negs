@@ -409,6 +409,33 @@ pub enum FrontPass<'a> {
         /// upstream's arithmetic.
         guard: bool,
     },
+    /// A scan of a real colour negative, read back to film density (the
+    /// convert-film route, ticket 33). It replaces the whole film side: the
+    /// caller sets the film's effects to `None`, and print spectral reads
+    /// the density this writes.
+    ConvertFilm(ConvertGpuParams),
+}
+
+/// The film converter (`spektrafilm_core::convert::FilmConverter`) as the
+/// convert front pass runs it: per pixel, `y = pretransform · rgb`, the
+/// analytic seed, then the box-bounded damped Gauss–Newton on the scan
+/// model `rgb = Σ_λ weight(λ) · 10^−(base(λ) + cmy · dye(λ))`. The same
+/// iteration and stopping rule as the CPU's f64 solve, in f32 (upstream's
+/// default precision).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConvertGpuParams {
+    /// Scanned linear RGB → the gained, calibrated RGB the model inverts (row-major).
+    pub pretransform: [[f64; 3]; 3],
+    /// The seed: `cmy0 + ginv · (logrgb0 − log10 y)`, boxed.
+    pub cmy0: [f64; 3],
+    pub logrgb0: [f64; 3],
+    pub ginv: [[f64; 3]; 3],
+    /// The box: each channel's density in `[0, x_hi]`.
+    pub x_hi: [f64; 3],
+    /// Per kept wavelength: the cyan, magenta and yellow dye densities and the tuned base.
+    pub dye_base: Vec<[f64; 4]>,
+    /// Per kept wavelength: its light's share of the scan RGB, `M · illuminant · cmf / norm`.
+    pub weights: Vec<[f64; 3]>,
 }
 
 /// Pre-computed plan for the GPU-resident diffusion filter. The per-channel

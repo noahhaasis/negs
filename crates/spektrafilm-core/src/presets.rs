@@ -79,10 +79,13 @@ const SKIPPED: [&str; 3] = ["grain.micro_sublayers", "camera.diffusion_filter", 
 /// What a preset doesn't carry: applying one keeps the photograph's values.
 /// How the source is read, its colour space and size, the output encoding,
 /// crop and rotation, the speed and memory settings, CAT16 and the colour
-/// management settings (Negs-only switches) and the Prep/Post tabs. Every other params value comes from the preset or, where
+/// management settings (Negs-only switches), the Prep/Post tabs and how a
+/// scanned negative is read (its route and scan light). Every other params value comes from the preset or, where
 /// Python's GUI has no such setting, Negs's default.
-pub const KEPT: [&str; 25] = [
+pub const KEPT: [&str; 28] = [
     "prep",
+    "workflow",
+    "film_render.convert",
     "io.lens_correction",
     "io.input_interpretation",
     "io.input_color_space",
@@ -95,6 +98,7 @@ pub const KEPT: [&str; 25] = [
     "io.upscale_factor",
     "io.photo_long_side_px",
     "io.rotate_cw",
+    "io.flip",
     "settings.use_enlarger_lut",
     "settings.use_scanner_lut",
     "settings.serial_grain",
@@ -142,11 +146,30 @@ fn listed_time(stock: &Profile, time: Option<f64>) -> Option<f64> {
     time.map(|t| times[profile::development_time_index(times, Some(t))])
 }
 
-/// The params after applying a preset: its own, with [`KEPT`] from `current`.
+/// What a preset also leaves on a scanned negative (the convert-film
+/// route), beside [`KEPT`]: its film base and its print balance, which
+/// belong to the frame and its roll, that it isn't scanned as film, and
+/// the RAW white balance it is read with (with the lens correction and the
+/// interpretation in [`KEPT`], all that decides how the scan is read: a
+/// new white balance would need the base found again). A preset brings
+/// the look and the paper (the film it's read as is the caller's to keep).
+pub const KEPT_NEGATIVE: [&str; 6] = [
+    "io.raw_white_balance",
+    "film_render.base",
+    "enlarger.m_filter_shift",
+    "enlarger.y_filter_shift",
+    "enlarger.print_exposure",
+    "io.scan_film",
+];
+
+/// The params after applying a preset: its own, with [`KEPT`] from
+/// `current`, and on a negative [`KEPT_NEGATIVE`] too.
 pub fn apply(preset: &RuntimeParams, current: &RuntimeParams) -> RuntimeParams {
+    let negative = current.workflow.converts_film();
     let mut params = serde_json::to_value(preset).expect("RuntimeParams serializes");
     let current = serde_json::to_value(current).expect("RuntimeParams serializes");
-    for path in KEPT {
+    let kept = if negative { &KEPT_NEGATIVE[..] } else { &[] };
+    for path in KEPT.iter().chain(kept) {
         let value = get(&current, path).expect("kept paths exist").clone();
         set(&mut params, path, value).expect("kept paths exist");
     }
@@ -733,6 +756,7 @@ mod tests {
         let mut current = RuntimeParams::default();
         current.io.photo_long_side_px = Some(3000);
         current.io.rotate_cw = 1;
+        current.io.flip = true;
         current.settings.use_cat16 = false;
         current.post.contrast = 0.3;
         current.prep.highlights = -65.0;
@@ -740,10 +764,44 @@ mod tests {
         let applied = apply(&preset.params, &current);
         assert_eq!(applied.io.photo_long_side_px, Some(3000));
         assert_eq!(applied.io.rotate_cw, 1);
+        assert!(applied.io.flip);
         assert!(!applied.settings.use_cat16);
         assert_eq!(applied.post.contrast, 0.3);
         assert_eq!(applied.prep.highlights, -65.0);
         assert_eq!(applied.camera.exposure_compensation_ev, 0.0);
+        // A photograph of a scene takes the preset's balance.
+        assert_eq!(applied.enlarger.print_exposure, preset.params.enlarger.print_exposure);
+    }
+
+    #[test]
+    fn applying_keeps_a_negative_as_it_is_read() {
+        let preset = import(DEFAULT_GUI_STATE, &data_dir()).unwrap();
+        let mut current = RuntimeParams::default();
+        current.workflow.route = crate::params::ROUTE_CONVERT_PRINT.into();
+        current.film_render.convert.scan_illuminant = "D50".into();
+        current.film_render.convert.exposure_compensation_ev = -0.4;
+        current.film_render.base.cyan = 1.1;
+        current.film_render.base.yellow = 0.9;
+        current.enlarger.m_filter_shift = 4.4;
+        current.enlarger.y_filter_shift = -1.8;
+        current.enlarger.print_exposure = 0.87;
+        current.film_render.grain.active = !preset.params.film_render.grain.active;
+        // A NEF read at As shot: the preset's Daylight would read it anew.
+        current.io.raw_white_balance.mode = spektrafilm_io::RawWhiteBalanceMode::AsShot;
+        assert_ne!(preset.params.io.raw_white_balance.mode, current.io.raw_white_balance.mode);
+        let applied = apply(&preset.params, &current);
+        assert_eq!(applied.io.raw_white_balance, current.io.raw_white_balance);
+        assert_eq!(applied.io.lens_correction, current.io.lens_correction);
+        assert_eq!(applied.io.input_interpretation, current.io.input_interpretation);
+        assert!(applied.workflow.converts_film());
+        assert_eq!(applied.film_render.convert.scan_illuminant, "D50");
+        assert_eq!(applied.film_render.convert.exposure_compensation_ev, -0.4);
+        assert_eq!((applied.film_render.base.cyan, applied.film_render.base.yellow), (1.1, 0.9));
+        assert_eq!((applied.enlarger.m_filter_shift, applied.enlarger.y_filter_shift), (4.4, -1.8));
+        assert_eq!(applied.enlarger.print_exposure, 0.87);
+        assert!(!applied.io.scan_film);
+        // The look is the preset's.
+        assert_eq!(applied.film_render.grain.active, preset.params.film_render.grain.active);
     }
 
     #[test]

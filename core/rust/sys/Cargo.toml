@@ -1,0 +1,17 @@
+# The shared app core's C ABI (core/include/negs_core.h) for Rust: raw
+# declarations, and a build script that builds and links the Odin static
+# library. The safe wrappers (core/rust/marks, core/rust/library) sit on it.
+[package]
+name = "negs-core-sys"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+links = "negs_core"
+build = "build.rs"
+
+[features]
+# Count the core's allocations (negs_core_alloc_stats), for leak checks.
+track = []
+
+[workspace]

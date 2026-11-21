@@ -22,41 +22,62 @@ struct PhotoTrash: Sendable {
         remove: { try FileManager.default.removeItem(at: $0) })
 }
 
-/// What a delete does. Photographs go to the Trash with their sidecars, and
-/// so with all their duplicates. A duplicate of a photograph that stays is
-/// removed from the sidecar, and the file stays.
+/// What a delete does (`delete.rs`). A photograph goes to the Trash with
+/// its sidecar, and a RAW with its camera JPEG, only with all its
+/// duplicates. Otherwise what is chosen leaves the sidecar and the file
+/// stays: a duplicate, or the photograph itself, whose first duplicate left
+/// then takes its place.
 struct DeletePlan: Equatable, Sendable {
     /// Everything chosen, in order: what Undo selects again.
     private(set) var items: [URL] = []
     private(set) var files: [URL] = []
+    /// What leaves the sidecar of a photograph that stays: duplicates, and
+    /// photographs whose duplicates don't all go.
     private(set) var duplicates: [URL] = []
-    /// Duplicates that go with their photographs without being chosen.
+    /// The duplicates that go with `files`.
     private(set) var following = 0
+    /// The camera JPEGs that go with `files`, by file.
+    private(set) var companions: [URL: URL] = [:]
+    /// Each duplicate that becomes its photograph, its photograph removed.
+    private(set) var renamed: [URL: URL] = [:]
 
     var isEmpty: Bool { items.isEmpty }
 
     /// `duplicates` gives a photograph's duplicates by variant id.
-    init(_ chosen: [URL], duplicates ids: (URL) -> [String] = { _ in [] }) {
+    init(_ chosen: [URL], duplicates ids: (URL) -> [String] = { _ in [] }, companion: (URL) -> URL? = { _ in nil }) {
         var seen = Set<URL>()
         let chosen = chosen.filter { seen.insert($0).inserted }
-        files = chosen.filter { $0.variantID == nil }
+        // A photograph's file goes only with every one of its duplicates.
+        files = chosen.filter { photo in photo.variantID == nil && ids(photo).allSatisfy { seen.contains(photo.variant($0)) } }
         let trashed = Set(files)
-        duplicates = chosen.filter { $0.variantID != nil && !trashed.contains($0.photoFile) }
+        duplicates = chosen.filter { !trashed.contains($0.photoFile) }
         items = chosen.filter { $0.variantID == nil || !trashed.contains($0.photoFile) }
-        following = files.reduce(0) { count, file in count + ids(file).filter { !seen.contains(file.variant($0)) }.count }
+        following = files.reduce(0) { $0 + ids($1).count }
+        for file in files { if let picture = companion(file) { companions[file] = picture } }
+        for photo in duplicates where photo.variantID == nil {
+            if let first = ids(photo).first(where: { !seen.contains(photo.variant($0)) }) { renamed[photo.variant(first)] = photo }
+        }
     }
+
+    /// What `item` is called once the plan is done: a duplicate that takes
+    /// its photograph's place becomes the photograph.
+    func after(_ item: URL) -> URL { renamed[item] ?? item }
+
+    /// The photographs among `duplicates`, kept for their duplicates.
+    private var keptPhotographs: Int { duplicates.filter { $0.variantID == nil }.count }
 
     /// The same plan without its files: after a permanent delete, only the
     /// duplicates can come back and go again.
     var withoutFiles: DeletePlan {
         var plan = self
-        plan.files = []; plan.following = 0; plan.items = duplicates
+        plan.files = []; plan.following = 0; plan.items = duplicates; plan.companions = [:]
         return plan
     }
 
     /// The Undo menu's name for it.
     var actionName: String {
         guard files.isEmpty else { return "Move to Trash" }
+        if keptPhotographs > 0 { return duplicates.count > 1 ? "Remove Photographs" : "Remove Photograph" }
         return duplicates.count > 1 ? "Remove Duplicates" : "Remove Duplicate"
     }
 
@@ -68,21 +89,35 @@ struct DeletePlan: Equatable, Sendable {
 
     /// The alert before it. A single photograph is named rather than counted.
     func question(name: (URL) -> String, permanent: Bool) -> Question {
-        let photos = files.count, copies = duplicates.count
+        let photos = files.count, copies = duplicates.count, kept = keptPhotographs
         func count(_ n: Int, _ noun: String) -> String { n == 1 ? "1 \(noun)" : "\(n) \(noun)s" }
         let with = following == 0 ? "" : photos == 1
             ? (following == 1 ? ", with its duplicate" : ", with its \(following) duplicates")
             : ", with \(count(following, "duplicate"))"
-        let filesGo = photos == 1 ? "the photograph’s file and its Negs rating and edits"
-            : "the photograph files and their Negs ratings and edits"
-        let copiesGo = copies == 1 ? "The duplicate’s rating and edits are removed from its .negs file; the photograph stays."
-            : "The duplicates’ ratings and edits are removed from their .negs files; the photographs stay."
+        let filesGo = companions.isEmpty
+            ? (photos == 1 ? "the photograph’s file and its Negs rating and edits" : "the photograph files and their Negs ratings and edits")
+            : (photos == 1 ? "the photograph’s file, its camera JPEG and its Negs rating and edits"
+                : "the photograph files, their camera JPEGs and their Negs ratings and edits")
+        let copiesGo: String
+        switch (kept, copies) {
+        case (0, 1): copiesGo = "The duplicate’s rating and edits are removed from its .negs file; the photograph stays."
+        case (0, _): copiesGo = "The duplicates’ ratings and edits are removed from their .negs files; the photographs stay."
+        case (_, 1):
+            copiesGo = renamed.keys.first.map { "Its rating and edits are removed from its .negs file; the file stays, and its duplicate “\(name($0))” takes its place." }
+                ?? "Its rating and edits are removed from its .negs file; the file stays for its duplicates."
+        default: copiesGo = "Their ratings and edits are removed from their .negs files; the files stay, and the first duplicate left takes each photograph’s place."
+        }
+        // What leaves the sidecars, counted: "1 photograph and 2 duplicates".
+        let removals = kept == 0 ? count(copies, "duplicate")
+            : kept == copies ? count(kept, "photograph") : "\(count(kept, "photograph")) and \(count(copies - kept, "duplicate"))"
         if photos == 0 {
-            return Question(message: copies == 1 ? "Remove the duplicate “\(name(duplicates[0]))”?" : "Remove \(copies) duplicates?",
-                            information: copiesGo + " You can put \(copies == 1 ? "it" : "them") back with Undo.", button: "Remove")
+            let message = copies == 1
+                ? (kept == 0 ? "Remove the duplicate “\(name(duplicates[0]))”?" : "Remove “\(name(duplicates[0]))”?")
+                : (kept == 0 ? "Remove \(copies) duplicates?" : "Remove \(removals)?")
+            return Question(message: message, information: copiesGo + " You can put \(copies == 1 ? "it" : "them") back with Undo.", button: "Remove")
         }
         let what = photos == 1 && copies == 0 ? "“\(name(files[0]))”" : count(photos, "photograph")
-        let andCopies = copies == 0 ? "" : " and remove \(count(copies, "duplicate"))"
+        let andCopies = copies == 0 ? "" : " and remove \(removals)"
         if permanent {
             let back = copies == 0 ? "" : " The duplicates can be put back with Undo."
             return Question(message: "Delete \(what) permanently\(andCopies)?",

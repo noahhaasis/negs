@@ -79,6 +79,7 @@ impl Rect {
         let y1 = self.max_y().min(other.max_y());
         Rect::new(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
     }
+    #[cfg(test)]
     pub fn offset(&self, dx: f64, dy: f64) -> Rect {
         Rect::new(self.x + dx, self.y + dy, self.width, self.height)
     }
@@ -242,10 +243,11 @@ impl CropSettings {
         if size.is_zero() { Size::ZERO } else { self.pixels(size).size() }
     }
 
-    /// The rectangle as the photograph is shown, after `rotation` clockwise
-    /// quarter turns, like `ImageBuf::rotated_cw`.
-    pub fn shown(rect: Rect, rotation: i32) -> Rect {
-        let mut r = rect;
+    /// The rectangle as the photograph is shown: mirrored left to right if
+    /// `flip`, then after `rotation` clockwise quarter turns, like
+    /// `ImageBuf::flipped_rotated_cw`.
+    pub fn shown(rect: Rect, rotation: i32, flip: bool) -> Rect {
+        let mut r = if flip { Self::mirrored(rect) } else { rect };
         for _ in 0..rotation.rem_euclid(4) {
             r = Rect::new(1.0 - r.y - r.height, r.x, r.height, r.width);
         }
@@ -253,13 +255,85 @@ impl CropSettings {
     }
 
     /// The inverse of `shown`.
-    pub fn unrotated(rect: Rect, rotation: i32) -> Rect {
+    pub fn unrotated(rect: Rect, rotation: i32, flip: bool) -> Rect {
         let mut r = rect;
         for _ in 0..rotation.rem_euclid(4) {
             r = Rect::new(r.y, 1.0 - r.x - r.width, r.height, r.width);
         }
-        r
+        if flip { Self::mirrored(r) } else { r }
     }
+
+    /// A fraction of the photograph mirrored left to right.
+    pub fn mirrored(rect: Rect) -> Rect {
+        Rect::new(1.0 - rect.max_x(), rect.y, rect.width, rect.height)
+    }
+}
+
+/// How the cropped photograph is shown (`io.flip`, `io.rotate_cw`): mirrored
+/// left to right if `flip`, then turned `turns` quarter turns clockwise. A
+/// mirror top to bottom is a flip and a half turn, so one Flip covers both
+/// (`Orientation` in `Crop.swift`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Orientation {
+    pub turns: i32,
+    pub flip: bool,
+}
+
+impl Orientation {
+    pub fn new(turns: i32, flip: bool) -> Self {
+        Self { turns: turns.rem_euclid(4), flip }
+    }
+
+    /// Mirrored left to right as shown: a flip conjugates the turns, so a
+    /// quarter turn becomes three.
+    pub fn flipped_as_shown(self) -> Self {
+        Self::new(4 - self.turns, !self.flip)
+    }
+
+    #[allow(dead_code)]
+    /// Where a point at `fraction` of the cropped photograph (unmirrored,
+    /// unturned, from its top left) is shown, as a fraction of the shown photograph.
+    pub fn shown(self, fraction: Point) -> Point {
+        let mut p = if self.flip { Point { x: 1.0 - fraction.x, y: fraction.y } } else { fraction };
+        for _ in 0..self.turns {
+            p = Point { x: 1.0 - p.y, y: p.x };
+        }
+        p
+    }
+
+    #[allow(dead_code)]
+    /// The inverse of `shown`.
+    pub fn unshown(self, fraction: Point) -> Point {
+        let mut p = fraction;
+        for _ in 0..self.turns {
+            p = Point { x: p.y, y: 1.0 - p.x };
+        }
+        if self.flip { Point { x: 1.0 - p.x, y: p.y } } else { p }
+    }
+}
+
+/// A point at `shown` (fractions of the photograph as the canvas shows it
+/// through `crop`) back to a fraction of the whole, uncropped photograph:
+/// through the crop, its straightening (turned back about the photograph's
+/// centre, as the canvas's shader samples it), the turns and the flip.
+/// `turned` is the whole photograph's size as shown, after the turns. None
+/// outside the photograph.
+pub fn unshown_point(orientation: Orientation, crop: &CropSettings, turned: Size, shown: [f64; 2]) -> Option<Point> {
+    if !(0.0..=1.0).contains(&shown[0]) || !(0.0..=1.0).contains(&shown[1]) || turned.width <= 0.0 || turned.height <= 0.0 {
+        return None;
+    }
+    let r = crop.rect;
+    let (a, b) = (orientation.shown(Point { x: r.x, y: r.y }), orientation.shown(Point { x: r.x + r.width, y: r.y + r.height }));
+    let (x0, y0, x1, y1) = (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y));
+    // In the turned photograph's pixels, about its centre.
+    let (cx, cy) = (turned.width / 2.0, turned.height / 2.0);
+    let (dx, dy) = ((x0 + shown[0] * (x1 - x0)) * turned.width - cx, (y0 + shown[1] * (y1 - y0)) * turned.height - cy);
+    // Straightened in the unflipped photograph: the other way round as shown.
+    let angle = if orientation.flip { -crop.angle } else { crop.angle };
+    let (s, k) = angle.to_radians().sin_cos();
+    let g = Point { x: (cx + dx * k + dy * s) / turned.width, y: (cy - dx * s + dy * k) / turned.height };
+    let p = orientation.unshown(g);
+    ((0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y)).then_some(p)
 }
 
 /// An edge or corner: -1 is the left or top edge, 1 the right or bottom,
@@ -272,9 +346,6 @@ pub struct Handle {
 
 impl Handle {
     pub const MOVE: Handle = Handle { x: 0, y: 0 };
-    pub fn corner(&self) -> bool {
-        self.x != 0 && self.y != 0
-    }
 }
 
 fn clamp(value: f64, low: f64, high: f64) -> f64 {
@@ -506,6 +577,12 @@ pub fn inscribe(rect: Rect, angle: f64, photo: Size) -> Rect {
     Rect::new(middle.x - size.width / 2.0, middle.y - size.height / 2.0, size.width, size.height)
 }
 
+/// A flip mirrors the straightening: clockwise as shown is anticlockwise
+/// on the unflipped photograph.
+fn mirrored(angle: f64, flip: bool) -> f64 {
+    if flip && angle != 0.0 { -angle } else { angle }
+}
+
 /// The crop being drawn. Nothing changes the edit until Done.
 #[derive(Clone, Debug)]
 pub struct CropSession {
@@ -515,11 +592,13 @@ pub struct CropSession {
     /// The locked ratio is taller than wide (for presets; custom uses its sides).
     pub portrait: bool,
     pub custom: Size,
-    /// Degrees clockwise, as `CropSettings::angle`.
+    /// Degrees clockwise as shown: `CropSettings::angle`, the other way
+    /// round on a flipped photograph.
     pub angle: f64,
-    /// The developed photograph as shown, in pixels, and its rotation.
+    /// The developed photograph as shown, in pixels, its rotation and flip.
     pub photo: Size,
     pub rotation: i32,
+    pub flip: bool,
     /// A handle is being dragged; the thirds grid shows.
     pub adjusting: bool,
     /// The dial or slider is turning the photograph; a finer grid shows.
@@ -534,9 +613,9 @@ pub struct CropSession {
 }
 
 impl CropSession {
-    pub fn new(start: crate::state::EditState, photo: Size, rotation: i32) -> Self {
+    pub fn new(start: crate::state::EditState, photo: Size, rotation: i32, flip: bool) -> Self {
         let settings = start.crop;
-        let shown = CropSettings::shown(settings.rect, rotation);
+        let shown = CropSettings::shown(settings.rect, rotation, flip);
         let portrait = shown.height * photo.height > shown.width * photo.width;
         let mut custom = settings.custom;
         if settings.aspect == CropAspect::Custom && (custom.height > custom.width) != portrait {
@@ -547,9 +626,10 @@ impl CropSession {
             aspect: settings.aspect,
             portrait,
             custom,
-            angle: settings.angle,
+            angle: mirrored(settings.angle, flip),
             photo,
             rotation,
+            flip,
             adjusting: false,
             straightening: false,
             typing: false,
@@ -560,7 +640,7 @@ impl CropSession {
 
     pub fn settings(&self) -> CropSettings {
         if self.angle != 0.0 {
-            return CropSettings { rect: self.rect, aspect: self.aspect, custom: self.custom, angle: self.angle };
+            return CropSettings { rect: self.rect, aspect: self.aspect, custom: self.custom, angle: mirrored(self.angle, self.flip) };
         }
         let unit = self.rect.intersection(&Rect::UNIT);
         // Within a thousandth of the whole photograph is no crop.
@@ -587,7 +667,7 @@ impl CropSession {
 
     /// The rectangle in pixels of the photograph as shown.
     pub fn shown(&self) -> Rect {
-        let r = CropSettings::shown(self.rect, self.rotation);
+        let r = CropSettings::shown(self.rect, self.rotation, self.flip);
         Rect::new(r.x * self.photo.width, r.y * self.photo.height, r.width * self.photo.width, r.height * self.photo.height)
     }
 
@@ -596,7 +676,7 @@ impl CropSession {
             return;
         }
         let r = Rect::new(value.x / self.photo.width, value.y / self.photo.height, value.width / self.photo.width, value.height / self.photo.height);
-        self.rect = CropSettings::unrotated(r, self.rotation);
+        self.rect = CropSettings::unrotated(r, self.rotation, self.flip);
     }
 
     /// Where the rectangle can go: the turned photograph's bounding box.
@@ -605,14 +685,20 @@ impl CropSession {
     }
 
     /// A newer render: a quarter turn swaps the locked ratio's orientation,
-    /// as the rectangle turns with the photograph.
-    pub fn update(&mut self, photo: Size, rotation: i32) {
+    /// as the rectangle turns with the photograph. A flip mirrors the
+    /// rectangle and the straightening with it.
+    pub fn update(&mut self, photo: Size, rotation: i32, flip: bool) {
         if (rotation - self.rotation) % 2 != 0 {
             self.portrait = !self.portrait;
             self.custom = self.custom.swapped();
         }
+        if flip != self.flip {
+            self.angle = mirrored(self.angle, true);
+            self.intended = None;
+        }
         self.photo = photo;
         self.rotation = rotation;
+        self.flip = flip;
     }
 
     pub fn choose(&mut self, aspect: CropAspect) {
@@ -704,13 +790,54 @@ mod tests {
     #[test]
     fn rectangle_turns_with_the_photograph() {
         let top_left = Rect::new(0.0, 0.0, 0.5, 0.25);
-        assert_rect(CropSettings::shown(top_left, 1), Rect::new(0.75, 0.0, 0.25, 0.5), 1e-9);
-        assert_rect(CropSettings::shown(top_left, 2), Rect::new(0.5, 0.75, 0.5, 0.25), 1e-9);
+        assert_rect(CropSettings::shown(top_left, 1, false), Rect::new(0.75, 0.0, 0.25, 0.5), 1e-9);
+        assert_rect(CropSettings::shown(top_left, 2, false), Rect::new(0.5, 0.75, 0.5, 0.25), 1e-9);
         let any = Rect::new(0.1, 0.2, 0.3, 0.4);
         for rotation in 0..4 {
-            assert_rect(CropSettings::unrotated(CropSettings::shown(any, rotation), rotation), any, 1e-9);
+            assert_rect(CropSettings::unrotated(CropSettings::shown(any, rotation, false), rotation, false), any, 1e-9);
         }
-        assert_rect(CropSettings::shown(any, 4), any, 1e-9);
+        assert_rect(CropSettings::shown(any, 4, false), any, 1e-9);
+        // Mirrored first, then turned, like `ImageBuf::flipped_rotated_cw`.
+        assert_rect(CropSettings::shown(top_left, 0, true), Rect::new(0.5, 0.0, 0.5, 0.25), 1e-9);
+        assert_rect(CropSettings::shown(top_left, 1, true), Rect::new(0.75, 0.5, 0.25, 0.5), 1e-9);
+        for rotation in 0..4 {
+            assert_rect(CropSettings::unrotated(CropSettings::shown(any, rotation, true), rotation, true), any, 1e-9);
+        }
+    }
+
+    /// Flip mirrors as shown (`Orientation.flippedAsShown`): a turned
+    /// photograph's turns are conjugated, so flipping twice is where it began.
+    #[test]
+    fn flipping_mirrors_the_photograph_as_shown() {
+        for turns in 0..4 {
+            for flip in [false, true] {
+                let o = Orientation::new(turns, flip);
+                let f = o.flipped_as_shown();
+                assert_eq!(f.flipped_as_shown(), o);
+                for p in [Point { x: 0.2, y: 0.7 }, Point { x: 0.9, y: 0.1 }] {
+                    let (a, b) = (o.shown(p), f.shown(p));
+                    assert!((a.x - (1.0 - b.x)).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9, "{o:?} {p:?}");
+                    let back = o.unshown(a);
+                    assert!((back.x - p.x).abs() < 1e-9 && (back.y - p.y).abs() < 1e-9);
+                }
+            }
+        }
+    }
+
+    /// The straightening is kept in the unflipped photograph: the session
+    /// shows it the other way round on a flipped one.
+    #[test]
+    fn a_flip_mirrors_the_straightening() {
+        let mut start = EditState::default();
+        start.crop.angle = 3.0;
+        start.crop.rect = Rect::new(0.1, 0.1, 0.5, 0.5);
+        let mut session = CropSession::new(start.clone(), Size::new(600.0, 400.0), 0, true);
+        assert_eq!(session.angle, -3.0);
+        assert_eq!(session.settings().angle, 3.0);
+        session.update(Size::new(600.0, 400.0), 0, false);
+        assert_eq!((session.angle, session.settings().angle), (3.0, 3.0));
+        let shown = CropSession::new(start, Size::new(600.0, 400.0), 0, true).shown();
+        assert_rect(shown, Rect::new(240.0, 40.0, 300.0, 200.0), 1e-9);
     }
 
     #[test]
@@ -741,7 +868,7 @@ mod tests {
 
     #[test]
     fn session_locks_ratios_and_turns_them_with_the_photograph() {
-        let mut session = CropSession::new(EditState::default(), Size::new(600.0, 400.0), 0);
+        let mut session = CropSession::new(EditState::default(), Size::new(600.0, 400.0), 0, false);
         assert!(!session.modified());
         session.choose(CropAspect::Square);
         assert_rect(session.shown(), Rect::new(100.0, 0.0, 400.0, 400.0), 1e-9);
@@ -749,7 +876,7 @@ mod tests {
         session.orient(true);
         assert_rect(session.shown(), Rect::new(166.666666, 0.0, 266.666666, 400.0), 1e-3);
         let rect = session.rect;
-        session.update(Size::new(400.0, 600.0), 1);
+        session.update(Size::new(400.0, 600.0), 1, false);
         assert_eq!(session.rect, rect);
         assert!(!session.orientation_portrait());
         assert!((session.ratio().unwrap() - 1.5).abs() < 1e-9);
@@ -768,7 +895,7 @@ mod tests {
     #[test]
     fn original_is_the_default_aspect() {
         assert_eq!(CropSettings::default().aspect, CropAspect::Original);
-        let session = CropSession::new(EditState::default(), Size::new(400.0, 600.0), 0);
+        let session = CropSession::new(EditState::default(), Size::new(400.0, 600.0), 0, false);
         assert!((session.ratio().unwrap() - 2.0 / 3.0).abs() < 1e-9);
         let resized = resize(session.shown(), Handle { x: 1, y: 1 }, Point { x: 300.0, y: 100.0 }, session.ratio(), Rect::of_size(session.photo), 10.0);
         assert!((resized.width / resized.height - 2.0 / 3.0).abs() < 1e-9);
@@ -777,7 +904,7 @@ mod tests {
     #[test]
     fn straightening_shrinks_the_crop_onto_the_turned_photograph() {
         let photo = Size::new(600.0, 400.0);
-        let mut session = CropSession::new(EditState::default(), photo, 0);
+        let mut session = CropSession::new(EditState::default(), photo, 0, false);
         session.begin_straightening();
         session.straighten(5.0);
         assert_eq!(session.angle, 5.0);

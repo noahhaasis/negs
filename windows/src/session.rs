@@ -13,17 +13,30 @@ use crate::crop::MAX_ANGLE;
 use crate::state::EditState;
 
 pub fn settings_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("NEGS_PROFILE_DIR") {
-        return PathBuf::from(dir);
+    if let Some(dir) = profile_override() {
+        return dir;
     }
     PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("Negs")
 }
 
 pub fn cache_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("NEGS_PROFILE_DIR") {
-        return PathBuf::from(dir).join("Cache");
+    if let Some(dir) = profile_override() {
+        return dir.join("Cache");
     }
     PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join("Negs")
+}
+
+/// `NEGS_PROFILE_DIR`, or in test builds a scratch folder, so no test can ever
+/// write the real profile in `%APPDATA%` (one did, through a run without the
+/// variable set).
+fn profile_override() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("NEGS_PROFILE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    if cfg!(test) {
+        return Some(std::env::temp_dir().join(format!("negs-test-profile-{}", std::process::id())));
+    }
+    None
 }
 
 /// Writes `data` to a sibling temporary file and renames it over `path`, so a
@@ -49,6 +62,11 @@ pub struct EditorSession {
     pub inspector_visible: bool,
     #[serde(default = "yes")]
     pub fit_image: bool,
+    /// The photograph's sidecar keeps its edits, and `state` is only what
+    /// was on screen. Sessions from before the library lack it: their state
+    /// is the photograph's edits, which go to a sidecar without any.
+    #[serde(default)]
+    pub library: bool,
 }
 
 fn yes() -> bool {
@@ -135,6 +153,8 @@ impl SessionStore {
 pub struct Preferences {
     pub recent_files: Vec<PathBuf>,
     pub filmstrip_visible: bool,
+    /// The grid's row height (its Size).
+    pub grid_size: f64,
     /// Comma-separated titles of the expanded groups.
     pub expanded_adjustments: String,
     pub inspector_tab: String,
@@ -156,6 +176,10 @@ pub struct Preferences {
     /// `WINDOWPLACEMENT` of the editor: show command and normal rectangle in
     /// workspace coordinates.
     pub window: Option<[i32; 5]>,
+    /// The normal rectangle's size in pixels and the DPI it was saved at:
+    /// at the same DPI the window reopens at exactly that size (the DIPs in
+    /// `window` round a pixel off at 125 % and 150 %).
+    pub window_pixels: Option<[i32; 3]>,
     /// The adjustments column's width, in DIPs.
     pub inspector_width: f64,
     pub check_for_updates: bool,
@@ -165,15 +189,16 @@ pub struct Preferences {
     /// Settings › Film, paper and preset previews (the Mac's `previews`).
     /// Old settings files lack it: on.
     pub previews: bool,
-    /// Settings › Keep paper when changing film (the Mac's `keep_paper`).
+    /// The paper lock on "printed on", once Settings › Keep paper when changing film (the Mac's `keep_paper`).
     /// Old settings files lack it: off, the paper follows the film.
     #[serde(rename = "keep_paper")]
     pub keep_paper: bool,
     /// The tone graph's channel: "rgb", "r", "g" or "b".
     pub tone_graph_channel: String,
-    /// Settings › New photographs: Start fresh (true, the default) or keep
-    /// the previous photograph's edits (false, as earlier versions did). A
-    /// restored session keeps its own edits either way.
+    /// Start fresh (true, the default) or keep the previous photograph's
+    /// edits (false, as earlier versions did), for a photograph opened
+    /// without a library. No longer in Settings: in a library the Mac's New
+    /// photographs film and paper decide. Kept so old settings files parse.
     #[serde(rename = "freshEditsForNewPhotos")]
     pub fresh_edits: bool,
     /// Settings › Match new photographs to camera brightness: whether a new
@@ -187,9 +212,16 @@ pub struct Preferences {
     /// Settings › Use less memory for export: grain channels one at a time.
     /// Only exports read it; previews always develop the channels together.
     pub low_memory_export: bool,
-    /// Lab › Advanced controls. Off, the Lab shows each group's basics and
-    /// anything changed from its default.
+    /// Where Lightroom and Lightroom Classic were last found (ticket 48), so
+    /// the menus are right before detection runs after launch.
+    pub lightroom_cloud: Option<PathBuf>,
+    pub lightroom_classic: Option<PathBuf>,
+    /// View › Show All Controls (once the Lab's Advanced controls). Off, the
+    /// Lab shows each module's basics and anything changed from its default.
     pub lab_all_controls: bool,
+    /// The modules (by title) and sections ("section:Print") whose "N more"
+    /// was clicked, comma-separated (`InspectorReveal`).
+    pub more_adjustments: String,
     /// The scope above the tabs: "Histogram" or "Waveform".
     pub scope_mode: String,
     /// The scope's height in DIPs, dragged with the handle below it.
@@ -205,6 +237,43 @@ pub struct Preferences {
     /// The custom colour behind the photograph, "#rrggbb" in sRGB.
     #[serde(rename = "viewerBackgroundColor")]
     pub viewer_background: String,
+    /// Settings › Look › Viewer › Sheet, as the Mac stores it ("theme",
+    /// "grey22", …). Old settings files lack it: the sheet nearest the
+    /// custom background when that was on, else the theme's own.
+    pub viewer_sheet: String,
+    /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
+    /// Old settings files lack it: Darkroom. Empty for a new user until
+    /// launch picks Plain or Plain dark, as Windows is (`ui::theme`).
+    #[serde(default = "darkroom")]
+    pub app_theme: String,
+    /// The library's: its filter, Copy Edits…'s groups, Advance After
+    /// Rating, New photographs' film and paper, under the Mac's keys.
+    #[serde(flatten)]
+    pub library: crate::model::LibraryPreferences,
+    /// Settings › Fotufilm films, as the Mac stores it: "all",
+    /// "datasheets" or "off".
+    pub fotufilm_films: String,
+    /// Settings › Show Negs-built films (the Mac's `showNegsBuiltFilms`), off
+    /// by default.
+    pub show_negs_built_films: bool,
+    /// Enlarger › Shifts move, as the Mac stores it: "separate",
+    /// "together" or "opposite".
+    pub filter_shift_link: String,
+    /// Original ⌄, as the Mac stores them: "hold", "split" or
+    /// "sideBySide"; "raw" or "cameraJPEG".
+    pub original_mode: String,
+    pub original_reference: String,
+    /// The Settings tab last shown (the Mac's `settingsTab`).
+    pub settings_tab: String,
+    /// The batch dialog's File Name, its Custom text and If a File Exists,
+    /// under the Mac's keys (`batch::Naming`, `batch::Existing`).
+    pub batch_naming: String,
+    pub batch_custom_name: String,
+    pub batch_existing: String,
+}
+
+fn darkroom() -> String {
+    "darkroom".into()
 }
 
 /// Starred for new users, as on the web and the Mac; once they change the
@@ -220,6 +289,7 @@ impl Default for Preferences {
         Self {
             recent_files: vec![],
             filmstrip_visible: true,
+            grid_size: crate::sheet_rules::GRID_DEFAULT,
             expanded_adjustments: "Enlarger".into(),
             inspector_tab: "Prep".into(),
             inspector_tab_chosen: false,
@@ -234,6 +304,8 @@ impl Default for Preferences {
             jpeg_quality: 95,
             last_save_folder: None,
             window: None,
+            window_pixels: None,
+            // The Mac's column starts at its narrowest (`EditorWindowController`).
             inspector_width: 340.0,
             check_for_updates: true,
             image_size_long_side: None,
@@ -244,7 +316,10 @@ impl Default for Preferences {
             match_new_photos: true,
             limit_preview: None,
             low_memory_export: false,
+            lightroom_cloud: None,
+            lightroom_classic: None,
             lab_all_controls: false,
+            more_adjustments: String::new(),
             scope_mode: "Histogram".into(),
             scope_height: SCOPE_HEIGHTS.0,
             favorite_films: DEFAULT_FAVORITE_FILMS.iter().map(|s| s.to_string()).collect(),
@@ -252,6 +327,18 @@ impl Default for Preferences {
             viewer_background_custom: false,
             // A neutral dark grey, near the dark theme's.
             viewer_background: "#242424".into(),
+            viewer_sheet: String::new(),
+            app_theme: String::new(),
+            library: Default::default(),
+            fotufilm_films: "all".into(),
+            show_negs_built_films: false,
+            filter_shift_link: "separate".into(),
+            original_mode: "hold".into(),
+            original_reference: "raw".into(),
+            batch_naming: "nameFilm".into(),
+            batch_custom_name: "{name}_{film}".into(),
+            batch_existing: "number".into(),
+            settings_tab: "Photographs".into(),
         }
     }
 }
@@ -287,6 +374,21 @@ impl Preferences {
             titles.push(title);
         }
         self.expanded_adjustments = titles.join(",");
+    }
+
+    /// Whether a module's or section's "N more" was clicked.
+    pub fn revealed(&self, key: &str) -> bool {
+        self.more_adjustments.split(',').any(|t| t == key)
+    }
+
+    /// Shows or folds back `key`'s extra controls; kept sorted, as on the Mac.
+    pub fn set_revealed(&mut self, key: &str, shown: bool) {
+        let mut keys: Vec<&str> = self.more_adjustments.split(',').filter(|t| !t.is_empty() && *t != key).collect();
+        if shown {
+            keys.push(key);
+        }
+        keys.sort_unstable();
+        self.more_adjustments = keys.join(",");
     }
 
     /// The tab the inspector shows. Post became Output; settings files from
@@ -388,6 +490,7 @@ mod tests {
             state: EditState { params: json!({"io": {"rotate_cw": 1}}), ..Default::default() },
             inspector_visible: true,
             fit_image: true,
+            library: false,
         }
     }
 

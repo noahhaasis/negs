@@ -97,6 +97,11 @@ struct Stock: Identifiable, Sendable {
     /// data rather than modelled from sample photographs (Settings › Fotufilm films).
     let fotufilm: Bool
     let manufacturerData: Bool
+    /// Prepared by Negs itself from datasheets (Settings › Show Negs-built films).
+    let negsBuilt: Bool
+    /// How many stops each camera colour filter takes on this film, by key;
+    /// empty for colour films and papers.
+    let filterStops: [String: Double]
     static let grainFields = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"]
     /// The DIR gammas and halation baseline the film's presets fill while the
     /// edit leaves them unset (`null`).
@@ -118,6 +123,48 @@ struct Stock: Identifiable, Sendable {
         // A catalog from before these fields lists every film.
         fotufilm = value["fotufilm"].bool
         manufacturerData = value["manufacturer_data"] != .bool(false)
+        negsBuilt = value["negs_built"].bool
+        filterStops = (value["color_filter_stops"].object ?? [:]).mapValues(\.double)
+    }
+}
+
+/// Settings › Show Negs-built films: the films Negs prepared itself from
+/// datasheets (catalog `negs_built`) stay out of the film menus and the tray
+/// until shown. Only the lists, as for Fotufilm films: an edit, a preset or a
+/// thumbnail with one keeps it.
+enum NegsBuiltFilms {
+    static let key = "showNegsBuiltFilms"
+    static let hint = "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; and the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides. Photos already using one keep it."
+
+    static func lists(_ stock: Stock, shown: Bool) -> Bool { shown || !stock.negsBuilt }
+}
+
+/// A camera colour filter from the catalog: its params key, the colour it's
+/// named by, the measured glass, and the glass's colour for its disc.
+struct ColorFilter: Identifiable, Equatable, Sendable {
+    let key: String
+    let name: String
+    let glass: String
+    let colour: UInt32
+    var id: String { key }
+
+    init(_ value: JSONValue) {
+        key = value["key"].string; name = value["name"].string; glass = value["glass"].string
+        colour = UInt32(value["colour"].string.dropFirst(), radix: 16) ?? 0x888888
+    }
+
+    static let path = "camera.color_filter"
+    static let none = "none"
+    /// What each filter does to a black-and-white photograph.
+    static func effect(_ key: String) -> String {
+        switch key {
+        case "hoya_x1": return "Lightens foliage; darkens red lips and skin a little, for a tanned look."
+        case "hoya_x0": return "Lightens foliage and darkens the sky a little. Kind to skin outdoors."
+        case "hoya_y2": return "Darkens blue sky a touch so clouds stand out. The everyday filter."
+        case "hoya_ya3": return "Darker sky, stronger clouds, less haze. Hides freckles and blemishes."
+        case "hoya_r1": return "Near-black blue sky, bright red and brick, pale skin and lips. Cuts haze hard."
+        default: return "No glass in front of the lens."
+        }
     }
 }
 
@@ -263,18 +310,21 @@ struct EditState: Codable, Equatable, Sendable {
     /// Prep › Match camera brightness: present while it's on. Sessions from
     /// before it decode as off and keep their exposure.
     var brightnessMatch: BrightnessMatch?
+    /// A scanned negative printed as a frame of a darkroom roll (§9.2).
+    /// The frame's params hold what it prints with; this says which roll.
+    var roll: NegativeRoll?
 
     /// The state without presentation-only settings, to decide whether an
-    /// edit needs a new render. The preview is never rotated: the canvas
-    /// turns it, and saving and exporting rotate the result. With an Image
+    /// edit needs a new render. The preview is never rotated or flipped: the
+    /// canvas turns it, and saving and exporting rotate the result. With an Image
     /// Size target the crop's extent sets the working size, so it stays; its
     /// position, angle and ratio never change the render.
     var rendered: EditState {
-        var state = self; state.border = BorderSettings(); state.crop = CropSettings(); state.brightnessMatch = nil
+        var state = self; state.border = BorderSettings(); state.crop = CropSettings(); state.brightnessMatch = nil; state.roll = nil
         if ImageSize.mode(of: params) == .longestSide, crop.cropped {
             state.crop.rect = CGRect(origin: .zero, size: crop.rect.size)
         }
-        state.params["io.rotate_cw"] = .null
+        state.params["io.rotate_cw"] = .null; state.params["io.flip"] = .null
         return state
     }
 }

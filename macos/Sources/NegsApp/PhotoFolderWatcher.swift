@@ -28,7 +28,7 @@ final class PhotoFolderWatcher {
                 // Resolve the parent: a removed file itself no longer resolves.
                 // Sidecars count; their hidden temporary files (`.tmp`) don't.
                 if flags[index] & rescan != 0 || url.resolvingSymlinksInPath().path == directory.path
-                    || ((PhotoFolder.extensions.contains(ext) || ext == PhotoSidecar.fileExtension)
+                    || ((PhotoFolder.extensions.contains(ext) || PhotoFolder.cameraPictureExtensions.contains(ext) || ext == PhotoSidecar.fileExtension)
                         && url.deletingLastPathComponent().resolvingSymlinksInPath().path == directory.path) {
                     continuation.yield(())
                     return

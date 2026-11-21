@@ -1,0 +1,8 @@
+// The shared app core's C ABI (core/include/negs_core.h), linked from
+// target/negs-core/libnegs_core.a: `python3 core/build.py lib` builds it
+// (scripts/package_macos_app.sh does, universal unless --dev).
+module CNegsCore [system] {
+    header "../../../core/include/negs_core.h"
+    link "negs_core"
+    export *
+}

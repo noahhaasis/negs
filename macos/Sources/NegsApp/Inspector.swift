@@ -395,8 +395,10 @@ struct PixelField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = Theme.serifFont(14.5) as NSFont
-        field.textColor = Theme.NS.paper
+        Theme.follow(field) { [weak field] in
+            field?.font = Theme.serifFont(14.5) as NSFont
+            field?.textColor = Theme.NS.paper
+        }
         field.alignment = .right
         field.setAccessibilityLabel(title)
         field.delegate = context.coordinator
@@ -614,7 +616,7 @@ extension AdjustmentInspector {
     static func count(_ section: InspectorSection, _ model: EditorModel) -> Int {
         var count = adjustmentGroups.filter { $0.section == section }.map { Self.count($0, model) }.reduce(0, +)
         switch section {
-        case .camera: count += ["camera.exposure_compensation_ev", FilmFormatPicker.path, "camera.lens_blur_um"].filter(model.isModified).count
+        case .camera: count += ["camera.exposure_compensation_ev", FilmFormatPicker.path, "camera.lens_blur_um", ColorFilter.path].filter(model.isModified).count
         case .film: count += model.isModified(filmDevelopmentPath) ? 1 : 0
         case .print: count += (scanFilmModified(model) ? 1 : 0) + (model.isModified(printDevelopmentPath) ? 1 : 0)
         case .scan: count += outputCount(model)
@@ -892,6 +894,29 @@ struct AdjustmentInspector: View {
                 }
             }
         }
+        if model.isNegative {
+            // Prep's tone, colour and detail work on a scene before the
+            // film; a negative is film already (the convert-film route).
+            NegativePrep(model: model)
+        } else {
+            scenePrep
+        }
+        // How the file is read; set once per photograph.
+        if model.isRaw {
+            if model.lensCorrectionSupported {
+                InkSection(title: "Lens", edited: model.isModified(EditorModel.lensCorrectionPath)) {
+                    TickRow(title: "Lens corrections", isOn: model.toggle(EditorModel.lensCorrectionPath),
+                            changed: model.isModified(EditorModel.lensCorrectionPath),
+                            help: "Corrects distortion and vignetting with the data the camera recorded for its lens.")
+                }
+            }
+        } else {
+            InkSection(title: nil) { inputColour }
+        }
+    }
+
+    /// Prep for a photograph of a scene.
+    @ViewBuilder private var scenePrep: some View {
         InkSection(title: "Brightness", edited: InspectorEdits.brightnessCount(model) > 0) {
             TickRow(title: model.isRaw ? "Match camera brightness" : "Match original brightness",
                     isOn: Binding(get: { model.matchesBrightness }, set: model.setMatchesBrightness),
@@ -921,18 +946,6 @@ struct AdjustmentInspector: View {
         controlSection("Tone", prepToneControls)
         controlSection("Color", prepColorControls)
         controlSection("Detail", prepDetailControls)
-        // How the file is read; set once per photograph.
-        if model.isRaw {
-            if model.lensCorrectionSupported {
-                InkSection(title: "Lens", edited: model.isModified(EditorModel.lensCorrectionPath)) {
-                    TickRow(title: "Lens corrections", isOn: model.toggle(EditorModel.lensCorrectionPath),
-                            changed: model.isModified(EditorModel.lensCorrectionPath),
-                            help: "Corrects distortion and vignetting with the data the camera recorded for its lens.")
-                }
-            }
-        } else {
-            InkSection(title: nil) { inputColour }
-        }
     }
 
     private func controlSection(_ title: String, _ controls: [Adjustment]) -> some View {
@@ -967,22 +980,28 @@ struct AdjustmentInspector: View {
             }
             .padding(.top, 10)
         }
-        InkSection(title: "Camera", edited: InspectorEdits.count(.camera, model) > 0) {
+        let negative = model.isNegative
+        InkSection(title: "Camera", edited: InspectorEdits.count(.camera, model) > 0, skipped: negative ? "skipped" : nil) {
+            if negative { HintText("The camera is skipped: your negative was exposed already.") }
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             FilmFormatPicker(model: model)
             let lensBlur = shows("camera.lens_blur_um", section: .camera)
             if lensBlur { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
+            colorFilterModule
             modules(.camera, ruledFirst: true)
             moreLine(.camera, loose: model.isModified("camera.lens_blur_um") ? [] : ["Lens blur"])
         }
         let filmStock = model.films.first { $0.id == model.film }
         InkSection(title: "Film", edited: InspectorEdits.count(.film, model) > 0) {
+            // A negative is read through the film's curves and base; what
+            // the film does as it's exposed and developed is in it already.
+            if negative { HintText("Your negative is read through the film's curves and base. Its grain, halation and couplers are skipped: the negative has them already.") }
             developmentTime(stock: filmStock, path: InspectorEdits.filmDevelopmentPath, label: "Development",
                             help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
-            modules(.film, ruledFirst: (filmStock?.times.count ?? 0) > 1)
+            modules(.film, ruledFirst: (filmStock?.times.count ?? 0) > 1, skippedModules: negative ? Self.negativeSkips : [])
             moreLine(.film)
         }
-        let scanSwitch = scanning || shows(section: .print)
+        let scanSwitch = !negative && (scanning || shows(section: .print))
         let paperStock = scanning ? nil : model.papers.first { $0.id == model.paper }
         let printTime = (paperStock?.times.count ?? 0) > 1
         InkSection(title: "Print", edited: InspectorEdits.count(.print, model) > 0, skipped: scanning ? "skipped" : nil) {
@@ -1057,14 +1076,20 @@ struct AdjustmentInspector: View {
 
     // MARK: Modules
 
-    @ViewBuilder private func modules(_ section: InspectorSection, ruledFirst: Bool, skipped: Bool = false) -> some View {
+    /// The film's modules a negative's read skips: they happen as film is
+    /// exposed and developed (the convert route replaces that).
+    static let negativeSkips: Set<String> = ["Grain", "Halation", "DIR Couplers"]
+
+    /// `skipped`: every module struck through; `skippedModules`: those named.
+    @ViewBuilder private func modules(_ section: InspectorSection, ruledFirst: Bool, skipped: Bool = false,
+                                      skippedModules: Set<String> = []) -> some View {
         let groups = adjustmentGroups.filter { $0.section == section && shows($0) }
         ForEach(Array(groups.enumerated()), id: \.element.id) { offset, group in
             let shown = shownControls(group)
             let enabled = group.enable.map { model.toggle($0) }
             let fewer = reveal.foldable(group, visible: shown.filter(isVisible)) { InspectorEdits.isModified($0, model) }
             module(group.title, help: ControlHelp.group(group.title), enabled: enabled, summary: summary(group),
-                   edited: InspectorEdits.count(group, model) > 0, skipped: skipped, ruled: offset > 0 || ruledFirst,
+                   edited: InspectorEdits.count(group, model) > 0, skipped: skipped || skippedModules.contains(group.title), ruled: offset > 0 || ruledFirst,
                    more: visibleCount(group) - shown.count, showMore: { revealMore(group.title) },
                    fewer: fewer, showFewer: { hideMore(group.title) }) {
                 if group.title == "Print Curves" { ToneGraphView(model: model).padding(.horizontal, Theme.Size.gutter).padding(.vertical, 6) }
@@ -1075,7 +1100,7 @@ struct AdjustmentInspector: View {
 
     private func module<Content: View>(_ title: String, help: String?, enabled: Binding<Bool>? = nil, summary: String?, edited: Bool,
                                        skipped: Bool = false, ruled: Bool = true, more: Int = 0, showMore: @escaping () -> Void = {},
-                                       fewer: Int = 0, showFewer: @escaping () -> Void = {},
+                                       fewer: Int = 0, showFewer: @escaping () -> Void = {}, disablesContent: Bool = true,
                                        @ViewBuilder content: @escaping () -> Content) -> some View {
         let open = Binding(
             get: { expanded.split(separator: ",").contains(Substring(title)) },
@@ -1085,7 +1110,24 @@ struct AdjustmentInspector: View {
                 expanded = titles.joined(separator: ",")
             })
         return InkModule(title: title, help: help, enabled: enabled, summary: summary, edited: edited, skipped: skipped, ruled: ruled,
-                         open: open, more: more, showMore: showMore, fewer: fewer, showFewer: showFewer, content: content)
+                         open: open, more: more, showMore: showMore, fewer: fewer, showFewer: showFewer,
+                         disablesContent: disablesContent, content: content)
+    }
+
+    /// Color Filter (issue #21): a taking filter for black-and-white film,
+    /// as glass discs. A colour film shows it only while one is set (by a
+    /// preset, or kept from a B&W film), with a warning.
+    @ViewBuilder private var colorFilterModule: some View {
+        let current = model.colorFilter
+        if !model.colorFilters.isEmpty, model.filmIsBW || current != ColorFilter.none {
+            let enabled = Binding(get: { model.colorFilter != ColorFilter.none },
+                                  set: { model.setColorFilter($0 ? model.lastColorFilter : ColorFilter.none) })
+            module("Color Filter", help: ControlHelp.group("Color Filter"), enabled: enabled,
+                   summary: model.colorFilters.first { $0.key == current }?.name ?? "Off",
+                   edited: model.isModified(ColorFilter.path), disablesContent: false) {
+                ColorFilterPicker(model: model)
+            }
+        }
     }
 
     /// A folded module's summary: its first slider's value.
@@ -1218,11 +1260,30 @@ struct ExportFoot: View {
                 .disabled(!model.canExport || model.cropping)
                 .inkFocus { if model.canExport && !model.cropping { model.exportPanel() } }
                 .help(model.exportTitle == "Export Photograph…" ? "Export photograph (⇧⌘E)" : "Export the selected photographs (⇧⌘E)")
+            // Quieter than Export: words, and only with Lightroom installed (ticket 48).
+            let kinds = model.lightroomKinds
+            if !kinds.isEmpty {
+                let targets = model.exportTargets
+                HStack(spacing: 14) {
+                    ForEach(kinds, id: \.self) { kind in
+                        WordButton(title: "Open in \(kind.title)", size: 13.5,
+                                   help: Self.lightroomHelp(kind, count: targets.count)) { model.openInLightroom(kind) }
+                            .disabled(!model.canOpenInLightroom(kind, targets: targets))
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.horizontal, Theme.Size.gutter)
         .padding(.top, 11)
         .padding(.bottom, 16)
         .overlay(alignment: .top) { InkRule() }
+    }
+
+    /// "Open the 12 selected photographs in Lightroom as 16-bit TIFFs (⌥⌘E)".
+    static func lightroomHelp(_ kind: LightroomKind, count: Int) -> String {
+        let what = count > 1 ? "the \(count) selected photographs" : "the photograph"
+        return "Open \(what) in \(kind.title) as full-size 16-bit TIFFs" + (kind == .cloud ? " (⌥⌘E)" : "")
     }
 
     /// "3984 × 2656 · JPEG 95 · sRGB": the photograph's size, then the

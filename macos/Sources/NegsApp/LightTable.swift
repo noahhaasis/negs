@@ -12,9 +12,14 @@ enum LightTable {
     /// edge and the sheet. A #333333 mat on `bg` is about 1.56, which reads;
     /// #222222 is about 1.23, which doesn't.
     static let minimumContrast = 1.5
-    /// How far the light moves the sheet's colour toward `paper` (or the
-    /// shade toward black): on `bg` it gives about `blank`, #1c1b18.
+    /// How far the light moves the sheet's colour toward `paper`: on
+    /// Darkroom's `bg` it gives about `blank`, #1c1b18.
     static let strength = 0.07
+    /// How far the shade moves a light sheet's colour toward black. The eye
+    /// tells dark tones apart more finely than light ones, so the shade
+    /// needs more than the light. 0.16 gives #d6d6d6 on white, about #e3e3e3
+    /// where it meets the mat after the blur.
+    static let shadeStrength = 0.16
     /// Points. The light reaches `spread` past the print's edges before it
     /// fades out over `blur`.
     static let spread: CGFloat = 14
@@ -36,9 +41,12 @@ enum LightTable {
     /// `sheet`; nil when the edge already stands out from the sheet.
     static func light(sheet: UInt32, edge: UInt32?) -> UInt32? {
         guard let edge, Theme.contrast(sheet, edge) < minimumContrast else { return nil }
-        // Away from the edge: lighter under a dark edge, darker under a light one.
-        let toward: UInt32 = Theme.luminance(edge) <= Theme.luminance(sheet) ? Theme.Hex.paper : 0x000000
-        return mix(sheet, toward, strength)
+        // Away from the edge: lighter under a dark edge, darker under a light
+        // one. An edge the sheet's own colour (a white mat on Light table's
+        // white) goes by the sheet: a dark sheet lights, a light one shades.
+        let edgeLuminance = Theme.luminance(edge), sheetLuminance = Theme.luminance(sheet)
+        let lights = edgeLuminance == sheetLuminance ? sheetLuminance < 0.18 : edgeLuminance < sheetLuminance
+        return lights ? mix(sheet, AppTheme.darkroom.palette.hex.paper, strength) : mix(sheet, 0x000000, shadeStrength)
     }
 
     static func mix(_ a: UInt32, _ b: UInt32, _ t: Double) -> UInt32 {

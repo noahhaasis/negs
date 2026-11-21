@@ -88,7 +88,15 @@ impl Scopes {
     /// milliseconds at any size; the budget also bounds very thin panoramas.
     /// The waveform runs across the photograph as shown, after `rotation`
     /// quarter turns clockwise.
+    #[cfg(test)]
     pub fn of(rgba: &[u8], width: usize, height: usize, crop: &CropSettings, rotation: i32, max_samples: usize) -> Scopes {
+        Self::shown(rgba, width, height, crop, crate::crop::Orientation::new(rotation, false), max_samples)
+    }
+
+    /// As `of`, the waveform across the photograph mirrored too if
+    /// `orientation.flip`, before its quarter turns.
+    pub fn shown(rgba: &[u8], width: usize, height: usize, crop: &CropSettings, orientation: crate::crop::Orientation, max_samples: usize) -> Scopes {
+        let rotation = orientation.turns;
         let size = Size::new(width as f64, height as f64);
         let area = crop.pixels(size);
         if area.width < 1.0 || area.height < 1.0 || max_samples == 0 || rgba.len() < width * height * 4 {
@@ -120,6 +128,7 @@ impl Scopes {
                 histogram.red[r] += 1;
                 histogram.green[g] += 1;
                 histogram.blue[b] += 1;
+                let column = if orientation.flip { columns - 1 - column } else { column };
                 let shown = match turn {
                     1 => rows - 1 - row,
                     2 => columns - 1 - column,

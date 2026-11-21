@@ -330,6 +330,9 @@ final class EngineClient: @unchecked Sendable {
         if let quality { child.qualityOfService = quality }
         try child.run()
         launches += 1
+        // A write to a helper that just died fails (EPIPE) and says so,
+        // rather than SIGPIPE ending the app.
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         process = child; input = stdin.fileHandleForWriting; output = stdout.fileHandleForReading
     }
 
