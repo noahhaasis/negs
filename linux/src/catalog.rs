@@ -215,8 +215,8 @@ mod tests {
         let films = super::stocks(false);
         let papers = super::stocks(true);
         // 23, plus the 24 colour and 5 B&W films ported from Fotufilm and the
-        // 10 Fujifilm negatives prepared from Fujifilm's datasheets.
-        assert_eq!(films.len(), 62);
+        // 10 Fujifilm negatives and 7 Fujifilm slides prepared from Fujifilm's datasheets.
+        assert_eq!(films.len(), 69);
         assert_eq!(papers.len(), 10);
         assert!(
             films

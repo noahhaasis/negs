@@ -163,3 +163,31 @@ by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
   every layer) in the Negs-only Data Guide block. Existing sections
   unchanged.
 - borders/35mm/: its edge-print strip, crates/spektrafilm-io/src/film35.rs.
+
+2026-11-21: seven Fujifilm slides prepared from Fujifilm's datasheets
+(CC BY-SA 4.0; method from spektrafilm by Andrea Volpato; measurement data
+(c) FUJIFILM Corporation):
+
+- profiles/: fujifilm_velvia_100f, fujifilm_provia_400f,
+  fujifilm_provia_400x, fujifilm_64t_type_ii, fujifilm_sensia_100,
+  fujifilm_sensia_200 and fujifilm_sensia_400, built by
+  tools/film_profiles (build_positive.py) from the Professional Film Data
+  Guide (US) AF3-207U, 2005, and the Provia 400X bulletin AF3-0213E, with
+  Fujifilm's own dye spectra, then made neutral on a grey ramp by Negs's
+  slide neutralisation (neutralise_positive.py; red and blue curves moved
+  by at most 0.09 D, staying close to the datasheet's curves). Document,
+  pages, SHA-256 and the step's figures in each profile's datasource and in
+  profile-sources/fujifilm-reversal/. Velvia 100 and Provia 100F were
+  rebuilt only for calibration; their shipped profiles are unchanged. No
+  existing profile changed.
+- presets/couplers.toml: own DIR coupler tables for Velvia 100F, Provia
+  400X and Sensia 100 (the colour-slide default scaled down so the DIR
+  pre-correction does not fold). Existing tables unchanged.
+- filters/neutral_print_filters.json: C0 M50 Y50 for the 7 new slides on
+  every paper, as upstream stores for its slides. Existing entries
+  unchanged.
+- presets/grain.toml: grain sections for the 7 new slides in a Negs-only
+  block at the end (the datasheet's RMS granularity on every layer).
+  Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 7 new slides,
+  crates/spektrafilm-io/src/film35.rs.

@@ -962,6 +962,38 @@
       }
     },
     {
+      "id": "fujifilm_64t_type_ii",
+      "name": "Fujifilm 64T Type II",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          10.0,
+          10.0,
+          10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "fujifilm_astia_100f",
       "name": "Fujifilm Astia 100F",
       "paper": false,
@@ -1026,8 +1058,200 @@
       }
     },
     {
+      "id": "fujifilm_provia_400f",
+      "name": "Fujifilm Provia 400F",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          13.0,
+          13.0,
+          13.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_provia_400x",
+      "name": "Fujifilm Provia 400X",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          11.0,
+          11.0,
+          11.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_sensia_100",
+      "name": "Fujifilm Sensia 100",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.0,
+          8.0,
+          8.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_sensia_200",
+      "name": "Fujifilm Sensia 200",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          13.0,
+          13.0,
+          13.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_sensia_400",
+      "name": "Fujifilm Sensia 400",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          13.0,
+          13.0,
+          13.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "fujifilm_velvia_100",
       "name": "Fujifilm Velvia 100",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.0,
+          8.0,
+          8.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_velvia_100f",
+      "name": "Fujifilm Velvia 100F",
       "paper": false,
       "positive": true,
       "bw": false,

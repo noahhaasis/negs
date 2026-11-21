@@ -194,6 +194,23 @@
    ]
   },
   {
+   "stock": "fujifilm_64t_type_ii",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_acros_100_ii",
    "use": "still",
    "antihalation": "strong",
@@ -500,6 +517,40 @@
    ]
   },
   {
+   "stock": "fujifilm_provia_400f",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_provia_400x",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_reala_100",
    "use": "still",
    "antihalation": "weak",
@@ -526,6 +577,57 @@
     50.0,
     50.0,
     50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_sensia_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_sensia_200",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_sensia_400",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
    ],
    "halation_strength": [
     0.015,
@@ -586,6 +688,23 @@
   },
   {
    "stock": "fujifilm_velvia_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_velvia_100f",
    "use": "still",
    "antihalation": "strong",
    "is_film": true,
