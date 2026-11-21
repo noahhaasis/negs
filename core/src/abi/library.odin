@@ -39,9 +39,11 @@ Transform_Fn :: proc "c" (user: rawptr, item: [^]u8, item_len: uint, state: [^]u
 
 // MARK: The call's arena
 
+// 16 KB to start, growing in blocks as a call needs: most calls (a name, a
+// summary) need little, and a large first block cost more than the call.
 @(private, deferred_out = call_end)
 call_begin :: proc(arena: ^runtime.Arena) -> ^runtime.Arena {
-	_ = runtime.arena_init(arena, 256 * 1024, context.allocator)
+	_ = runtime.arena_init(arena, 16 * 1024, context.allocator)
 	return arena
 }
 
