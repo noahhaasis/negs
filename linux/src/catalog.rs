@@ -18,6 +18,11 @@ pub struct Stock {
     /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
     #[serde(default)]
     pub grain: serde_json::Value,
+    /// Prepared by Negs itself from datasheets, still being checked: the Mac,
+    /// web and Windows apps hide these until Settings › Show Negs-built films;
+    /// Linux has no such setting yet, so it leaves them out.
+    #[serde(default)]
+    pub negs_built: bool,
 }
 #[derive(Deserialize)]
 struct Catalog {
@@ -91,7 +96,7 @@ pub fn stocks(paper: bool) -> Vec<&'static Stock> {
         })
         .profiles
         .iter()
-        .filter(|s| s.paper == paper)
+        .filter(|s| s.paper == paper && !s.negs_built)
         .collect();
     // Match the macOS menu sections while retaining catalog order within each.
     stocks.sort_by_key(|stock| group_order(&stock.group));

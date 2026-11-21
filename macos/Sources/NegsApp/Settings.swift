@@ -154,6 +154,9 @@ struct SettingsView: View {
             ChoiceRow(title: "Fotufilm films", items: FotufilmFilms.allCases.map { .option($0.title, tag: $0.rawValue) },
                       selection: model.fotufilmFilms.rawValue) { model.fotufilmFilms = FotufilmFilms(rawValue: $0) ?? .all }
             HintText("Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.")
+            TickRow(title: "Show Negs-built films", isOn: Binding(
+                get: { model.showNegsBuiltFilms }, set: { model.showNegsBuiltFilms = $0 }))
+            HintText(NegsBuiltFilms.hint)
         }
         InkSection(title: "RAW + JPEG") {
             TickRow(title: "Show camera JPEGs separately", isOn: Binding(

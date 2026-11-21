@@ -890,8 +890,7 @@ impl Model {
     /// the film menu's groups, the chosen one always among them.
     pub fn new_photo_film_choices(&self) -> Vec<(String, String)> {
         let (film, _) = self.new_photo_stocks();
-        let shown = self.fotufilm_films();
-        let films: Vec<&crate::state::Stock> = self.stocks.iter().filter(|s| !s.paper && (shown.lists(s) || s.id == film)).collect();
+        let films: Vec<&crate::state::Stock> = self.stocks.iter().filter(|s| !s.paper && (self.lists_film(s) || s.id == film)).collect();
         let papers = self.papers();
         crate::state::film_groups(&films, &papers).into_iter().flat_map(|g| g.stocks).map(|s| (s.id.clone(), s.name.clone())).collect()
     }

@@ -902,7 +902,11 @@ function stockGroups(stocks, order, kind) {
 // hidden film keeps it, and the film in use stays listed.
 const FOTUFILM_FILMS = ["all", "datasheets", "off"];
 let fotufilmFilms = FOTUFILM_FILMS.find((choice) => choice === remembered("fotufilmFilms", "all")) ?? "all";
-const listsFilm = (s) => !s.fotufilm || fotufilmFilms === "all" || (fotufilmFilms === "datasheets" && s.manufacturer_data !== false);
+// Settings › Show Negs-built films (macOS NegsBuiltFilms): the films Negs
+// prepared itself from datasheets stay out of the lists until shown.
+let showNegsBuilt = remembered("showNegsBuiltFilms", false) === true;
+const listsFotufilm = (s) => !s.fotufilm || fotufilmFilms === "all" || (fotufilmFilms === "datasheets" && s.manufacturer_data !== false);
+const listsFilm = (s) => listsFotufilm(s) && (showNegsBuilt || s.negs_built !== true);
 const listedFilms = () => films().filter((s) => listsFilm(s) || s.id === state.film);
 // The grid has a tile for every film (`all`) and hides the rest.
 const unlistedFilms = () => films().filter((s) => !listsFilm(s) && s.id !== state.film).map((s) => s.id);
@@ -2036,6 +2040,7 @@ function crashCheck() {
 function openSettings() {
   $("previews").checked = previewsOn;
   $("fotufilm-films").value = fotufilmFilms;
+  $("negs-built-films").checked = showNegsBuilt;
   $("match-new-raws").checked = matchNewRaws();
   $("advanced").checked = advanced;
   $("lang").value = lang;
@@ -2051,6 +2056,12 @@ $("match-new-raws").addEventListener("change", () => remember("matchNewRaws", $(
 $("fotufilm-films").addEventListener("change", () => {
   fotufilmFilms = $("fotufilm-films").value;
   remember("fotufilmFilms", fotufilmFilms);
+  refillFilms();
+  pumpPreviews();
+});
+$("negs-built-films").addEventListener("change", () => {
+  showNegsBuilt = $("negs-built-films").checked;
+  remember("showNegsBuiltFilms", showNegsBuilt);
   refillFilms();
   pumpPreviews();
 });

@@ -1615,6 +1615,30 @@ mod tests {
         assert!(profiles.iter().filter(|p| !provenance(p).0).all(|p| provenance(p).1));
     }
     #[test]
+    fn catalog_marks_the_negs_built_films() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let result = catalog(&data).unwrap();
+        let profiles = result["profiles"].as_array().unwrap();
+        let built: Vec<&str> =
+            profiles.iter().filter(|p| p["negs_built"].as_bool().unwrap()).map(|p| p["id"].as_str().unwrap()).collect();
+        // Exactly the profiles whose metadata version says Negs prepared them.
+        let mut expected = Vec::new();
+        for entry in std::fs::read_dir(data.join("profiles")).unwrap() {
+            let path = entry.unwrap().path();
+            let profile: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            if profile["metadata"]["version"].as_str().unwrap_or("").starts_with("negs-") {
+                expected.push(path.file_stem().unwrap().to_str().unwrap().to_owned());
+            }
+        }
+        let mut built_sorted: Vec<String> = built.iter().map(|s| s.to_string()).collect();
+        built_sorted.sort();
+        expected.sort();
+        assert_eq!(built_sorted, expected);
+        // Neither Fotufilm ports nor spektrafilm's own films, nor the B&W expansion.
+        assert!(profiles.iter().filter(|p| p["negs_built"].as_bool().unwrap()).all(|p| !p["fotufilm"].as_bool().unwrap()));
+        assert!(!built.contains(&"kodak_portra_400") && !built.contains(&"kodak_trix400_d76_8min"));
+    }
+    #[test]
     fn presets_import_over_the_current_params_and_export() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
         let mut session = Session::default();

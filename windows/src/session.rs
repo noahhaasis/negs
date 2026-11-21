@@ -253,6 +253,9 @@ pub struct Preferences {
     /// Settings › Fotufilm films, as the Mac stores it: "all",
     /// "datasheets" or "off".
     pub fotufilm_films: String,
+    /// Settings › Show Negs-built films (the Mac's `showNegsBuiltFilms`), off
+    /// by default.
+    pub show_negs_built_films: bool,
     /// Enlarger › Shifts move, as the Mac stores it: "separate",
     /// "together" or "opposite".
     pub filter_shift_link: String,
@@ -328,6 +331,7 @@ impl Default for Preferences {
             app_theme: String::new(),
             library: Default::default(),
             fotufilm_films: "all".into(),
+            show_negs_built_films: false,
             filter_shift_link: "separate".into(),
             original_mode: "hold".into(),
             original_reference: "raw".into(),

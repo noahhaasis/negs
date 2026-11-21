@@ -53,6 +53,9 @@ pub fn catalog(data: &Path, stocks: impl IntoIterator<Item = String>) -> Result<
             // Where the profile comes from, for Settings' Fotufilm films choice.
             "fotufilm": p.metadata.version.starts_with("fotufilm-port"),
             "manufacturer_data": p.metadata.manufacturer_data,
+            // Prepared by Negs itself from datasheets (tools/film_profiles), for
+            // Settings' Show Negs-built films, off by default.
+            "negs_built": p.metadata.version.starts_with("negs-"),
             "grain": {
                 "rms_granularity": grain.rms_granularity, "density_min": grain.density_min,
                 "uniformity": grain.uniformity, "particle_scale_sublayers": grain.particle_scale_sublayers,

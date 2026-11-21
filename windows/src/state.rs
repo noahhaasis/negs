@@ -241,6 +241,8 @@ pub struct Stock {
     /// data rather than modelled from sample photographs (Settings › Fotufilm films).
     pub fotufilm: bool,
     pub manufacturer_data: bool,
+    /// Prepared by Negs itself from datasheets (Settings › Show Negs-built films).
+    pub negs_built: bool,
 }
 
 /// A camera colour filter from the catalog (`ColorFilter` in
@@ -371,6 +373,15 @@ impl FilterLink {
     }
 }
 
+/// Settings › Show Negs-built films (`NegsBuiltFilms` in `Parameters.swift`):
+/// the films Negs prepared itself from datasheets stay out of the film menu and
+/// grid until shown. Only the lists, as for Fotufilm films.
+pub fn lists_negs_built(stock: &Stock, shown: bool) -> bool {
+    shown || !stock.negs_built
+}
+
+pub const NEGS_BUILT_HINT: &str = "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; and the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides. Photos already using one keep it.";
+
 /// Settings › Fotufilm films (`FotufilmFilms` in `Parameters.swift`): which
 /// of the films ported from Fotufilm the film menu and grid list. Only the
 /// lists: an edit or a preset with a hidden film keeps it.
@@ -469,6 +480,7 @@ impl Stock {
             // A catalog from before these fields lists every film.
             fotufilm: json::boolean(&value["fotufilm"]),
             manufacturer_data: value["manufacturer_data"] != Value::Bool(false),
+            negs_built: json::boolean(&value["negs_built"]),
         }
     }
 
@@ -1094,7 +1106,7 @@ mod tests {
     #[test]
     fn stocks_group_like_the_mac() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool, target: &str| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
+            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
         };
         let films = [
             stock("gold", "Gold", false, false, false, "endura"),
@@ -1118,7 +1130,7 @@ mod tests {
     #[test]
     fn film_search_matches_every_word_in_name_id_or_group() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true,
+            id: id.into(), name: name.into(), paper, positive, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
         };
         // The Mac's fixture: Gold 200, Velvia 50 and Tri-X 400.
         let films = [stock("gold", "Gold 200", false, false, false), stock("velvia", "Velvia 50", false, true, false), stock("trix", "Tri-X 400", false, false, true)];
