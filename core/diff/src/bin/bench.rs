@@ -4,7 +4,6 @@
 
 use negs_core_diff::{embedded_preview, exact_fit, sheet_rules};
 use negs_core_diff::{median_ms, peak_rss_mib};
-use negs_library::{Config, Filter, FolderBin, Library, RatingFilter};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
@@ -13,12 +12,23 @@ const RUNS: usize = 7;
 #[global_allocator]
 static ALLOC: negs_core_diff::Counting = negs_core_diff::Counting;
 
-/// One run of `f`, counted: allocations and bytes.
+/// One run of `f`, counted: Rust's allocations and bytes, and the core's
+/// when it counts them (built with `--features track`).
 fn counted(label: &str, mut f: impl FnMut()) {
     negs_core_diff::take_allocations();
+    let core_before = negs_core_sys::alloc_stats();
     f();
     let (n, bytes) = negs_core_diff::take_allocations();
-    println!("  {label} allocations: {n} ({:.1} MiB)", bytes as f64 / 1048576.0);
+    let core_after = negs_core_sys::alloc_stats();
+    if core_after.tracked == 1 && core_after.total_count != core_before.total_count {
+        println!(
+            "  {label} allocations: Rust {n} ({:.1} MiB), core {}",
+            bytes as f64 / 1048576.0,
+            core_after.total_count - core_before.total_count
+        );
+    } else {
+        println!("  {label} allocations: {n} ({:.1} MiB)", bytes as f64 / 1048576.0);
+    }
 }
 
 fn repo() -> PathBuf {
@@ -49,56 +59,80 @@ fn make_folder(root: &Path) -> PathBuf {
     photos
 }
 
-fn open(photos: &Path, bin: &Path) -> Library {
-    Library::new(
-        photos,
-        Config { data: repo().join("data"), app: "bench".into(), bin: Box::new(FolderBin::new(bin.to_path_buf())), pairing: true, sidecars: true, id_seed: Some(7) },
-    )
-    .unwrap()
+/// The library workloads for one implementation: `$lib` is the crate
+/// (negs_library_rust, the Rust oracle; negs_library, the Odin core).
+macro_rules! library_workloads {
+    ($name:ident, $lib:ident, $label:literal) => {
+        fn $name(scratch: &Path) {
+            use $lib::{Config, Filter, FolderBin, Library, RatingFilter};
+            let open = |photos: &Path, bin: &Path| -> Library {
+                Library::new(
+                    photos,
+                    Config {
+                        data: repo().join("data"),
+                        app: "bench".into(),
+                        bin: Box::new(FolderBin::new(bin.to_path_buf())),
+                        pairing: true,
+                        sidecars: true,
+                        id_seed: Some(7),
+                    },
+                )
+                .unwrap()
+            };
+            let photos = make_folder(scratch);
+            let bin = scratch.join("bin");
+            let open_ms = median_ms(RUNS, || {
+                let library = open(&photos, &bin);
+                let shown = library.shown(None);
+                for item in &shown {
+                    black_box(library.summary(item));
+                    black_box(library.look(item));
+                    black_box(library.name(item));
+                }
+                assert_eq!(shown.len(), 500);
+            });
+            println!(concat!($label, "library_open_500 (list + parse + summaries + looks): {:.2} ms"), open_ms);
+            counted(concat!($label, "library_open_500"), || {
+                let library = open(&photos, &bin);
+                for item in &library.shown(None) {
+                    black_box(library.summary(item));
+                    black_box(library.look(item));
+                }
+            });
+            let mut library = open(&photos, &bin);
+            let items = library.items();
+            let write_ms = median_ms(RUNS, || {
+                black_box(library.set_rating(&items, 4));
+                black_box(library.undo());
+            });
+            println!(concat!($label, "library_rate_and_undo_500 (1000 sidecar writes): {:.2} ms"), write_ms);
+            counted(concat!($label, "library_rate_and_undo_500"), || {
+                black_box(library.set_rating(&items, 4));
+                black_box(library.undo());
+            });
+            let filter_ms = median_ms(RUNS, || {
+                for stars in 1..=5u8 {
+                    library.set_filter(Filter { rating: RatingFilter::AtLeast(stars), ..Filter::default() });
+                    black_box(library.shown(None));
+                }
+                library.set_filter(Filter::default());
+            });
+            println!(concat!($label, "library_filter_sort_5x500: {:.2} ms"), filter_ms);
+            counted(concat!($label, "library_filter_sort_5x500"), || {
+                for stars in 1..=5u8 {
+                    library.set_filter(Filter { rating: RatingFilter::AtLeast(stars), ..Filter::default() });
+                    black_box(library.shown(None));
+                }
+                library.set_filter(Filter::default());
+            });
+            drop(library);
+            let _ = std::fs::remove_dir_all(scratch);
+        }
+    };
 }
 
-fn library(scratch: &Path) {
-    let photos = make_folder(scratch);
-    let bin = scratch.join("bin");
-    let open_ms = median_ms(RUNS, || {
-        let library = open(&photos, &bin);
-        let shown = library.shown(None);
-        for item in &shown {
-            black_box(library.summary(item));
-            black_box(library.look(item));
-            black_box(library.name(item));
-        }
-        assert_eq!(shown.len(), 500);
-    });
-    println!("library_open_500 (list + parse + summaries + looks): {open_ms:.2} ms");
-    counted("library_open_500", || {
-        let library = open(&photos, &bin);
-        for item in &library.shown(None) {
-            black_box(library.summary(item));
-            black_box(library.look(item));
-        }
-    });
-    let mut library = open(&photos, &bin);
-    let items = library.items();
-    let write_ms = median_ms(RUNS, || {
-        black_box(library.set_rating(&items, 4));
-        black_box(library.undo());
-    });
-    println!("library_rate_and_undo_500 (1000 sidecar writes): {write_ms:.2} ms");
-    counted("library_rate_and_undo_500", || {
-        black_box(library.set_rating(&items, 4));
-        black_box(library.undo());
-    });
-    let filter_ms = median_ms(RUNS, || {
-        for stars in 1..=5u8 {
-            library.set_filter(Filter { rating: RatingFilter::AtLeast(stars), ..Filter::default() });
-            black_box(library.shown(None));
-        }
-        library.set_filter(Filter::default());
-    });
-    println!("library_filter_sort_5x500: {filter_ms:.2} ms");
-    let _ = std::fs::remove_dir_all(scratch);
-}
+library_workloads!(library, negs_library_rust, "");
+library_workloads!(core_library, negs_library, "core_");
 
 fn names(count: usize) -> Vec<String> {
     (0..count).map(|i| format!("DSC_{:04}.NEF", 1000 + i)).collect()
@@ -187,7 +221,13 @@ fn main() {
     let which = args.get(1).map(String::as_str).unwrap_or("all");
     let scratch = std::env::temp_dir().join(format!("negs-core-bench-{}", std::process::id()));
     match which {
-        "library" => library(&scratch),
+        "library" => {
+            library(&scratch);
+            core_library(&scratch);
+        }
+        // One implementation per process, for its own peak RSS.
+        "library-rust" => library(&scratch),
+        "library-core" => core_library(&scratch),
         "marks" => {
             marks();
             core_marks();
@@ -197,6 +237,7 @@ fn main() {
         "embedded" => embedded(Path::new(args.get(2).expect("raw folder"))),
         "all" => {
             library(&scratch);
+            core_library(&scratch);
             marks();
             core_marks();
             sheet();
