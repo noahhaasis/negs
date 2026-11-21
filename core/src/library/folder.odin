@@ -105,7 +105,7 @@ listing :: proc(directory: string, pairing: bool) -> (Listing, Io_Error) {
 			append(&out.photos, file)
 		}
 	}
-	slice.stable_sort_by(out.photos[:], proc(a, b: Photo_File) -> bool {return standard_compare(a.name, b.name) < 0})
+	sort_by_name(out.photos[:])
 	if pairing {
 		pair(&out, heifs[:])
 	}
@@ -129,7 +129,18 @@ pair :: proc(l: ^Listing, heifs: []string) {
 	if len(raws) == 0 {
 		return
 	}
-	slice.stable_sort_by(heifs, proc(a, b: string) -> bool {return standard_compare(file_name(a), file_name(b)) < 0})
+	Keyed_Path :: struct {
+		key:  Name_Key,
+		path: string,
+	}
+	keyed := make([]Keyed_Path, len(heifs), ta)
+	for h, i in heifs {
+		keyed[i] = Keyed_Path{name_key(file_name(h)), h}
+	}
+	slice.stable_sort_by(keyed, proc(a, b: Keyed_Path) -> bool {return compare_name_keys(a.key, b.key) < 0})
+	for k, i in keyed {
+		heifs[i] = k.path
+	}
 	pictures := make([dynamic]string, 0, len(l.photos) + len(heifs), ta)
 	for p in l.photos {
 		if is_camera_picture(p.path) {
@@ -185,4 +196,21 @@ paired_raw :: proc(picture: string) -> (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Finder's order of the photographs, each name's key worked out once.
+@(private = "file")
+sort_by_name :: proc(photos: []Photo_File) {
+	Keyed :: struct {
+		key:  Name_Key,
+		file: Photo_File,
+	}
+	keyed := make([]Keyed, len(photos), context.temp_allocator)
+	for p, i in photos {
+		keyed[i] = Keyed{name_key(p.name), p}
+	}
+	slice.stable_sort_by(keyed, proc(a, b: Keyed) -> bool {return compare_name_keys(a.key, b.key) < 0})
+	for k, i in keyed {
+		photos[i] = k.file
+	}
 }

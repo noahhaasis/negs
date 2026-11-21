@@ -2,6 +2,7 @@
 // are new, changed or gone since read (library.rs `refresh`, `reload`).
 package library
 
+import "base:runtime"
 import "core:strings"
 
 // Lists the folder again and reads the sidecars that are new, changed or
@@ -90,6 +91,11 @@ library_refresh :: proc(lib: ^Library, interacting: bool) -> ([]string, Outcome)
 	for f, i in lib.files {
 		files[i] = photo_file_clone(f, ta)
 	}
+	// Each sidecar is read with its own scratch memory, so a listing of a
+	// large folder doesn't hold every parsed file at once.
+	scratch: runtime.Arena
+	_ = runtime.arena_init(&scratch, 32 * 1024, lib.allocator)
+	defer runtime.arena_destroy(&scratch)
 	for file in files {
 		now := Stamp{}
 		if s, ok := found.sidecars[file.name]; ok {
@@ -100,7 +106,10 @@ library_refresh :: proc(lib: ^Library, interacting: bool) -> ([]string, Outcome)
 			if has_known {
 				append(&changed, file.path)
 			}
+			mark := runtime.arena_temp_begin(&scratch)
+			context.temp_allocator = runtime.arena_allocator(&scratch)
 			reload(lib, file.path)
+			runtime.arena_temp_end(mark)
 		}
 	}
 	if lib.has_open {

@@ -13,7 +13,7 @@ import "core:unicode/utf8"
 @(private = "file")
 PUNCTUATION :: "_-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$"
 
-@(private = "file")
+@(private)
 Primary_Kind :: enum u8 {
 	Space,
 	Punctuation,
@@ -22,7 +22,7 @@ Primary_Kind :: enum u8 {
 	Letter,
 }
 
-@(private = "file")
+@(private)
 Element :: struct {
 	kind:   Primary_Kind,
 	// The punctuation's rank, the other character, the letter, or the
@@ -88,12 +88,18 @@ is_rust_whitespace :: proc(r: rune) -> bool {
 	return false
 }
 
-@(private = "file")
-elements :: proc(name: string) -> []Element {
-	out := make([dynamic]Element, 0, len(name), context.temp_allocator)
+// A name's sort key: its elements, worked out once.
+Name_Key :: struct {
+	name:     string,
+	elements: []Element,
+}
+
+name_key :: proc(name: string, allocator := context.temp_allocator) -> Name_Key {
+	out := make([dynamic]Element, 0, len(name), allocator)
 	i := 0
 	for i < len(name) {
-		if name[i] >= '0' && name[i] <= '9' {
+		b := name[i]
+		if b >= '0' && b <= '9' {
 			start := i
 			for i < len(name) && name[i] >= '0' && name[i] <= '9' {
 				i += 1
@@ -101,6 +107,13 @@ elements :: proc(name: string) -> []Element {
 			run := name[start:i]
 			trimmed := strings.trim_left(run, "0")
 			append(&out, Element{kind = .Number, value = u32(len(trimmed)), digits = trimmed, zeros = len(run) - len(trimmed)})
+			continue
+		}
+		// ASCII letters, the common case: no accent, upper case known.
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') {
+			upper := b <= 'Z'
+			append(&out, Element{kind = .Letter, value = u32(b + 32 if upper else b), upper = upper})
+			i += 1
 			continue
 		}
 		c, width := utf8.decode_rune_in_string(name[i:])
@@ -116,7 +129,7 @@ elements :: proc(name: string) -> []Element {
 			append(&out, Element{kind = .Other, value = u32(c)})
 		}
 	}
-	return out[:]
+	return Name_Key{name, out[:]}
 }
 
 @(private = "file")
@@ -157,7 +170,11 @@ sequence_cmp :: proc(x, y: []Element, field: proc(a, b: Element) -> int) -> int 
 
 // -1, 0 or 1 as `a` sorts before, with or after `b`.
 standard_compare :: proc(a, b: string) -> int {
-	x, y := elements(a), elements(b)
+	return compare_name_keys(name_key(a), name_key(b))
+}
+
+compare_name_keys :: proc(a, b: Name_Key) -> int {
+	x, y := a.elements, b.elements
 	if c := sequence_cmp(x, y, primary_cmp); c != 0 {
 		return c
 	}
@@ -170,5 +187,5 @@ standard_compare :: proc(a, b: string) -> int {
 	if c := sequence_cmp(x, y, proc(p, q: Element) -> int {return cmp(p.zeros, q.zeros)}); c != 0 {
 		return c
 	}
-	return strings.compare(a, b)
+	return strings.compare(a.name, b.name)
 }
