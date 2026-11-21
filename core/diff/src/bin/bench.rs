@@ -127,6 +127,23 @@ fn marks() {
     });
 }
 
+/// The same marks from the Odin core, through negs-core-marks (the
+/// allocations counted are the wrapper's Vecs; the core's own heap isn't
+/// Rust's).
+fn core_marks() {
+    let names = names(1000);
+    let ms = median_ms(RUNS, || {
+        for name in &names {
+            for index in 0..5 {
+                black_box(negs_core_marks::star_path(name, index));
+            }
+            black_box(negs_core_marks::cross_strokes(200.0, 140.0, name));
+            black_box(negs_core_marks::pick_box_grid(264.0, 176.0, name));
+        }
+    });
+    println!("core_marks_1000_names (5 stars + cross + box each): {ms:.2} ms");
+}
+
 fn sheet() {
     let ratios: Vec<f64> = (0..1000).map(|i| [1.5, 0.6667, 1.0, 1.7778, 1.25][i % 5]).collect();
     let ms = median_ms(RUNS, || {
@@ -171,13 +188,17 @@ fn main() {
     let scratch = std::env::temp_dir().join(format!("negs-core-bench-{}", std::process::id()));
     match which {
         "library" => library(&scratch),
-        "marks" => marks(),
+        "marks" => {
+            marks();
+            core_marks();
+        }
         "sheet" => sheet(),
         "fit" => fit(),
         "embedded" => embedded(Path::new(args.get(2).expect("raw folder"))),
         "all" => {
             library(&scratch);
             marks();
+            core_marks();
             sheet();
         }
         other => panic!("unknown workload {other}"),
