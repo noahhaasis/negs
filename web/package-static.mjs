@@ -77,7 +77,7 @@ if (assets.length + 1 > 1000) throw new Error("Exceeds the dashboard's 1,000-fil
 const hasGit = existsSync(join(root, ".git"));
 const manifest = {
   sourceCommit: hasGit ? execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim() : null,
-  sourceChanges: hasGit ? execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { cwd: root, encoding: "utf8" }).trim() : "Built without Git metadata",
+  sourceChanges: hasGit ? execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: root, encoding: "utf8" }).trim() : "Built without Git metadata",
   builtAt: new Date().toISOString(),
   assets,
 };
