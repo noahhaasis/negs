@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.18.0" date="2026-11-21">
+      <description>
+        <p>LibRaw fallback opens Nikon HE and HE★ and other RAW files rawler can't read. On Windows: the Mac's interface, themes, film and paper tray, folder library, strip and grid, Compare, batch export and Open in Lightroom. Plus 17 Fujifilm films from datasheets behind Settings › Show Negs-built films on Mac, Windows and Web.</p>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-11-18">
       <description>
         <p>On the Mac: a lock that keeps the paper when the film changes, a dark Plain theme, and scanned negatives printed as Auto does on a new paper.</p>

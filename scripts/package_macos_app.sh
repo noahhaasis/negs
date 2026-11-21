@@ -212,7 +212,7 @@ README
 if [[ $DEV != 1 ]]; then
     COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='.build' --exclude='.swiftpm' \
         -czf "$DIST_DIR/SOURCE.tar.gz" Cargo.toml Cargo.lock LICENSE README.md \
-        crates vendor macos data assets scripts docs .github release
+        crates vendor core macos data assets scripts docs .github release
 fi
 
 # Ad-hoc sign our own executables and the outer app. Do not recursively
