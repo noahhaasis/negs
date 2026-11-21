@@ -531,7 +531,7 @@ A stock whose DIR pre-correction folds first gets the D8 fold remedy (`tools/fot
 
 **12. Finalise** (`finalize_positive.py`): metadata (CC BY-SA 4.0, `version` `negs-datasheet-1`, the document, pages and hash, every Negs choice, the step's before/after figures and every gate exception), the recipe's display name, and the profile's shape. Then filters, grain, edge print, strip and the halation fixture as D6, and the film counts in the Linux and Windows tests.
 
-Shipped (2026-11-21, behind Settings › Show Negs-built films): Velvia 100F, Provia 400F, Provia 400X, 64T Type II, Sensia 100, Sensia 200 and Sensia 400. Velvia 100 and Provia 100F stay spektrafilm's. Gate exceptions above the 0.41 % approved for the negatives await Noah: Provia 400F (dye zero 1.1 %, characteristic y 0.5 %), 64T Type II (dye zero 0.7 %), Sensia 200 (dye x 0.5 %), Sensia 400 (dye zero 0.5 %).
+Shipped (2026-11-21, behind Settings › Show Negs-built films): Velvia 100F, Provia 400F, Provia 400X, 64T Type II, Sensia 100, Sensia 200 and Sensia 400. Velvia 100 and Provia 100F stay spektrafilm's. Gate exceptions above the 0.41 % approved for the negatives, approved by Noah (2026-11-21) while the films stay behind that setting: Provia 400F (dye zero 1.1 %, characteristic y 0.5 %), 64T Type II (dye zero 0.7 %), Sensia 200 (dye x 0.5 %), Sensia 400 (dye zero 0.5 %).
 
 ---
 
