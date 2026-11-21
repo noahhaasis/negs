@@ -10,7 +10,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 |---|---|---|---|
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
 | 1 | Pilot: `marks` + `theme` | done (Mac) | Bit for bit with `windows/marks` on Apple silicon; macOS draws marks and themes from the core; Windows wiring at the Phase 2 gate |
-| 2 | Pilot Go/No-Go: `library` | not started | Mac differential tests first → **ping Noah for Windows PC** → Go/No-Go review |
+| 2 | Pilot Go/No-Go: `library` | Mac side done; waiting for the Windows gate | Fixtures byte for byte, suites + lockstep at 50 seeds, 0 diffs, 0 leaks → **Windows PC gate** → Go/No-Go review |
 | 3 | Pure Domain Rules & Media Helpers | not started | 3a (`sheet`/`tray`/`compare`), 3b (`crop`/`border`/`exact_fit`/`thumb_compose`), 3c (`embedded_preview`/`photo_facts`/`tone_graph`/`histogram`/`negative`/`help`) |
 | 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
@@ -42,6 +42,65 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-21: Phase 2 Mac side, `library` (branch `core-p2-library`)
+
+- **Port:** `core/src/library` (23 files, ~7,400 lines of Odin, against
+  `negs-library`'s 5,385 lines of Rust): its own JSON reader/writer,
+  SHA-256, Finder order, folder listing and RAW+JPEG pairing, sidecars,
+  edits, XMP, thumbnails' looks and keys, filter, selection, delete plans,
+  the Library state machine with undo, and the file system (POSIX; a
+  kernel32 version that type-checks for Windows but has not run there).
+  ABI (`core/src/abi/library*.odin`, ~1,700 lines): an opaque
+  `NegsLibrary*` used from one thread at a time, values crossing as JSON
+  (shapes in the header), the bin as a host vtable (`negs_bin_t`), a
+  per-call arena. `NEGS_CORE_ABI_VERSION` is 3.
+- **Rust wrapper** `core/rust/library` (`negs-core-library`) has
+  `negs-library`'s API: `Library` and `Selection` run in Odin; plain data
+  types and pure helpers (Json, sidecar read/write, edits encode/decode,
+  filter words, `DeletePlan::new`, `FolderBin`) are re-exported from Rust.
+- **Gates, all passing** (`build.py test`; `build.py diff --seeds 50`):
+  - `docs/sidecar-fixtures/`: every fixture reads and rewrites byte for
+    byte, in Odin's own tests, through the C ABI, and through the wrapper.
+  - `negs-library`'s own suites, unchanged (`fixtures.rs`, `library.rs`,
+    `state.rs` at `NEGS_LIBRARY_SEEDS=50`), run against the core.
+  - **Lockstep** (`core/diff/tests/lockstep.rs`): Rust and the core each get
+    the same folder (fixture sidecars, RAW+JPEG pairs, non-ASCII names) and
+    the same ~30 kinds of random action; after every step, every file's
+    bytes, the items, names, summaries, looks, thumbnail states, export
+    edits, the open photograph, copied edits, defaults, Undo/Redo and each
+    outcome must match. **0 diffs** at 50 seeds (3,000 steps) and at
+    300 seeds × 120 steps (36,000 steps); different id seeds and a planted
+    bug both fail it. **0 leaks, 0 bad frees** (21M core allocations).
+  - ASan (with Homebrew LLVM's runtime: Apple clang's lacks the check Odin's
+    LLVM 20 emits): Odin tests and the 50-seed suites clean.
+  - Full macOS `swift test` against this core: 490 tests, 0 failures.
+- **Fixed for every module:** a static library has no entry point, so
+  Odin's runtime startup never ran and globals initialised by code stayed
+  zero: `core:unicode`'s tables, so `is_letter`/`is_upper` were false past
+  Latin-1 (Ω sorted after an emoji). `core_context()` now runs
+  `runtime._startup_runtime()` once in static builds. Tests missed it
+  because they run as executables; 40,000 seeded Finder-order pairs and the
+  lockstep folder's non-ASCII names now catch it.
+- **Speed** (500 photos, median of 7; on battery, indicative):
+
+  | | Rust | Odin core |
+  |---|---:|---:|
+  | open + summaries + looks + names | 28.3 ms | 15.0–15.5 ms |
+  | rate 500 + undo (1,000 writes) | 206–210 ms | 177 ms |
+  | filter + sort 5×500 | 0.34 ms | 1.2 ms (500 items as JSON per call) |
+  | peak RSS | 6.4 MiB | 11.8–12.1 MiB |
+
+  Rust-side allocations fall from 175,861 / 330,562 (open / rate) to
+  19,831 / 2,037; the core makes 3,294 / 4,608 of its own.
+- **Compile time:** `build.py lib` is a whole-program build, cold or after
+  a one-line edit: **6.5–6.9 s** with the library (0.6 s before it), 92% of
+  it LLVM codegen of one `-o:speed` module. With `-use-separate-modules`:
+  **1.6 s**; the marks stay bit for bit, theme and lockstep pass, the
+  library bench is within noise. Not adopted yet: Noah's call.
+- **Open:** path equality is string equality; non-UTF-8 file names are read
+  lossily; `is_letter`/`is_upper` follow Odin's Unicode tables (equal to
+  Rust's on all 40,000 sampled pairs). Windows: type-checks only.
 
 ### 2026-11-21: Phase 1, `marks` + `theme` (branch `core-p1-marks-theme`)
 
