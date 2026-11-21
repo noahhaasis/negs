@@ -316,12 +316,12 @@ fn new_library(core: bool, root: &Path, seed: u64, film: &str) -> Box<dyn Lib> {
 }
 
 /// The folder both start from: plain photographs, sidecars of each kind the
-/// fixtures have (edited, duplicates, rejected, from a newer Negs), and a
-/// RAW with its camera JPEG.
+/// fixtures have (edited, duplicates, rejected, from a newer Negs), RAWs
+/// with their camera JPEGs, and names past ASCII for Finder's order.
 fn make_folder(root: &Path) {
     let photos = root.join("photos");
     std::fs::create_dir_all(&photos).unwrap();
-    for (index, name) in ["a.png", "b.png", "c.png", "d.png", "e.png", "f.CR3", "f.JPG"].iter().enumerate() {
+    for (index, name) in ["a.png", "b.png", "c.png", "d.png", "e.png", "f.CR3", "f.JPG", "Ä 10.png", "ä 9.png", "Ωmega.CR3", "ωmega.JPG"].iter().enumerate() {
         std::fs::write(photos.join(name), [b'p', b'n', b'g', index as u8]).unwrap();
     }
     for (photo, fixture) in [("b.png", "edited.negs"), ("c.png", "two-variants.negs"), ("d.png", "rated-reject.negs"), ("e.png", "newer-schema.negs")] {
@@ -490,7 +490,7 @@ fn sequence(seed: u64, steps: usize, root: &Path, run: &mut Run) -> Result<(), S
                 text = (outcome_text(&rust, &o.0), outcome_text(&core, &o.1));
             }
             14 => {
-                if items.len() >= 12 {
+                if items.len() >= 16 {
                     continue;
                 }
                 let targets = random.subset(&items);

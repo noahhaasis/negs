@@ -41,9 +41,22 @@ tracked_proc :: proc(
 	return mem.tracking_allocator_proc(&t.tracking, mode, size, alignment, old_memory, old_size, location)
 }
 
+// A static library has no entry point, so nothing runs Odin's runtime
+// startup: globals that need code to initialise (core:unicode's range
+// tables, which is_letter and is_upper read for anything past Latin-1)
+// would stay zero. The first call into the core runs it.
+@(private)
+started: sync.Once
+
 // The context for an exported procedure's body: `context = core_context()`.
 core_context :: proc "contextless" () -> runtime.Context {
 	c := runtime.default_context()
+	when ODIN_BUILD_MODE == .Static {
+		context = c
+		sync.once_do(&started, proc() {
+			runtime._startup_runtime()
+		})
+	}
 	when NEGS_CORE_TRACK {
 		context = c
 		sync.once_do(&tracker.once, proc() {

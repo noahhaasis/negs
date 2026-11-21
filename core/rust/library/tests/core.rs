@@ -53,6 +53,23 @@ fn helpers_match_the_rust_ones() {
             assert_eq!(folder::standard_compare(a, b), oracle::folder::standard_compare(a, b), "{a} {b}");
         }
     }
+    // Seeded names from letters (accented, both cases), digits with
+    // leading zeros, spaces, punctuation and other scripts.
+    let alphabet: Vec<char> = "aAbBzZeéÉäÄöñßıİ0012999 _-.,()[]~#+çΩж中😀\u{a0}".chars().collect();
+    let mut state = 0x5eed_u64;
+    let mut next = move || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    let random: Vec<String> = (0..400).map(|_| (0..1 + next() % 8).map(|_| alphabet[(next() % alphabet.len() as u64) as usize]).collect()).collect();
+    for a in &random {
+        for b in random.iter().take(100) {
+            assert_eq!(folder::standard_compare(a, b), oracle::folder::standard_compare(a, b), "{a:?} {b:?}");
+        }
+    }
     let png = [137u8, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 0, 73, 68, 65, 84, 1, 2, 3, 4, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];
     let embedded = xmp::embed(&png, 4).expect("a PNG");
     assert_eq!(Some(embedded.clone()), oracle::xmp::embed(&png, 4));
