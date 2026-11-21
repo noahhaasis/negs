@@ -161,8 +161,13 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
         Kind::Negative,
         EdgePrint::Cine { product: "8522", keykode: None },
     ),
+    // The Data Guide stocks: the guide's product codes in the pattern of the
+    // shipped Pro and Superia films, not checked against scans.
+    ("fujifilm_pro_160c", Kind::Negative, EdgePrint::Still(&["PRO160C", "FUJI"])),
     ("fujifilm_pro_160ns", Kind::Negative, EdgePrint::Still(&["PRO160NS", "FUJI"])),
+    ("fujifilm_pro_160s", Kind::Negative, EdgePrint::Still(&["PRO160S", "FUJI"])),
     ("fujifilm_pro_400h", Kind::Negative, EdgePrint::Still(&["PRO400H", "FUJI"])),
+    ("fujifilm_pro_800z", Kind::Negative, EdgePrint::Still(&["PRO800Z", "FUJI"])),
     ("fujifilm_provia_100f", Kind::Slide, EdgePrint::Still(&["FUJI RDPIII"])),
     ("fujifilm_reala_100", Kind::Negative, EdgePrint::Still(&["FUJI", "REALA", "CS"])),
     (
@@ -170,7 +175,9 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
         Kind::Negative,
         EdgePrint::Cine { product: "8592", keykode: None },
     ),
+    ("fujifilm_superia_1600", Kind::Negative, EdgePrint::Still(&["FUJI", "S-1600", "CU"])),
     ("fujifilm_superia_200", Kind::Negative, EdgePrint::Still(&["FUJI", "S-200"])),
+    ("fujifilm_true_definition_400", Kind::Negative, EdgePrint::Still(&["FUJI", "TD-400", "CH"])),
     ("fujifilm_velvia_100", Kind::Slide, EdgePrint::Still(&["FUJI RVP100"])),
     ("fujifilm_velvia_50", Kind::Slide, EdgePrint::Still(&["FUJI RVP"])),
     ("fujifilm_xtra_400", Kind::Negative, EdgePrint::Still(&["FUJI", "S-400", "CH23"])),

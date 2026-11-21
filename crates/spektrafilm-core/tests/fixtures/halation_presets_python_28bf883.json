@@ -398,7 +398,41 @@
    ]
   },
   {
+   "stock": "fujifilm_pro_160c",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_pro_160ns",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_pro_160s",
    "use": "still",
    "antihalation": "weak",
    "is_film": true,
@@ -428,6 +462,23 @@
    "halation_strength": [
     0.015,
     0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_pro_800z",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
     0.0
    ]
   },
@@ -483,7 +534,41 @@
    ]
   },
   {
+   "stock": "fujifilm_superia_1600",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_superia_200",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_true_definition_400",
    "use": "still",
    "antihalation": "weak",
    "is_film": true,
