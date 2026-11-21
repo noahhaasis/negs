@@ -568,6 +568,23 @@
    ]
   },
   {
+   "stock": "fujifilm_true_definition_400",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_velvia_100",
    "use": "still",
    "antihalation": "strong",

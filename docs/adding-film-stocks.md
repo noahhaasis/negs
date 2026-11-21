@@ -503,9 +503,9 @@ The FUJIFILM Professional Film Data Guide (AF3-207U, 2005) has each still negati
 - **Relative sensitivity axes.** No tick values, only a 1.0 scale bar between two gridlines: `fit_axis` accepts two positions when `relative_reason` is set. D5 removes the offset.
 - **Target print** `fujifilm_crystal_archive_typeii` and `use: still`, as the shipped Fujifilm still negatives. D8 check 8's range is that paper's shipped films (yellow 50.0–116.5).
 - **Fourth layer.** Fujifilm's cyan-sensitive fourth layer (dashed) is not modelled; recorded in each profile's notes.
-- **Product codes are not identities.** True Definition 400 carries X-TRA 400's [CH] but different curves; compare traces before treating two stocks as one.
+- **Product codes are not identities.** True Definition 400 carries X-TRA 400's [CH] but different curves (up to 0.59 D); compare traces before treating two stocks as one. Noah decided (2026-11-20) to ship it as a film of its own.
 
-Shipped: Pro 160S, Pro 160C, Pro 800Z, Superia 1600. Stopped at D8 and kept for a decision: NPL 160 and Superia 100 (print-weighted dye residual 0.013/0.011 D, bound 0.01), X-TRA 800 (check 8). Calibration only: Pro 400H, X-TRA 400, Reala, Superia 200.
+Shipped: Pro 160S, Pro 160C, Pro 800Z, Superia 1600, and True Definition 400 (2026-11-21). Stopped at D8 and kept for a decision: NPL 160 and Superia 100 (print-weighted dye residual 0.013/0.011 D, bound 0.01), X-TRA 800 (check 8). Calibration only: Pro 400H, X-TRA 400, Reala, Superia 200.
 
 ---
 

@@ -177,6 +177,7 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ),
     ("fujifilm_superia_1600", Kind::Negative, EdgePrint::Still(&["FUJI", "S-1600", "CU"])),
     ("fujifilm_superia_200", Kind::Negative, EdgePrint::Still(&["FUJI", "S-200"])),
+    ("fujifilm_true_definition_400", Kind::Negative, EdgePrint::Still(&["FUJI", "TD-400", "CH"])),
     ("fujifilm_velvia_100", Kind::Slide, EdgePrint::Still(&["FUJI RVP100"])),
     ("fujifilm_velvia_50", Kind::Slide, EdgePrint::Still(&["FUJI RVP"])),
     ("fujifilm_xtra_400", Kind::Negative, EdgePrint::Still(&["FUJI", "S-400", "CH23"])),

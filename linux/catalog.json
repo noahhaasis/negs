@@ -354,6 +354,38 @@
       }
     },
     {
+      "id": "fujifilm_true_definition_400",
+      "name": "Fujifilm True Definition 400",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "fujifilm_crystal_archive_typeii",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          5.0,
+          5.0,
+          5.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "fujifilm_xtra_400",
       "name": "Fujifilm X-Tra 400",
       "paper": false,

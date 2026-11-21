@@ -147,6 +147,9 @@ def main():
     report = json.loads((build / "report.json").read_text())
     packet = Path(a.recipe).resolve().parent.relative_to(TOOL.parents[1]).as_posix()
     p["metadata"] = metadata(r["stocks"][a.stock], r["extraction"][a.stock], report, a.stock, a.created, packet)
+    # the display name is the recipe's now, not the build's: a stock built under a
+    # calibration name and shipped later must not keep it
+    p["info"]["name"] = r["stocks"][a.stock]["name"]
     check_shape(p, a.stock)
     out = Path(a.negs_data) / "profiles" / f"{a.stock}.json"
     out.write_text(json.dumps(p, indent=4) + "\n")

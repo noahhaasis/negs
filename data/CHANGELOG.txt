@@ -149,3 +149,17 @@ spektrafilm by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
   Existing sections unchanged.
 - borders/35mm/: edge-print strips for the 4 new films,
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-21: one more Fujifilm still negative from the Professional Film
+Data Guide (CC BY-SA 4.0; method and generic dye spectra from spektrafilm
+by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: fujifilm_true_definition_400, built as the 2026-11-20 entry
+  from page 33 of the guide. It shares X-TRA 400's code [CH] but not its
+  curves. No existing profile changed.
+- filters/neutral_print_filters.json: its TH-KG3 entry on every colour
+  paper, from upstream's solver. Existing entries unchanged.
+- presets/grain.toml: its grain section (the guide's RMS granularity 5 on
+  every layer) in the Negs-only Data Guide block. Existing sections
+  unchanged.
+- borders/35mm/: its edge-print strip, crates/spektrafilm-io/src/film35.rs.

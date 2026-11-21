@@ -284,12 +284,12 @@
       "dye_density_cmy_donor": "generic_a",
       "dye_density_reconstruct_model": "dmid_dmin",
       "data_trustability": 0.3,
-      "calibration_only": true,
       "stock": "fujifilm_true_definition_400",
-      "name": "Fujifilm True Definition 400 (cross-check against X-TRA 400)",
+      "name": "Fujifilm True Definition 400",
       "antihalation": "weak",
       "notes": [
-        "cross-check only: same emulsion code [CH] as X-TRA 400"
+        "the datasheet's dashed 'Cyan Sensitive Layer' (Fujifilm's fourth colour layer) is not modelled: the three-layer model takes the blue, green and red sensitive layers only",
+        "the guide prints the code [CH], as for X-TRA 400, but its curves differ from X-TRA 400's by up to 0.59 D (calibration/true_definition_400_vs_xtra_400_curves.json), so it is built as a film of its own"
       ],
       "datasheet_heading": "FUJICOLOR TRUE DEFINITION 400 [CH] ISO 400/27\u00b0, Daylight Type \u25cf  SPECTRAL SENSITIVITY CURVES \u25cf  SPECTRAL DYE DENSITY CURVES",
       "rms_granularity": 5,
