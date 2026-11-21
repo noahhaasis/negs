@@ -152,3 +152,23 @@ gamma_interlayer_r_to_gb = [0.0610, 0.0657]
 gamma_interlayer_g_to_rb = [0.0209, 0.0368]
 gamma_interlayer_b_to_rg = [0.0240, 0.1037]
 
+
+# --- Fujifilm slides built from the Professional Film Data Guide (data/profile-sources/fujifilm-reversal):
+# class default scaled uniformly (tools/fotufilm_port/coupler_presets.py, margin 0.1), the D8 fold remedy.
+[fujifilm_velvia_100f]  # class default x 0.675 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.1547, 0.0695, 0.1790]
+gamma_interlayer_r_to_gb = [0.0978, 0.1053]
+gamma_interlayer_g_to_rb = [0.0335, 0.0590]
+gamma_interlayer_b_to_rg = [0.0385, 0.1662]
+
+[fujifilm_provia_400x]  # class default x 0.831 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.1903, 0.0855, 0.2202]
+gamma_interlayer_r_to_gb = [0.1204, 0.1296]
+gamma_interlayer_g_to_rb = [0.0412, 0.0726]
+gamma_interlayer_b_to_rg = [0.0474, 0.2045]
+
+[fujifilm_sensia_100]  # class default x 0.875 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.2004, 0.0900, 0.2319]
+gamma_interlayer_r_to_gb = [0.1268, 0.1365]
+gamma_interlayer_g_to_rb = [0.0434, 0.0765]
+gamma_interlayer_b_to_rg = [0.0500, 0.2154]

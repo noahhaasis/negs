@@ -143,7 +143,7 @@ class Datasheet:
 # ------------------------------------------------------------------ fold check (tools/fotufilm_port/fold_check.py)
 
 def coupler_matrix(stock, presets):
-    g = presets.get(stock) or presets["defaults"]["color"]["positive"]
+    g = coupler_table(stock, presets)
     s, r, gg, b = g["gamma_samelayer_rgb"], g["gamma_interlayer_r_to_gb"], g["gamma_interlayer_g_to_rb"], g["gamma_interlayer_b_to_rg"]
     return np.array([[s[0], r[0], r[1]], [gg[0], s[1], gg[1]], [b[0], b[1], s[2]]])
 
@@ -159,10 +159,18 @@ def fold_slopes(dc, M):
 G = {}
 
 
-def init_worker(source, film_path):
+def init_worker(source, film_path, couplers):
     rp.setup(source)
     G["film"] = rp.load(film_path)
     G["params"] = rp.base_params(G["film"])
+    G["couplers"] = couplers
+
+
+def coupler_table(stock, presets):
+    """The gammas Negs applies (couplers_presets.rs): the stock's table, else the class default."""
+    g = dict(presets["defaults"]["color"]["positive"])
+    g.update({k: v for k, v in presets.get(stock, {}).items() if k.startswith("gamma_")})
+    return {k: v for k, v in g.items() if k.startswith("gamma_")}
 
 
 def scan_ramp(cas):
@@ -174,7 +182,10 @@ def scan_ramp(cas):
     m = p.film.data.density_curves_model
     m.centers, m.amplitudes, m.sigmas = c, a, s
     img = (0.184 * 2.0 ** EVS)[None, :, None] * np.ones((1, 1, 3))
-    return SimulationPipeline(digest_params(p)).process(img).reshape(-1, 3)
+    d = digest_params(p)
+    for k, v in G["couplers"].items():  # Negs's table, also for a stock 28bf883 has none for
+        setattr(d.film_render.dir_couplers, k, v)
+    return SimulationPipeline(d).process(img).reshape(-1, 3)
 
 
 def lab(rgb):
@@ -256,6 +267,7 @@ def main():
     ap.add_argument("--datasheet", required=True)
     ap.add_argument("--densitometer", required=True)
     ap.add_argument("--couplers", required=True)
+    ap.add_argument("--couplers-extra", help="TOML of per-stock coupler tables not yet in --couplers (D8 remedy)")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--evaluate-only", action="store_true")
     ap.add_argument("--w-reg", type=float, help="tuning only: override W_REG")
@@ -276,15 +288,19 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     profile = json.loads(Path(a.film).read_text())
     sheet = Datasheet(profile["data"], a.datasheet, a.densitometer)
-    M = coupler_matrix(profile["info"]["stock"], tomllib.loads(Path(a.couplers).read_text()))
+    presets = tomllib.loads(Path(a.couplers).read_text())
+    if a.couplers_extra:
+        presets.update(tomllib.loads(Path(a.couplers_extra).read_text()))
+    table = coupler_table(profile["info"]["stock"], presets)
+    M = coupler_matrix(profile["info"]["stock"], presets)
     ctx = mp.get_context("spawn")
-    with ctx.Pool(a.jobs, initializer=init_worker, initargs=(a.python_source, str(Path(a.film).resolve()))) as pool:
+    with ctx.Pool(a.jobs, initializer=init_worker, initargs=(a.python_source, str(Path(a.film).resolve()), table)) as pool:
         prob = Problem(profile, sheet, M, pool)
         x0 = np.zeros(prob.n)
         rep = {"film": a.film, "free_channels": "".join("rgb"[i] for i in FREE), "weights": {"neutral": W_NEUTRAL, "ev0_level": W_EV0_LEVEL, "ev0_neutral": W_EV0_NEUTRAL,
                                            "datasheet": W_DATASHEET, "fold": W_FOLD, "reg": W_REG},
                "tol": TOL, "fold_margin": FOLD_MARGIN, "tol_lo": prob.tol_lo.tolist(), "tol_hi": prob.tol_hi.tolist(),
-               "coupler_matrix": M.tolist(), "before": prob.report(x0)}
+               "coupler_matrix": M.tolist(), "coupler_table": table, "before": prob.report(x0)}
         if not a.evaluate_only:
             fit = least_squares(prob.fun, x0, jac=prob.jac, x_scale=0.05, max_nfev=60, verbose=1)
             rep.update({"x": fit.x.tolist(), "nfev": int(fit.nfev), "status": int(fit.status), "after": prob.report(fit.x)})
