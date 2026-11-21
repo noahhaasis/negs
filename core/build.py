@@ -6,6 +6,7 @@
     python3 core/build.py lib --track       # counts allocations (tests)
     python3 core/build.py test              # header, unit tests, leak check, layout
     python3 core/build.py diff              # Rust wrappers + differential tests (tracked)
+    python3 core/build.py diff --seeds 50   # ... the library's state and lockstep at 50 seeds
     python3 core/build.py odin              # which odin it uses
 
 Odin is pinned (core/ODIN_VERSION): $NEGS_ODIN, then ~/.negs/odin/<tag>/odin,
@@ -186,13 +187,17 @@ def test(_args: argparse.Namespace) -> None:
 
 # The Rust crates over the core, each its own workspace (own Cargo.lock),
 # then the differential tests against the Rust oracles (core/diff).
-RUST_CRATES = ["rust/sys", "rust/marks", "diff"]
+RUST_CRATES = ["rust/sys", "rust/marks", "rust/library", "diff"]
 
 
 def diff(args: argparse.Namespace) -> None:
     """Every crate's tests with the core's allocations counted (--features
     track), so the differential tests also check nothing leaks."""
     target = REPO / "target" / "core-diff"
+    if args.seeds:
+        # The library's state and lockstep tests (default 3 seeds; CI and
+        # the Phase 2 gate run 50).
+        os.environ["NEGS_LIBRARY_SEEDS"] = str(args.seeds)
     for crate in RUST_CRATES:
         cmd = ["cargo", "test", "--release", "--manifest-path", str(CORE / crate / "Cargo.toml"),
                "--target-dir", str(target), "--features", "track"]
@@ -218,8 +223,9 @@ def main() -> None:
     lib.add_argument("--out", help=f"output path (default target/negs-core/{LIB_NAME})")
     lib.set_defaults(func=build_lib)
     sub.add_parser("test", help="header check, unit tests, leak check, layout check").set_defaults(func=test)
-    d = sub.add_parser("diff", help="Rust wrappers' tests and the differential tests, allocations tracked")
-    d.add_argument("--test", help="only this test of core/diff (e.g. marks, theme)")
+    d = sub.add_parser("diff", aliases=["rust"], help="Rust wrappers' tests and the differential tests, allocations tracked")
+    d.add_argument("--test", help="only this test of core/diff (e.g. marks, theme, lockstep, state)")
+    d.add_argument("--seeds", type=int, help="NEGS_LIBRARY_SEEDS for the library's state and lockstep tests")
     d.set_defaults(func=diff)
     sub.add_parser("header", help="check negs_core.h is valid C99").set_defaults(func=lambda _a: check_header())
     sub.add_parser("odin", help="print the odin used").set_defaults(func=lambda _a: print(find_odin()))
