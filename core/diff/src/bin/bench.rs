@@ -99,6 +99,7 @@ macro_rules! library_workloads {
                     black_box(library.look(item));
                 }
             });
+            println!("  peak_rss after opening: {:.1} MiB", peak_rss_mib());
             let mut library = open(&photos, &bin);
             let items = library.items();
             let write_ms = median_ms(RUNS, || {
@@ -110,6 +111,11 @@ macro_rules! library_workloads {
                 black_box(library.set_rating(&items, 4));
                 black_box(library.undo());
             });
+            println!("  peak_rss after rating: {:.1} MiB", peak_rss_mib());
+            let core = negs_core_sys::alloc_stats();
+            if core.tracked == 1 {
+                println!("  core heap live: {:.1} MiB in {} allocations", core.live_bytes as f64 / 1048576.0, core.live_count);
+            }
             let filter_ms = median_ms(RUNS, || {
                 for stars in 1..=5u8 {
                     library.set_filter(Filter { rating: RatingFilter::AtLeast(stars), ..Filter::default() });
