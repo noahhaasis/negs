@@ -49,8 +49,21 @@ fn run<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
     result
 }
 
+/// A float's bits, with every NaN as one value: Rust doesn't promise a NaN
+/// result's sign or payload, and they differ by platform (x86's default NaN
+/// is negative; a libm call such as UCRT's `pow` passes its operand's on).
+trait CanonBits {
+    fn canon_bits(self) -> u64;
+}
+
+impl CanonBits for f64 {
+    fn canon_bits(self) -> u64 {
+        if self.is_nan() { f64::NAN.to_bits() } else { self.to_bits() }
+    }
+}
+
 fn bits(v: &[f64]) -> Vec<u64> {
-    v.iter().map(|x| x.to_bits()).collect()
+    v.iter().map(|x| x.canon_bits()).collect()
 }
 
 fn bits3(v: &[Vec<f64>; 3]) -> [Vec<u64>; 3] {
@@ -64,7 +77,7 @@ fn of_oracle_handle(h: oracle::Handle) -> HandleBits {
         oracle::Handle::Middle => (0, 0),
         oracle::Handle::Shadows => (1, 0),
         oracle::Handle::Highlights => (2, 0),
-        oracle::Handle::Curve(t) => (3, t.to_bits()),
+        oracle::Handle::Curve(t) => (3, t.canon_bits()),
     }
 }
 
@@ -73,7 +86,7 @@ fn of_core_handle(h: core::Handle) -> HandleBits {
         core::Handle::Middle => (0, 0),
         core::Handle::Shadows => (1, 0),
         core::Handle::Highlights => (2, 0),
-        core::Handle::Curve(t) => (3, t.to_bits()),
+        core::Handle::Curve(t) => (3, t.canon_bits()),
     }
 }
 
@@ -270,16 +283,16 @@ fn one_curve(r: &mut Random, t: &mut Tally) {
             let stops = special(r).unwrap_or_else(|| r.between(-8.0, 8.0));
             let curve = od.brightness(ch);
             assert_eq!(bits(&cd.brightness(ch)), bits(&curve), "display brightness");
-            assert_eq!(cd.value(&curve, stops).to_bits(), od.value(&curve, stops).to_bits(), "value at {stops}");
+            assert_eq!(cd.value(&curve, stops).canon_bits(), od.value(&curve, stops).canon_bits(), "value at {stops}");
             let (og, cg) = geometry(r);
             for v in [stops, r.unit(), r.between(-2.0, 2.0), special(r).unwrap_or(0.5)] {
-                assert_eq!(cg.x(v).to_bits(), og.x(v).to_bits(), "x({v})");
-                assert_eq!(cg.stops(v * 300.0).to_bits(), og.stops(v * 300.0).to_bits(), "stops({v})");
-                assert_eq!(cg.y(v).to_bits(), og.y(v).to_bits(), "y({v})");
-                assert_eq!(cg.brightness(v * 300.0).to_bits(), og.brightness(v * 300.0).to_bits(), "brightness({v})");
+                assert_eq!(cg.x(v).canon_bits(), og.x(v).canon_bits(), "x({v})");
+                assert_eq!(cg.stops(v * 300.0).canon_bits(), og.stops(v * 300.0).canon_bits(), "stops({v})");
+                assert_eq!(cg.y(v).canon_bits(), og.y(v).canon_bits(), "y({v})");
+                assert_eq!(cg.brightness(v * 300.0).canon_bits(), og.brightness(v * 300.0).canon_bits(), "brightness({v})");
             }
-            let op: Vec<(HandleBits, u64, u64)> = og.handle_points(&od, ch).into_iter().map(|(h, (x, y))| (of_oracle_handle(h), x.to_bits(), y.to_bits())).collect();
-            let cp: Vec<(HandleBits, u64, u64)> = cg.handle_points(&cd, ch).into_iter().map(|(h, (x, y))| (of_core_handle(h), x.to_bits(), y.to_bits())).collect();
+            let op: Vec<(HandleBits, u64, u64)> = og.handle_points(&od, ch).into_iter().map(|(h, (x, y))| (of_oracle_handle(h), x.canon_bits(), y.canon_bits())).collect();
+            let cp: Vec<(HandleBits, u64, u64)> = cg.handle_points(&cd, ch).into_iter().map(|(h, (x, y))| (of_core_handle(h), x.canon_bits(), y.canon_bits())).collect();
             assert_eq!(cp, op, "handle points {ch:?} on {og:?}");
             t.calls += 12;
             let points = og.handle_points(&od, ch);
@@ -296,14 +309,14 @@ fn one_curve(r: &mut Random, t: &mut Tally) {
             let (oh, chh) = handle_pair(r);
             let os = oracle::Drag::start(oh, &oc, &od, ch);
             let cs = core::Drag::start(chh, &cc, &cd, ch);
-            assert_eq!(cs.as_ref().map(|d| (of_core_handle(d.handle), d.tone.to_bits())), os.as_ref().map(|d| (of_oracle_handle(d.handle), d.tone.to_bits())), "drag start");
+            assert_eq!(cs.as_ref().map(|d| (of_core_handle(d.handle), d.tone.canon_bits())), os.as_ref().map(|d| (of_oracle_handle(d.handle), d.tone.canon_bits())), "drag start");
             if let (Some(os), Some(cs)) = (os, cs) {
                 for _ in 0..4 {
                     let (on, cn) = next_controls(r, &d);
                     let p = point(r, &og, near_of(&points));
                     let dch = if r.chance(3) { channel(r) } else { ch };
-                    let a = os.value(on, dch, &og, p).map(|(path, v)| (path, v.to_bits()));
-                    let b = cs.value(cn, dch, &cg, p).map(|(path, v)| (path, v.to_bits()));
+                    let a = os.value(on, dch, &og, p).map(|(path, v)| (path, v.canon_bits()));
+                    let b = cs.value(cn, dch, &cg, p).map(|(path, v)| (path, v.canon_bits()));
                     assert_eq!(b, a, "drag {:?} at {p:?} with {on:?} {dch:?} on {og:?}", os.handle);
                     t.drags += 1;
                     t.solved += a.is_some() as u64;
@@ -324,12 +337,12 @@ fn helpers(r: &mut Random, t: &mut Tally) {
     let s = series(r, n, a, b);
     for _ in 0..8 {
         let v = special(r).unwrap_or_else(|| r.between(-4.0, 4.0));
-        assert_eq!(core::index_of_decreasing(&s, v).to_bits(), oracle::index_of_decreasing(&s, v).to_bits(), "decreasing {s:?} {v}");
-        assert_eq!(core::index_of_increasing(&s, v).to_bits(), oracle::index_of_increasing(&s, v).to_bits(), "increasing {s:?} {v}");
+        assert_eq!(core::index_of_decreasing(&s, v).canon_bits(), oracle::index_of_decreasing(&s, v).canon_bits(), "decreasing {s:?} {v}");
+        assert_eq!(core::index_of_increasing(&s, v).canon_bits(), oracle::index_of_increasing(&s, v).canon_bits(), "increasing {s:?} {v}");
         let i = special(r).unwrap_or_else(|| r.between(-3.0, n as f64 + 3.0));
-        assert_eq!(core::interpolate(&s, i).to_bits(), oracle::interpolate(&s, i).to_bits(), "interpolate {s:?} {i}");
+        assert_eq!(core::interpolate(&s, i).canon_bits(), oracle::interpolate(&s, i).canon_bits(), "interpolate {s:?} {i}");
         let (a, b, c) = (r.between(-1.0, 2.0), special(r).unwrap_or(r.unit()), r.unit());
-        assert_eq!(core::Curve::luma(a, b, c).to_bits(), oracle::Curve::luma(a, b, c).to_bits());
+        assert_eq!(core::Curve::luma(a, b, c).canon_bits(), oracle::Curve::luma(a, b, c).canon_bits());
         t.calls += 4;
     }
 }
