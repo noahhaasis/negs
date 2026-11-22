@@ -13,6 +13,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use negs_core_sys::theme as core;
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
@@ -129,7 +132,7 @@ thread_local! {
     static CHOSEN: Cell<ThemeName> = const { Cell::new(ThemeName::Darkroom) };
     /// The tokens the window is drawn with: the shown theme's, or the
     /// system's colours in high contrast.
-    static TOKENS: Cell<Tokens> = const { Cell::new(DARKROOM) };
+    static TOKENS: Cell<Tokens> = const { Cell::new(UNSET) };
     static BRUSHES: RefCell<HashMap<Color, isize>> = RefCell::new(HashMap::new());
 }
 
@@ -281,16 +284,11 @@ fn high_contrast_tokens(p: &Palette) -> Tokens {
 
 /// The relative luminance of 0xRRGGBB (WCAG).
 pub fn luminance(rgb: u32) -> f64 {
-    let channel = |shift: u32| {
-        let c = ((rgb >> shift) & 0xff) as f64 / 255.0;
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
-    };
-    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+    unsafe { core::negs_theme_luminance(rgb) }
 }
 
 pub fn contrast(a: u32, b: u32) -> f64 {
-    let (x, y) = (luminance(a), luminance(b));
-    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    unsafe { core::negs_theme_contrast(a, b) }
 }
 
 fn high_contrast() -> bool {
@@ -318,11 +316,8 @@ fn apps_use_dark() -> bool {
 
 /// `a` moved towards `b` by `t`.
 pub fn mix(a: Color, b: Color, t: f64) -> Color {
-    let channel = |shift: u32| {
-        let (x, y) = (((a >> shift) & 0xff) as f64, ((b >> shift) & 0xff) as f64);
-        ((x + (y - x) * t).round() as u32) << shift
-    };
-    channel(0) | channel(8) | channel(16)
+    // Channel by channel, so a GDI colour (0x00bbggrr) mixes as well as a token.
+    unsafe { core::negs_theme_mix(a, b, t) }
 }
 
 /// A solid brush for `color`, kept for the life of the thread.
@@ -538,56 +533,33 @@ pub enum ThemeName {
 impl ThemeName {
     pub const ALL: [ThemeName; 6] = [Self::Darkroom, Self::ContactSheet, Self::LightTable, Self::Daylight, Self::Plain, Self::PlainDark];
 
+    /// The core's id (`NEGS_THEME_*`): the cases are in its order.
+    fn id(self) -> usize {
+        self as usize
+    }
+
     /// The stored name, as the macOS app's `AppTheme` raw value.
     pub fn key(self) -> &'static str {
-        match self {
-            Self::Darkroom => "darkroom",
-            Self::ContactSheet => "contactSheet",
-            Self::LightTable => "lightTable",
-            Self::Daylight => "daylight",
-            Self::Plain => "plain",
-            Self::PlainDark => "plainDark",
-        }
+        NAMES[self.id()].0
     }
 
     /// A stored name or a title, any case, with or without spaces.
     pub fn parse(text: &str) -> Option<Self> {
-        let squashed: String = text.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
-        Self::ALL.into_iter().find(|t| t.key().to_ascii_lowercase() == squashed)
+        let id = unsafe { core::negs_theme_parse(text.as_ptr().cast(), text.len()) };
+        Self::ALL.get(usize::try_from(id).ok()?).copied()
     }
 
     pub fn title(self) -> &'static str {
-        match self {
-            Self::Darkroom => "Darkroom",
-            Self::ContactSheet => "Contact sheet",
-            Self::LightTable => "Light table",
-            Self::Daylight => "Daylight",
-            Self::Plain => "Plain",
-            Self::PlainDark => "Plain dark",
-        }
+        NAMES[self.id()].1
     }
 
     /// The line under the swatches in Settings › Look.
     pub fn hint(self) -> &'static str {
-        match self {
-            Self::Darkroom => "Warm black, cream ink and the yellow pencil.",
-            Self::ContactSheet => "Ivory paper and the red grease pencil; the strip stays black film.",
-            Self::LightTable => "Lit white, graphite type and a yellow highlighter.",
-            Self::Daylight => "Soft grey with an amber pencil, the calmest of the light ones.",
-            Self::Plain => "Black on light grey in the system font, with plain blue marks. The easiest to read. The default when Windows is light.",
-            Self::PlainDark => "Plain in dark greys: light words in the system font, blue marks. The default when Windows is dark.",
-        }
+        NAMES[self.id()].2
     }
 
     pub fn tokens(self) -> &'static Tokens {
-        match self {
-            Self::Darkroom => &DARKROOM,
-            Self::ContactSheet => &CONTACT_SHEET,
-            Self::LightTable => &LIGHT_TABLE,
-            Self::Daylight => &DAYLIGHT,
-            Self::Plain => &PLAIN,
-            Self::PlainDark => &PLAIN_DARK,
-        }
+        &TABLE[self.id()]
     }
 }
 
@@ -661,133 +633,81 @@ pub struct Tokens {
     pub film: Hex,
 }
 
+/// Before the first `detect`, which sets the shown theme's.
+const UNSET_HEX: Hex = Hex {
+    bg: 0,
+    panel: 0,
+    film: 0,
+    grid: 0,
+    line: 0,
+    track: 0,
+    dim: 0,
+    label: 0,
+    paper: 0,
+    accent: 0,
+    fill: 0,
+    on_fill: 0,
+    warn: 0,
+    blank: 0,
+};
+const UNSET: Tokens = Tokens { hex: UNSET_HEX, dark: true, highlighter: false, plain: false, film: UNSET_HEX };
+
+fn hex_of(h: &core::negs_theme_hex_t) -> Hex {
+    Hex {
+        bg: h.bg,
+        panel: h.panel,
+        film: h.film,
+        grid: h.grid,
+        line: h.line,
+        track: h.track,
+        dim: h.dim,
+        label: h.label,
+        paper: h.paper,
+        accent: h.accent,
+        fill: h.fill,
+        on_fill: h.on_fill,
+        warn: h.warn,
+        blank: h.blank,
+    }
+}
+
+fn core_theme(id: usize) -> core::negs_theme_t {
+    let mut t = core::negs_theme_t::default();
+    assert_eq!(unsafe { core::negs_theme_get(id as u32, &mut t) }, 1, "the core has no theme {id}");
+    t
+}
+
+fn static_str(p: *const std::os::raw::c_char) -> &'static str {
+    // The core's names and hints are static, NUL-terminated UTF-8.
+    unsafe { std::ffi::CStr::from_ptr(p) }.to_str().expect("UTF-8 from the core")
+}
+
+/// The six themes' tokens, from the shared core (core/src/theme), in
+/// `ThemeName` order: the same tables the macOS app draws with.
+static TABLE: LazyLock<[Tokens; 6]> = LazyLock::new(|| {
+    assert_eq!(unsafe { core::negs_theme_count() } as usize, ThemeName::ALL.len());
+    std::array::from_fn(|id| {
+        let t = core_theme(id);
+        Tokens { hex: hex_of(&t.hex), dark: t.dark != 0, highlighter: t.highlighter != 0, plain: t.plain != 0, film: hex_of(&t.film) }
+    })
+});
+
+/// Each theme's key, title and Windows hint, from the core.
+static NAMES: LazyLock<[(&'static str, &'static str, &'static str); 6]> = LazyLock::new(|| {
+    std::array::from_fn(|id| {
+        let t = core_theme(id);
+        (static_str(t.key), static_str(t.title), static_str(unsafe { core::negs_theme_hint(id as u32, core::NEGS_PLATFORM_WINDOWS) }))
+    })
+});
+
 /// The T2 · Label tokens (IMPLEMENTATION.md §2.1).
-const DARKROOM_HEX: Hex = Hex {
-    bg: 0x0c0b0a,
-    panel: 0x161513,
-    film: 0x000000,
-    grid: 0x000000,
-    line: 0x2b2925,
-    track: 0x47443d,
-    dim: 0x918a7c,
-    label: 0xbeb6a7,
-    paper: 0xf2ebdd,
-    accent: 0xffd23f,
-    fill: 0xffd23f,
-    on_fill: 0x14120c,
-    warn: 0xff8a66,
-    blank: 0x1c1b18,
-};
-
-pub const DARKROOM: Tokens = Tokens { hex: DARKROOM_HEX, dark: true, highlighter: false, plain: false, film: DARKROOM_HEX };
-
-/// Ivory paper and the red grease pencil of a Magnum contact sheet; the
-/// strip stays black film, its inks Darkroom's with a brighter red.
-pub const CONTACT_SHEET: Tokens = Tokens {
-    hex: Hex {
-        bg: 0xf7f3ea,
-        panel: 0xe9e2d3,
-        film: 0x0c0b0a,
-        grid: 0xf7f3ea,
-        line: 0xd6cdbb,
-        track: 0xb3aa99,
-        dim: 0x655c4e,
-        label: 0x463f35,
-        paper: 0x1d1a15,
-        accent: 0xc63a26,
-        fill: 0xc63a26,
-        on_fill: 0xfff8ee,
-        warn: 0x9a2f18,
-        blank: 0xe2dccd,
-    },
-    dark: false,
-    highlighter: false,
-    plain: false,
-    film: Hex { accent: 0xe2492f, ..DARKROOM_HEX },
-};
-
-const LIGHT_TABLE_HEX: Hex = Hex {
-    bg: 0xffffff,
-    panel: 0xededeb,
-    film: 0xf3f3f1,
-    grid: 0xf3f3f1,
-    line: 0xdcdcd9,
-    track: 0xbdbdba,
-    dim: 0x666663,
-    label: 0x41413f,
-    paper: 0x151514,
-    accent: 0xad7b00,
-    fill: 0xffd23f,
-    on_fill: 0x14120c,
-    warn: 0xb4381e,
-    blank: 0xe4e4e1,
-};
-
-/// A lit white table, graphite type; the yellow stays as a highlighter and
-/// in the Export button, ochre where it's a thin line.
-pub const LIGHT_TABLE: Tokens = Tokens { hex: LIGHT_TABLE_HEX, dark: false, highlighter: true, plain: false, film: LIGHT_TABLE_HEX };
-
-const DAYLIGHT_HEX: Hex = Hex {
-    bg: 0xe8e6e1,
-    panel: 0xd8d5cf,
-    film: 0xc9c6bf,
-    grid: 0xc9c6bf,
-    line: 0xc6c2bb,
-    track: 0xa29e96,
-    dim: 0x57524b,
-    label: 0x3a3631,
-    paper: 0x161411,
-    accent: 0xa35000,
-    fill: 0xa35000,
-    on_fill: 0xffffff,
-    warn: 0x912a16,
-    blank: 0xd0cdc7,
-};
-
+pub static DARKROOM: LazyLock<Tokens> = LazyLock::new(|| TABLE[0]);
+/// Ivory paper and the red grease pencil; the strip stays black film.
+#[cfg(test)]
+pub static CONTACT_SHEET: LazyLock<Tokens> = LazyLock::new(|| TABLE[1]);
 /// Soft warm grey with an amber pencil.
-pub const DAYLIGHT: Tokens = Tokens { hex: DAYLIGHT_HEX, dark: false, highlighter: false, plain: false, film: DAYLIGHT_HEX };
-
-const PLAIN_HEX: Hex = Hex {
-    bg: 0xf7f7f7,
-    panel: 0xececec,
-    film: 0xe2e2e2,
-    grid: 0xf7f7f7,
-    line: 0xd2d2d2,
-    track: 0xa6a6a6,
-    dim: 0x4a4a4a,
-    label: 0x1d1d1d,
-    paper: 0x000000,
-    accent: 0x0058d0,
-    fill: 0x0062d9,
-    on_fill: 0xffffff,
-    warn: 0xb0160a,
-    blank: 0xe0e0e0,
-};
-
-/// Near native: neutral greys, near-black words (7 : 1 and up on every
-/// ground), a plain blue mark and the system font.
-pub const PLAIN: Tokens = Tokens { hex: PLAIN_HEX, dark: false, highlighter: false, plain: true, film: PLAIN_HEX };
-
-const PLAIN_DARK_HEX: Hex = Hex {
-    bg: 0x1e1e1e,
-    panel: 0x282828,
-    film: 0x141414,
-    grid: 0x1e1e1e,
-    line: 0x3a3a3a,
-    track: 0x5e5e5e,
-    dim: 0xb4b4b4,
-    label: 0xdcdcdc,
-    paper: 0xf5f5f5,
-    accent: 0x0091ff,
-    fill: 0x0059d1,
-    on_fill: 0xffffff,
-    warn: 0xff6961,
-    blank: 0x2e2e2e,
-};
-
-/// Plain in dark greys: words 7 : 1 and up on every ground, a lighter blue
-/// for marks, a readable dark red.
-pub const PLAIN_DARK: Tokens = Tokens { hex: PLAIN_DARK_HEX, dark: true, highlighter: false, plain: true, film: PLAIN_DARK_HEX };
+#[cfg(test)]
+pub static DAYLIGHT: LazyLock<Tokens> = LazyLock::new(|| TABLE[3]);
 
 /// The highlighter's yellow and strength (Light table).
 pub const HIGHLIGHTER_INK: u32 = 0xffd23f;
@@ -823,4 +743,52 @@ impl Tokens {
 /// A token as a GDI colour (0x00bbggrr).
 pub fn gdi(hex: u32) -> Color {
     rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+#[cfg(test)]
+mod core_tests {
+    use super::*;
+
+    /// The constants still written here are the core's.
+    #[test]
+    fn constants_are_the_cores() {
+        let mut c = core::negs_theme_constants_t::default();
+        unsafe { core::negs_theme_constants(&mut c) };
+        assert_eq!(HIGHLIGHTER_INK, c.highlighter_ink);
+        assert_eq!(CROP_SHADE, c.crop_shade);
+        for (here, core) in [
+            (HIGHLIGHTER_OPACITY, c.highlighter_opacity),
+            (SELECTION_OPACITY, c.selection_opacity),
+            (CROP_SHADE_OPACITY, c.crop_shade_opacity),
+            (DISABLED_OPACITY, c.disabled_opacity),
+            (STRIP_DIM, c.strip_dim),
+        ] {
+            assert_eq!(here, core as f32);
+        }
+        for dark in [true, false] {
+            let t = Tokens { dark, ..*DARKROOM };
+            let (rgb, alpha) = t.dimming();
+            let d = if dark { c.dimming_dark } else { c.dimming_light };
+            let channel = |shift: u32| ((rgb >> shift) & 0xff) as f64;
+            assert_eq!([channel(16), channel(8), channel(0)], [d[0], d[1], d[2]].map(|v| (v * 255.0).round()));
+            assert_eq!(alpha, d[3] as f32);
+            assert_eq!(t.shadow_strength(), (if dark { c.shadow_dark } else { c.shadow_light }) as f32);
+        }
+    }
+
+    #[test]
+    fn names_and_tables_come_from_the_core() {
+        for (i, theme) in ThemeName::ALL.into_iter().enumerate() {
+            assert_eq!(theme as usize, i);
+            assert_eq!(ThemeName::parse(theme.key()), Some(theme));
+            assert_eq!(ThemeName::parse(theme.title()), Some(theme));
+            assert!(!theme.hint().is_empty());
+        }
+        assert_eq!(ThemeName::parse("neon"), None);
+        assert_eq!(DARKROOM.hex.accent, 0xffd23f);
+        assert_eq!(CONTACT_SHEET.film.accent, 0xe2492f);
+        assert_eq!(ThemeName::Plain.hint(), "Black on light grey in the system font, with plain blue marks. The easiest to read. The default when Windows is light.");
+        assert_eq!(mix(0x000000, 0xffffff, 0.5), 0x808080);
+        assert!((contrast(0xffffff, 0x000000) - 21.0).abs() < 1e-12);
+    }
 }

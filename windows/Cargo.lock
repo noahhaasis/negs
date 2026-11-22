@@ -1117,6 +1117,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "negs-core-library"
+version = "0.0.0"
+dependencies = [
+ "negs-core-sys",
+ "negs-library",
+]
+
+[[package]]
+name = "negs-core-marks"
+version = "0.0.0"
+dependencies = [
+ "negs-core-sys",
+]
+
+[[package]]
+name = "negs-core-sys"
+version = "0.0.0"
+
+[[package]]
 name = "negs-library"
 version = "0.18.0"
 
@@ -1131,8 +1150,9 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "image",
- "negs-library",
- "negs-marks",
+ "negs-core-library",
+ "negs-core-marks",
+ "negs-core-sys",
  "pollster",
  "raw-window-handle",
  "rawler",

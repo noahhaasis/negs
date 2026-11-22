@@ -3,6 +3,8 @@
 # feature unification or lock file. See docs/windows-app.md.
 [workspace]
 resolver = "2"
+# The marks' Rust geometry, kept as the shared core's test oracle.
+members = ["marks"]
 
 [package]
 name = "negs-windows"
@@ -33,10 +35,14 @@ rawler = "0.8"
 raw-window-handle = "0.6"
 pollster = "0.4"
 bytemuck = { version = "1.25", features = ["derive"] }
-# The pencil marks' geometry, ported from the macOS app (tested on any OS).
-negs-marks = { path = "marks" }
-# The library: .negs sidecars, ratings, flags, per-photograph edits, undo.
-negs-library = { path = "../crates/negs-library" }
+# The pencil marks' geometry, from the shared Odin core (core/src/marks)
+# with windows/marks's API; windows/marks stays as its test oracle.
+negs-marks = { package = "negs-core-marks", path = "../core/rust/marks" }
+# The library: .negs sidecars, ratings, flags, per-photograph edits, undo,
+# from the shared Odin core (core/src/library) with negs-library's API.
+negs-library = { package = "negs-core-library", path = "../core/rust/library" }
+# The themes' tables, names and colour maths (core/src/theme).
+negs-core-sys = { path = "../core/rust/sys" }
 
 [build-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg"] }
