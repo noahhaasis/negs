@@ -50,9 +50,9 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
   his request (merge now `c52e424`).
 - **`-use-separate-modules`** for the library and tests: `build.py lib`
   1.5 s (6.8 s whole-program, kept as `--whole-program` for comparing).
-  `build.py diff` passes, the marks bit for bit. Windows (`-build-mode:obj`
-  then writes one object per package; `lib.exe` archives them all) is
-  checked at the Phase 3 PC gate.
+  `build.py diff` passes, the marks bit for bit. On the PC (`-build-mode:obj`
+  then writes one object per package; `lib.exe` archives them all):
+  1.6 s against 7.5 s, and `build.py test` and `build.py diff` pass.
 - **Trap found:** with separate modules, Odin writing to an archive that
   already exists keeps the old members' code: a rebuilt library still said
   ABI 3. Every build now goes to a fresh folder and is moved into place.
