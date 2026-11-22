@@ -1136,6 +1136,8 @@ name = "negs-core-rules"
 version = "0.0.0"
 dependencies = [
  "negs-core-sys",
+ "serde_json",
+ "spektrafilm-io",
 ]
 
 [[package]]

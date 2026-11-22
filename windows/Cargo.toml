@@ -44,7 +44,8 @@ negs-library = { package = "negs-core-library", path = "../core/rust/library" }
 # The themes' tables, names and colour maths (core/src/theme).
 negs-core-sys = { path = "../core/rust/sys" }
 # windows/src's pure rules (Phase 3), from the shared Odin core.
-negs-core-rules = { path = "../core/rust/rules" }
+# Feature io: PhotoFacts::read through spektrafilm-io (Phase 3c).
+negs-core-rules = { path = "../core/rust/rules", features = ["io"] }
 
 [build-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg"] }
