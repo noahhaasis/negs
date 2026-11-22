@@ -756,6 +756,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "negs-core-library"
+version = "0.0.0"
+dependencies = [
+ "negs-core-sys",
+ "negs-library",
+]
+
+[[package]]
+name = "negs-core-rules"
+version = "0.0.0"
+dependencies = [
+ "image",
+ "negs-core-library",
+ "negs-core-sys",
+]
+
+[[package]]
+name = "negs-core-sys"
+version = "0.0.0"
+
+[[package]]
 name = "negs-library"
 version = "0.18.0"
 
@@ -764,7 +785,8 @@ name = "negs-windows-library-map"
 version = "0.18.0"
 dependencies = [
  "image",
- "negs-library",
+ "negs-core-library",
+ "negs-core-rules",
  "negs-windows-stub",
  "serde",
  "serde_json",

@@ -194,6 +194,17 @@ fn sheet() {
     println!("sheet_layout_1000_items_x100: {ms:.2} ms");
 }
 
+/// The same layouts on the core (negs-core-rules' sheet_rules).
+fn core_sheet() {
+    let ratios: Vec<f64> = (0..1000).map(|i| [1.5, 0.6667, 1.0, 1.7778, 1.25][i % 5]).collect();
+    let ms = median_ms(RUNS, || {
+        for _ in 0..100 {
+            black_box(negs_core_rules::sheet_rules::SheetLayout::new(&ratios, 1440.0, 180.0));
+        }
+    });
+    println!("core_sheet_layout_1000_items_x100: {ms:.2} ms");
+}
+
 fn fit() {
     let (w, h) = (6000u32, 4000u32);
     let rgba: Vec<u8> = (0..w as usize * h as usize * 4).map(|i| (i * 31 % 251) as u8).collect();
@@ -238,7 +249,10 @@ fn main() {
             marks();
             core_marks();
         }
-        "sheet" => sheet(),
+        "sheet" => {
+            sheet();
+            core_sheet();
+        }
         "fit" => fit(),
         "embedded" => embedded(Path::new(args.get(2).expect("raw folder"))),
         "all" => {
@@ -247,6 +261,7 @@ fn main() {
             marks();
             core_marks();
             sheet();
+            core_sheet();
         }
         other => panic!("unknown workload {other}"),
     }

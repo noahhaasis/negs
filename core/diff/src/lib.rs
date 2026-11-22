@@ -11,6 +11,16 @@ pub mod embedded_preview;
 #[allow(dead_code)]
 #[path = "../oracle/sheet_rules.rs"]
 pub mod sheet_rules;
+#[allow(dead_code)]
+#[path = "../oracle/tray_rules.rs"]
+pub mod tray_rules;
+#[allow(dead_code)]
+#[path = "../oracle/compare.rs"]
+pub mod compare;
+/// model/compare.rs's pure helpers, copied verbatim (tests/model_compare.rs checks).
+#[allow(dead_code)]
+#[path = "../oracle/model_compare_pure.rs"]
+pub mod model_compare;
 
 use std::time::Instant;
 

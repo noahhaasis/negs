@@ -24,6 +24,8 @@ negs-marks = { path = "../../windows/marks" }
 negs-core-marks = { path = "../rust/marks" }
 negs-core-sys = { path = "../rust/sys" }
 negs-core-rules = { path = "../rust/rules" }
+# The image crate the model/compare oracle resizes with, as windows/ has it.
+image = { version = "0.25", default-features = false }
 
 # crates/negs-library's own suites, unchanged, run against the core.
 [[test]]

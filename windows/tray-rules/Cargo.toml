@@ -14,3 +14,7 @@ publish = false
 [lib]
 path = "src/lib.rs"
 doctest = false
+
+[dependencies]
+# The rules now come from the shared Odin core, through negs-core-rules.
+negs-core-rules = { path = "../../core/rust/rules" }

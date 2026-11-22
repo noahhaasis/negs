@@ -460,7 +460,355 @@ negs_buf_t negs_selection_apply(const uint8_t *state, size_t state_len, const ui
 /* ------------------------------------------------------------------ */
 /* Phase 3a: Sheet, tray and compare rules (core/src/rules: sheet, tray, compare) */
 /* ------------------------------------------------------------------ */
-/* (Phase 3a's declarations go here.) */
+/* windows/src's sheet_rules, tray_rules and compare (and model/compare's
+ * pixel helpers), with Rust's floating point to the bit. Nothing here keeps
+ * state, takes a handle or returns memory: arrays go in borrowed for the
+ * call; results go into the caller's arrays, sized as each function says.
+ * Words go into the caller's buffer (`out`, `cap` bytes, not
+ * NUL-terminated): the function returns the whole length, so a caller
+ * whose buffer was too small calls again with one that long. Optional
+ * indices come back as int64_t, -1 for none. Static words (const char *)
+ * are NUL-terminated and live as long as the process. */
+
+/* -- Sheet: the film strip and the grid (core/src/rules/sheet) -------- */
+
+typedef struct negs_sheet_constants_t {
+    double strip, strip_top, strip_rebate, strip_gap, picture, status, band;
+    double strip_dim, strip_hover, strip_pressed, pencil_width, pencil_drop;
+    double fallback_ratio, strip_margin;
+    double leader_width, leader_height, leader_raised, leader_slant, glide_ms;
+    double grid_gap, grid_top, grid_side, grid_bottom, grid_size_min, grid_size_max;
+    double grid_default, grid_size_step, grid_margin, sentence, foot;
+    double box_margin, selection_outset;
+    double fade_ms, fade_rise, wheel_step, wheel_tau_ms;
+    double bar_width, bar_wide, bar_inset, bar_min, bar_reach, bar_shown_ms, bar_fade_ms;
+    uint64_t prefetch_reach, header_batch;
+    uint32_t edited_long_side, render_long_side;
+    uint64_t edited_limit, renders_limit;
+} negs_sheet_constants_t;
+
+/* A grid row: photographs start..end-1, its top and height. Frames are
+ * negs_rect_t. */
+typedef struct negs_sheet_row_t {
+    size_t start, end;
+    double y, height;
+} negs_sheet_row_t;
+
+/* One photograph as the developing pump sees it. */
+typedef struct negs_sheet_pump_item_t {
+    uint8_t look;      /* its look is known */
+    uint8_t on_screen;
+    uint8_t open;      /* open in the edit view */
+    uint8_t done;      /* developing, developed, or failed with this look */
+} negs_sheet_pump_item_t;
+
+/* The library's filter. rating: 0 any, 1 at least `stars`, 2 unrated;
+ * flags: bit 0 picks, 1 unflagged, 2 rejects (none shows every one);
+ * edits: 0 any, 1 edited, 2 unedited. */
+typedef struct negs_sheet_filter_t {
+    uint8_t rating, stars, flags, edits;
+} negs_sheet_filter_t;
+
+#define NEGS_SHEET_PART_WORDS 0u
+#define NEGS_SHEET_PART_FILTER 1u
+#define NEGS_SHEET_PART_CLEAR 2u
+#define NEGS_SHEET_MAX_PARTS 8u
+
+/* A piece of the sentence over the grid: its text is text[offset..+len]
+ * of the buffer given; `on` for a filter word while filtered. */
+typedef struct negs_sheet_part_t {
+    uint32_t kind;
+    uint8_t on;
+    size_t offset, len;
+} negs_sheet_part_t;
+
+#define NEGS_THUMB_STRIP 0u
+#define NEGS_THUMB_MEDIUM 1u
+#define NEGS_THUMB_LARGE 2u
+
+void negs_sheet_constants(negs_sheet_constants_t *out);
+double negs_sheet_reject_opacity(uint8_t in_strip, uint8_t current);
+double negs_sheet_strip_opacity(uint8_t current, uint8_t selected, uint8_t rejected, uint8_t hovered, uint8_t pressed);
+
+/* The strip: frames' left edges `xs` and `widths`, `count` each. */
+double negs_sheet_kept_ratio(uint8_t has_known, double known, double thumbnail);
+double negs_sheet_frame_width(uint8_t has_ratio, double ratio);
+/* Writes `count` left edges into `xs`; returns the row's width. */
+double negs_sheet_strip_layout(const double *widths, size_t count, double *xs);
+double negs_sheet_strip_middle(double x, double width);
+void negs_sheet_strip_indices(const double *xs, const double *widths, size_t count, double min_x, double max_x, size_t *start, size_t *end);
+int64_t negs_sheet_strip_hit(const double *xs, const double *widths, size_t count, double x);
+int64_t negs_sheet_strip_index_at(const double *xs, const double *widths, size_t count, double x);
+double negs_sheet_centred(double middle, double visible, double content);
+double negs_sheet_hold(double old_middle, double new_middle, double new_width, double scroll, double visible);
+double negs_sheet_smoothstep(double t);
+
+/* The grid. negs_sheet_layout writes `count` frames and up to `count` rows
+ * (how many into *row_count) and returns the grid's height. */
+double negs_sheet_clamp_size(double size);
+double negs_sheet_layout(const double *ratios, size_t count, double width, double target, negs_rect_t *frames, negs_sheet_row_t *rows, size_t *row_count);
+int64_t negs_sheet_row_of(const negs_sheet_row_t *rows, size_t row_count, size_t frame_count, size_t index);
+int64_t negs_sheet_vertical(const negs_rect_t *frames, size_t frame_count, const negs_sheet_row_t *rows, size_t row_count, size_t index, int64_t by);
+/* Writes up to `frame_count` indices into `out`; returns how many. */
+size_t negs_sheet_indices_in(const negs_rect_t *frames, size_t frame_count, const negs_sheet_row_t *rows, size_t row_count, negs_rect_t rect, size_t *out);
+void negs_sheet_indices(const negs_sheet_row_t *rows, size_t row_count, double min_y, double max_y, size_t *start, size_t *end);
+int64_t negs_sheet_hit(const negs_rect_t *frames, size_t frame_count, const negs_sheet_row_t *rows, size_t row_count, double x, double y);
+int64_t negs_sheet_nearest(const negs_rect_t *frames, size_t frame_count, const negs_sheet_row_t *rows, size_t row_count, double x, double y);
+double negs_sheet_centre_row(negs_sheet_row_t row, double height, double viewport);
+double negs_sheet_reveal(negs_rect_t frame, double height, double scroll, double viewport);
+double negs_sheet_keep_anchor(negs_rect_t frame, double height, double down, double from_top, double viewport);
+
+/* Thumbnails: sizes are NEGS_THUMB_*. */
+uint32_t negs_sheet_thumb_pixels(uint32_t size);
+uint32_t negs_sheet_thumb_grid(double points, double scale);
+uint32_t negs_sheet_thumb_for_rows(double size, double scale);
+void negs_sheet_thumb_cache_limits(uint32_t size, size_t *bytes, size_t *count);
+size_t negs_sheet_thumbnail_centre(const size_t *on_screen, size_t count, uint8_t has_open, size_t open);
+/* `order` (count) gets the positions in `indices`, nearest `centre` first. */
+void negs_sheet_outward(const size_t *indices, size_t count, size_t centre, size_t *order);
+/* `out` holds 2 × prefetch_reach + 1; returns how many. */
+size_t negs_sheet_prefetch_order(size_t count, const size_t *on_screen, size_t on_screen_count, uint8_t has_current, size_t current, size_t *out);
+/* `out` holds `count`; returns how many. */
+size_t negs_sheet_pump_order(const negs_sheet_pump_item_t *items, size_t count, uint8_t low_power, size_t *out);
+size_t negs_sheet_helpers(size_t cores, uint64_t memory, uint8_t low_power);
+size_t negs_sheet_readers(size_t cores);
+
+/* The sentence: up to `parts_cap` parts (NEGS_SHEET_MAX_PARTS is enough),
+ * their texts one after another in `text`; *text_len gets the texts' whole
+ * length. Returns how many parts. */
+size_t negs_sheet_sentence(const negs_sheet_filter_t *filter, size_t shown, size_t total, negs_sheet_part_t *parts, size_t parts_cap, uint8_t *text, size_t text_cap, size_t *text_len);
+size_t negs_sheet_foot(size_t shown, size_t total, size_t selected, uint8_t filtered, uint8_t *out, size_t cap);
+double negs_sheet_size_fraction(double size);
+double negs_sheet_size_at(double fraction);
+
+/* The fade and scrolling. negs_sheet_cubic_pieces samples `f` (called on
+ * this thread before it returns) and writes max(pieces, 1) × 5 doubles:
+ * each piece's start, then c0..c3. */
+void negs_sheet_look(double along, double *opacity, double *rise);
+double negs_sheet_cubic_bezier(double x1, double y1, double x2, double y2, double t);
+void negs_sheet_cubic_pieces(double (*f)(void *user, double t), void *user, double length, size_t pieces, double *out);
+double negs_sheet_wheel_glide(double at, double to, double dt_ms);
+uint8_t negs_sheet_bar_knob(double scroll, double content, double viewport, double *top, double *length);
+double negs_sheet_bar_scroll(double top, double content, double viewport);
+double negs_sheet_bar_opacity(double since_ms);
+
+/* -- Tray: the film and paper tray (core/src/rules/tray) -------------- */
+
+typedef struct negs_tray_constants_t {
+    double tile, picture, tile_gap, group_gap, title, title_gap, inset, top;
+    double name_gap, name_line, row, foot, height, star, star_inset;
+    double wheel_notch, glide_ms;
+    const char *favourites, *scan, *your_negative, *keep_paper_label;
+} negs_tray_constants_t;
+
+/* A stock as the tray lists it, and a group of them (strings UTF-8,
+ * borrowed for the call). */
+typedef struct negs_tray_entry_t {
+    const uint8_t *id;
+    size_t id_len;
+    const uint8_t *name;
+    size_t name_len;
+} negs_tray_entry_t;
+
+typedef struct negs_tray_section_t {
+    const uint8_t *title;
+    size_t title_len;
+    const negs_tray_entry_t *stocks;
+    size_t count;
+    uint8_t favourites;
+} negs_tray_section_t;
+
+/* A tile in the row; from negs_tray_places, `stock` points into the
+ * sections given. */
+typedef struct negs_tray_place_t {
+    const uint8_t *stock;
+    size_t stock_len;
+    uint8_t favourite;
+} negs_tray_place_t;
+
+/* What's open when Esc is pressed. */
+typedef struct negs_tray_escape_context_t {
+    uint8_t alert, typing, tray, cropping, grid, image_only, photograph;
+} negs_tray_escape_context_t;
+
+#define NEGS_TRAY_HIT_NONE 0u
+#define NEGS_TRAY_HIT_TILE 1u
+#define NEGS_TRAY_HIT_STAR 2u
+
+#define NEGS_TRAY_ENDING_NOTHING 0u
+#define NEGS_TRAY_ENDING_STEP 1u
+#define NEGS_TRAY_ENDING_RESTORE 2u
+
+#define NEGS_TRAY_SUBMIT_KEEP 0u
+#define NEGS_TRAY_SUBMIT_TRY_FIRST 1u
+#define NEGS_TRAY_CANCEL_CLEAR 0u
+#define NEGS_TRAY_CANCEL_GO_BACK 1u
+
+/* Keys in, actions out. */
+#define NEGS_TRAY_KEY_ESCAPE 0u
+#define NEGS_TRAY_KEY_RETURN 1u
+#define NEGS_TRAY_KEY_LEFT 2u
+#define NEGS_TRAY_KEY_RIGHT 3u
+#define NEGS_TRAY_KEY_OTHER 4u
+#define NEGS_TRAY_ACTION_GO_BACK 0u
+#define NEGS_TRAY_ACTION_KEEP 1u
+#define NEGS_TRAY_ACTION_STEP 2u
+#define NEGS_TRAY_ACTION_PASS 3u
+
+/* Esc's order, the first that applies. */
+#define NEGS_ESCAPE_ALERT 0u
+#define NEGS_ESCAPE_TYPING 1u
+#define NEGS_ESCAPE_TRAY 2u
+#define NEGS_ESCAPE_CROP 3u
+#define NEGS_ESCAPE_GRID 4u
+#define NEGS_ESCAPE_IMAGE_ONLY 5u
+#define NEGS_ESCAPE_SHOW_GRID 6u
+#define NEGS_ESCAPE_NOTHING 7u
+
+void negs_tray_constants(negs_tray_constants_t *out);
+uint8_t negs_tray_searching(const uint8_t *query, size_t query_len);
+/* Which of `n` matched groups (`counts`: their stocks) show, into `kept`
+ * (n), and whether the favourites lead; returns how many. */
+size_t negs_tray_sections(const size_t *counts, size_t n, size_t favourite_count, const uint8_t *query, size_t query_len, size_t *kept, uint8_t *favourites_lead);
+/* Whether the film row leads with Your negative's Scan group. */
+uint8_t negs_tray_with_scan(uint8_t paper, uint8_t read_as, const uint8_t *query, size_t query_len);
+/* Every tile, in order, if `cap` holds them; returns how many there are. */
+size_t negs_tray_places(const negs_tray_section_t *sections, size_t n, negs_tray_place_t *out, size_t cap);
+int64_t negs_tray_step(const uint8_t *current, size_t current_len, uint8_t in_favourites, int32_t offset, const negs_tray_place_t *places, size_t n);
+double negs_tray_width(size_t stock_count);
+/* `out` holds n. */
+void negs_tray_starts(const negs_tray_section_t *sections, size_t n, double *out);
+double negs_tray_content_width(const negs_tray_section_t *sections, size_t n);
+double negs_tray_tile_left(double start, size_t index);
+uint8_t negs_tray_tile_x(const uint8_t *stock, size_t stock_len, size_t section, const negs_tray_section_t *sections, size_t n, double *x);
+int64_t negs_tray_section_of(const uint8_t *stock, size_t stock_len, const negs_tray_section_t *sections, size_t n, uint8_t favourites_first);
+size_t negs_tray_current(double scrolled_to, const double *starts, size_t n);
+double negs_tray_centring(double tile_x, double visible, double content);
+double negs_tray_jump(double start, double visible, double content);
+double negs_tray_clamp(double x, double visible, double content);
+double negs_tray_reveal(double offset, const uint8_t *stock, size_t stock_len, uint8_t in_favourites, uint8_t centre, const negs_tray_section_t *sections, size_t n, double visible);
+double negs_tray_wheel(double offset, int32_t delta, uint8_t sideways, double visible, double content);
+double negs_tray_glide(double from, double to, double elapsed_ms);
+/* NEGS_TRAY_HIT_*, and the tile's section and index. */
+uint32_t negs_tray_hit(const negs_tray_section_t *sections, size_t n, double x, double y, size_t *section, size_t *index);
+/* x, y, width, height. */
+void negs_tray_star_rect(double left, double out[4]);
+void negs_tray_stand_in_size(uint32_t image_width, uint32_t image_height, double photo_width, double photo_height, double out[2]);
+
+const char *negs_tray_star_help(uint8_t favourite);
+size_t negs_tray_star_label(const uint8_t *name, size_t name_len, uint8_t favourite, uint8_t *out, size_t cap);
+const char *negs_tray_tile_value(uint8_t selected, uint8_t before);
+size_t negs_tray_index_label(const uint8_t *title, size_t title_len, uint8_t *out, size_t cap);
+size_t negs_tray_hint(uint8_t has_before, const uint8_t *before, size_t before_len, uint8_t *out, size_t cap);
+size_t negs_tray_matches(size_t count, uint8_t *out, size_t cap);
+size_t negs_tray_no_match(const uint8_t *query, size_t query_len, uint8_t paper, uint8_t *out, size_t cap);
+const char *negs_tray_done_help(uint8_t paper);
+const char *negs_tray_keep_paper_words(uint8_t kept);
+
+/* A visit: the undo name for keeping, and the tiles' Trying and Before. */
+const char *negs_tray_visit_action(uint8_t paper, uint8_t read_as);
+uint8_t negs_tray_visit_tried(const uint8_t *before_id, size_t before_len, const uint8_t *current, size_t current_len);
+uint8_t negs_tray_visit_shows_before(const uint8_t *before_id, size_t before_len, const uint8_t *stock, size_t stock_len, const uint8_t *current, size_t current_len);
+/* `unchanged`: the edit before the visit equals the edit now. */
+uint32_t negs_tray_ending(uint8_t keep, uint8_t unchanged);
+uint32_t negs_tray_submit(const uint8_t *query, size_t query_len);
+uint32_t negs_tray_cancel(const uint8_t *query, size_t query_len);
+/* NEGS_TRAY_ACTION_*; *step is -1 or 1 for a step. */
+uint32_t negs_tray_key(uint32_t key, uint8_t command, uint8_t typing, int32_t *step);
+uint32_t negs_tray_escape(const negs_tray_escape_context_t *context);
+
+/* -- Compare (core/src/rules/compare) --------------------------------- */
+
+typedef struct negs_compare_constants_t {
+    double caption, label, stacked_caption, gap, stacked_gap, side, bottom;
+    const char *parts[5]; /* the camera's facts, as the status line names them */
+} negs_compare_constants_t;
+
+/* A string that may be missing. */
+typedef struct negs_compare_text_t {
+    const uint8_t *text;
+    size_t len;
+    uint8_t has;
+} negs_compare_text_t;
+
+/* A photograph, or one of its duplicates; equal when both are byte for byte. */
+typedef struct negs_compare_item_t {
+    const uint8_t *photo;
+    size_t photo_len;
+    negs_compare_text_t variant;
+} negs_compare_item_t;
+
+#define NEGS_COMPARE_OFFER_TOO_MANY 0u
+#define NEGS_COMPARE_OFFER_PAIR 1u
+#define NEGS_COMPARE_OFFER_WITH_CURRENT 2u
+#define NEGS_COMPARE_OFFER_WITH_ORIGINAL 3u
+
+typedef struct negs_compare_offer_t {
+    uint32_t kind;
+    uint8_t enabled, with_original;
+} negs_compare_offer_t;
+
+#define NEGS_COMPARE_WORD_PAIR 0u
+#define NEGS_COMPARE_WORD_TOO_MANY 1u
+#define NEGS_COMPARE_WORD_SELECT_SECOND 2u
+
+#define NEGS_ORIGINAL_HOLD 0u
+#define NEGS_ORIGINAL_SPLIT 1u
+#define NEGS_ORIGINAL_SIDE_BY_SIDE 2u
+#define NEGS_ORIGINAL_RAW 0u
+#define NEGS_ORIGINAL_CAMERA_JPEG 1u
+
+#define NEGS_COMPARE_ROW 0u
+#define NEGS_COMPARE_COLUMN 1u
+
+/* How the camera's JPEG is laid over the RAW's frame: the picture made is
+ * out[0] × out[1]; `same`: the JPEG is stretched to it; else it is resized
+ * to size[0] × size[1] and drawn at at[0], at[1] on black. */
+typedef struct negs_compare_over_frame_t {
+    uint32_t out[2];
+    uint32_t size[2];
+    int64_t at[2];
+    uint8_t same;
+} negs_compare_over_frame_t;
+
+void negs_compare_constants(negs_compare_constants_t *out);
+uint8_t negs_compare_edited_is_first(uint8_t first_original, uint8_t second_original, uint8_t active_first);
+uint8_t negs_compare_against_original(uint8_t first_original, uint8_t second_original);
+/* `current_other`: there is a current photograph and it isn't the one
+ * clicked. Then the title: a and b the pair's numbers, a the current's
+ * number, or a the original's word. */
+void negs_compare_offer(size_t target_count, uint8_t current_other, uint8_t can_compare, uint8_t can_with_original, negs_compare_offer_t *out);
+size_t negs_compare_offer_title(uint32_t kind, const uint8_t *a, size_t a_len, const uint8_t *b, size_t b_len, uint8_t *out, size_t cap);
+uint32_t negs_compare_word(size_t selected, uint8_t can_compare);
+size_t negs_compare_word_title(uint32_t kind, const uint8_t *a, size_t a_len, const uint8_t *b, size_t b_len, uint8_t *out, size_t cap);
+/* a, b: each photograph's five facts, NULL while unknown. */
+size_t negs_compare_differences(const negs_compare_text_t a[5], const negs_compare_text_t b[5], const uint8_t *film_a, size_t film_a_len, const uint8_t *film_b, size_t film_b_len, negs_compare_text_t paper_a, negs_compare_text_t paper_b, uint8_t *out, size_t cap);
+const char *negs_compare_menu_title(uint8_t comparing);
+/* The index into `order`, or -1. */
+int64_t negs_compare_step(const negs_compare_item_t *from, const negs_compare_item_t *first, const negs_compare_item_t *order, size_t n, int64_t offset);
+size_t negs_compare_frame_number(const negs_compare_item_t *items, size_t n, const negs_compare_item_t *item, uint8_t *out, size_t cap);
+
+const char *negs_compare_original_mode_key(uint32_t mode);
+uint32_t negs_compare_original_mode_from_key(const uint8_t *key, size_t key_len);
+const char *negs_compare_original_mode_title(uint32_t mode);
+size_t negs_compare_original_mode_help(uint32_t mode, const uint8_t *original, size_t original_len, uint8_t *out, size_t cap);
+const char *negs_compare_original_reference_key(uint32_t reference);
+uint32_t negs_compare_original_reference_from_key(const uint8_t *key, size_t key_len);
+const char *negs_compare_original_reference_title(uint32_t reference);
+
+/* Geometry: frames are negs_rect_t (x, y, width, height). */
+void negs_compare_fit(double aspect, double room_width, double room_height, double out[2]);
+void negs_compare_row_layout(double canvas_width, double canvas_height, double first_aspect, double second_aspect, negs_rect_t out[2]);
+void negs_compare_column_layout(double canvas_width, double canvas_height, double first_aspect, double second_aspect, negs_rect_t out[2]);
+/* NEGS_COMPARE_ROW or _COLUMN, whichever shows the two larger. */
+uint32_t negs_compare_layout(double canvas_width, double canvas_height, double first_aspect, double second_aspect, negs_rect_t out[2]);
+void negs_compare_slider_frame(double canvas_width, double canvas_height, double aspect, negs_rect_t *out);
+
+/* Pixels: RGBA rows packed. negs_compare_halved writes
+ * max(width / 2, 1) × max(height / 2, 1) pixels, each the mean of four;
+ * width and height at least 1 (else nothing is written). */
+void negs_compare_halved(const uint8_t *src, uint32_t width, uint32_t height, uint8_t *out);
+void negs_compare_over_frame(uint32_t width, uint32_t height, uint32_t frame_width, uint32_t frame_height, negs_compare_over_frame_t *out);
 
 
 
