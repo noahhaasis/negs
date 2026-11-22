@@ -20,3 +20,6 @@ negs-core-sys = { path = "../sys" }
 # Phase 3a: the library's Filter and Item (sheet_rules, compare), from the
 # core's library under the name windows/ gives it.
 negs-library = { package = "negs-core-library", path = "../library" }
+# model_compare's filtered resize and overlay (the host's half of
+# over_frame), as windows/ has it.
+image = { version = "0.25", default-features = false }

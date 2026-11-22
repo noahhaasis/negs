@@ -4,6 +4,9 @@
 // Phase 3a: sheet_rules, tray_rules, compare.
 pub mod sheet_rules;
 pub mod tray_rules;
+pub mod compare;
+/// model/compare.rs's pure helpers (the rest is Phase 5's frame pipeline).
+pub mod model_compare;
 
 
 
