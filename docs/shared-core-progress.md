@@ -11,7 +11,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
 | 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
-| 3 | Pure Domain Rules & Media Helpers | in progress (3 slices in parallel) | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`) |
+| 3 | Pure Domain Rules & Media Helpers | Mac side done (3 slices merged); Windows gate next | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs, 0 leaks, ASan clean |
 | 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
@@ -35,13 +35,128 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Windows startup: `inspector_shown` (median) | 192.5 ms (same runs); with the core 188.3 ms | — | — |
 | Library: 500-photo folder open + sidecar parse/write + look hash | open + parse + summaries + looks 28.6 ms (175,861 allocs, 28.4 MiB); rate 500 + undo (1,000 writes) 216 ms (330,562 allocs); filter + sort 5×500 0.38 ms | — | — |
 | Marks: 1,000 names × (5 stars + cross + grid box) | 23.6 ms (203,585 allocs, 163.9 MiB) | — | — |
-| `exact_fit` Lanczos downscale (6k×4k → fit) | 6000×4000 → 1500×1000: 50.7 ms | — | — |
-| `embedded_preview` TIFF IFD scan (61 RAWs) | `~/Downloads/free_raws` (95 files, 58 with TIFF previews), find + read largest, warm: 11.8 ms | — | — |
-| `sheet_rules` packed-row layout (1,000 items) | `SheetLayout::new` ×100: 0.47 ms | — | — |
+| `exact_fit` Lanczos downscale (6k×4k → fit) | 6000×4000 → 1500×1000: 50.7 ms | 47.1 ms (Rust 56.0 ms same run; Phase 3b, indicative, shared machine) | — |
+| `embedded_preview` TIFF IFD scan (61 RAWs) | `~/Downloads/free_raws` (95 files, 58 with TIFF previews), find + read largest, warm: 11.8 ms | 11.8–11.9 ms (Rust 11.6–11.8 ms same run; Phase 3c) | — |
+| `sheet_rules` packed-row layout (1,000 items) | `SheetLayout::new` ×100: 0.47 ms | 0.40–0.42 ms (Rust 0.45–0.46 ms same run; Phase 3a) | — |
 | Peak RSS (500-photo folder + grid workload) | library bench 6.4 MiB; marks 2.8 MiB; exact_fit 168.7 MiB (its 96 MB input); embedded 17.4 MiB | — | — |
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-22: Phase 3 Mac side, three slices merged (`core-p3a-sheet`, `core-p3c-media`, `core-p3b-picture`)
+
+Three agents worked in parallel, one per slice, from `00b0d0d`; the
+coordinator merged 3a (`9c77ee9`), then 3c, then 3b, and checked the
+combined tree after each (`build.py test`, `test --asan`, `diff`,
+`diff --asan`, the Windows cross-check with and without `--tests`, and the
+any-OS Windows crates with `--locked`). All pass on the merged tree.
+
+**Pattern (as in Phase 2).** `negs-core-rules` (`core/rust/rules`) keeps
+each Windows module's public API; plain types stay Rust structs; the logic
+runs in Odin. `windows/src/<module>.rs` is now `pub use
+negs_core_rules::<module>::*` and keeps its own `#[cfg(test)]` tests; no
+other `windows/src` file changed. The Rust originals are frozen as oracles
+in `core/diff/oracle` (3b's and 3c's compile in their own crates,
+`core/diff/picture` and `core/diff/media-oracle`, so their stand-in
+`crate::` modules don't clash).
+
+**Differential tests** (SplitMix inputs, `NEGS_RULES_SEEDS`/`NEGS_RULES_SEED`;
+every output compared, floats bit for bit; 0 differences; 0 live core
+allocations and 0 bad frees after each test; each one also under ASan):
+
+| Slice | Module | Compared | Mutation check (caught) |
+|---|---|---|---|
+| 3a | `sheet_rules` | 909k values, 46 functions (+30k Rect) | layout clamp 10→9.5: 5,084 diffs |
+| 3a | `tray_rules` | 700k values, 39 functions, all 128 Esc contexts | U+3000 out of White_Space: 3,752 |
+| 3a | `compare` | 290k values, 21 functions | `>`→`>=` in arrangement: 931 |
+| 3a | `model/compare` (`halved`, `over_frame` geometry) | 20k | `+2`→`+1` rounding: 7,612 |
+| 3b | `crop` | 10k + 2.5k 12-step sessions + serde both ways (1.16M values) | inscribe 0.98→0.97: 10,836 |
+| 3b | `border` | 10k + every film + serde (496k) | film_geometry 0.025→0.0251: 2,763 |
+| 3b | `exact_fit` | 10k sizes, 200 resamples incl. 6000×4000→1500×1000 (98.4M) | encode constant: 101,682 |
+| 3b | `histogram` | 10k + 24 MP in 8 orientations (190M) | turn-3 mapping: 4,570 |
+| 3b | `negative` | 10k (230k) | tolerance `<=`→`<`: 308 |
+| 3b | `thumb_compose` | 10k sizes, 2.5k full thumbnails with real borders (230M) | decode constant: 881 |
+| 3b | `windows_units` | the Windows modules' own tests on the core; the app's `CropSession` vs the frozen one (2.5k) | wrapper drops `intended`: caught |
+| 3c | `embedded_preview` | 96 real RAWs by path and bytes (98.4 MB of previews), 12k headers (cut, corrupted, synthetic), 403 synthetic files | orientation 1–8→1–7; `largest` tie-break |
+| 3c | `photo_facts` | 5.57M camera names (every Unicode scalar), 60k numbers, `read` on 106 real + 300 synthetic files | ties-to-even→half-up |
+| 3c | `tone_graph` | 10k curves, 30k predictions, 480k hits, 389k drags | flat run `>0`→`>=0` |
+| 3c | `help` | all 91 paths, 15 groups, 20k lookups | `-` accepted in lanes |
+
+3b also passed at seed 20261122 with 40,000 cases each. Two mutations that
+survived were shown equivalent (sheet's row-fill and ln-tie comparisons;
+exact_fit's `<=` at 0.0031308).
+
+**Bugs the differential tests found** (in the port, fixed before merge):
+histogram's `usize::MAX` sample budget became −1 as an Odin `int`, and a
+far-off-picture sample (1e300 crop) saturated to −1 and indexed out of
+range; the core now compares unsigned, as the Rust does.
+
+**What stayed in Rust, and why.** Engine calls (`CropSettings::engine()`,
+`PhotoFacts::read`'s EXIF via spektrafilm-io, `image` resizes and
+rotations, PNG strip textures); JSON (the tone graph's `Controls`/`Curve`
+parsing, negative's `FlatField::of`/`BaseStatus::of`, border's `options()`)
+until the core has JSON (Phase 4); Win32 packing (`colorref`); `Lru` (a
+generic container of host values); `CropSession` (holds `EditState`; it
+delegates every method to the core's `SessionGeometry`); constants the app
+matches on (tested equal to the core's). Engine *formulas* that 3b needed
+(border margins, film geometry, the 35mm strip, `Crop::pixels`,
+`straightened_size`) are ported to Odin and diff-tested bit for bit against
+spektrafilm-io's own functions, so an engine change shows up as a failing
+test.
+
+**ABI** (version 4 throughout): ~109 `negs_sheet_*`/`negs_tray_*`/
+`negs_compare_*`, ~100 Phase 3b functions, ~30 Phase 3c. No JSON. Text into
+caller buffers (with an exact-size retry) or owned `negs_buf_t`; pixels,
+bins and previews into caller buffers (`negs_embedded_read` writes straight
+into the caller's buffer: 14.0 → 11.9 ms on the bench); static strings for
+constants. Layout tables cover every header struct (C, Odin, Rust).
+
+**Speed** (indicative; Docker used ~3 cores): sheet 0.40 ms vs Rust 0.45;
+fit 47.1 ms vs 56.0 (byte-identical); embedded 11.85 ms vs 11.7. The first
+ports were slower (sheet 0.65 ms, fit 136 ms): bounds checks in the inner
+loops (now `#no_bounds_check` with lengths clamped up front) and
+`math.round` not inlining across separate modules (now libm's `round`).
+`build.py lib` 1.44–1.53 s with every slice in.
+
+**Build tooling.** `diff --asan` passes `--target <host>` so RUSTFLAGS
+don't put the ASan runtime into proc macros (rustc aborted with
+"Interceptors are not working" once core/diff pulled in serde_derive).
+core/diff now builds spektrafilm-io and rawler (for the oracles), so its
+first build is slower. Because `negs-core-rules` now brings spektrafilm-io,
+`windows/sheet-rules` and `windows/tray-rules` patch `rawler` to
+`vendor/rawler` as `library-map` does; the merged tree's check caught it
+(crates.io's rawler lacks the X-Trans API). Lock files were resolved offline with `cargo tree
+--offline` (`cargo update -p` offline downgrades unrelated crates).
+
+**Coordinator decisions** (the agents' questions; none is a product
+trade-off):
+- `Lru`'s `len`/`bytes`/`retain` stay `pub` in the wrapper (Windows' tests
+  use them).
+- `windows/library-map` and `windows/sheet-rules` now use the core's
+  library under the `negs-library` name, as the app does (otherwise
+  `compare::Item` is a different type).
+- `windows/sheet-rules` and `windows/tray-rules` only re-run tests the
+  wrapper crate runs too; retire them in Phase 5 with the rest of the
+  non-UI Rust. CI still runs them (after `install_odin`).
+- core/diff may depend on spektrafilm-io and rawler (read only) so
+  `PhotoFacts::read` and the engine formulas are compared on real inputs.
+- The tone graph's and negative's JSON stay in Rust until Phase 4.
+- Porting engine formulas is accepted when a differential test holds them
+  to the engine function bit for bit.
+- `negs-core-rules` depends on spektrafilm-io unconditionally (3b needs
+  it); 3c's `io` feature is kept as an empty name so `windows/Cargo.toml`
+  needs no change. `image` (no default features) comes with it for
+  `model_compare`; making it optional can wait.
+
+**Risks to check at the Windows gate:** embedded's Windows reader
+(`CreateFileW`/`ReadFile`) has never run (no `\\?\` prefix for long
+paths; failures fall back to decoding, no crash); exact_fit's thread count
+via `GetSystemInfo`; bit-exactness with UCRT's libm on x86_64 (`build.py
+diff` on the PC); `pow` standing in for `exp10` (drags snap to 0.01, so
+low risk); a panic in the `cubic_pieces` callback aborts (documented);
+border's `strip_textures_load` runs only in `windows/`; photographs compare
+byte for byte (a path with mixed `\` and `/` counts as different; the
+library never produces one).
 
 ### 2026-11-22: Go for Phase 3; build tooling and Phase 3 groundwork (branch `core-p3-base`)
 
