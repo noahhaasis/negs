@@ -770,6 +770,7 @@ dependencies = [
  "image",
  "negs-core-library",
  "negs-core-sys",
+ "serde_json",
 ]
 
 [[package]]

@@ -233,6 +233,26 @@ fn embedded(folder: &Path) {
     println!("embedded_preview_{}_raws (find + read largest, warm cache): {ms:.2} ms ({found} with previews)", files.len());
 }
 
+/// The same on the core (Phase 3c), through negs-core-rules as windows/ calls it.
+fn core_embedded(folder: &Path) {
+    use negs_core_rules::embedded_preview as core;
+    let mut files: Vec<PathBuf> = std::fs::read_dir(folder).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_file()).collect();
+    files.sort();
+    let mut found = 0;
+    let ms = median_ms(RUNS, || {
+        found = 0;
+        for path in &files {
+            if let Some(previews) = core::find(path) {
+                found += 1;
+                if let Some(jpeg) = previews.largest() {
+                    black_box(core::bytes(path, &jpeg));
+                }
+            }
+        }
+    });
+    println!("core_embedded_preview_{}_raws (find + read largest, warm cache): {ms:.2} ms ({found} with previews)", files.len());
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let which = args.get(1).map(String::as_str).unwrap_or("all");
@@ -254,7 +274,11 @@ fn main() {
             core_sheet();
         }
         "fit" => fit(),
-        "embedded" => embedded(Path::new(args.get(2).expect("raw folder"))),
+        "embedded" => {
+            let folder = Path::new(args.get(2).expect("raw folder"));
+            embedded(folder);
+            core_embedded(folder);
+        }
         "all" => {
             library(&scratch);
             core_library(&scratch);

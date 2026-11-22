@@ -1,0 +1,23 @@
+# Phase 3c's oracles: windows/src's photo_facts, tone_graph and help as they
+# were before the core took them over (core/diff/oracle), compiled with the
+# few windows/src items they name (copied as they were, src/lib.rs). Its own
+# crate, so its `crate::json`, `crate::state` and `crate::negative` don't
+# meet other slices' oracles in negs-core-diff.
+[package]
+name = "negs-media-oracle"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
+spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = false }
+# Not used here: turns on the wrapper's PhotoFacts::read for the
+# differential tests (features unify), without touching the shared line in
+# negs-core-diff's manifest.
+negs-core-rules = { path = "../../rust/rules", features = ["io"] }

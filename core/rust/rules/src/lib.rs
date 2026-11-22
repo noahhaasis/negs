@@ -15,3 +15,7 @@ pub mod model_compare;
 
 
 // Phase 3c: embedded_preview, photo_facts, tone_graph, help.
+pub mod embedded_preview;
+pub mod help;
+pub mod photo_facts;
+pub mod tone_graph;
