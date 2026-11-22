@@ -13,7 +13,7 @@ publish = false
 
 [features]
 # Count the core's allocations, so the differential tests check for leaks.
-track = ["negs-core-marks/track", "negs-core-sys/track", "negs-library/track"]
+track = ["negs-core-marks/track", "negs-core-sys/track", "negs-library/track", "negs-core-rules/track"]
 
 [dependencies]
 # The library suites (crates/negs-library/tests) compile against the core's
@@ -23,6 +23,7 @@ negs-library-rust = { package = "negs-library", path = "../../crates/negs-librar
 negs-marks = { path = "../../windows/marks" }
 negs-core-marks = { path = "../rust/marks" }
 negs-core-sys = { path = "../rust/sys" }
+negs-core-rules = { path = "../rust/rules" }
 
 # crates/negs-library's own suites, unchanged, run against the core.
 [[test]]

@@ -6,10 +6,13 @@ import "../marks"
 import "../theme"
 
 @(private)
-layout_table := [?]struct {
+Layout_Entry :: struct {
 	name:  string,
 	value: i64,
-} {
+}
+
+@(private)
+layout_table := [?]Layout_Entry {
 	{"negs_buf_t", size_of(Buf)},
 	{"negs_buf_t.data", i64(offset_of(Buf, data))},
 	{"negs_buf_t.len", i64(offset_of(Buf, len))},
@@ -80,6 +83,14 @@ layout :: proc "c" (name: [^]u8, n: uint) -> i64 {
 	for entry in layout_table {
 		if entry.name == key {
 			return entry.value
+		}
+	}
+	// Phase 3's slices each keep their own table (layout_3a.odin, ...).
+	for table in ([?]^[]Layout_Entry{&layout_3a, &layout_3b, &layout_3c}) {
+		for entry in table^ {
+			if entry.name == key {
+				return entry.value
+			}
 		}
 	}
 	return -1

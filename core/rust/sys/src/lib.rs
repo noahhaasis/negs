@@ -9,8 +9,17 @@ pub mod marks;
 pub mod library;
 pub mod theme;
 
+// Phase 3a
+pub mod sheet;
+
+// Phase 3b
+pub mod picture;
+
+// Phase 3c
+pub mod media;
+
 /// NEGS_CORE_ABI_VERSION of the header these declarations follow.
-pub const NEGS_CORE_ABI_VERSION: u32 = 3;
+pub const NEGS_CORE_ABI_VERSION: u32 = 4;
 
 #[repr(C)]
 #[derive(Debug)]
