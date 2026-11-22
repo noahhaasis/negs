@@ -306,13 +306,21 @@ def diff(args: argparse.Namespace) -> None:
         else:
             os.environ["RUSTFLAGS"] = (os.environ.get("RUSTFLAGS", "") + " -C link-arg=-fsanitize=address").strip()
         target = REPO / "target" / "core-asan"
+        # With an explicit --target, RUSTFLAGS reach only the test binaries,
+        # not build scripts or proc macros: rustc dlopens a proc macro, and
+        # one linked against the ASan runtime aborts it ("interceptors are
+        # not working"), as spektrafilm-io's dependencies' derives do.
+        host = subprocess.run(["rustc", "-vV"], check=True, capture_output=True, text=True).stdout
+        cargo_target = ["--target", next(l.split(": ", 1)[1] for l in host.splitlines() if l.startswith("host: "))]
+    else:
+        cargo_target = []
     if args.seeds:
         # The library's state and lockstep tests (default 3 seeds; CI and
         # the Phase 2 gate run 50).
         os.environ["NEGS_LIBRARY_SEEDS"] = str(args.seeds)
     for crate in RUST_CRATES:
         cmd = ["cargo", "test", "--release", "--manifest-path", str(CORE / crate / "Cargo.toml"),
-               "--target-dir", str(target), "--features", "track"]
+               "--target-dir", str(target), "--features", "track", *cargo_target]
         if args.test:
             cmd += ["--test", args.test]
         if crate != "diff" and args.test:
