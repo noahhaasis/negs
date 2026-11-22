@@ -817,7 +817,298 @@ void negs_compare_over_frame(uint32_t width, uint32_t height, uint32_t frame_wid
 /* ------------------------------------------------------------------ */
 /* Phase 3b: Picture rules: crop, border, exact fit, thumbnail compose, histogram, negative (core/src/rules) */
 /* ------------------------------------------------------------------ */
-/* (Phase 3b's declarations go here.) */
+/* The same rounding, clamping and floating-point steps as windows/src's
+ * Rust (Rust's min/max ignore a NaN; float to integer casts saturate), so
+ * results are bit for bit. Nothing here takes a handle or keeps state;
+ * results go through out-pointers (NULL skips them) or come back in an
+ * owned negs_buf_t. Booleans in structs are 0 or 1. Rectangles are
+ * negs_rect_t (x, y, w, h) and points negs_pt_t, from Marks. */
+
+typedef struct negs_size_t {
+    double width, height;
+} negs_size_t;
+
+/* Crop (core/src/rules/crop; windows/src/crop.rs, Crop.swift).
+ * A presentation crop: the rectangle is a fraction of the unrotated
+ * photograph, origin top left; `angle` straightens it, degrees clockwise
+ * as shown. */
+
+#define NEGS_CROP_ORIGINAL 0u
+#define NEGS_CROP_FREEFORM 1u
+#define NEGS_CROP_SQUARE 2u
+#define NEGS_CROP_16_9 3u
+#define NEGS_CROP_3_2 4u
+#define NEGS_CROP_4_3 5u
+#define NEGS_CROP_5_4 6u
+#define NEGS_CROP_7_5 7u
+#define NEGS_CROP_CUSTOM 8u
+
+typedef struct negs_crop_settings_t {
+    negs_rect_t rect;
+    negs_size_t custom; /* the custom ratio, width by height as shown */
+    double angle;
+    uint32_t aspect;    /* NEGS_CROP_* */
+    uint32_t reserved;
+} negs_crop_settings_t;
+
+/* Mirrored left to right if flip, then `turns` quarter turns clockwise. */
+typedef struct negs_orientation_t {
+    int32_t turns;
+    uint8_t flip;
+    uint8_t reserved[3];
+} negs_orientation_t;
+
+/* An edge or corner: -1 left or top, 1 right or bottom; both 0 moves. */
+typedef struct negs_crop_handle_t {
+    int32_t x, y;
+} negs_crop_handle_t;
+
+/* The crop being drawn, its geometry (the host keeps the edit it began
+ * from). Make it with negs_crop_session_new; the session calls change it
+ * in place. `intended` (with has_intended) is the crop when straightening
+ * began, as shown. */
+typedef struct negs_crop_session_t {
+    negs_rect_t rect;
+    negs_size_t custom;
+    negs_size_t photo;  /* the developed photograph as shown, in pixels */
+    negs_rect_t intended;
+    double angle;       /* as shown: the setting's, the other way round when flipped */
+    int32_t rotation;
+    uint32_t aspect;
+    uint8_t portrait;
+    uint8_t flip;
+    uint8_t straightening;
+    uint8_t has_intended;
+    uint32_t reserved;
+} negs_crop_session_t;
+
+double negs_crop_max_angle(void);
+/* Static strings; the format is NULL for a ratio without one. */
+const char *negs_crop_aspect_title(uint32_t aspect);
+const char *negs_crop_aspect_format(uint32_t aspect);
+/* The long side over the short; 0 for freeform and custom. */
+uint8_t negs_crop_aspect_ratio(uint32_t aspect, negs_size_t photo, double *out);
+uint8_t negs_crop_aspect_turns(uint32_t aspect);
+uint8_t negs_crop_cropped(const negs_crop_settings_t *crop);
+/* The exporter's rounding (spektrafilm-io's Crop::pixels and
+ * straightened_size): out[4] = x, y, width, height; out[2] = width, height. */
+void negs_crop_engine_pixels(const negs_crop_settings_t *crop, uint32_t width, uint32_t height, uint32_t out[4]);
+void negs_crop_straightened_size(const negs_crop_settings_t *crop, uint32_t width, uint32_t height, uint32_t out[2]);
+void negs_crop_pixels(const negs_crop_settings_t *crop, negs_size_t size, negs_rect_t *out);
+void negs_crop_size_of(const negs_crop_settings_t *crop, negs_size_t size, negs_size_t *out);
+void negs_crop_shown(negs_rect_t rect, int32_t rotation, uint8_t flip, negs_rect_t *out);
+void negs_crop_unrotated(negs_rect_t rect, int32_t rotation, uint8_t flip, negs_rect_t *out);
+void negs_crop_mirrored(negs_rect_t rect, negs_rect_t *out);
+void negs_rect_inset(negs_rect_t rect, double dx, double dy, negs_rect_t *out);
+uint8_t negs_rect_contains(negs_rect_t rect, negs_pt_t p);
+void negs_rect_intersection(negs_rect_t a, negs_rect_t b, negs_rect_t *out);
+void negs_orientation_new(int32_t turns, uint8_t flip, negs_orientation_t *out);
+void negs_orientation_flipped_as_shown(negs_orientation_t o, negs_orientation_t *out);
+void negs_orientation_shown(negs_orientation_t o, negs_pt_t fraction, negs_pt_t *out);
+void negs_orientation_unshown(negs_orientation_t o, negs_pt_t fraction, negs_pt_t *out);
+/* A point shown through the crop back to a fraction of the photograph;
+ * 0 outside it. */
+uint8_t negs_crop_unshown_point(negs_orientation_t o, const negs_crop_settings_t *crop, negs_size_t turned, double x, double y,
+                                negs_pt_t *out);
+void negs_crop_fit(double ratio, negs_pt_t center, negs_rect_t bounds, negs_rect_t *out);
+void negs_crop_move_rect(negs_rect_t rect, double dx, double dy, negs_rect_t bounds, negs_rect_t *out);
+void negs_crop_resize(negs_rect_t rect, negs_crop_handle_t handle, negs_pt_t point, uint8_t has_ratio, double ratio,
+                      negs_rect_t bounds, double minimum, negs_rect_t *out);
+/* 0 when the point is out of reach. */
+uint8_t negs_crop_handle_at(negs_pt_t point, negs_rect_t frame, double scale, negs_crop_handle_t *out);
+void negs_crop_turn(negs_pt_t point, double degrees, negs_pt_t center, negs_pt_t *out);
+void negs_crop_corners(negs_size_t photo, double angle, negs_pt_t out[4]);
+void negs_crop_bounds(negs_size_t photo, double angle, negs_rect_t *out);
+uint8_t negs_crop_fits(negs_rect_t rect, double angle, negs_size_t photo);
+void negs_crop_constrain(negs_rect_t start, negs_rect_t target, double angle, negs_size_t photo, negs_rect_t *out);
+void negs_crop_inscribe(negs_rect_t rect, double angle, negs_size_t photo, negs_rect_t *out);
+
+void negs_crop_session_new(const negs_crop_settings_t *start, negs_size_t photo, int32_t rotation, uint8_t flip,
+                           negs_crop_session_t *out);
+void negs_crop_session_settings(const negs_crop_session_t *s, negs_crop_settings_t *out);
+uint8_t negs_crop_session_modified(const negs_crop_session_t *s);
+uint8_t negs_crop_session_orientation_portrait(const negs_crop_session_t *s);
+/* Width over height of the locked ratio as shown; 0 for freeform. */
+uint8_t negs_crop_session_ratio(const negs_crop_session_t *s, double *out);
+void negs_crop_session_shown(const negs_crop_session_t *s, negs_rect_t *out);
+void negs_crop_session_set_shown(negs_crop_session_t *s, negs_rect_t value);
+void negs_crop_session_bounds(const negs_crop_session_t *s, negs_rect_t *out);
+void negs_crop_session_update(negs_crop_session_t *s, negs_size_t photo, int32_t rotation, uint8_t flip);
+void negs_crop_session_choose(negs_crop_session_t *s, uint32_t aspect);
+void negs_crop_session_orient(negs_crop_session_t *s, uint8_t portrait);
+void negs_crop_session_set_custom(negs_crop_session_t *s, uint8_t has_width, double width, uint8_t has_height, double height);
+void negs_crop_session_reset(negs_crop_session_t *s);
+void negs_crop_session_begin_straightening(negs_crop_session_t *s);
+void negs_crop_session_straighten(negs_crop_session_t *s, double degrees);
+void negs_crop_session_end_straightening(negs_crop_session_t *s);
+
+/* Border (core/src/rules/border; windows/src/border.rs, Border.swift).
+ * The engine's sizes (spektrafilm-io's border and film35 strip) are ported
+ * and held to it bit for bit; the textures and drawing stay the engine's. */
+
+#define NEGS_BORDER_SOLID 0u
+#define NEGS_BORDER_FILM 1u
+#define NEGS_BORDER_KEYLINE 2u
+#define NEGS_BORDER_FILM35 3u
+
+#define NEGS_FILM_FULL 0u
+#define NEGS_FILM_HALF 1u
+
+typedef struct negs_border_settings_t {
+    double width;      /* the solid and keyline mat, a share of the long edge */
+    double film_width; /* black around the film frame */
+    double line;       /* the keyline's line */
+    uint32_t style;    /* NEGS_BORDER_* */
+    uint8_t color[3];  /* 8-bit sRGB */
+    uint8_t line_color[3];
+    uint8_t enabled;
+    uint8_t export_border;
+    uint8_t instagram;
+    uint8_t reserved[3];
+} negs_border_settings_t;
+
+/* Static strings. */
+const char *negs_border_style_title(uint32_t style);
+const char *negs_border_style_help(uint32_t style);
+const char *negs_border_style_raw_value(uint32_t style);
+/* The styles in the inspector's order. */
+void negs_border_styles(uint32_t out[4]);
+uint8_t negs_border_fits(uint32_t style, uint32_t width, uint32_t height);
+/* NEGS_FILM_*, or -1 when the photograph is neither 3:2 nor 3:4. */
+int32_t negs_film_format_of(uint32_t width, uint32_t height);
+const char *negs_film_format_name(uint32_t format);
+uint32_t negs_border_margin(uint32_t width, uint32_t height, double fraction);
+uint32_t negs_border_keyline_width(uint32_t width, uint32_t height, double fraction);
+/* (inset, nine-patch size) */
+void negs_border_film_geometry(uint32_t width, uint32_t height, uint32_t out[2]);
+void negs_border_instagram_canvas(uint32_t width, uint32_t height, uint32_t style, uint32_t out[2]);
+uint8_t negs_strip_turned(uint32_t format, uint32_t width, uint32_t height);
+void negs_strip_canvas(uint32_t format, uint32_t width, uint32_t height, uint32_t out[2]);
+/* Whether the 35mm strip turns to hold the photograph. */
+uint8_t negs_border_turned(uint32_t width, uint32_t height);
+/* "#rrggbb" and a NUL. */
+void negs_border_color_hex(const uint8_t color[3], char out[8]);
+/* "#rrggbb" or "rrggbb"; 0 when it isn't one. */
+uint8_t negs_border_color_from_hex(const uint8_t *text, size_t len, uint8_t out[3]);
+void negs_border_color_rgba(const uint8_t color[3], float out[4]);
+uint8_t negs_border_shown(const negs_border_settings_t *border, uint32_t width, uint32_t height);
+uint8_t negs_border_exported(const negs_border_settings_t *border, uint32_t width, uint32_t height);
+/* The style's width setting; 0 for 35mm, which has none. */
+uint8_t negs_border_style_width(const negs_border_settings_t *border, double *out);
+uint32_t negs_border_keyline(const negs_border_settings_t *border, uint32_t width, uint32_t height);
+/* The canvas around a width x height photograph, as the exporter makes it
+ * (the 35mm strip's size doesn't depend on the film). */
+void negs_border_canvas(const negs_border_settings_t *border, uint32_t width, uint32_t height, uint32_t out[2]);
+/* Instagram's 3:4 canvas around a bordered width x height canvas. */
+void negs_border_instagram(const negs_border_settings_t *border, uint32_t width, uint32_t height, uint32_t out[2]);
+void negs_border_document(const negs_border_settings_t *border, uint32_t width, uint32_t height, uint32_t out[2]);
+/* `spektrafilm process` arguments, each followed by a NUL. */
+negs_buf_t negs_border_arguments(const negs_border_settings_t *border);
+/* A double as Rust's `{}` writes it. */
+negs_buf_t negs_rust_display_f64(double v);
+
+/* Exact fit (core/src/rules/fit; windows/src/exact_fit.rs): Lanczos-3 in
+ * linear light, as Pillow's. Pixels are the caller's. */
+
+void negs_fit_target(double w, double h, double z, uint32_t out[2]);
+uint8_t negs_fit_worth_it(double z, uint32_t texture_w, uint32_t texture_h, uint32_t target_w, uint32_t target_h);
+/* Fills `output` starts and counts and the weights when weights_cap holds
+ * them all (any NULL: fills nothing); returns how many weights there are. */
+size_t negs_fit_coefficients(uint32_t input, uint32_t output, uint32_t *starts, uint32_t *counts, float *weights,
+                             size_t weights_cap);
+/* sRGB RGBA w x h into out (tw x th x 4 bytes, opaque), on up to 16
+ * threads for the call. 0 when a size is 0 or a buffer too small. */
+uint8_t negs_fit_resample(const uint8_t *rgba, size_t rgba_len, uint32_t w, uint32_t h, uint32_t tw, uint32_t th,
+                          uint8_t *out, size_t out_len);
+
+/* Thumbnail compose (core/src/rules/compose; windows/src/thumb_compose.rs):
+ * the rules around the engine's crop and border, which the host calls. */
+
+/* The size a preview is reduced to before a crop_w x crop_h (fractions)
+ * crop is cut for a long_side thumbnail; 0 when it's small enough. */
+uint8_t negs_compose_reduced_size(uint32_t width, uint32_t height, double crop_w, double crop_h, uint32_t long_side,
+                                  uint32_t out[2]);
+/* RGBA with Rec. 2020 primaries to sRGB's, in place; m is row-major. */
+void negs_compose_to_srgb(uint8_t *rgba, size_t len, const float m[9]);
+
+/* Histogram (core/src/rules/histogram; windows/src/histogram.rs). */
+
+typedef struct negs_histogram_t {
+    uint32_t red[256];
+    uint32_t green[256];
+    uint32_t blue[256];
+} negs_histogram_t;
+
+uint32_t negs_histogram_peak(const negs_histogram_t *h);
+/* The waveform's width for a width x height preview; 0 when there is
+ * nothing to count. */
+size_t negs_scopes_wave_width(size_t width, size_t height, const negs_crop_settings_t *crop, negs_orientation_t o,
+                              size_t max_samples);
+/* Counts the crop of an RGBA preview into *h and the waveform's bins
+ * (wave_len = wave width x 256 each, row-major, level 0 first); returns the
+ * samples, 0 when there is nothing to count or wave_len doesn't match. */
+size_t negs_scopes_count(const uint8_t *rgba, size_t rgba_len, size_t width, size_t height,
+                         const negs_crop_settings_t *crop, negs_orientation_t o, size_t max_samples, negs_histogram_t *h,
+                         uint32_t *red, uint32_t *green, uint32_t *blue, size_t wave_len);
+/* The waveform drawn: width x 256 premultiplied RGBA pixels, level 255 on
+ * top. 0 when a buffer is short. */
+uint8_t negs_waveform_raster(size_t width, const uint32_t *red, const uint32_t *green, const uint32_t *blue, size_t len,
+                             uint8_t *out, size_t out_pixels);
+
+/* Negative (core/src/rules/negative; windows/src/negative.rs). The edit
+ * state's fields come in as plain values. */
+
+#define NEGS_NEGATIVE_ROUTE 0u
+#define NEGS_NEGATIVE_SCENE_ROUTE 1u
+#define NEGS_NEGATIVE_ROUTE_PATH 2u
+#define NEGS_NEGATIVE_DEFAULT_FILM 3u
+#define NEGS_NEGATIVE_STOCK_ID 4u
+#define NEGS_NEGATIVE_NAME 5u
+#define NEGS_NEGATIVE_TILE_TEXT 6u
+#define NEGS_NEGATIVE_SCAN_ILLUMINANT 7u
+#define NEGS_NEGATIVE_FLAT_FIELD 8u
+#define NEGS_NEGATIVE_FLAT_FIELD_HELP 9u
+
+#define NEGS_NEGATIVE_OWN_PATHS 0u
+#define NEGS_NEGATIVE_FOUND_PATHS 1u
+#define NEGS_NEGATIVE_PRESET_KEEPS 2u
+#define NEGS_NEGATIVE_SCAN_READING 3u
+
+#define NEGS_PICK_BASE 0u
+#define NEGS_PICK_NEUTRAL 1u
+
+/* What a camera recorded of a scan's light: shutter (s), aperture, ISO. */
+typedef struct negs_scan_light_t {
+    double value[3];
+    uint8_t has[3];
+    uint8_t reserved[5];
+} negs_scan_light_t;
+
+/* Static strings; NULL for an unknown name or past a list's end. */
+const char *negs_negative_text(uint32_t which);
+const char *negs_negative_path(uint32_t list, size_t index);
+/* 0 when the two share nothing recorded. */
+uint8_t negs_negative_scan_stops(negs_scan_light_t frame, negs_scan_light_t reference, double *out);
+double negs_negative_exposure_ev(double roll, uint8_t has_stops, double stops);
+negs_buf_t negs_negative_skipped(uint64_t count);
+uint8_t negs_negative_is_route(const uint8_t *route, size_t len);
+uint8_t negs_negative_readable(uint8_t paper, uint8_t positive, uint8_t bw);
+uint8_t negs_negative_is_found(const uint8_t *path, size_t len);
+/* The crop to the picture the rebate finder found (NaN for a missing
+ * corner); 0 unless it lies in the photograph. */
+uint8_t negs_negative_picture_crop(double x0, double y0, double x1, double y1, double angle, negs_crop_settings_t *out);
+negs_buf_t negs_flat_field_value(const uint8_t *path, size_t len);
+/* used: -1 not said yet, 0 not used, 1 used. 0 when there's no hint. */
+uint8_t negs_flat_field_hint(const uint8_t *path, size_t len, int32_t used, uint8_t has_reason, const uint8_t *reason,
+                             size_t reason_len, negs_buf_t *out);
+const char *negs_negative_not_negative(uint8_t raw);
+/* The edge as shown (static); NULL for a word that isn't an edge. */
+const char *negs_negative_shown_edge(negs_orientation_t o, const uint8_t *edge, size_t len);
+uint8_t negs_base_status_guessed(uint8_t found, uint8_t picked, uint8_t by_hand, uint8_t from_roll);
+negs_buf_t negs_base_status_sentence(uint8_t found, uint8_t picked, uint8_t by_hand, uint8_t from_roll, uint8_t has_edge,
+                                     const uint8_t *edge, size_t edge_len, negs_orientation_t o);
+const char *negs_pick_prompt(uint32_t pick);
+uint8_t negs_negative_same_number(double p, double q);
 
 
 

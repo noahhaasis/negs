@@ -15,7 +15,7 @@ publish = false
 # Count the core's allocations, so tests can check nothing leaks.
 track = ["negs-core-sys/track", "negs-library/track"]
 # PhotoFacts::read, which asks the engine for the file's EXIF (Phase 3c).
-io = ["dep:spektrafilm-io"]
+io = []
 
 [dependencies]
 negs-core-sys = { path = "../sys" }
@@ -25,11 +25,13 @@ negs-library = { package = "negs-core-library", path = "../library" }
 # model_compare's filtered resize and overlay (the host's half of
 # over_frame), as windows/ has it.
 image = { version = "0.25", default-features = false }
+# Phase 3b: the picture rules keep windows/src's types, serde included
+# (sidecars and sessions), and the engine's (BorderStyle, FilmFormat, Crop).
 # Phase 3c: tone_graph's helper replies; photo_facts' EXIF (feature io).
+serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = false, optional = true }
+spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = false }
 
-# The engine's rawler, as the workspace and windows/ patch it (the io
-# feature's spektrafilm-io).
+# The engine's rawler, as the workspace and windows/ patch it.
 [patch.crates-io]
 rawler = { path = "../../../vendor/rawler" }

@@ -761,6 +761,7 @@ name = "negs-core-diff"
 version = "0.0.0"
 dependencies = [
  "image",
+ "negs-core-diff-picture",
  "negs-core-library",
  "negs-core-marks",
  "negs-core-rules",
@@ -769,6 +770,19 @@ dependencies = [
  "negs-marks",
  "negs-media-oracle",
  "serde_json",
+ "spektrafilm-io",
+ "spektrafilm-math",
+]
+
+[[package]]
+name = "negs-core-diff-picture"
+version = "0.0.0"
+dependencies = [
+ "image",
+ "serde",
+ "serde_json",
+ "spektrafilm-io",
+ "spektrafilm-math",
 ]
 
 [[package]]
@@ -793,6 +807,7 @@ dependencies = [
  "image",
  "negs-core-library",
  "negs-core-sys",
+ "serde",
  "serde_json",
  "spektrafilm-io",
 ]

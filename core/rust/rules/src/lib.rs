@@ -11,6 +11,12 @@ pub mod model_compare;
 
 
 // Phase 3b: crop, border, exact_fit, thumb_compose, histogram, negative.
+pub mod border;
+pub mod crop;
+pub mod exact_fit;
+pub mod histogram;
+pub mod negative;
+pub mod thumb_compose;
 
 
 

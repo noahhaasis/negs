@@ -4,10 +4,15 @@
 //! Either from the helper's thumbnail (cropped already), or from the open
 //! photograph's settled preview as it's left, so filing its thumbnail
 //! costs no develop.
+//!
+//! The two rules of its own, the reduced size and the Rec. 2020 to sRGB
+//! conversion, are the shared core's (negs_core_rules::thumb_compose);
+//! the rest is the engine's crop and border and `image`'s resizing.
 
 use std::path::PathBuf;
 
 use image::{RgbaImage, imageops};
+use negs_core_rules::thumb_compose as rules;
 use spektrafilm_io::border::{BorderOptions, Rgb, add_border, extend_for_instagram};
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, to_f32};
@@ -62,41 +67,18 @@ pub fn finish(image: RgbaImage, finish: &Finish) -> RgbaImage {
 /// turned and bordered. None for an empty preview.
 pub fn from_preview(pixels: &[u8], width: u32, height: u32, wide: bool, crop: &CropSettings, finish_with: &Finish, long_side: u32) -> Option<RgbaImage> {
     let image = RgbaImage::from_raw(width, height, pixels.get(..width as usize * height as usize * 4)?.to_vec())?;
-    let share = crop.rect.width.max(crop.rect.height).clamp(0.05, 1.0);
-    let wanted = (2.0 * long_side as f64 / share).ceil() as u32;
-    let longest = width.max(height);
-    let mut image = if longest > wanted {
-        let scale = wanted as f64 / longest as f64;
-        imageops::resize(&image, ((width as f64 * scale).round() as u32).max(1), ((height as f64 * scale).round() as u32).max(1), imageops::FilterType::Triangle)
-    } else {
-        image
+    // The size is the core's rule (negs_core_rules::thumb_compose), the
+    // resizing `image`'s.
+    let mut image = match rules::reduced_size(width, height, (crop.rect.width, crop.rect.height), long_side) {
+        Some((w, h)) => imageops::resize(&image, w, h, imageops::FilterType::Triangle),
+        None => image,
     };
     if wide {
-        to_srgb(&mut image);
+        // Rec. 2020 primaries to sRGB's, both on sRGB's curve, clipped.
+        rules::to_srgb(&mut image, &crate::gpu::REC2020_TO_SRGB);
     }
     let cropped = if crop.cropped() { rgba(&crop.engine().apply(&buffer(&image))) } else { image };
     Some(finish(cropped, finish_with))
-}
-
-/// Rec. 2020 primaries to sRGB's, both on sRGB's curve, clipped.
-fn to_srgb(image: &mut RgbaImage) {
-    let decode: Vec<f32> = (0..256).map(|i| srgb_decode(i as f32 / 255.0)).collect();
-    let m = crate::gpu::REC2020_TO_SRGB;
-    for p in image.pixels_mut() {
-        let c = [decode[p[0] as usize], decode[p[1] as usize], decode[p[2] as usize]];
-        for i in 0..3 {
-            let linear = (m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2]).clamp(0.0, 1.0);
-            p[i] = (srgb_encode(linear) * 255.0).round() as u8;
-        }
-    }
-}
-
-fn srgb_decode(v: f32) -> f32 {
-    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-}
-
-fn srgb_encode(v: f32) -> f32 {
-    if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
 }
 
 fn buffer(image: &RgbaImage) -> ImageBuf {

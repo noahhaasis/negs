@@ -24,12 +24,23 @@ negs-marks = { path = "../../windows/marks" }
 negs-core-marks = { path = "../rust/marks" }
 negs-core-sys = { path = "../rust/sys" }
 negs-core-rules = { path = "../rust/rules" }
-# The image crate the model/compare oracle resizes with, as windows/ has it.
-image = { version = "0.25", default-features = false }
 # Phase 3c: the oracles of photo_facts, tone_graph and help (it also turns
 # on negs-core-rules' `io`, for PhotoFacts::read); the tone graph's JSON.
 negs-media-oracle = { path = "media-oracle" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+
+# Phase 3b: the picture rules' oracles (windows/src as it was) and the
+# engine functions the core's ported sizes are held to.
+negs-core-diff-picture = { path = "picture" }
+spektrafilm-io = { path = "../../crates/spektrafilm-io", default-features = false }
+spektrafilm-math = { path = "../../crates/spektrafilm-math" }
+# The image crate (model/compare's oracle resizes with it; the picture
+# oracles read PNGs), as windows/ has it.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# The engine's rawler, as windows/Cargo.toml patches it (vendor/README.md).
+[patch.crates-io]
+rawler = { path = "../../vendor/rawler" }
 
 # crates/negs-library's own suites, unchanged, run against the core.
 [[test]]
@@ -44,7 +55,3 @@ path = "../../crates/negs-library/tests/library.rs"
 name = "state"
 path = "../../crates/negs-library/tests/state.rs"
 
-# The engine's rawler, as the workspace and windows/ patch it (Phase 3c:
-# spektrafilm-io, for PhotoFacts::read).
-[patch.crates-io]
-rawler = { path = "../../vendor/rawler" }
