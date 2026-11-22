@@ -22,3 +22,8 @@ negs-core-sys = { path = "../sys" }
 # Phase 3c: tone_graph's helper replies; photo_facts' EXIF (feature io).
 serde_json = { version = "1", features = ["float_roundtrip"] }
 spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = false, optional = true }
+
+# The engine's rawler, as the workspace and windows/ patch it (the io
+# feature's spektrafilm-io).
+[patch.crates-io]
+rawler = { path = "../../../vendor/rawler" }

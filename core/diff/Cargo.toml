@@ -24,6 +24,10 @@ negs-marks = { path = "../../windows/marks" }
 negs-core-marks = { path = "../rust/marks" }
 negs-core-sys = { path = "../rust/sys" }
 negs-core-rules = { path = "../rust/rules" }
+# Phase 3c: the oracles of photo_facts, tone_graph and help (it also turns
+# on negs-core-rules' `io`, for PhotoFacts::read); the tone graph's JSON.
+negs-media-oracle = { path = "media-oracle" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 # crates/negs-library's own suites, unchanged, run against the core.
 [[test]]
@@ -37,3 +41,8 @@ path = "../../crates/negs-library/tests/library.rs"
 [[test]]
 name = "state"
 path = "../../crates/negs-library/tests/state.rs"
+
+# The engine's rawler, as the workspace and windows/ patch it (Phase 3c:
+# spektrafilm-io, for PhotoFacts::read).
+[patch.crates-io]
+rawler = { path = "../../vendor/rawler" }
