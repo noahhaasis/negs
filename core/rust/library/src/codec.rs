@@ -10,6 +10,72 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// A value as the core reads it: compact JSON, keys in order, and numbers
+/// in Rust's shortest form that reads back as the same `f64` (`Display`),
+/// not the Swift-style description sidecars need, which costs most of the
+/// time a call spends in Rust.
+pub fn wire(v: &Json) -> String {
+    let mut out = String::with_capacity(256);
+    write_wire(v, &mut out);
+    out
+}
+
+fn write_wire(v: &Json, out: &mut String) {
+    use std::fmt::Write;
+    match v {
+        Json::Null => out.push_str("null"),
+        Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Json::Number(n) if n.is_finite() => {
+            let _ = write!(out, "{n}");
+        }
+        Json::Number(_) => out.push_str(&v.to_compact_sorted()),
+        Json::String(s) => write_wire_string(s, out),
+        Json::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_wire(item, out);
+            }
+            out.push(']');
+        }
+        Json::Object(fields) => {
+            out.push('{');
+            for (index, (key, value)) in fields.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_wire_string(key, out);
+                out.push(':');
+                write_wire(value, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+fn write_wire_string(s: &str, out: &mut String) {
+    use std::fmt::Write;
+    out.push('"');
+    let mut plain = 0;
+    for (i, c) in s.char_indices() {
+        if c == '"' || c == '\\' || (c as u32) < 0x20 {
+            out.push_str(&s[plain..i]);
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                c => {
+                    let _ = write!(out, "\\u{:04x}", c as u32);
+                }
+            }
+            plain = i + c.len_utf8();
+        }
+    }
+    out.push_str(&s[plain..]);
+    out.push('"');
+}
+
 pub fn parse(bytes: &[u8]) -> Json {
     Json::parse(bytes).unwrap_or_else(|e| panic!("the core sent JSON its reader refuses ({e:?}): {}", String::from_utf8_lossy(bytes)))
 }

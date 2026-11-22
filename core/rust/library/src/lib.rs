@@ -85,12 +85,12 @@ pub mod thumbnail {
     }
 
     pub fn look(edits: &Json, defaults_version: i64) -> String {
-        let json = edits.to_compact_sorted();
+        let json = codec::wire(&edits);
         text(unsafe { sys::negs_thumbnail_look(json.as_ptr(), json.len(), defaults_version) })
     }
 
     pub fn unedited_look(state: &EditState) -> String {
-        let json = codec::state(state).to_compact_sorted();
+        let json = codec::wire(&codec::state(state));
         text(unsafe { sys::negs_thumbnail_unedited_look(json.as_ptr(), json.len()) })
     }
 
@@ -171,6 +171,12 @@ pub(crate) fn watch_for_leaks() {}
 /// The core's own JSON, for the fixture gate and differential tests.
 pub mod core_json {
     use negs_core_sys::{library as sys, negs_buf_t, take_buf};
+
+    /// A value as the wrapper sends it to the core (for the tests that check
+    /// the core reads every number back as the same bits).
+    pub fn wire(v: &super::Json) -> String {
+        super::codec::wire(v)
+    }
 
     fn call(f: unsafe extern "C" fn(*const u8, usize, *mut negs_buf_t) -> u8, bytes: &[u8]) -> Result<Vec<u8>, String> {
         let mut out = negs_buf_t { data: std::ptr::null_mut(), len: 0 };

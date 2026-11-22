@@ -107,3 +107,41 @@ fn a_library_frees_everything() {
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// What the wrapper sends reads back in the core as the same values: every
+/// number the same bits (the core writes it again Swift's way, which tells
+/// any two doubles apart), every string the same text.
+#[test]
+fn the_wire_format_reads_back_exactly() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let mut seed = 0x5eed_u64;
+    let mut next = || {
+        seed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = seed;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    let mut numbers = vec![0.0, -0.0, 1.0, -1.0, 0.1, 0.2 + 0.1, 1e21, 1e22, 1e-7, 5e-324, -5e-324, f64::MAX, f64::MIN, f64::MIN_POSITIVE, 2f64.powi(53) + 2.0, 123456.789, 9007199254740993.0];
+    while numbers.len() < 20_000 {
+        let bits = next();
+        let v = match numbers.len() % 4 {
+            0 => f64::from_bits(bits),
+            1 => (bits >> 11) as f64 / (1u64 << 53) as f64 * 200.0 - 100.0,
+            2 => ((bits % 2001) as f64 - 1000.0) / 10.0,
+            _ => f64::from_bits(bits) * 1e-300,
+        };
+        if v.is_finite() {
+            numbers.push(v);
+        }
+    }
+    for chunk in numbers.chunks(500) {
+        let value = Json::Array(chunk.iter().map(|&n| Json::Number(n)).collect());
+        let wire = core_json::wire(&value);
+        assert_eq!(core_json::compact_sorted(wire.as_bytes()).unwrap(), value.to_compact_sorted());
+    }
+    let texts = ["", "plain", "quote \" and \\ backslash", "a/b", "tab\tnew\nline\r\u{8}\u{c}\u{1}\u{1f}", "Ωmega 東京 😀", "\u{7f}\u{80}\u{2028}"];
+    let value = Json::Object(texts.iter().enumerate().map(|(i, t)| (t.to_string(), Json::Array(vec![Json::String(t.to_string()), Json::Number(i as f64), Json::Bool(i % 2 == 0), Json::Null]))).collect());
+    let wire = core_json::wire(&value);
+    assert_eq!(core_json::compact_sorted(wire.as_bytes()).unwrap(), value.to_compact_sorted());
+}
