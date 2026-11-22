@@ -511,6 +511,10 @@ void negs_previews_free(negs_previews_t *previews);
 /* The `length` bytes at `offset` in the file into *out (empty for 0); 0
  * when they aren't all there or can't be read. */
 uint8_t negs_embedded_bytes(const uint8_t *path, size_t path_len, uint64_t offset, uint64_t length, negs_buf_t *out);
+/* The same into the caller's memory, so a host that owns the bytes copies
+ * nothing: with dst NULL, whether the file has those bytes (1) or not (0);
+ * else reads them into dst, which holds `length` bytes. */
+uint8_t negs_embedded_read(const uint8_t *path, size_t path_len, uint64_t offset, uint64_t length, uint8_t *dst);
 /* Previews::largest (by pixels, then length; the last of equals),
  * ::for_size (the smallest of the largest's shape at least `pixels` on its
  * long side, else the largest) and ::ratio (width / height upright): 0

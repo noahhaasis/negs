@@ -93,11 +93,17 @@ pub fn find(path: &Path) -> Option<Previews> {
 
 /// The bytes of `jpeg` in `path`.
 pub fn bytes(path: &Path, jpeg: &Jpeg) -> Option<Vec<u8>> {
+    // Asked first, so a length past the file allocates nothing; then read
+    // straight into the Vec (negs_embedded_bytes would copy it once more).
     let p = path_bytes(path);
-    let mut out = negs_core_sys::negs_buf_t { data: std::ptr::null_mut(), len: 0 };
-    let ok = unsafe { sys::negs_embedded_bytes(p.as_ptr(), p.len(), jpeg.offset, jpeg.length, &mut out) } != 0;
-    let bytes = negs_core_sys::take_buf(out);
-    ok.then_some(bytes)
+    if unsafe { sys::negs_embedded_read(p.as_ptr(), p.len(), jpeg.offset, jpeg.length, std::ptr::null_mut()) } == 0 {
+        return None;
+    }
+    let mut buffer = vec![0; jpeg.length as usize];
+    if buffer.is_empty() {
+        return Some(buffer);
+    }
+    (unsafe { sys::negs_embedded_read(p.as_ptr(), p.len(), jpeg.offset, jpeg.length, buffer.as_mut_ptr()) } != 0).then_some(buffer)
 }
 
 /// A header in memory: what `find` reads from a file. `None` when it isn't

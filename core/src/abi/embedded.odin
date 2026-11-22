@@ -91,8 +91,22 @@ embedded_bytes :: proc "c" (path: [^]u8, path_len: uint, offset, length: u64, ou
 	return 1
 }
 
+// The same into the caller's memory: with dst NULL, whether the file has
+// those bytes; else reads them into dst (`length` bytes).
+@(export, link_name = "negs_embedded_read")
+embedded_read :: proc "c" (path: [^]u8, path_len: uint, offset, length: u64, dst: [^]u8) -> u8 {
+	context = core_context()
+	if dst == nil {
+		return u8(embedded.read_file_into(host_string(path, path_len), offset, length, nil, false))
+	}
+	if length > u64(max(int)) {
+		return 0
+	}
+	return u8(embedded.read_file_into(host_string(path, path_len), offset, length, dst[:int(length)], true))
+}
+
 @(private = "file")
-jpegs_of :: proc "contextless" (jpegs: [^]embedded.Jpeg, count: uint) -> []embedded.Jpeg {
+jpegs_of ::proc "contextless" (jpegs: [^]embedded.Jpeg, count: uint) -> []embedded.Jpeg {
 	return jpegs[:count] if jpegs != nil else nil
 }
 

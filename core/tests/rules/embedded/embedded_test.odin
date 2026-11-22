@@ -142,6 +142,15 @@ reads_files_a_piece_at_a_time :: proc(t: ^testing.T) {
 	testing.expect(t, read && len(bytes) == 200 && bytes[0] == 0xff && bytes[9] == 0xc0)
 	_, past := embedded.read_file(path, u64(len(file)) - 10, 11)
 	testing.expect(t, !past)
+	// Into the host's memory: asked, then filled.
+	j := p.jpegs[1]
+	testing.expect(t, embedded.read_file_into(path, j.offset, j.length, nil, false))
+	testing.expect(t, !embedded.read_file_into(path, u64(len(file)) - 10, 11, nil, false))
+	testing.expect(t, !embedded.read_file_into(path, max(u64), 2, nil, false))
+	into: [200]u8
+	testing.expect(t, embedded.read_file_into(path, j.offset, j.length, into[:], true))
+	testing.expect(t, into[0] == 0xff && into[9] == 0xc0)
+	testing.expect(t, !embedded.read_file_into(path, j.offset, j.length, into[:199], true))
 	_, missing := embedded.find("no such file.nef")
 	testing.expect(t, !missing)
 }

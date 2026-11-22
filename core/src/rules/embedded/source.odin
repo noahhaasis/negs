@@ -50,3 +50,23 @@ read_file :: proc(path: string, offset, length: u64, allocator := context.alloca
 	}
 	return out, true
 }
+
+// The same into the host's memory: whether the file has `length` bytes at
+// `offset`, and with `fill`, reads them into `dst` (`length` long). A host
+// that owns the bytes asks first, allocates, then fills, so nothing is
+// copied (the Rust wrapper: one Vec, as the original's read).
+read_file_into :: proc(path: string, offset, length: u64, dst: []u8, fill: bool) -> bool {
+	f, size, ok := file_open(path)
+	if !ok {
+		return false
+	}
+	defer file_close(f)
+	end := offset + length
+	if end < offset || end > size {
+		return false
+	}
+	if !fill {
+		return true
+	}
+	return u64(len(dst)) == length && file_read_exact(f, offset, dst)
+}

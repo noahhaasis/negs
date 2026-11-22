@@ -178,6 +178,7 @@ unsafe extern "C" {
     pub fn negs_embedded_find(path: *const u8, path_len: usize, out: *mut negs_previews_t) -> u8;
     pub fn negs_previews_free(previews: *mut negs_previews_t);
     pub fn negs_embedded_bytes(path: *const u8, path_len: usize, offset: u64, length: u64, out: *mut negs_buf_t) -> u8;
+    pub fn negs_embedded_read(path: *const u8, path_len: usize, offset: u64, length: u64, dst: *mut u8) -> u8;
     pub fn negs_previews_largest(jpegs: *const negs_jpeg_t, count: usize, out: *mut negs_jpeg_t) -> u8;
     pub fn negs_previews_for_size(jpegs: *const negs_jpeg_t, count: usize, pixels: u32, out: *mut negs_jpeg_t) -> u8;
     pub fn negs_previews_ratio(jpegs: *const negs_jpeg_t, count: usize, orientation: u16, has_orientation: u8, out: *mut f64) -> u8;
