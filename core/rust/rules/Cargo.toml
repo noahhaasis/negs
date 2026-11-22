@@ -14,6 +14,11 @@ publish = false
 [features]
 # Count the core's allocations, so tests can check nothing leaks.
 track = ["negs-core-sys/track"]
+# PhotoFacts::read, which asks the engine for the file's EXIF (Phase 3c).
+io = ["dep:spektrafilm-io"]
 
 [dependencies]
 negs-core-sys = { path = "../sys" }
+# Phase 3c: tone_graph's helper replies; photo_facts' EXIF (feature io).
+serde_json = { version = "1", features = ["float_roundtrip"] }
+spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = false, optional = true }
