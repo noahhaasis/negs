@@ -36,10 +36,14 @@ clamp_size :: proc "contextless" (size: f64) -> f64 {
 // sheet `width` wide at rows about `target` high: a frame per ratio into
 // `frames`, the rows into `rows` (both as long as `ratios`). Returns the
 // rows used and the whole grid's height, padding included.
-layout :: proc "contextless" (ratios: []f64, width, chosen: f64, frames: []Rect, rows: []Row) -> (row_count: int, height: f64) {
+//
+// Unchecked indexing (bounds checks made it slower than the Rust): every
+// index is below `n`, which no slice is shorter than, and a row holds at
+// least one frame, so there are never more rows than frames.
+layout :: proc "contextless" (ratios: []f64, width, chosen: f64, frames: []Rect, rows: []Row) -> (row_count: int, height: f64) #no_bounds_check {
 	usable := max(width - 2.0 * GRID_SIDE, 1.0)
 	target := max(chosen, 1.0)
-	n := len(ratios)
+	n := min(len(ratios), len(frames), len(rows))
 	y := f64(GRID_TOP)
 	start := 0
 	for start < n {

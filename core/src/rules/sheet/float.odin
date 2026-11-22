@@ -6,7 +6,6 @@
 package sheet
 
 import "core:c/libc"
-import "core:math"
 
 // Rust's f64::clamp: NaN stays NaN; an end equal to the value keeps the value.
 clampf :: #force_inline proc "contextless" (x, lo, hi: f64) -> f64 {
@@ -20,9 +19,10 @@ clampf :: #force_inline proc "contextless" (x, lo, hi: f64) -> f64 {
 	return x
 }
 
-// Rust's f64::round: half away from zero.
+// Rust's f64::round: half away from zero, as C's round (core:math's is
+// the same but, in its own module, isn't inlined: libm's is quicker).
 roundf :: #force_inline proc "contextless" (x: f64) -> f64 {
-	return math.round(x)
+	return f64(libc.round(libc.double(x)))
 }
 
 lnf :: #force_inline proc "contextless" (x: f64) -> f64 {
