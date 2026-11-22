@@ -11,8 +11,8 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
 | 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
-| 3 | Pure Domain Rules & Media Helpers | done (Mac + Windows), awaiting Noah | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs and 0 leaks on Mac and PC, ASan clean; Windows app on the core; screenshots identical; startup within noise |
-| 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
+| 3 | Pure Domain Rules & Media Helpers | done (Mac + Windows); **Go** for Phase 4 from Noah 2026-11-22 | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs and 0 leaks on Mac and PC, ASan clean; Windows app on the core; screenshots identical; startup within noise |
+| 4 | State, Presets & Data-Driven Inspector | in progress | Wave 1: `core-p4-base` (serde-faithful value, `EditState`, ABI 5, oracles) and `core-p4i-inspector` (Inspector ViewModel extracted in Rust); wave 2: 4a state rules + edits + ViewModel, 4b presets + session, 4c batch + caches |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
 | 7 | Performance, Memory & Compile-Time Evaluation + Optimization | not started | Odin vs. Rust comparison report + optimization pass |
@@ -42,6 +42,42 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-22: Go for Phase 4; plan
+
+Noah: Go for Phase 4.
+
+**What Phase 4 needs first.** The Phase 4 modules are built on
+`serde_json::Value` (`float_roundtrip`, BTreeMap order), and bytes matter:
+`match_cache::key` and `rendered_preview::key` hash or compare
+`serde_json::to_string` output and `format!("{}", f64)` text, and the
+settings files are serde's compact or pretty output. The core's JSON
+(`library.Json`) is the Mac's `JSONValue` (doubles, Foundation's encoder)
+and stays as it is. So the core gets a second, serde-faithful value type
+(u64/i64/f64 numbers, ryu formatting, serde's escaping and accept/reject),
+differential-tested against serde_json byte for byte.
+
+**The Inspector ViewModel has no Rust original.** Its logic is spread over
+`ui/inspector.rs` (4.2k lines, Win32) and `edits.rs` (which takes
+`&Model`). So it is first extracted in Rust: a platform-free builder from a
+plain facts struct (the `Model` helpers it needs, copied), plus command
+dispatch, with `ui/inspector.rs` drawing from it and PC screenshots
+identical to main. That builder then becomes the frozen oracle for the
+Odin port.
+
+**Waves.**
+- **Wave 1, in parallel:**
+  - `core-p4-base` (Mac): `core/src/value`, `EditState`/`Roll`/`BrightnessMatch` and its serde in `core/src/state`, ABI 5 with per-slice header/layout/sys/wrapper sections, frozen oracles for `state`/`json`/`session`/`presets`/`batch`/`match_cache`/`rendered_preview`, and the JSON round-trip cost measured.
+  - `core-p4i-inspector`: owns the PC for its tests and screenshots.
+- **Wave 2, in parallel after both merge:**
+  - 4a: the rest of `state.rs`, `edits`, and the ViewModel in Odin;
+  - 4b: `presets` + `session`;
+  - 4c: `batch` + `match_cache` + `rendered_preview`.
+- **Then the PC gate.**
+
+**Moved out of Phase 4:**
+- `film_cache_release` goes to Phase 5. It is a request through `EngineClient` plus Win32 memory notifications; nothing pure is left to port.
+- `brightness` stays as is: WIC decoding plus the engine's `spektrafilm_io::brightness`, so there is no app logic to port.
 
 ### 2026-11-22: Phase 3 Windows gate (main `1503525`)
 
