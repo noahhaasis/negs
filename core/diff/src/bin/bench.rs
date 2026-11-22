@@ -202,6 +202,14 @@ fn fit() {
         black_box(exact_fit::resample(&rgba, w, h, tw, th));
     });
     println!("exact_fit_6000x4000_to_{tw}x{th}: {ms:.2} ms");
+    // The core's (Phase 3b): the same pixels (core/diff/tests/exact_fit.rs).
+    let ms = median_ms(RUNS, || {
+        black_box(negs_core_rules::exact_fit::resample(&rgba, w, h, tw, th));
+    });
+    println!("core_exact_fit_6000x4000_to_{tw}x{th}: {ms:.2} ms");
+    counted("core_exact_fit", || {
+        black_box(negs_core_rules::exact_fit::resample(&rgba, w, h, tw, th));
+    });
 }
 
 fn embedded(folder: &Path) {

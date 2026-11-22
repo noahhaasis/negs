@@ -6,7 +6,6 @@
 package fit
 
 import "core:c/libc"
-import "core:os"
 import "core:thread"
 import "../crop"
 
@@ -160,25 +159,35 @@ Job :: struct {
 	rows:    int,
 }
 
-// Across: `rows` rows of `tw` linear pixels.
+// Across: `rows` rows of `tw` linear pixels. The indices are in range by
+// construction (`resample` checks the buffers, `coefficients` keeps each
+// pixel's taps inside the row), so the loops go unchecked; each sum adds
+// in the Rust's order, so the floats are the same.
 @(private = "file")
 run_across :: proc(job: ^Job) {
-	tw := job.tw
-	for y in job.first ..< job.first + job.rows {
-		source := job.rgba[y * job.w * 4:(y + 1) * job.w * 4]
-		row := job.middle[y * tw * 3:(y + 1) * tw * 3]
-		for t, x in job.across.taps {
-			weights := job.across.weights[t.first:t.first + t.count]
-			sum: [3]f32
-			for weight, k in weights {
+	tw, w := job.tw, job.w
+	lut := job.lut
+	taps := raw_data(job.across.taps)
+	weights := raw_data(job.across.weights)
+	rgba := raw_data(job.rgba)
+	middle := raw_data(job.middle)
+	#no_bounds_check for y in job.first ..< job.first + job.rows {
+		source := rgba[y * w * 4:]
+		row := middle[y * tw * 3:]
+		for x in 0 ..< tw {
+			t := taps[x]
+			ws := weights[t.first:]
+			s0, s1, s2: f32
+			for k in 0 ..< int(t.count) {
+				weight := ws[k]
 				p := (int(t.start) + k) * 4
-				for c in 0 ..< 3 {
-					sum[c] += weight * job.lut[source[p + c]]
-				}
+				s0 += weight * lut[source[p]]
+				s1 += weight * lut[source[p + 1]]
+				s2 += weight * lut[source[p + 2]]
 			}
-			row[x * 3] = sum[0]
-			row[x * 3 + 1] = sum[1]
-			row[x * 3 + 2] = sum[2]
+			row[x * 3] = s0
+			row[x * 3 + 1] = s1
+			row[x * 3 + 2] = s2
 		}
 	}
 }
@@ -187,29 +196,29 @@ run_across :: proc(job: ^Job) {
 @(private = "file")
 run_down :: proc(job: ^Job) {
 	tw := job.tw
-	for y in job.first ..< job.first + job.rows {
-		t := job.down.taps[y]
-		weights := job.down.weights[t.first:t.first + t.count]
-		row := job.out[y * tw * 4:(y + 1) * tw * 4]
+	taps := raw_data(job.down.taps)
+	weights := raw_data(job.down.weights)
+	middle := raw_data(job.middle)
+	out := raw_data(job.out)
+	#no_bounds_check for y in job.first ..< job.first + job.rows {
+		t := taps[y]
+		ws := weights[t.first:]
+		row := out[y * tw * 4:]
 		for x in 0 ..< tw {
-			sum: [3]f32
-			for weight, k in weights {
+			s0, s1, s2: f32
+			for k in 0 ..< int(t.count) {
+				weight := ws[k]
 				p := ((int(t.start) + k) * tw + x) * 3
-				for c in 0 ..< 3 {
-					sum[c] += weight * job.middle[p + c]
-				}
+				s0 += weight * middle[p]
+				s1 += weight * middle[p + 1]
+				s2 += weight * middle[p + 2]
 			}
-			for c in 0 ..< 3 {
-				row[x * 4 + c] = crop.sat_u8(f64(libc.roundf(encode(sum[c]) * 255.0)))
-			}
+			row[x * 4] = crop.sat_u8(f64(libc.roundf(encode(s0) * 255.0)))
+			row[x * 4 + 1] = crop.sat_u8(f64(libc.roundf(encode(s1) * 255.0)))
+			row[x * 4 + 2] = crop.sat_u8(f64(libc.roundf(encode(s2) * 255.0)))
 			row[x * 4 + 3] = 255
 		}
 	}
-}
-
-@(private = "file")
-threads :: proc() -> int {
-	return clamp(os.get_processor_core_count(), 1, 16)
 }
 
 // Runs `work` over `total` rows in up to `threads()` bands, as the Rust
