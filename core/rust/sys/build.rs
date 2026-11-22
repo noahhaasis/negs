@@ -19,6 +19,12 @@ fn main() {
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
     let windows = target_os == "windows";
+    if windows {
+        // The Windows library is the core's object alone (core/build.py):
+        // the CRT and kernel32 come with Rust's link; Odin's runtime also
+        // calls BCryptGenRandom.
+        println!("cargo:rustc-link-lib=bcrypt");
+    }
     if let Ok(dir) = std::env::var("NEGS_CORE_LIB_DIR") {
         println!("cargo:rustc-link-search=native={dir}");
         println!("cargo:rustc-link-lib=static=negs_core");
