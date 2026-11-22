@@ -144,15 +144,29 @@ fn grid(r: &mut Random, seed: u64, t: &mut Tally) {
     t.check("clamp_size", seed, b(oracle::clamp_size(size)), b(core::clamp_size(size)));
     let most = if r.chance(10) { 600 } else { 40 };
     let n = if r.chance(20) { 0 } else { r.index(most) };
-    let ratios: Vec<f64> = (0..n).map(|_| ratio(r)).collect();
-    let width = if r.chance(10) { r.edge() } else { r.whole(0.0, 4000.0) };
-    let chosen = if r.chance(10) { r.edge() } else { r.whole(80.0, 400.0) };
+    let mut ratios: Vec<f64> = (0..n).map(|_| ratio(r)).collect();
+    let mut width = if r.chance(10) { r.edge() } else { r.whole(0.0, 4000.0) };
+    let mut chosen = if r.chance(10) { r.edge() } else { r.whole(80.0, 400.0) };
+    if n > 0 && r.chance(6) {
+        // Rows that fit exactly at the chosen height: the ties.
+        let shape = [1.0, 1.5, 2.0, 0.5][r.index(4)];
+        ratios.iter_mut().for_each(|x| *x = shape);
+        chosen = [100.0, 120.0, 176.0, 200.0][r.index(4)];
+        let fit = r.index(8) as f64;
+        width = 2.0 * oracle::GRID_SIDE + (fit + 1.0) * shape * chosen + oracle::GRID_GAP * fit;
+    }
     let (o, c) = (oracle::SheetLayout::new(&ratios, width, chosen), core::SheetLayout::new(&ratios, width, chosen));
     let frames_o: Vec<[u64; 4]> = o.frames.iter().map(rect_o).collect();
     let frames_c: Vec<[u64; 4]> = c.frames.iter().map(rect_c).collect();
     let rows_o: Vec<(usize, usize, u64, u64)> = o.rows.iter().map(|w| (w.start, w.end, b(w.y), b(w.height))).collect();
     let rows_c: Vec<(usize, usize, u64, u64)> = c.rows.iter().map(|w| (w.start, w.end, b(w.y), b(w.height))).collect();
+    let same = (&frames_o, &rows_o) == (&frames_c, &rows_c);
     t.check("SheetLayout::new", seed, (frames_o, rows_o, b(o.width), b(o.height)), (frames_c, rows_c, b(c.width), b(c.height)));
+    if !same {
+        // Counted; asking the two different layouts about rows and frames
+        // by index would only panic.
+        return;
+    }
 
     let pick = |r: &mut Random| if n > 0 && !r.chance(8) { r.index(n) } else { r.index(n + 3) };
     for _ in 0..4 {
