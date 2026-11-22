@@ -28,6 +28,9 @@ serde = { version = "1", features = ["derive"] }
 # Exact float reading: the catalog's defaults must equal the sidecar tables' to the bit.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# The shared Odin core's rules, which crop.rs, border.rs and negative.rs
+# re-export (Phase 3b).
+negs-core-rules = { path = "../../core/rust/rules" }
 # state.rs's one Win32 call, stood in for.
 windows = { package = "negs-windows-stub", path = "windows-stub" }
 

@@ -146,9 +146,7 @@ impl Tally {
     }
 }
 
-/// Runs `f` and checks the core's allocations: none left behind, no bad
-/// frees (when the core counts them: `--features track`). Prints the tally.
-pub fn gate(name: &str, seed: u64, f: impl FnOnce(&mut Tally) -> usize) {
+fn gate_with(name: &str, seed: u64, shared: bool, f: impl FnOnce(&mut Tally) -> usize) {
     let before = negs_core_sys::alloc_stats();
     let mut t = Tally::default();
     let n = f(&mut t);
@@ -164,7 +162,24 @@ pub fn gate(name: &str, seed: u64, f: impl FnOnce(&mut Tally) -> usize) {
     );
     assert_eq!(t.differing, 0, "{name}: first differences:\n{}", t.first.join("\n"));
     if after.tracked == 1 {
-        assert_eq!(after.live_count, before.live_count, "{name}: the core leaked");
+        if shared {
+            println!("  (live counts include the other tests running beside it: not compared)");
+        } else {
+            assert_eq!(after.live_count, before.live_count, "{name}: the core leaked");
+        }
         assert_eq!(after.bad_frees, 0, "{name}: bad frees");
     }
+}
+
+/// Runs `f` and checks the core's allocations: none left behind, no bad
+/// frees (when the core counts them: `--features track`). Prints the tally.
+pub fn gate(name: &str, seed: u64, f: impl FnOnce(&mut Tally) -> usize) {
+    gate_with(name, seed, false, f)
+}
+
+/// `gate` for a test file with other tests in it, which run on other
+/// threads at the same time: the core's live count is the process's, so
+/// only differences and bad frees are checked.
+pub fn gate_shared(name: &str, seed: u64, f: impl FnOnce(&mut Tally) -> usize) {
+    gate_with(name, seed, true, f)
 }
