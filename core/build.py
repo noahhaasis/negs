@@ -310,9 +310,16 @@ def diff(args: argparse.Namespace) -> None:
         # The library's state and lockstep tests (default 3 seeds; CI and
         # the Phase 2 gate run 50).
         os.environ["NEGS_LIBRARY_SEEDS"] = str(args.seeds)
+    # With --asan, the host's triple named: RUSTFLAGS then reach only the
+    # tests, not proc macros (serde's derive) or build scripts, which rustc
+    # and cargo load or run without the ASan runtime first.
+    triple = []
+    if args.asan:
+        host = subprocess.run(["rustc", "-vV"], check=True, capture_output=True, text=True).stdout
+        triple = ["--target", next(line.split()[1] for line in host.splitlines() if line.startswith("host:"))]
     for crate in RUST_CRATES:
         cmd = ["cargo", "test", "--release", "--manifest-path", str(CORE / crate / "Cargo.toml"),
-               "--target-dir", str(target), "--features", "track"]
+               "--target-dir", str(target), "--features", "track", *triple]
         if args.test:
             cmd += ["--test", args.test]
         if crate != "diff" and args.test:
