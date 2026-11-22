@@ -13,7 +13,10 @@ publish = false
 
 [features]
 # Count the core's allocations, so tests can check nothing leaks.
-track = ["negs-core-sys/track"]
+track = ["negs-core-sys/track", "negs-library/track"]
 
 [dependencies]
 negs-core-sys = { path = "../sys" }
+# Phase 3a: the library's Filter and Item (sheet_rules, compare), from the
+# core's library under the name windows/ gives it.
+negs-library = { package = "negs-core-library", path = "../library" }

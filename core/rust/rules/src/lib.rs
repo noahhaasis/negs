@@ -2,6 +2,7 @@
 //! windows/src module, with the same public API.
 
 // Phase 3a: sheet_rules, tray_rules, compare.
+pub mod sheet_rules;
 
 
 
