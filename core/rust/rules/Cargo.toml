@@ -17,3 +17,13 @@ track = ["negs-core-sys/track"]
 
 [dependencies]
 negs-core-sys = { path = "../sys" }
+
+# Phase 3b: the picture rules keep windows/src's types, serde included
+# (sidecars and sessions), and the engine's (BorderStyle, FilmFormat, Crop).
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = false }
+
+# The engine's rawler, as windows/Cargo.toml patches it (vendor/README.md).
+[patch.crates-io]
+rawler = { path = "../../../vendor/rawler" }

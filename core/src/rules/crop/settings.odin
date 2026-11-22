@@ -32,17 +32,23 @@ ASPECT_TITLES := [Aspect]cstring {
 	.Custom       = "Custom",
 }
 
-// The film or print format with that shape (nil for none).
-ASPECT_FORMATS := [Aspect]cstring {
-	.Original     = nil,
-	.Freeform     = nil,
-	.Square       = "6×6",
-	.Sixteen_Nine = nil,
-	.Three_Two    = "35mm",
-	.Four_Three   = "645",
-	.Five_Four    = "4×5",
-	.Seven_Five   = "5×7",
-	.Custom       = nil,
+// The film or print format with that shape (nil for none). A procedure,
+// not a table: a table with nil entries is filled in by the runtime's
+// startup, which a static library's plain calls don't run.
+aspect_format :: proc "contextless" (a: Aspect) -> cstring {
+	#partial switch a {
+	case .Square:
+		return "6×6"
+	case .Three_Two:
+		return "35mm"
+	case .Four_Three:
+		return "645"
+	case .Five_Four:
+		return "4×5"
+	case .Seven_Five:
+		return "5×7"
+	}
+	return nil
 }
 
 // The long side over the short side, for a photograph shown at `photo`.

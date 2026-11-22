@@ -40,7 +40,7 @@ crop_max_angle :: proc "c" () -> f64 {return crop.MAX_ANGLE}
 crop_aspect_title :: proc "c" (aspect: u32) -> cstring {return crop.ASPECT_TITLES[aspect_of(aspect)]}
 
 @(export, link_name = "negs_crop_aspect_format")
-crop_aspect_format :: proc "c" (aspect: u32) -> cstring {return crop.ASPECT_FORMATS[aspect_of(aspect)]}
+crop_aspect_format :: proc "c" (aspect: u32) -> cstring {return crop.aspect_format(aspect_of(aspect))}
 
 @(export, link_name = "negs_crop_aspect_ratio")
 crop_aspect_ratio :: proc "c" (aspect: u32, photo: crop.Size, out: ^f64) -> u8 {
