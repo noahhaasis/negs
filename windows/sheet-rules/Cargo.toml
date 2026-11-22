@@ -16,4 +16,7 @@ path = "src/lib.rs"
 doctest = false
 
 [dependencies]
-negs-library = { path = "../../crates/negs-library" }
+# The rules now come from the shared Odin core, through negs-core-rules,
+# with the core's library under the name the app gives it.
+negs-library = { package = "negs-core-library", path = "../../core/rust/library" }
+negs-core-rules = { path = "../../core/rust/rules" }
