@@ -11,7 +11,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
 | 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
-| 3 | Pure Domain Rules & Media Helpers | Mac side done (3 slices merged); Windows gate next | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs, 0 leaks, ASan clean |
+| 3 | Pure Domain Rules & Media Helpers | done (Mac + Windows), awaiting Noah | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs and 0 leaks on Mac and PC, ASan clean; Windows app on the core; screenshots identical; startup within noise |
 | 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
@@ -42,6 +42,56 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-22: Phase 3 Windows gate (main `1503525`)
+
+PC worktrees `negs\worktrees\p3-core` (main) and `p3-base` (`acbad18`,
+main before the slices), built with `wt.cmd`; the gate is
+`C:\Users\Noah\.negs\core-gate3.cmd [raws|coretest|lib|diff|wintest|anyos]`.
+
+- **`build.py test`:** passes. The Windows-only Odin code runs for the first
+  time: embedded's `CreateFileW` reader and exact_fit's `GetSystemInfo`
+  thread count.
+- **`build.py lib`:** 1.70 s and 1.68 s (separate modules).
+- **`build.py diff`:** passes (186 s), every Phase 3 harness 0 differences
+  and 0 leaks with UCRT's libm on x86_64, with `NEGS_RAW_FOLDER` on copies
+  of `free_raws` (97 files; `--nocapture` runs with and without the folder
+  confirm the real files went through the Windows reader).
+  - **One fix:** the tone graph's harness compared NaNs by their bits. One
+    predicted point (gamma −inf) was NaN on both sides but `-NaN` in the
+    core and `+NaN` in Rust: x86's default NaN is negative, a libm call
+    passes its operand's on, and Rust promises neither. It now counts every
+    NaN as one value, as 3a's harnesses do; all else stays bit for bit
+    (`1503525`).
+- **The Windows app's `cargo test`:** 290 passed, 2 ignored (both
+  `#[ignore]` on the base too).
+- **Any-OS crates** (`library-map` 7 + 18, `sheet-rules` 20, `tray-rules`
+  17): pass with `--locked`.
+- **Screenshots** (3 themes × photo, crop mode, photo with the histogram
+  after leaving crop, grid; nine D750 NEF copies with core-written
+  sidecars): crop and grid byte-identical; the others differ only in the
+  status bar's "developed in" time.
+- **Startup**, 12 runs ABBA, core vs base:
+
+  | stamp | core | base |
+  |---|---:|---:|
+  | `first_window_composited` | 80.9 ms | 82.1 ms |
+  | `inspector_shown` | 188.3 ms | 195.5 ms |
+  | `gpu_ready` | 455.6 ms | 473.5 ms |
+  | `first_image_on_screen` | 920.8 ms | 926.2 ms |
+
+- **Speed on the PC** (`bench`, indicative):
+
+  | | Rust | Odin core |
+  |---|---:|---:|
+  | sheet layout, 1,000 items ×100 | 1.74 ms | 0.65 ms |
+  | exact_fit 6000×4000 → 1500×1000 | 74.0 ms | 54.8 ms |
+  | embedded, 96 RAWs warm | 38.3–39.1 ms | 39.6–43.9 ms |
+
+  The embedded gap is within run-to-run noise after the first run; Rust's
+  `seek_read` vs the core's `SetFilePointerEx` + `ReadFile` is the one
+  difference to look at in Phase 7.
+- **Open for Noah:** Go for Phase 4.
 
 ### 2026-11-22: Phase 3 Mac side, three slices merged (`core-p3a-sheet`, `core-p3c-media`, `core-p3b-picture`)
 
