@@ -20,3 +20,8 @@ doctest = false
 # with the core's library under the name the app gives it.
 negs-library = { package = "negs-core-library", path = "../../core/rust/library" }
 negs-core-rules = { path = "../../core/rust/rules" }
+
+# negs-core-rules brings the engine (spektrafilm-io) with it: its
+# rawler, as the app uses it (vendor/README.md).
+[patch.crates-io]
+rawler = { path = "../../vendor/rawler" }

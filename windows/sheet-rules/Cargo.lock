@@ -1059,8 +1059,6 @@ dependencies = [
 [[package]]
 name = "rawler"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51cb9d46a5b34946878eb236d1180adec0806eee260738ce299517b083a232e8"
 dependencies = [
  "backtrace",
  "bitstream-io",
@@ -1086,6 +1084,7 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
+ "web-time",
  "weezl",
  "zerocopy",
 ]
