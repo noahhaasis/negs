@@ -45,18 +45,19 @@ Shape :: struct {
 
 // The grid for a `width` × `height` preview: an even grid of at most
 // `max_samples` pixels over the crop. None when there's nothing to count.
-shape :: proc "contextless" (width, height: int, settings: crop.Settings, o: crop.Orientation, max_samples: int) -> Maybe(Shape) {
+shape :: proc "contextless" (width, height: int, settings: crop.Settings, o: crop.Orientation, max_samples: uint) -> Maybe(Shape) {
 	area := crop.pixels(settings, crop.Size{f64(width), f64(height)})
 	if area.width < 1 || area.height < 1 || max_samples == 0 {
 		return nil
 	}
-	aw, ah := int(crop.sat_uint(area.width)), int(crop.sat_uint(area.height))
-	root := int(crop.sat_uint(crop.sqrt(f64(max_samples) * f64(aw) / f64(ah))))
+	// In unsigned arithmetic, as the Rust's usize: any budget, up to all ones.
+	aw, ah := crop.sat_uint(area.width), crop.sat_uint(area.height)
+	root := crop.sat_uint(crop.sqrt(f64(max_samples) * f64(aw) / f64(ah)))
 	columns := min(min(aw, max_samples), max(root, 1))
 	rows := min(ah, max(max_samples / columns, 1))
 	turn := crop.rem4(o.turns)
 	shown_columns := columns if turn % 2 == 0 else rows
-	return Shape{area, columns, rows, shown_columns, min(shown_columns, 256), turn}
+	return Shape{area, int(columns), int(rows), int(shown_columns), int(min(shown_columns, 256)), turn}
 }
 
 // Counts the samples of an RGBA preview into `h` (cleared first) and the
@@ -83,7 +84,7 @@ count :: proc "contextless" (rgba: []u8, width, height: int, settings: crop.Sett
 			dx := area.x + (f64(column) + 0.5) * area.width / f64(s.columns) - cx
 			dy := area.y + (f64(row) + 0.5) * area.height / f64(s.rows) - cy
 			x, y := libc.floor(cx + dx * cos - dy * sin), libc.floor(cy + dx * sin + dy * cos)
-			if x < 0 || y < 0 || int(crop.sat_uint(x)) >= width || int(crop.sat_uint(y)) >= height {
+			if x < 0 || y < 0 || crop.sat_uint(x) >= uint(width) || crop.sat_uint(y) >= uint(height) {
 				continue
 			}
 			p := (int(crop.sat_uint(y)) * width + int(crop.sat_uint(x))) * 4

@@ -38,7 +38,7 @@ scopes_histogram_peak :: proc "c" (h: ^histogram.Histogram) -> u32 {
 // The waveform's width for these scopes; 0 when there's nothing to count.
 @(export, link_name = "negs_scopes_wave_width")
 scopes_wave_width :: proc "c" (width, height: uint, s: ^crop.Settings, o: crop.Orientation, max_samples: uint) -> uint {
-	shape, ok := histogram.shape(int(width), int(height), s^, o, int(max_samples)).?
+	shape, ok := histogram.shape(int(width), int(height), s^, o, max_samples).?
 	return uint(shape.wave_width) if ok else 0
 }
 
@@ -51,7 +51,7 @@ scopes_count :: proc "c" (rgba: [^]u8, rgba_len: uint, width, height: uint, s: ^
 		return 0
 	}
 	h^ = {}
-	shape, ok := histogram.shape(int(width), int(height), s^, o, int(max_samples)).?
+	shape, ok := histogram.shape(int(width), int(height), s^, o, max_samples).?
 	if !ok || rgba_len < width * height * 4 || wave_len != uint(shape.wave_width) * 256 {
 		return 0
 	}
