@@ -9,8 +9,8 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | # | Phase | State | Notes |
 |---|---|---|---|
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
-| 1 | Pilot: `marks` + `theme` | done (Mac) | Bit for bit with `windows/marks` on Apple silicon; macOS draws marks and themes from the core; Windows wiring at the Phase 2 gate |
-| 2 | Pilot Go/No-Go: `library` | Mac side done; waiting for the Windows gate | Fixtures byte for byte, suites + lockstep at 50 seeds, 0 diffs, 0 leaks → **Windows PC gate** → Go/No-Go review |
+| 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
+| 2 | Pilot Go/No-Go: `library` | Windows gate passed; **waiting for Noah's Go/No-Go** | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
 | 3 | Pure Domain Rules & Media Helpers | not started | 3a (`sheet`/`tray`/`compare`), 3b (`crop`/`border`/`exact_fit`/`thumb_compose`), 3c (`embedded_preview`/`photo_facts`/`tone_graph`/`histogram`/`negative`/`help`) |
 | 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
@@ -21,7 +21,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 
 - **Base `main` SHA:** `a9d64f6` (2026-11-21)
 - **Odin version (Mac):** `dev-2026-11a` (`odin version`: `dev-2026-11-nightly:9a69916`), the official macOS arm64 release in `~/.negs/odin/dev-2026-11a` (`core/install_odin.py`). Pinned in `core/ODIN_VERSION`; `build.py` refuses any other build. (Nix had `dev-2025-01` on PATH; Homebrew offers `2026-11a` but floats with upgrades, so neither is used.)
-- **Odin version (Windows PC):** *TBD at Phase 2 Windows checkpoint*
+- **Odin version (Windows PC):** `dev-2026-11a` (`9a69916`), the official windows_amd64 release in `C:\Users\Noah\.negs\odin\dev-2026-11a` (`core/install_odin.py`), with MSVC's `lib.exe` (found through vswhere).
 
 ## Baseline vs. Final Comparison (fill in Phase 0 and Phase 7)
 
@@ -29,10 +29,10 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 |---|---:|---:|---:|
 | Core cold build | Rust `negs-library` 4.7 s (`cargo build --release`, cold target dir) | — | — |
 | Core 1-line incremental build | Rust `negs-library` 1.6 s (function-body edit in `sidecar.rs`); its tests 1.3 s more; `negs-marks` 0.4 s | — | — |
-| Windows 1-line UI edit rebuild (`windows/src/ui/inspector.rs`) | `cargo check` (x86_64-pc-windows-msvc, on the Mac) 1.4 s, same for `sheet_rules.rs`; full PC build at the Phase 2 gate | — | — |
+| Windows 1-line UI edit rebuild (`windows/src/ui/inspector.rs`) | `cargo check` (x86_64-pc-windows-msvc, on the Mac) 1.4 s, same for `sheet_rules.rs`; PC release build (LTO off, 16 units, incremental) 4.5 s; with the core linked 4.6 s | — | — |
 | macOS 1-line edit rebuild (`--dev`) | Swift release 56 s (117 s cold); debug test build 9.5 s (string edit in `Sidecar.swift`) | — | — |
-| Windows startup: `first_window_composited` (median) | ~82–90 ms *(re-measure in Phase 0/2)* | — | — |
-| Windows startup: `inspector_shown` (median) | ~176–181 ms *(re-measure in Phase 0/2)* | — | — |
+| Windows startup: `first_window_composited` (median) | 87.4 ms (Phase 2 gate, 12 runs ABBA, `8154a6a`, release LTO off); with the core 83.6 ms | — | — |
+| Windows startup: `inspector_shown` (median) | 192.5 ms (same runs); with the core 188.3 ms | — | — |
 | Library: 500-photo folder open + sidecar parse/write + look hash | open + parse + summaries + looks 28.6 ms (175,861 allocs, 28.4 MiB); rate 500 + undo (1,000 writes) 216 ms (330,562 allocs); filter + sort 5×500 0.38 ms | — | — |
 | Marks: 1,000 names × (5 stars + cross + grid box) | 23.6 ms (203,585 allocs, 163.9 MiB) | — | — |
 | `exact_fit` Lanczos downscale (6k×4k → fit) | 6000×4000 → 1500×1000: 50.7 ms | — | — |
@@ -42,6 +42,118 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-22: Phase 2 Windows gate (branch `core-win-gate`)
+
+- **Odin on the PC:** `dev-2026-11a`, installed by `core/install_odin.py`.
+  `build.py test` passes there, including the library's kernel32 file
+  system (Phase 2 had only type-checked it).
+- **Linking on Windows.** None of Odin's static-library modes works for a
+  Rust host:
+  - Odin's default linker (radlink) and lld leave `memset` and
+    `_tls_index` unresolved.
+  - `-linker:msvc` archives every library the packages import, the static
+    CRT among them: `LNK2005` against Rust's DLL CRT, and a 44.7 MB `.lib`.
+
+  `build.py` now has Odin write an object (`-build-mode:obj`) and archives
+  only that with MSVC's `lib.exe`. The result is 1.06 MB. The CRT and system
+  libraries come from the host's link; `negs-core-sys` adds `bcrypt`. Test
+  executables get `.exe`. `Negs.exe` grows by 0.5 MB (21.31 → 21.81 MB,
+  LTO off).
+- **Fixed:** an object has no entry point either, so `core_context()` now
+  runs the runtime's startup for `.Object` builds as well as `.Static`. The
+  Windows `negs-core-library` suite caught it (Finder order of `Ω`).
+- **The Windows app on the core:** `windows/Cargo.toml` renames
+  `negs-core-marks` and `negs-core-library` to `negs-marks` and
+  `negs-library`, so no call site changed.
+  - `ui/theme.rs` takes the six theme tables, names, hints, `parse`,
+    `luminance`, `contrast` and `mix` from the core. The scalar constants
+    stay in Rust and a test checks them against `negs_theme_constants`.
+  - The original `theme.rs` is frozen as the theme oracle
+    (`core/diff/tests/oracle/windows_theme.rs.txt`); `windows/marks` stays
+    as the marks oracle.
+  - CI: the Windows jobs install the pinned Odin and run `build.py test`;
+    `core/**` changes trigger them.
+- **Gate, all passing on the PC:**
+  - `build.py test`.
+  - `build.py diff --seeds 50`: fixtures byte for byte, `negs-library`'s
+    suites, lockstep at 50 seeds.
+  - The Windows app's `cargo test`: 292 passed, plus `negs-marks` 16.
+  - To make the diff crate run on Windows: peak memory via
+    `K32GetProcessMemoryInfo`, and `core/diff/tests/mac-encoded` as checked
+    copies instead of a symlink, which Windows checkouts write as a text
+    file.
+  - **Flake, not the core's:** `state.rs` seed 44 failed once on Windows
+    for the Rust oracle and once for the core, and passed on reruns. An
+    "another app" write that changes neither size nor write time within a
+    timer tick goes unnoticed (likely NTFS timestamp granularity). The Mac
+    never shows it. Left as is; worth a look when the library's change
+    detection is next touched.
+- **Mac ↔ Windows round trip** (`core/diff/src/bin/roundtrip.rs`):
+  - `make` builds a folder with every sidecar fixture, RAW+JPEG pairs, and
+    non-ASCII and NFC names. `step` applies seeded core edits: ratings,
+    flags, open/edit/save, copy and paste, duplicate, reset, undo.
+  - `check` opens copies with the core and the Rust oracle and requires:
+    the same view, no bytes changed by opening, and every sidecar
+    rewriting byte for byte in both.
+  - Results:
+    - Mac → PC: identical digests.
+    - The same seeded steps on each machine: byte-identical folders.
+    - PC → Mac: identical once the transfer's NFD names (macOS `tar`) are
+      normalised back. The NFD folder itself also checks OK.
+    - Redone after the wire change below: the same digests.
+- **Screenshots** (3 themes × photo and grid, base and core, nine D750
+  NEFs with core-written sidecars): pixel-identical except the status bar's
+  render time and the menu underlines that the harness's Alt tap shows.
+- **Startup.**
+  - The first run was +31 ms at `inspector_shown`, and above every base
+    run.
+  - Bisected with builds that put modules back on Rust: themes only +5 ms;
+    themes + library +22 ms.
+  - A call trace (`NEGS_CORE_TRACE`, a diagnostic branch, not merged)
+    showed ~10 ms of library calls on the UI thread:
+    - `unedited_state` 16–20 times, ~0.2 ms each.
+    - `edit` and `set_defaults` 0.5–0.6 ms each.
+
+    Most of it was Rust formatting numbers with the oracle's Swift-style
+    `swift_double_description`. The later stages, the inspector's painting
+    above all, were then bimodal (12 or 40 ms), most likely because they
+    landed on the engine and GPU start-up.
+  - Fixed in the wrapper:
+    - `unedited_state` is cached until the library changes.
+    - Values cross as compact JSON with Rust's shortest exact numbers
+      (`codec::wire`). A new test sends 20,000 doubles (random bits,
+      subnormals, extremes, ties) and awkward strings, and requires the core
+      to read back the same bits and text.
+  - After: 12 runs ABBA, core vs base:
+
+    | stamp | core | base |
+    |---|---:|---:|
+    | `first_window_composited` | 83.6 ms | 87.4 ms |
+    | `inspector_shown` | 188.3 ms | 192.5 ms |
+    | `first_image_on_screen` | 918 ms | 926 ms |
+
+    Every stage matches and the paint times are no longer bimodal.
+  - The open sequence alone (`roundtrip open docs`) is still 2.7 ms on the
+    core against Rust's 1.4 ms: JSON in and out of the ABI. A candidate for
+    Phase 4's state design and Phase 7.
+- **Speed on the PC** (`bench library`, 500 photos):
+
+  | | Rust | Odin core |
+  |---|---:|---:|
+  | open | 58.1 ms | 49.2 ms |
+  | 1,000 writes | 706 ms | 598 ms |
+  | filter + sort 5×500 | 0.59 ms | 2.76 ms |
+  | marks (1,000 names) | 48.7 ms | 45.0 ms |
+- **Compile times on the PC:**
+  - `build.py lib` (whole program): 7.5 s, against 6.5–6.9 s on the Mac.
+  - A one-line `inspector.rs` edit: 4.6 s with the core, 4.5 s without.
+    The core isn't rebuilt for UI edits.
+- **Open for Noah:**
+  - Go/No-Go for Phase 3.
+  - `-use-separate-modules` (1.6 s instead of ~7 s builds; marks still bit
+    for bit).
+  - An ASan target in `build.py`.
 
 ### 2026-11-21: Phase 2 Mac side, `library` (branch `core-p2-library`)
 

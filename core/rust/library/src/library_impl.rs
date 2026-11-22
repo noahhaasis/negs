@@ -104,7 +104,7 @@ unsafe extern "C" fn transform_trampoline<F: Fn(&Item, &EditState) -> EditState>
     let f = unsafe { &*(user as *const F) };
     let item = codec::to_item(&codec::parse(unsafe { bytes_of(item, item_len) }));
     let state = codec::to_state(&codec::parse(unsafe { bytes_of(state, state_len) }));
-    buf_of(codec::state(&f(&item, &state)).to_compact_sorted().as_bytes())
+    buf_of(codec::wire(&codec::state(&f(&item, &state))).as_bytes())
 }
 
 // MARK: The library
@@ -131,6 +131,9 @@ pub struct Library {
     folder: PathBuf,
     snapshot: OnceCell<Snapshot>,
     defaults: OnceCell<EditDefaults>,
+    // The state a photograph without edits opens with: it follows the
+    // defaults alone, and the Windows app asks for it per strip item.
+    unedited: OnceCell<EditState>,
     state: OnceCell<Option<EditState>>,
     copied: OnceCell<Option<CopiedEdits>>,
     previous: OnceCell<Option<EditState>>,
@@ -147,11 +150,11 @@ impl Drop for Library {
 }
 
 fn items_json(items: &[Item]) -> String {
-    codec::items(items).to_compact_sorted()
+    codec::wire(&codec::items(items))
 }
 
 fn item_json(item: &Item) -> String {
-    codec::item(item).to_compact_sorted()
+    codec::wire(&codec::item(item))
 }
 
 impl Library {
@@ -193,6 +196,7 @@ impl Library {
             folder,
             snapshot: OnceCell::new(),
             defaults: OnceCell::new(),
+            unedited: OnceCell::new(),
             state: OnceCell::new(),
             copied: OnceCell::new(),
             previous: OnceCell::new(),
@@ -203,6 +207,7 @@ impl Library {
     fn changed(&mut self) {
         self.snapshot.take();
         self.defaults.take();
+        self.unedited.take();
         self.state.take();
         self.copied.take();
         self.previous.take();
@@ -292,14 +297,14 @@ impl Library {
 
     pub fn store_solved_match(&mut self, item: &Item, look: &str, state: &EditState) -> bool {
         let i = item_json(item);
-        let s = codec::state(state).to_compact_sorted();
+        let s = codec::wire(&codec::state(state));
         let stored = unsafe { sys::negs_library_store_solved_match(self.handle, i.as_ptr(), i.len(), look.as_ptr(), look.len(), s.as_ptr(), s.len()) };
         self.changed();
         stored != 0
     }
 
     pub fn unedited_state(&self) -> EditState {
-        codec::to_state(&self.json(unsafe { sys::negs_library_unedited_state(self.handle) }))
+        self.unedited.get_or_init(|| codec::to_state(&self.json(unsafe { sys::negs_library_unedited_state(self.handle) }))).clone()
     }
 
     pub fn companion(&self, photo: &Path) -> Option<&Path> {
@@ -319,7 +324,7 @@ impl Library {
     }
 
     pub fn set_filter(&mut self, filter: Filter) {
-        let f = codec::filter(&filter).to_compact_sorted();
+        let f = codec::wire(&codec::filter(&filter));
         let set = unsafe { sys::negs_library_set_filter(self.handle, f.as_ptr(), f.len()) };
         assert!(set != 0, "the core refused the filter {f}");
         self.changed();
@@ -361,7 +366,7 @@ impl Library {
     // MARK: Settings
 
     pub fn set_defaults(&mut self, defaults: EditDefaults) -> Outcome {
-        let d = codec::defaults(&defaults).to_compact_sorted();
+        let d = codec::wire(&codec::defaults(&defaults));
         self.outcome(unsafe { sys::negs_library_set_defaults(self.handle, d.as_ptr(), d.len()) })
     }
 
@@ -419,7 +424,7 @@ impl Library {
     }
 
     pub fn edit(&mut self, state: EditState) {
-        let s = codec::state(&state).to_compact_sorted();
+        let s = codec::wire(&codec::state(&state));
         let taken = unsafe { sys::negs_library_edit(self.handle, s.as_ptr(), s.len()) };
         assert!(taken != 0, "the core refused an EditState");
         self.changed();
@@ -454,7 +459,7 @@ impl Library {
 
     pub fn copy_edits(&mut self, item: &Item, groups: BTreeSet<EditGroup>) -> Outcome {
         let i = item_json(item);
-        let g = codec::groups(&groups).to_compact_sorted();
+        let g = codec::wire(&codec::groups(&groups));
         self.outcome(unsafe { sys::negs_library_copy_edits(self.handle, i.as_ptr(), i.len(), g.as_ptr(), g.len()) })
     }
 
@@ -520,17 +525,17 @@ impl Library {
     }
 
     pub fn delete_question(&self, plan: &DeletePlan) -> Question {
-        let p = codec::plan(plan).to_compact_sorted();
+        let p = codec::wire(&codec::plan(plan));
         codec::to_question(&self.json(unsafe { sys::negs_library_delete_question(self.handle, p.as_ptr(), p.len()) }))
     }
 
     pub fn delete_is_permanent(&self, plan: &DeletePlan) -> bool {
-        let p = codec::plan(plan).to_compact_sorted();
+        let p = codec::wire(&codec::plan(plan));
         unsafe { sys::negs_library_delete_is_permanent(self.handle, p.as_ptr(), p.len()) != 0 }
     }
 
     pub fn delete(&mut self, plan: &DeletePlan) -> Outcome {
-        let p = codec::plan(plan).to_compact_sorted();
+        let p = codec::wire(&codec::plan(plan));
         self.outcome(unsafe { sys::negs_library_delete(self.handle, p.as_ptr(), p.len()) })
     }
 

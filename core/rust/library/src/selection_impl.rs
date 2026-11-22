@@ -46,8 +46,8 @@ impl Selection {
 
     /// Applies `op` in the core; returns its `items` answer.
     fn apply<const N: usize>(&mut self, pairs: [(&str, Json); N]) -> Json {
-        let state = self.to_json().to_compact_sorted();
-        let op = Json::from_pairs(pairs).to_compact_sorted();
+        let state = codec::wire(&self.to_json());
+        let op = codec::wire(&Json::from_pairs(pairs));
         let bytes = take_buf(unsafe { sys::negs_selection_apply(state.as_ptr(), state.len(), op.as_ptr(), op.len()) });
         assert!(!bytes.is_empty(), "the core refused a selection change: {op}");
         let out = codec::parse(&bytes);

@@ -92,6 +92,7 @@ jobs:
               - "scripts/check_native_macos.py"
             windows:
               - *shared
+              - "core/**"
               - "windows/**"
             macos:
               - *shared
@@ -117,6 +118,10 @@ jobs:
         with:
           workspaces: windows -> windows/target
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install the shared core's pinned Odin
+        run: python core/install_odin.py
+      - name: Test the shared core
+        run: python core/build.py test
       - name: Test Windows app
         run: cargo test --locked --manifest-path windows/Cargo.toml
       # The marks' geometry and the pure rules the app includes by #[path]
@@ -169,6 +174,8 @@ jobs:
         with:
           workspaces: windows -> windows/target
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install the shared core's pinned Odin
+        run: python core/install_odin.py
       - name: Build Negs.exe
         run: cargo build --release --locked --manifest-path windows/Cargo.toml
       - uses: actions/upload-artifact@v4

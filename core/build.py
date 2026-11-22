@@ -31,6 +31,8 @@ TAG, COMMIT = (CORE / "ODIN_VERSION").read_text().split()
 WINDOWS = sys.platform == "win32"
 DARWIN = sys.platform == "darwin"
 LIB_NAME = "negs_core.lib" if WINDOWS else "libnegs_core.a"
+# Odin wants an executable's extension on Windows.
+EXE = ".exe" if WINDOWS else ""
 # The macOS app's deployment target (Info.plist, MACOSX_DEPLOYMENT_TARGET).
 MACOS_MIN = "14.0"
 
@@ -81,23 +83,52 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, **kwargs)
 
 
+def msvc_lib_exe() -> str:
+    """lib.exe of the newest Visual Studio (vswhere), or the one on PATH."""
+    found = shutil.which("lib.exe")
+    if found:
+        return found
+    vswhere = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    if vswhere.is_file():
+        out = subprocess.run(
+            [str(vswhere), "-latest", "-products", "*", "-find", r"VC\Tools\MSVC\**\bin\Hostx64\x64\lib.exe"],
+            capture_output=True, text=True,
+        ).stdout.split()
+        if out:
+            return out[-1]
+    sys.exit("[core] lib.exe not found: install Visual Studio's C++ build tools")
+
+
 def odin_lib(odin: str, target: str, out: Path, track: bool, debug: bool) -> float:
     """Builds the static library for one target; returns the seconds it took."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        odin, "build", str(CORE / "src" / "abi"),
-        "-build-mode:static", "-no-entry-point", f"-out:{out}", f"-target:{target}", "-vet", "-strict-style",
-    ]
-    cmd += ["-debug", "-o:none"] if debug else ["-o:speed"]
-    if target.startswith("darwin"):
-        cmd.append(f"-minimum-os-version:{MACOS_MIN}")
-    if target.startswith("linux"):
-        cmd.append("-reloc-mode:pic")
-    if track:
-        cmd.append("-define:NEGS_CORE_TRACK=true")
-    start = time.perf_counter()
-    run(cmd)
-    return time.perf_counter() - start
+    windows = target.startswith("windows")
+    with tempfile.TemporaryDirectory() as tmp:
+        # On Windows, Odin's own static libraries take in every library its
+        # packages import, the static CRT (libucrt.lib) among them, which
+        # clashes with the CRT the host links (Rust: the DLL one). So Odin
+        # writes an object and lib.exe archives only that; the CRT and the
+        # system libraries come from the host's link (negs-core-sys).
+        cmd = [odin, "build", str(CORE / "src" / "abi"), "-no-entry-point", f"-target:{target}", "-vet", "-strict-style"]
+        if windows:
+            cmd += ["-build-mode:obj", f"-out:{Path(tmp) / 'negs_core.obj'}"]
+        else:
+            cmd += ["-build-mode:static", f"-out:{out}"]
+        cmd += ["-debug", "-o:none"] if debug else ["-o:speed"]
+        if target.startswith("darwin"):
+            cmd.append(f"-minimum-os-version:{MACOS_MIN}")
+        if target.startswith("linux"):
+            cmd.append("-reloc-mode:pic")
+        if track:
+            cmd.append("-define:NEGS_CORE_TRACK=true")
+        start = time.perf_counter()
+        run(cmd)
+        if windows:
+            objects = sorted(str(p) for p in Path(tmp).glob("*.obj"))
+            if not objects:
+                sys.exit("[core] odin wrote no object")
+            run([msvc_lib_exe(), "/NOLOGO", f"/OUT:{out}", *objects])
+        return time.perf_counter() - start
 
 
 def build_lib(args: argparse.Namespace) -> Path:
@@ -144,11 +175,11 @@ def odin_tests(odin: str) -> None:
     flags = ["-debug", "-vet", "-strict-style", "-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true", "-define:ODIN_TEST_FANCY=false"]
     with tempfile.TemporaryDirectory() as tmp:
         start = time.perf_counter()
-        run([odin, "test", str(CORE / "tests"), *flags, f"-out:{Path(tmp) / 'tests'}"])
-        run([odin, "test", str(CORE / "tests" / "library"), *flags, f"-out:{Path(tmp) / 'library'}"])
+        run([odin, "test", str(CORE / "tests"), *flags, f"-out:{Path(tmp) / ('tests' + EXE)}"])
+        run([odin, "test", str(CORE / "tests" / "library"), *flags, f"-out:{Path(tmp) / ('library' + EXE)}"])
         log(f"unit tests passed in {time.perf_counter() - start:.2f} s (tracking allocator, leaks fail)")
         leak = subprocess.run(
-            [odin, "test", str(CORE / "tests" / "leakcheck"), *flags, f"-out:{Path(tmp) / 'leakcheck'}"],
+            [odin, "test", str(CORE / "tests" / "leakcheck"), *flags, f"-out:{Path(tmp) / ('leakcheck' + EXE)}"],
             capture_output=True, text=True,
         )
         text = leak.stdout + leak.stderr
@@ -161,7 +192,9 @@ def odin_tests(odin: str) -> None:
 def layout_check(odin: str) -> None:
     cc = c_compiler()
     if cc is None or WINDOWS:
-        log("layout check needs clang or cc (skipped)")
+        # On Windows the Rust side checks the same table (negs-core-sys's
+        # and the wrappers' layout tests, run by `build.py diff`).
+        log("layout check needs clang or cc on macOS or Linux (skipped)")
         return
     with tempfile.TemporaryDirectory() as tmp:
         lib = Path(tmp) / LIB_NAME

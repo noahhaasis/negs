@@ -1,7 +1,9 @@
-//! The themes, Odin core against the Rust oracle (windows/src/ui/theme.rs,
-//! which links the Windows API, so it can't be built here): its tables are
-//! read from the source, and its colour maths and parse are copied below,
-//! with a check that the source still says the same. Every theme's tokens,
+//! The themes, Odin core against the Rust oracle: windows/src/ui/theme.rs as
+//! it was before the Windows app took its themes from the core, frozen in
+//! tests/oracle/windows_theme.rs.txt (it links the Windows API, so it can't
+//! be built here). Its tables are read from that source, and its colour
+//! maths and parse are copied below, with a check that the source says the
+//! same. Every theme's tokens,
 //! key, title and Windows hint; luminance, contrast and mix over seeded
 //! colours, bit for bit; parse over seeded and awkward names.
 
@@ -9,7 +11,7 @@ use negs_core_sys::theme::*;
 use std::collections::HashMap;
 use std::ffi::CStr;
 
-const SOURCE: &str = include_str!("../../../windows/src/ui/theme.rs");
+const SOURCE: &str = include_str!("oracle/windows_theme.rs.txt");
 
 const FIELDS: [&str; 14] =
     ["bg", "panel", "film", "grid", "line", "track", "dim", "label", "paper", "accent", "fill", "on_fill", "warn", "blank"];
@@ -137,7 +139,7 @@ fn tokens_names_and_hints_match_windows() {
     assert_eq!(c.highlighter_opacity.to_string(), konst("HIGHLIGHTER_OPACITY"));
 }
 
-// Copied from windows/src/ui/theme.rs; `the_copies_are_the_source` holds them to it.
+// Copied from the oracle; `the_copies_are_the_source` holds them to it.
 mod oracle {
     pub fn luminance(rgb: u32) -> f64 {
         let channel = |shift: u32| {
@@ -174,7 +176,7 @@ fn the_copies_are_the_source() {
     for name in ["luminance", "contrast", "mix"] {
         let copy = braces_after(this, &format!("pub fn {name}("));
         let original = braces_after(SOURCE, &format!("pub fn {name}("));
-        assert_eq!(squash(copy), squash(original), "{name} drifted from windows/src/ui/theme.rs");
+        assert_eq!(squash(copy), squash(original), "{name} drifted from the oracle");
     }
     assert!(source.contains(&squash(
         "let squashed: String = text.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();"

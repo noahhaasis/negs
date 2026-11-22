@@ -26,7 +26,29 @@ pub fn median_ms(runs: usize, mut f: impl FnMut()) -> f64 {
     times[times.len() / 2]
 }
 
+/// Peak resident memory of this process so far, in MiB: the peak working
+/// set on Windows.
+#[cfg(windows)]
+pub fn peak_rss_mib() -> f64 {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Counters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        rest: [usize; 7],
+    }
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32GetProcessMemoryInfo(process: isize, counters: *mut Counters, cb: u32) -> i32;
+    }
+    let mut c = Counters { cb: std::mem::size_of::<Counters>() as u32, ..Default::default() };
+    unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
+    c.peak_working_set_size as f64 / 1048576.0
+}
+
 /// Peak resident memory of this process so far, in MiB (getrusage).
+#[cfg(not(windows))]
 pub fn peak_rss_mib() -> f64 {
     #[repr(C)]
     struct Timeval {
