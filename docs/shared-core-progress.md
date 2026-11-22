@@ -10,8 +10,8 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 |---|---|---|---|
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
-| 2 | Pilot Go/No-Go: `library` | Windows gate passed; **waiting for Noah's Go/No-Go** | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
-| 3 | Pure Domain Rules & Media Helpers | not started | 3a (`sheet`/`tray`/`compare`), 3b (`crop`/`border`/`exact_fit`/`thumb_compose`), 3c (`embedded_preview`/`photo_facts`/`tone_graph`/`histogram`/`negative`/`help`) |
+| 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
+| 3 | Pure Domain Rules & Media Helpers | in progress (3 slices in parallel) | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`) |
 | 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
@@ -42,6 +42,36 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-22: Go for Phase 3; build tooling and Phase 3 groundwork (branch `core-p3-base`)
+
+- **Noah's answers:** Go for Phase 3; adopt `-use-separate-modules`; add
+  an ASan target. The Phase 2 commits were re-dated to 22 Nov evening at
+  his request (merge now `c52e424`).
+- **`-use-separate-modules`** for the library and tests: `build.py lib`
+  1.5 s (6.8 s whole-program, kept as `--whole-program` for comparing).
+  `build.py diff` passes, the marks bit for bit. Windows (`-build-mode:obj`
+  then writes one object per package; `lib.exe` archives them all) is
+  checked at the Phase 3 PC gate.
+- **Trap found:** with separate modules, Odin writing to an archive that
+  already exists keeps the old members' code: a rebuilt library still said
+  ABI 3. Every build now goes to a fresh folder and is moved into place.
+- **ASan:** `build.py test --asan` (unit tests; fails unless it catches a
+  deliberate use after free in `tests/asancheck`) and `build.py diff
+  --asan` (every Rust and differential test against an instrumented,
+  tracked core). Both clean. On macOS it links Homebrew LLVM's runtime.
+  What it adds: Odin's heap is libc's malloc, so use after free and stray
+  raw pointers are caught; small overruns past a slice's end often aren't
+  (the heap allocator pads for alignment), and bounds checks cover those.
+- **Phase 3 slices, regrouped:** `histogram` and `negative` build on
+  `crop`'s types, so they move from 3c to 3b; the three slices then share
+  no Odin code. `model/compare` is mostly the frame pipeline (Phase 5):
+  3a ports only its pure rules.
+- **Groundwork so the slices merge cleanly:** ABI 4 (bumped once for the
+  phase); a header section, layout table and `sys` module per slice; the
+  `negs-core-rules` wrapper crate (`windows/` and `core/diff` depend on
+  it); every Odin test package under `core/tests` runs; the benches' Rust
+  side frozen in `core/diff/oracle`.
 
 ### 2026-11-22: Phase 2 Windows gate (branch `core-win-gate`)
 
