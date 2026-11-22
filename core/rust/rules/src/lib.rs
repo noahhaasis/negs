@@ -3,6 +3,7 @@
 
 // Phase 3a: sheet_rules, tray_rules, compare.
 pub mod sheet_rules;
+pub mod tray_rules;
 
 
 
