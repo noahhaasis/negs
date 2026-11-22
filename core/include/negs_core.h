@@ -28,7 +28,7 @@ extern "C" {
 #endif
 
 /* Bumped on every change a host must be rebuilt for. */
-#define NEGS_CORE_ABI_VERSION 3u
+#define NEGS_CORE_ABI_VERSION 4u
 
 /* ------------------------------------------------------------------ */
 /* Basics                                                              */
@@ -456,6 +456,33 @@ uint8_t negs_can_write(const uint8_t *folder, size_t folder_len);
  * {"selection", "items"}. The ops are listed in
  * core/src/abi/library_helpers.odin. */
 negs_buf_t negs_selection_apply(const uint8_t *state, size_t state_len, const uint8_t *op, size_t op_len);
+
+/* ------------------------------------------------------------------ */
+/* Phase 3a: Sheet, tray and compare rules (core/src/rules: sheet, tray, compare) */
+/* ------------------------------------------------------------------ */
+/* (Phase 3a's declarations go here.) */
+
+
+
+
+
+/* ------------------------------------------------------------------ */
+/* Phase 3b: Picture rules: crop, border, exact fit, thumbnail compose, histogram, negative (core/src/rules) */
+/* ------------------------------------------------------------------ */
+/* (Phase 3b's declarations go here.) */
+
+
+
+
+
+/* ------------------------------------------------------------------ */
+/* Phase 3c: Media helpers: embedded previews, photo facts, tone graph, help (core/src/rules) */
+/* ------------------------------------------------------------------ */
+/* (Phase 3c's declarations go here.) */
+
+
+
+
 
 #ifdef __cplusplus
 }

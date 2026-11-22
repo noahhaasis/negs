@@ -7,6 +7,8 @@
     python3 core/build.py test              # header, unit tests, leak check, layout
     python3 core/build.py diff              # Rust wrappers + differential tests (tracked)
     python3 core/build.py diff --seeds 50   # ... the library's state and lockstep at 50 seeds
+    python3 core/build.py test --asan       # ... under AddressSanitizer (macOS: Homebrew LLVM)
+    python3 core/build.py diff --asan       # ... against an ASan-instrumented core
     python3 core/build.py odin              # which odin it uses
 
 Odin is pinned (core/ODIN_VERSION): $NEGS_ODIN, then ~/.negs/odin/<tag>/odin,
@@ -99,8 +101,35 @@ def msvc_lib_exe() -> str:
     sys.exit("[core] lib.exe not found: install Visual Studio's C++ build tools")
 
 
-def odin_lib(odin: str, target: str, out: Path, track: bool, debug: bool) -> float:
-    """Builds the static library for one target; returns the seconds it took."""
+def asan_runtime() -> Path | None:
+    """The folder holding the ASan runtime to link Odin's instrumented code
+    with on macOS. Apple clang's runtime lacks a check Odin's LLVM emits, so
+    it is Homebrew LLVM's (`brew install llvm`), newest first. None elsewhere
+    (Linux's compiler brings its own)."""
+    if WINDOWS:
+        sys.exit("[core] --asan: not supported on Windows")
+    if not DARWIN:
+        return None
+    found = sorted(Path("/opt/homebrew/opt").glob("llvm*/lib/clang/*/lib/darwin/libclang_rt.asan_osx_dynamic.dylib"),
+                   key=lambda p: int(p.parts[-4]) if p.parts[-4].isdigit() else 0)
+    if not found:
+        sys.exit("[core] --asan needs Homebrew LLVM's ASan runtime: brew install llvm")
+    return found[-1].parent
+
+
+def asan_link_flags() -> list[str]:
+    folder = asan_runtime()
+    if folder is None:
+        return []
+    return [f"-extra-linker-flags:{folder / 'libclang_rt.asan_osx_dynamic.dylib'} -Wl,-rpath,{folder}"]
+
+
+def odin_lib(odin: str, target: str, out: Path, track: bool, debug: bool, asan: bool = False, whole: bool = False) -> float:
+    """Builds the static library for one target; returns the seconds it took.
+
+    Packages are compiled as separate LLVM modules (`-use-separate-modules`):
+    ~1.6 s instead of ~7 s, the marks still bit for bit. `whole` builds one
+    module, for comparing."""
     out.parent.mkdir(parents=True, exist_ok=True)
     windows = target.startswith("windows")
     with tempfile.TemporaryDirectory() as tmp:
@@ -110,11 +139,19 @@ def odin_lib(odin: str, target: str, out: Path, track: bool, debug: bool) -> flo
         # writes an object and lib.exe archives only that; the CRT and the
         # system libraries come from the host's link (negs-core-sys).
         cmd = [odin, "build", str(CORE / "src" / "abi"), "-no-entry-point", f"-target:{target}", "-vet", "-strict-style"]
+        # Always into a fresh folder, then moved: with -use-separate-modules,
+        # Odin adding to an archive that already exists keeps the old
+        # members' code (a rebuilt library still said ABI 3).
+        fresh = Path(tmp) / out.name
         if windows:
             cmd += ["-build-mode:obj", f"-out:{Path(tmp) / 'negs_core.obj'}"]
         else:
-            cmd += ["-build-mode:static", f"-out:{out}"]
-        cmd += ["-debug", "-o:none"] if debug else ["-o:speed"]
+            cmd += ["-build-mode:static", f"-out:{fresh}"]
+        cmd += ["-debug", "-o:none"] if debug or asan else ["-o:speed"]
+        if not whole:
+            cmd.append("-use-separate-modules")
+        if asan:
+            cmd.append("-sanitize:address")
         if target.startswith("darwin"):
             cmd.append(f"-minimum-os-version:{MACOS_MIN}")
         if target.startswith("linux"):
@@ -127,7 +164,9 @@ def odin_lib(odin: str, target: str, out: Path, track: bool, debug: bool) -> flo
             objects = sorted(str(p) for p in Path(tmp).glob("*.obj"))
             if not objects:
                 sys.exit("[core] odin wrote no object")
-            run([msvc_lib_exe(), "/NOLOGO", f"/OUT:{out}", *objects])
+            run([msvc_lib_exe(), "/NOLOGO", f"/OUT:{fresh}", *objects])
+        out.unlink(missing_ok=True)
+        shutil.move(fresh, out)
         return time.perf_counter() - start
 
 
@@ -142,14 +181,14 @@ def build_lib(args: argparse.Namespace) -> Path:
             total = 0.0
             for target in ("darwin_arm64", "darwin_amd64"):
                 piece = Path(tmp) / target / LIB_NAME
-                total += odin_lib(odin, target, piece, args.track, args.debug)
+                total += odin_lib(odin, target, piece, args.track, args.debug, whole=args.whole_program)
                 slices.append(str(piece))
             out.parent.mkdir(parents=True, exist_ok=True)
             run(["lipo", "-create", "-output", str(out), *slices])
         log(f"built {out} (arm64 + x86_64) in {total:.2f} s")
         return out
     target = args.target or host_target()
-    seconds = odin_lib(odin, target, out, args.track, args.debug)
+    seconds = odin_lib(odin, target, out, args.track, args.debug, args.asan, args.whole_program)
     log(f"built {out} ({target}) in {seconds:.2f} s")
     return out
 
@@ -171,13 +210,28 @@ def check_header() -> None:
     log("negs_core.h is valid C99")
 
 
-def odin_tests(odin: str) -> None:
+def test_packages() -> list[Path]:
+    """core/tests and every folder under it holding .odin files, but the
+    two that fail on purpose."""
+    found = []
+    for folder in sorted([CORE / "tests", *(p for p in (CORE / "tests").rglob("*") if p.is_dir())]):
+        if folder.name in ("leakcheck", "asancheck"):
+            continue
+        if any(folder.glob("*.odin")):
+            found.append(folder)
+    return found
+
+
+def odin_tests(odin: str, asan: bool = False) -> None:
     flags = ["-debug", "-vet", "-strict-style", "-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true", "-define:ODIN_TEST_FANCY=false"]
+    if asan:
+        flags += ["-sanitize:address", *asan_link_flags()]
     with tempfile.TemporaryDirectory() as tmp:
         start = time.perf_counter()
-        run([odin, "test", str(CORE / "tests"), *flags, f"-out:{Path(tmp) / ('tests' + EXE)}"])
-        run([odin, "test", str(CORE / "tests" / "library"), *flags, f"-out:{Path(tmp) / ('library' + EXE)}"])
-        log(f"unit tests passed in {time.perf_counter() - start:.2f} s (tracking allocator, leaks fail)")
+        for package in test_packages():
+            name = "_".join(package.relative_to(CORE).parts)
+            run([odin, "test", str(package), *flags, f"-out:{Path(tmp) / (name + EXE)}"])
+        log(f"unit tests passed in {time.perf_counter() - start:.2f} s (tracking allocator, leaks fail{', ASan' if asan else ''})")
         leak = subprocess.run(
             [odin, "test", str(CORE / "tests" / "leakcheck"), *flags, f"-out:{Path(tmp) / ('leakcheck' + EXE)}"],
             capture_output=True, text=True,
@@ -187,6 +241,16 @@ def odin_tests(odin: str) -> None:
             sys.stderr.write(text)
             sys.exit("[core] the deliberate leak in tests/leakcheck was not caught")
         log("the deliberate leak in tests/leakcheck was caught")
+        if asan:
+            probe = subprocess.run(
+                [odin, "test", str(CORE / "tests" / "asancheck"), *flags, f"-out:{Path(tmp) / ('asancheck' + EXE)}"],
+                capture_output=True, text=True,
+            )
+            text = probe.stdout + probe.stderr
+            if probe.returncode == 0 or "AddressSanitizer" not in text:
+                sys.stderr.write(text)
+                sys.exit("[core] the deliberate use after free in tests/asancheck was not caught")
+            log("the deliberate use after free in tests/asancheck was caught")
 
 
 def layout_check(odin: str) -> None:
@@ -201,7 +265,7 @@ def layout_check(odin: str) -> None:
         odin_lib(odin, host_target(), lib, track=True, debug=False)
         exe = Path(tmp) / "layout_check"
         cmd = [cc, "-std=c99", "-Wall", "-Wextra", "-Werror", f"-I{CORE / 'include'}",
-               str(CORE / "tests" / "c" / "layout_check.c"), str(lib), "-o", str(exe)]
+               *sorted(str(p) for p in (CORE / "tests" / "c").glob("*.c")), str(lib), "-o", str(exe)]
         if DARWIN:
             cmd.append(f"-mmacosx-version-min={MACOS_MIN}")
         else:
@@ -210,23 +274,38 @@ def layout_check(odin: str) -> None:
         run([str(exe)])
 
 
-def test(_args: argparse.Namespace) -> None:
+def test(args: argparse.Namespace) -> None:
     odin = find_odin()
     check_header()
-    odin_tests(odin)
+    odin_tests(odin, args.asan)
     layout_check(odin)
     log("all core tests passed")
 
 
 # The Rust crates over the core, each its own workspace (own Cargo.lock),
 # then the differential tests against the Rust oracles (core/diff).
-RUST_CRATES = ["rust/sys", "rust/marks", "rust/library", "diff"]
+RUST_CRATES = ["rust/sys", "rust/marks", "rust/library", "rust/rules", "diff"]
 
 
 def diff(args: argparse.Namespace) -> None:
     """Every crate's tests with the core's allocations counted (--features
     track), so the differential tests also check nothing leaks."""
     target = REPO / "target" / "core-diff"
+    if args.asan:
+        # An instrumented, tracked core in its own folder; negs-core-sys links
+        # it instead of building its own (NEGS_CORE_LIB_DIR).
+        lib = REPO / "target" / "negs-core-asan" / LIB_NAME
+        seconds = odin_lib(find_odin(), host_target(), lib, track=True, debug=True, asan=True)
+        log(f"built {lib} (ASan) in {seconds:.2f} s")
+        os.environ["NEGS_CORE_LIB_DIR"] = str(lib.parent)
+        os.environ.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+        folder = asan_runtime()
+        if folder is not None:
+            flags = f"-C link-arg={folder / 'libclang_rt.asan_osx_dynamic.dylib'} -C link-arg=-Wl,-rpath,{folder}"
+            os.environ["RUSTFLAGS"] = (os.environ.get("RUSTFLAGS", "") + " " + flags).strip()
+        else:
+            os.environ["RUSTFLAGS"] = (os.environ.get("RUSTFLAGS", "") + " -C link-arg=-fsanitize=address").strip()
+        target = REPO / "target" / "core-asan"
     if args.seeds:
         # The library's state and lockstep tests (default 3 seeds; CI and
         # the Phase 2 gate run 50).
@@ -254,11 +333,16 @@ def main() -> None:
     lib.add_argument("--debug", action="store_true", help="-debug -o:none")
     lib.add_argument("--target", help="an odin -target, e.g. windows_amd64")
     lib.add_argument("--out", help=f"output path (default target/negs-core/{LIB_NAME})")
+    lib.add_argument("--asan", action="store_true", help="instrument with AddressSanitizer (implies -debug -o:none)")
+    lib.add_argument("--whole-program", action="store_true", help="one LLVM module, not -use-separate-modules")
     lib.set_defaults(func=build_lib)
-    sub.add_parser("test", help="header check, unit tests, leak check, layout check").set_defaults(func=test)
+    t = sub.add_parser("test", help="header check, unit tests, leak check, layout check")
+    t.add_argument("--asan", action="store_true", help="run the unit tests under AddressSanitizer")
+    t.set_defaults(func=test)
     d = sub.add_parser("diff", aliases=["rust"], help="Rust wrappers' tests and the differential tests, allocations tracked")
     d.add_argument("--test", help="only this test of core/diff (e.g. marks, theme, lockstep, state)")
     d.add_argument("--seeds", type=int, help="NEGS_LIBRARY_SEEDS for the library's state and lockstep tests")
+    d.add_argument("--asan", action="store_true", help="against an ASan-instrumented core (target/core-asan)")
     d.set_defaults(func=diff)
     sub.add_parser("header", help="check negs_core.h is valid C99").set_defaults(func=lambda _a: check_header())
     sub.add_parser("odin", help="print the odin used").set_defaults(func=lambda _a: print(find_odin()))

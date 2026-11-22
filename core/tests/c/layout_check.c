@@ -3,11 +3,11 @@
  * `python3 core/build.py test`. */
 #include <stdio.h>
 #include <string.h>
-#include "negs_core.h"
+#include "layout_check.h"
 
-static int failures = 0;
+int failures = 0;
 
-static void check(const char *name, long long c_value) {
+void check(const char *name, long long c_value) {
     long long core_value = (long long)negs_core_layout(name, strlen(name));
     if (core_value != c_value) {
         fprintf(stderr, "layout: %s is %lld in C, %lld in the core\n", name, c_value, core_value);
@@ -15,8 +15,6 @@ static void check(const char *name, long long c_value) {
     }
 }
 
-#define SIZE(T) check(#T, (long long)sizeof(T))
-#define FIELD(T, f) check(#T "." #f, (long long)offsetof(T, f))
 
 int main(void) {
     SIZE(negs_buf_t);

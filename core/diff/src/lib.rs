@@ -1,14 +1,15 @@
 //! Shared helpers for the core's differential tests and benchmarks.
 
-// windows/src's pure modules, compiled here as they are there.
+// windows/src's pure modules as they were before Phase 3 moved them onto
+// the core: frozen copies (core/diff/oracle), the benches' Rust side.
 #[allow(dead_code)]
-#[path = "../../../windows/src/exact_fit.rs"]
+#[path = "../oracle/exact_fit.rs"]
 pub mod exact_fit;
 #[allow(dead_code)]
-#[path = "../../../windows/src/embedded_preview.rs"]
+#[path = "../oracle/embedded_preview.rs"]
 pub mod embedded_preview;
 #[allow(dead_code)]
-#[path = "../../../windows/src/sheet_rules.rs"]
+#[path = "../oracle/sheet_rules.rs"]
 pub mod sheet_rules;
 
 use std::time::Instant;

@@ -1132,6 +1132,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "negs-core-rules"
+version = "0.0.0"
+dependencies = [
+ "negs-core-sys",
+]
+
+[[package]]
 name = "negs-core-sys"
 version = "0.0.0"
 
@@ -1152,6 +1159,7 @@ dependencies = [
  "image",
  "negs-core-library",
  "negs-core-marks",
+ "negs-core-rules",
  "negs-core-sys",
  "pollster",
  "raw-window-handle",

@@ -1,0 +1,19 @@
+# windows/src's pure rules on the shared Odin core (core/src/rules): each
+# module keeps its Rust API (plain data types stay Rust), the logic runs in
+# Odin through the C ABI. windows/src/<module>.rs re-exports it, so no call
+# site changes; core/diff holds the frozen Rust originals as oracles.
+[package]
+name = "negs-core-rules"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace]
+
+[features]
+# Count the core's allocations, so tests can check nothing leaks.
+track = ["negs-core-sys/track"]
+
+[dependencies]
+negs-core-sys = { path = "../sys" }
