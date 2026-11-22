@@ -1,6 +1,6 @@
 //! model/compare.rs's pure helpers, copied verbatim from the frozen
 //! oracle/model_compare.rs.txt (the rest of that module is the model's frame
-//! pipeline and can't build here); tests/compare.rs checks the copies still
+//! pipeline and can't build here); tests/model_compare.rs checks the copies still
 //! read as the source does.
 
 /// `image` at half its size, each pixel the mean of four.

@@ -17,7 +17,7 @@ pub mod tray_rules;
 #[allow(dead_code)]
 #[path = "../oracle/compare.rs"]
 pub mod compare;
-/// model/compare.rs's pure helpers, copied verbatim (tests/compare.rs checks).
+/// model/compare.rs's pure helpers, copied verbatim (tests/model_compare.rs checks).
 #[allow(dead_code)]
 #[path = "../oracle/model_compare_pure.rs"]
 pub mod model_compare;
