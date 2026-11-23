@@ -6,6 +6,9 @@
 // in the allocator given (the temporary one by default).
 package files
 
+import "core:strings"
+import "../paths"
+
 // An OS error: errno, or a Win32 error code; 0 is none.
 Code :: distinct i32
 
@@ -66,4 +69,24 @@ CODE_WHOLE_TREE :: Code(-1)
 is_dir :: proc(path: string) -> bool {
 	st, err := stat(path)
 	return err == 0 && st.is_dir
+}
+
+// session.rs's `write_atomic`: `data` to a sibling with the extension
+// `tmp`, renamed over `path` (MoveFileExW, replacing), so a crash never
+// leaves half a file. The error as anyhow's `{:#}` shows it.
+write_atomic :: proc(path: string, data: []u8, allocator := context.temp_allocator) -> (err: string, ok: bool) {
+	style := paths.HOST
+	if dir, has := paths.parent(path, style); has {
+		if code := create_dir_all(dir); code != 0 {
+			return error_text(code, allocator), false
+		}
+	}
+	staging := paths.with_extension(path, "tmp", style, context.temp_allocator)
+	if code := write_file(staging, data); code != 0 {
+		return error_text(code, allocator), false
+	}
+	if code, message := replace_file(staging, path, context.temp_allocator); code != 0 {
+		return strings.concatenate({"Could not move the file to ", path, ": ", message}, allocator), false
+	}
+	return "", true
 }
