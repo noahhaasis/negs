@@ -12,7 +12,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
 | 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
 | 3 | Pure Domain Rules & Media Helpers | done (Mac + Windows); **Go** for Phase 4 from Noah 2026-11-22 | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs and 0 leaks on Mac and PC, ASan clean; Windows app on the core; screenshots identical; startup within noise |
-| 4 | State, Presets & Data-Driven Inspector | in progress | Wave 1: `core-p4-base` (serde-faithful value, `EditState`, ABI 5, oracles) and `core-p4i-inspector` (Inspector ViewModel extracted in Rust); wave 2: 4a state rules + edits + ViewModel, 4b presets + session, 4c batch + caches |
+| 4 | State, Presets & Data-Driven Inspector | in progress | Wave 1: `core-p4-base` (serde-faithful value, `EditState`, ABI 5, oracles) running; `core-p4i-inspector` merged `885e8fb` (PC checks pending); wave 2: 4a state rules + edits + ViewModel, 4b presets + session, 4c batch + caches |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
 | 7 | Performance, Memory & Compile-Time Evaluation + Optimization | not started | Odin vs. Rust comparison report + optimization pass |
@@ -42,6 +42,76 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-23: Inspector ViewModel in Rust merged (`core-p4i-inspector`, `885e8fb`)
+
+**PC checks still to do (the PC was off):** the Windows test suite and the
+base-vs-branch screenshot comparison, both deferred to the Phase 4 gate.
+- The jobs are ready: 44 shots, made of 2 builds × 2 themes × 11 inspector states. They cover:
+  - the plain NEF, the edited NEF and the JPEG;
+  - each tab, with groups open and with all controls shown;
+  - the edit-list menu.
+- **Where they are:** the coordinator's scratchpad `p4i-shots/` (`run.sh`, `prep.cmd`, `make_jobs.py`, `compare.sh`, `p4i.cmd`).
+- **Already on the PC:** `worktrees\p4i-base` (main `79f66a3`, built). Remove it after the gate.
+
+**What it is:** `windows/src/inspector_view/`, platform-free; it uses no
+`windows` crate, `crate::ui` or `crate::model`. Its pieces:
+- **Inputs:** `InspectorFacts`, borrowed from `Model` through
+  `Model::inspector_facts()`. Its sub-facts `Params`, `ColorFilters`,
+  `Brightness` and `Prefs` now hold the `Model` helpers (`value`,
+  `default_value`, `is_modified`, brightness match, colour filter, preview
+  space), which `Model` delegates to, so their behaviour is unchanged.
+  Values that need the model's internals are worked out up front:
+  `NegativeFacts`, `can_export`, `photo_size`, `cropping`, `size_error`.
+- **Schema:** the 195 rows of the old `ui/inspector.rs` table, in order,
+  with their kinds, labels, ranges, options and tooltips. Row ids are the
+  table positions, so the Win32 control ids are unchanged.
+- **View:** `build(facts, ui) -> InspectorView`, a line-for-line port of
+  the UI's rules. It holds tabs, counts, the header total, the export
+  summary, and one `RowView` per row: visible, enabled, changed, skipped,
+  checked, title, value, hint, warning, help, summary, status, slider
+  values, options and selection.
+- **Commands:** `dispatch(facts, ui, id, RowAction) -> Vec<Effect>`.
+  Actions are Set, Track, Check, Select, Press and Reset. Effects are
+  path/value sets, named model actions, interaction begin/end with the
+  same undo names and grouping, and dialogs handed back.
+- **Edit lists:** `edits.rs` takes `&InspectorFacts` instead of `&Model`.
+- **Export choices:** `OutputFormat`, `COLOR_SPACES` and the other export
+  constants moved to `inspector_view/output.rs`; `model.rs` re-exports
+  them.
+- **The UI:** `ui/inspector.rs` keeps only its Win32 code (+378/−1064):
+  windows, layout, the slide, ink, tone graph and colour filter widgets, and
+  the crop panel. It draws from the view and maps clicks to actions.
+
+**Tests:**
+- **Mac:** 55 tests pass in a check crate (the coordinator's scratchpad,
+  `inspector-check/`), which `#[path]`-includes the module and its portable
+  dependencies, with a one-call `FindNLSStringEx` shim. 14 of them are new
+  builder tests: every row kind, the visibility rules, notes, summaries,
+  "N more", counts and edit lists, and every control set and then reset
+  back to its default on each tab and file type.
+- **PC only:** new `Model`-based tests (`counts_match_the_lists`,
+  `actions_and_resets_are_undo_steps`).
+- **Windows cross-check:** clean, with and without `--tests`.
+
+**Reserved file touched:** `session.rs` (+1/−5). `Preferences::revealed`
+was removed because nothing calls it any more, and `expanded` is now
+test-only.
+
+**For the Odin port (4a):**
+- **Cost:** `build` runs on every inspector, structure or histogram
+  refresh, so every render and drag frame. It takes 30 µs on Prep, 138 µs
+  on the Lab and 62 µs on Output (Mac fixture). Most of it is the edit
+  counts for all three tabs, visibility for all 195 rows, and per-row
+  strings. Use a per-sync arena, a static schema table, and catalog
+  lookups indexed once per catalog.
+- **Effects:** `Effect::Set` carries a JSON value.
+- **A quirk to keep, worth deciding later:** the development-time list is
+  cached and refreshed even while hidden, so after a film change on another
+  tab it may be stale.
+
+**Dates:** `b69e4e9` was made at 09:02 on a Tuesday, so it was re-dated to
+23 Nov 03:29 (`f70fd70`).
 
 ### 2026-11-22: Go for Phase 4; plan
 
