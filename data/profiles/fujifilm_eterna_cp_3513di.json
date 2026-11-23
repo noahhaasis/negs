@@ -5,7 +5,7 @@
         "created": "2026-11-24",
         "license": "Negs film profile, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Prepared with the profile-creation method of spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm; profiles CC BY-SA 4.0, see SPEKTRAFILM_LICENSE.txt). Derivatives must credit both, note their modifications and remain CC BY-SA 4.0. Changes: data/CHANGELOG.txt.",
         "citation": "spektrafilm, https://github.com/andreavolpato/spektrafilm (see its CITATION.cff); FUJICOLOR POSITIVE FILM ETERNA-CP 3513DI/3613DI brochure, Ref. No. KB-505E, (c) 2005 FUJIFILM Corporation.",
-        "datasource": "Prepared for Negs from the manufacturer's brochure: FUJICOLOR POSITIVE FILM ETERNA-CP 3513DI/3613DI brochure, Ref. No. KB-505E, (c) 2005 FUJIFILM Corporation, PDF page 1 (spectral sensitivity, per-dye spectral density, characteristic curves). PDF sha256 ce5f63f622dc2024557b4c1f0ec018efdc0c0426eb00c3348629c05d30dfaf74. Data (c) FUJIFILM Corporation. The curves were read from the PDF's vector paths (tools/film_profiles/extract_pdf.py); the points and axis calibration are in data/profile-sources/fujifilm-print/fujifilm_eterna_cp_3513di/.\nMethod: spektrafilm's public-era profile creator by Andrea Volpato (commit b2c7fe6), its steps for papers and print films: D-min removed (base synthesised from the curves' D-min), log E zero where green is 0.735 over D-min, Fujifilm's own per-dye spectra scaled so equal amounts view as an 18.4 % neutral under the viewing illuminant (K75P), status-A unmixing, a 3 norm_cdfs curve fit, densitometer normalisation. Then the author's print normalisation (spektrafilm #557): sensitivities scaled so the TH-KG3 enlarger lamp through Y50 M50 and the mid-scale neutral of kodak_vision3_250d gives raw exposure 1 per channel. Negs step before the unmixing: each status-A curve moved along log E so log E 0 develops the metameric neutral's status-A density (the private creator's preliminary neutral shift; R +0.165, G -0.033, B +0.074 log E). Calibration: the same steps rebuild Kodak 2383 and 2393 from spektrafilm's public raw data to within CIEDE2000 0.9-1.0 mean (2.6 at most) of the shipped profiles on a ColorChecker printed from cine negatives, and their neutral filters within about 3 CC (data/profile-sources/fujifilm-print/calibration/). Tools and procedure: tools/film_profiles, docs/adding-film-stocks.md D12.\nBrochure specifics: the characteristic curves' log H axis is unlabelled (one square is 0.5 log H), and green and blue are plotted 1.0 and 2.0 log H to the left of red; the shift is undone, and the pre-alignment fixes each channel's position anyway. Fujifilm draws each dye curve with the film base under it (where all four are drawn, Y + M + C - Gray = 2 x base). The base taken off is the one this brochure's own dye chart implies, smoothed 20 nm. Undrawn parts filled: yellow 685-695 nm from the Gray curve less the other two dyes and the base. Sensitivity is drawn only near each peak (red in two pieces, 360-442 nm and 630-723 nm): beyond each drawn end it continues with the shape of kodak_2383 (Kodak's ECP-2 print film, the calibration stock), joined at the end and only falling away from it. Share of the normalisation's raw exposure from these tails: R 13%, G 1%, B 0% (red: mostly 600-640 nm, where an orange-masked negative passes the most light).\nChecks: curve fit within 0.015 D; status-A remix within 0.031 D of the brochure's curves up to D 2.0 and 0.089 D above; raw exposure 1 per channel through the reference film.\nNegs choices: reference illuminant TH-KG3 and viewing illuminant K75P, use 'cine' and antihalation 'strong', as the shipped spektrafilm Kodak 2383; log_sensitivity_density_over_min 1.0 as printed (reciprocal of exposure (erg/cm2) for density 1.0 above minimum density); spectra left empty (null) outside 400-695 nm for the dyes; characteristic curves in log10 H. Printed as 2854K tungsten, 1/100 s, Fuji SC-41 + CC-90Y + CC-60M; ECP-2B.\nRecorded exceptions: characteristic x axis (relative): Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square.",
+        "datasource": "Prepared for Negs from the manufacturer's brochure: FUJICOLOR POSITIVE FILM ETERNA-CP 3513DI/3613DI brochure, Ref. No. KB-505E, (c) 2005 FUJIFILM Corporation, PDF page 1 (spectral sensitivity, per-dye spectral density, characteristic curves). PDF sha256 ce5f63f622dc2024557b4c1f0ec018efdc0c0426eb00c3348629c05d30dfaf74. Data (c) FUJIFILM Corporation. The curves were read from the PDF's vector paths (tools/film_profiles/extract_pdf.py); the points and axis calibration are in data/profile-sources/fujifilm-print/fujifilm_eterna_cp_3513di/.\nMethod: spektrafilm's public-era profile creator by Andrea Volpato (commit b2c7fe6), its steps for papers and print films: D-min removed (base synthesised from the curves' D-min), log E zero where green is 0.735 over D-min, Fujifilm's own per-dye spectra scaled so equal amounts view as an 18.4 % neutral under the viewing illuminant (K75P), status-A unmixing, a 3 norm_cdfs curve fit, densitometer normalisation. Then the author's print normalisation (spektrafilm #557): sensitivities scaled so the TH-KG3 enlarger lamp through Y50 M50 and the mid-scale neutral of kodak_vision3_250d gives raw exposure 1 per channel. Negs step before the unmixing: each status-A curve moved along log E so log E 0 develops the metameric neutral's status-A density (the private creator's preliminary neutral shift; R +0.165, G -0.033, B +0.074 log E). Calibration: the same steps rebuild Kodak 2383 and 2393 from spektrafilm's public raw data to within CIEDE2000 0.9-1.0 mean (2.6 at most) of the shipped profiles on a ColorChecker printed from cine negatives, and their neutral filters within about 3 CC (data/profile-sources/fujifilm-print/calibration/). Tools and procedure: tools/film_profiles, docs/adding-film-stocks.md D12.\nBrochure specifics: the characteristic curves' log H axis is unlabelled (one square is 0.5 log H), and green and blue are plotted 1.0 and 2.0 log H to the left of red; the shift is undone, and the pre-alignment fixes each channel's position anyway. Fujifilm draws each dye curve with the film base under it (where all four are drawn, Y + M + C - Gray = 2 x base). The base taken off is the one this brochure's own dye chart implies, smoothed 20 nm. Undrawn parts filled: yellow 685-695 nm from the Gray curve less the other two dyes and the base. Sensitivity is drawn only near each peak (red in two pieces, 360-442 nm and 630-723 nm): beyond each drawn end it continues with the shape of kodak_2383 (Kodak's ECP-2 print film, the calibration stock), joined at the end and only falling away from it. Share of the normalisation's raw exposure from these tails: R 12%, G 1%, B 0% (red: mostly 600-640 nm, where an orange-masked negative passes the most light).\nChecks: curve fit within 0.015 D; status-A remix within 0.031 D of the brochure's curves up to D 2.0 and 0.089 D above; raw exposure 1 per channel through the reference film.\nNegs choices: reference illuminant TH-KG3 and viewing illuminant K75P, use 'cine' and antihalation 'strong', as the shipped spektrafilm Kodak 2383; log_sensitivity_density_over_min 1.0 as printed (reciprocal of exposure (erg/cm2) for density 1.0 above minimum density); spectra left empty (null) outside 400-695 nm for the dyes; characteristic curves in log10 H. Printed as 2854K tungsten, 1/100 s, Fuji SC-41 + CC-90Y + CC-60M; ECP-2B.\nRecorded exceptions: characteristic x axis (relative): Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square.",
         "manufacturer_data": true
     },
     "info": {
@@ -109,407 +109,407 @@
         ],
         "log_sensitivity": [
             [
-                0.356883,
+                0.362161,
                 0.145661,
                 0.495794
             ],
             [
-                0.281138,
+                0.286415,
                 0.036514,
                 0.400173
             ],
             [
-                0.206928,
+                0.212204,
                 -0.087567,
                 0.285427
             ],
             [
-                0.132484,
+                0.137761,
                 -0.184734,
                 0.157242
             ],
             [
-                0.044849,
+                0.050125,
                 -0.251115,
                 0.074853
             ],
             [
-                -0.054393,
+                -0.049117,
                 -0.338013,
                 0.060722
             ],
             [
-                -0.162571,
+                -0.157296,
                 -0.487262,
                 0.083207
             ],
             [
-                -0.277994,
+                -0.27272,
                 -0.668086,
                 0.13946
             ],
             [
-                -0.406103,
+                -0.40083,
                 -0.852673,
                 0.2189
             ],
             [
-                -0.56942,
+                -0.564149,
                 -0.944637,
                 0.304514
             ],
             [
-                -0.739181,
+                -0.733913,
                 -0.939057,
                 0.394482
             ],
             [
-                -0.899956,
+                -0.894693,
                 -0.895082,
                 0.488984
             ],
             [
-                -1.041023,
+                -1.035765,
                 -0.837284,
                 0.577752
             ],
             [
-                -1.197709,
+                -1.19246,
                 -0.744433,
                 0.623113
             ],
             [
-                -1.381514,
+                -1.37628,
                 -0.652552,
                 0.691622
             ],
             [
-                -1.56142,
+                -1.556208,
                 -0.558786,
                 0.822077
             ],
             [
-                -1.735815,
+                -1.730634,
                 -0.456493,
                 0.994131
             ],
             [
-                -1.903086,
+                -1.897949,
                 -0.349227,
                 1.204737
             ],
             [
-                -2.061622,
+                -2.05654,
                 -0.230907,
                 1.399124
             ],
             [
-                -2.20981,
+                -2.204793,
                 -0.164164,
                 1.351286
             ],
             [
-                -2.346041,
+                -2.341088,
                 -0.116909,
                 1.026167
             ],
             [
-                -2.468704,
+                -2.4638,
                 -0.059389,
                 0.594729
             ],
             [
-                -2.576198,
+                -2.571307,
                 0.015814,
                 0.082912
             ],
             [
-                -2.666922,
+                -2.661992,
                 0.099494,
                 -0.327475
             ],
             [
-                -2.739282,
+                -2.734264,
                 0.182864,
                 -0.679363
             ],
             [
-                -2.791691,
+                -2.786559,
                 0.247685,
                 -0.967212
             ],
             [
-                -2.822559,
+                -2.817327,
                 0.273141,
                 -1.399302
             ],
             [
-                -2.830293,
+                -2.825015,
                 0.275096,
                 -1.889298
             ],
             [
-                -2.830244,
+                -2.8327,
                 0.277387,
                 -2.344294
             ],
             [
-                -2.830111,
+                -2.863409,
                 0.290003,
                 -2.767911
             ],
             [
-                -2.82986,
+                -2.915439,
                 0.368153,
                 -3.163287
             ],
             [
-                -2.829428,
+                -2.986952,
                 0.481162,
                 -3.533155
             ],
             [
-                -2.828687,
+                -3.075804,
                 0.658452,
                 -3.879907
             ],
             [
-                -2.827384,
+                -3.179062,
                 0.790524,
                 -4.205643
             ],
             [
-                -2.824991,
+                -3.291679,
                 0.867016,
                 -4.512218
             ],
             [
-                -2.82035,
+                -3.402753,
                 0.687917,
                 -4.801274
             ],
             [
-                -2.810794,
+                -3.486158,
                 0.265145,
                 -5.074272
             ],
             [
-                -2.789969,
+                -3.487099,
                 -0.178056,
                 -5.332513
             ],
             [
-                -2.742819,
+                -3.339352,
                 -0.626849,
                 -5.577163
             ],
             [
-                -2.637285,
+                -3.035478,
                 -1.033872,
                 -5.809266
             ],
             [
-                -2.424324,
+                -2.625028,
                 -1.281601,
                 -6.029764
             ],
             [
-                -2.055516,
+                -2.127826,
                 -1.63341,
                 -6.239507
             ],
             [
-                -1.622575,
+                -1.644571,
                 -1.973908,
                 -6.439261
             ],
             [
-                -1.560077,
+                -1.578446,
                 -2.298569,
                 -6.629725
             ],
             [
-                -1.535156,
+                -1.552251,
                 -2.608473,
                 -6.811531
             ],
             [
-                -1.471685,
+                -1.485714,
                 -2.904603,
                 -6.985257
             ],
             [
-                -1.3924,
+                -1.403172,
                 -3.187857,
                 -7.151429
             ],
             [
-                -1.309023,
+                -1.316961,
                 -3.459059,
                 -7.310531
             ],
             [
-                -1.218994,
+                -1.224434,
                 -3.71896,
                 -7.463003
             ],
             [
-                -1.12785,
+                -1.131244,
                 -3.968253,
                 -7.609252
             ],
             [
-                -1.053689,
+                -1.055712,
                 -4.207575,
                 -7.749651
             ],
             [
-                -0.973633,
+                -0.97442,
                 -4.437511,
                 -7.884544
             ],
             [
-                -0.912363,
+                -0.912347,
                 -4.658603,
                 -8.014249
             ],
             [
-                -0.862539,
+                -0.86195,
                 -4.871353,
                 -8.139059
             ],
             [
-                -0.825235,
+                -0.824258,
                 -5.076223,
                 -8.259247
             ],
             [
-                -0.794944,
+                -0.793676,
                 -5.273643,
                 -8.375064
             ],
             [
-                -0.755314,
+                -0.753696,
                 -5.464012,
                 -8.486745
             ],
             [
-                -0.685486,
+                -0.683322,
                 -5.647702,
                 -8.594507
             ],
             [
-                -0.616173,
+                -0.613548,
                 -5.825057,
                 -8.698553
             ],
             [
-                -0.546943,
+                -0.543926,
                 -5.996401,
                 -8.799073
             ],
             [
-                -0.468912,
+                -0.465523,
                 -6.162033,
                 -8.896242
             ],
             [
-                -0.433182,
+                -0.429643,
                 -6.322234,
                 -8.990224
             ],
             [
-                -0.425765,
+                -0.422197,
                 -6.477268,
                 -9.081176
             ],
             [
-                -0.437575,
+                -0.434054,
                 -6.62738,
                 -9.169239
             ],
             [
-                -0.473824,
+                -0.470456,
                 -6.772801,
                 -9.254551
             ],
             [
-                -0.549264,
+                -0.54626,
                 -6.913748,
                 -9.337238
             ],
             [
-                -0.645148,
+                -0.642707,
                 -7.050423,
                 -9.417419
             ],
             [
-                -0.758919,
+                -0.757331,
                 -7.183018,
                 -9.495207
             ],
             [
-                -0.901391,
+                -0.901245,
                 -7.311714,
                 -9.570707
             ],
             [
-                -1.215309,
+                -1.220669,
                 -7.436679,
                 -9.644018
             ],
             [
-                -1.686791,
+                -1.713806,
                 -7.558074,
                 -9.715235
             ],
             [
-                -2.107308,
+                -2.192853,
                 -7.67605,
                 -9.784446
             ],
             [
-                -2.438512,
+                -2.658406,
                 -7.790748,
                 -9.851734
             ],
             [
-                -2.649943,
+                -3.111027,
                 -7.902304,
                 -9.917179
             ],
             [
-                -2.756567,
+                -3.551247,
                 -8.010845,
                 -9.980854
             ],
             [
-                -2.802028,
+                -3.979569,
                 -8.116491,
                 -10.042832
             ],
             [
-                -2.819986,
+                -4.396469,
                 -8.219357,
                 -10.103179
             ],
             [
-                -2.826951,
+                -4.802399,
                 -8.319552,
                 -10.161959
             ],
             [
-                -3.027452,
+                -5.197785,
                 -8.417177,
                 -10.219231
             ],
             [
-                -3.412699,
+                -5.583032,
                 -8.512331,
                 -10.275053
             ],
             [
-                -3.788194,
+                -5.958526,
                 -8.605106,
                 -10.32948
             ]

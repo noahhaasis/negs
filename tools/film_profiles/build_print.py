@@ -80,10 +80,30 @@ def tail_extend(x, y, wl):
     return out
 
 
-def donor_extend(x, y, wl, donor):
+def falling(t):
+    """t ordered outward from a drawn end, towards another drawn piece of the same
+    channel; the same until its first minimum, then falling on as it fell into it
+    (mirrored through the minimum, then along its first slope). Past the minimum the donor
+    climbs to the peak the other piece draws, which that piece's own tail covers; a
+    running minimum there would hold this tail flat instead, a shelf (the red layer's
+    drawn blue piece, to 433-442 nm, kept one over 515-575 nm and beyond 740 nm)."""
+    t = np.array(t, float)
+    rise = np.nonzero(np.diff(t) > 0)[0]
+    if rise.size == 0:
+        return t
+    k = rise[0]
+    slope = min(t[1] - t[0], 0.0)
+    for j in range(k + 1, t.size):
+        i = 2 * k - j
+        t[j] = 2 * t[k] - t[i] if i >= 0 else t[j - 1] + slope
+    return t
+
+
+def donor_extend(x, y, wl, donor, towards=(False, False)):
     """y (log S) on wl, NaN outside [x0, x1]; beyond each end the donor's log S shape,
-    offset to meet the drawn end, and only ever falling away from it (a running minimum
-    outward), so a tail never picks up the donor's other peaks."""
+    offset to meet the drawn end, and only ever falling away from it: a running minimum
+    outward, so a tail never picks up the donor's other peaks, or, on a side with another
+    drawn piece of the channel (towards: left, right), falling."""
     out = np.full(wl.size, np.nan)
     inside = (wl >= x[0]) & (wl <= x[-1])
     out[inside] = up.interpolate_to_common_axis(np.vstack([x, y]), wl[inside])
@@ -91,7 +111,8 @@ def donor_extend(x, y, wl, donor):
         side = wl < x[0] if end == 0 else wl > x[-1]
         tail = donor[side] + (y[end] - np.interp(x[end], wl, donor))
         tail = np.minimum(tail, y[end])
-        out[side] = np.minimum.accumulate(tail[::-1])[::-1] if end == 0 else np.minimum.accumulate(tail)
+        fall = falling if towards[0 if end == 0 else 1] else np.minimum.accumulate
+        out[side] = fall(tail[::-1])[::-1] if end == 0 else fall(tail)
     return out
 
 
@@ -114,7 +135,8 @@ def load_sensitivity(stock_dir, ch, tails):
     for s in segs:
         x, y = s
         if isinstance(tails, dict):
-            v = donor_extend(x, y, WL, donor_sensitivity(tails["donor"])[:, "rgb".index(ch)])
+            towards = (any(o[0][-1] < x[0] for o in segs), any(o[0][0] > x[-1] for o in segs))
+            v = donor_extend(x, y, WL, donor_sensitivity(tails["donor"])[:, "rgb".index(ch)], towards)
         elif tails == "extrapolate":
             v = tail_extend(x, y, WL)
         else:
