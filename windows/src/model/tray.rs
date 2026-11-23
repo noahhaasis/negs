@@ -182,7 +182,7 @@ impl Model {
     pub fn tray_sections(&self) -> Vec<Section> {
         let Some(tray) = self.tray() else { return vec![] };
         let (paper, read_as) = (tray.paper, tray.read_as);
-        let (mut films, papers) = (self.listed_films(), self.papers());
+        let (mut films, papers) = (self.listed_films(), self.listed_papers());
         // Reading a negative: the colour negatives only.
         if read_as {
             films.retain(|s| crate::negative::readable(s));
@@ -191,7 +191,8 @@ impl Model {
         let entry = |s: &Stock| Entry::new(s.id.clone(), s.name.clone());
         let matched = groups.into_iter().map(|g| Section::group(g.title, g.stocks.into_iter().map(entry).collect())).collect();
         // Films listed only (Settings › Fotufilm films).
-        let favourites = self.favorite_stocks(paper).into_iter().filter(|s| paper || films.iter().any(|f| f.id == s.id)).map(entry).collect();
+        let listed = if paper { &papers } else { &films };
+        let favourites = self.favorite_stocks(paper).into_iter().filter(|s| listed.iter().any(|f| f.id == s.id)).map(entry).collect();
         rules::with_scan(rules::sections(matched, favourites, &tray.query), paper, read_as, &tray.query, crate::negative::NAME)
     }
 

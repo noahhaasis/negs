@@ -24,7 +24,7 @@ for path in (root / 'data/profiles').glob('*.json'):
     info = profile['info']
     paper = info['support'] == 'paper' or info['stage'] == 'printing'
     bw = info.get('channel_model') == 'bw'
-    cinema = paper and ('Vision' in info['name'] or 'Print Film' in info['name'])
+    cinema = info['support'] == 'film' and info['stage'] == 'printing'
     group = ('Black & White' if bw else 'Motion Picture Print' if cinema else 'Color Paper') if paper else ('Black & White' if bw else 'Color Slide' if info['type'] == 'positive' else 'Motion Picture' if info.get('target_print') in ('kodak_2383', 'kodak_2393', 'kodak_2302') else 'Color Negative')
     stocks.append(dict(id=path.stem, name=info['name'], paper=paper, positive=info['type'] == 'positive', bw=bw, group=group, target=info.get('target_print') or '', times=profile['data'].get('development_time') or [], **({} if paper else {'grain': grain[path.stem]}),
                        **({'negs_built': True} if profile.get('metadata', {}).get('version', '').startswith('negs-') else {})))

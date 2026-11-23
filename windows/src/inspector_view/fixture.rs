@@ -63,6 +63,7 @@ pub fn stock(id: &str, name: &str, paper: bool, bw: bool) -> Stock {
         fotufilm: false,
         manufacturer_data: true,
         negs_built: false,
+        cine_print: false,
     }
 }
 

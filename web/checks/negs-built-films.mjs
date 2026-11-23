@@ -1,7 +1,8 @@
 // node web/cdp.mjs http://localhost:8137/ web/checks/negs-built-films.mjs 3000
 // Settings › Show Negs-built films (macOS NegsBuiltFilms): off by default, the
-// films Negs prepared itself from datasheets are left out of the Film menu, the
-// grid and its search; on, they are listed; the film in use stays listed.
+// films and print films Negs prepared itself from datasheets are left out of
+// the Film and Paper menus, the grids and the film search; on, they are
+// listed; the stock in use stays listed.
 export default async ({ evaluate }) => {
   const check = (ok, message) => { if (!ok) throw new Error(message); };
   const r = await evaluate(`
@@ -18,9 +19,12 @@ export default async ({ evaluate }) => {
     const setting = document.getElementById('negs-built-films');
     const tick = async (on) => { setting.checked = on; setting.dispatchEvent(new Event('change')); await quiet(); };
     const menu = () => [...document.querySelectorAll('#film optgroup:not(.favorites) option')].map((o) => o.value);
+    const paperFold = document.querySelectorAll('.stock-fold')[1];
+    const papers = () => [...document.querySelectorAll('#paper optgroup:not(.favorites) option')].map((o) => o.value);
+    const paperGrid = () => [...paperFold.querySelectorAll('.stock-grid:not(.stock-favorites) .stock-cell:not([hidden]) .stock-tile')].map((b) => b.dataset.id);
     const grid = () => [...fold.querySelectorAll('.stock-grid:not(.stock-favorites) .stock-cell:not([hidden]) .stock-tile')].map((b) => b.dataset.id);
     const type = (text) => { field.value = text; field.dispatchEvent(new Event('input')); };
-    const look = () => ({ menu: menu(), grid: grid() });
+    const look = () => ({ menu: menu(), grid: grid(), papers: papers(), paperGrid: paperGrid() });
     const off = look();
     type('eterna 250d');
     const search = grid();
@@ -28,7 +32,7 @@ export default async ({ evaluate }) => {
     await tick(true);
     const on = look();
     await tick(false);
-    negs.start('fujifilm_eterna_250d', 'kodak_2383'); await quiet();
+    negs.start('fujifilm_eterna_250d', 'fujifilm_eterna_cp_3513di'); await quiet();
     const inUse = look();
     negs.start('kodak_portra_400', 'kodak_portra_endura'); await quiet();
     const after = look();
@@ -41,6 +45,12 @@ export default async ({ evaluate }) => {
     check(has(r.on[view], "fujifilm_eterna_250d") && r.on[view].length > r.off[view].length, `${view}: on lists them`);
     check(has(r.inUse[view], "fujifilm_eterna_250d") && r.inUse[view].length === r.off[view].length + 1, `${view}: the film in use stays listed`);
     check(!has(r.after[view], "fujifilm_eterna_250d"), `${view}: and leaves once another is chosen`);
+  }
+  for (const view of ["papers", "paperGrid"]) {
+    check(!has(r.off[view], "fujifilm_eterna_cp_3513di") && has(r.off[view], "kodak_2383"), `${view}: off by default hides the Negs-built prints only`);
+    check(has(r.on[view], "fujifilm_eterna_cp_3513di") && r.on[view].length === r.off[view].length + 5, `${view}: on lists the five`);
+    check(has(r.inUse[view], "fujifilm_eterna_cp_3513di") && r.inUse[view].length === r.off[view].length + 1, `${view}: the print in use stays listed`);
+    check(!has(r.after[view], "fujifilm_eterna_cp_3513di"), `${view}: and leaves once another is chosen`);
   }
   check(!has(r.search, "fujifilm_eterna_250d"), "the search leaves hidden films out");
   check(r.saved === "false", "the choice is remembered");

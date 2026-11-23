@@ -202,7 +202,7 @@ lifecycle_test! {
         model.shutdown();
         let mut h = Harness::start(harness::prefs(false)).unwrap();
         assert_eq!(h.model().films().len(), 69);
-        assert_eq!(h.model().papers().len(), 10);
+        assert_eq!(h.model().papers().len(), 15);
         let saved = crate::session::CatalogCache::load(&paths.helper, &paths.data).unwrap();
         assert_eq!(film_count(&saved), 69, "the helper's catalog replaced the file");
     }
@@ -220,14 +220,14 @@ const FOTUFILM: [&str; 29] = [
 ];
 
 lifecycle_test! {
-    /// Fotufilm: the helper lists 69 films (52 + the 5 datasheet Eternas + 5 Data Guide negatives + 7 Fujifilm slides) and 10 papers; every film lands in
+    /// Fotufilm: the helper lists 69 films (52 + the 5 datasheet Eternas + 5 Data Guide negatives + 7 Fujifilm slides) and 15 papers (10 + the 5 Eterna-CP prints); every film lands in
     /// exactly one grid group; the 29 new films are there with their own 35mm
     /// strips (full and half frame), and every film's strip loads.
     fn the_catalog_has_the_fotufilm_films_grouped_with_their_borders() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         let m = h.model();
         let (films, papers) = (m.films(), m.papers());
-        assert_eq!((films.len(), papers.len()), (69, 10));
+        assert_eq!((films.len(), papers.len()), (69, 15));
         let groups = state::film_groups(&films, &papers);
         let grouped: Vec<&str> = groups.iter().flat_map(|g| g.stocks.iter().map(|s| s.id.as_str())).collect();
         let mut sorted = grouped.clone();

@@ -282,8 +282,8 @@ window.NEGS_I18N.dict = {
   "Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.":
     "从 Fotufilm 移植的胶片。“仅限数据表”会隐藏其中八款根据样片而非厂商数据建模的胶片。已在使用被隐藏胶片的照片会保留它。",
   "Show Negs-built films": "显示 Negs 自制胶片",
-  "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; and the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides. Photos already using one keep it.":
-    "Negs 根据富士数据表自行制作、仍在核查中的胶片：Eterna 电影胶片；Pro 160S、160C 和 800Z、Superia 1600 与 True Definition 400；以及 Velvia 100F、Provia 400F 和 400X、Sensia 与 64T 反转片。已在使用其中某款的照片会保留它。",
+  "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it.":
+    "Negs 根据富士数据表自行制作、仍在核查中的胶片：Eterna 电影胶片；Pro 160S、160C 和 800Z、Superia 1600 与 True Definition 400；Velvia 100F、Provia 400F 和 400X、Sensia 与 64T 反转片；以及 Eterna-CP 电影拷贝片。已在使用其中某款的照片会保留它。",
   "Match new RAWs to camera brightness": "新 RAW 匹配相机亮度",
   "Start each RAW you open as bright as the camera showed it (Prep › Match camera brightness).":
     "打开的每张 RAW 都以相机呈现的亮度起步（预处理 › 匹配相机亮度）。",

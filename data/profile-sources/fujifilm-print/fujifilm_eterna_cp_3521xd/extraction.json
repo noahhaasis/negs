@@ -1,0 +1,412 @@
+{
+ "stock": "fujifilm_eterna_cp_3521xd",
+ "source": {
+  "file": "eterna_cp_type3521xd.pdf",
+  "sha256": "bcac8295757c75e439af15c9a76efdb1acbed79be7371ee900681d30382e105b",
+  "document": "FUJICOLOR POSITIVE FILM ETERNA-CP 3521XD brochure, Ref. No. KB-0601E",
+  "edition": "(c) 2006 FUJIFILM Corporation"
+ },
+ "panels": {
+  "characteristic": {
+   "page": 0,
+   "page_rotation": 0,
+   "frame_pdf": [
+    61.76753234863281,
+    53.8951416015625,
+    271.62835693359375,
+    221.2569580078125
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 0.023825413696292756,
+     "offset": -1.471656077143945,
+     "span": 5.00002096438182,
+     "gridline_pdf": [
+      82.7543,
+      103.7402,
+      124.7265,
+      145.7124,
+      166.6982,
+      187.684,
+      208.6709,
+      229.6557,
+      250.6425
+     ],
+     "gridline_residual": [
+      1e-06,
+      -3e-06,
+      5e-06,
+      1e-06,
+      -3e-06,
+      -6e-06,
+      1.3e-05,
+      -1.4e-05,
+      6e-06
+     ],
+     "frame_pdf": [
+      61.76753234863281,
+      271.62835693359375
+     ],
+     "frame_value": [
+      -1.9065938622997436e-05,
+      5.000001898443197
+     ],
+     "worst_over_span": 2.727408240022121e-06,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square"
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.029875424465085728,
+     "offset": 6.610132938047356,
+     "span": 5.000005304384468,
+     "gridline_pdf": [
+      70.631,
+      87.3668,
+      104.1036,
+      120.8395,
+      137.5763,
+      154.3116,
+      171.0475,
+      187.7843,
+      204.5201
+     ],
+     "gridline_residual": [
+      2e-06,
+      1.2e-05,
+      -7e-06,
+      2e-06,
+      -1.7e-05,
+      7e-06,
+      1.7e-05,
+      -3e-06,
+      7e-06
+     ],
+     "frame_pdf": [
+      53.8951416015625,
+      221.2569580078125
+     ],
+     "frame_value": [
+      4.999992706094776,
+      -1.2598289690579634e-05
+     ],
+     "frame_residual": [
+      -7e-06,
+      -1.3e-05
+     ],
+     "worst_over_span": 3.44797679385287e-06,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "density_curve_b": {
+     "paths": [
+      166
+     ],
+     "points": 128,
+     "x_range": [
+      -1.9065938622997436e-05,
+      2.499997414777159
+     ],
+     "y_range": [
+      0.14158941236001787,
+      4.700231916381375
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      "167.0"
+     ],
+     "points": 128,
+     "x_range": [
+      0.9737283838695296,
+      3.5394276212890556
+     ],
+     "y_range": [
+      0.08177227561476652,
+      4.844138685106019
+     ]
+    },
+    "density_curve_r": {
+     "paths": [
+      168
+     ],
+     "points": 128,
+     "x_range": [
+      2.1020036511229243,
+      4.435870445114852
+     ],
+     "y_range": [
+      0.08342213742859617,
+      4.448420599430051
+     ]
+    }
+   }
+  },
+  "spectral_density": {
+   "page": 0,
+   "page_rotation": 0,
+   "frame_pdf": [
+    347.79583740234375,
+    348.3507080078125,
+    516.0599975585938,
+    566.2803955078125
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 2.052209529535559,
+     "offset": -336.72248630154326,
+     "span": 345.3133129519538,
+     "gridline_pdf": [
+      358.3549,
+      408.7763,
+      456.267,
+      504.9291
+     ],
+     "gridline_residual": [
+      -1.303106,
+      2.172145,
+      -0.366942,
+      -0.502097
+     ],
+     "frame_pdf": [
+      347.79583740234375,
+      516.0599975585938
+     ],
+     "frame_value": [
+      377.0274455483464,
+      722.3407585003001
+     ],
+     "worst_over_span": 0.006290358787713349,
+     "gate": 0.007,
+     "pass": 1.0,
+     "gate_reason": "Hand-drafted grid shared by four brochures (3521XD, 3512, 3514DI, 3523XD): the 400/500/600/700 nm gridlines are 50.4, 47.5 and 48.7 pt apart; the worst is 0.63 % of span (2 nm). Physical check: the dye peaks fall within 3 nm of 3513DI's precisely drawn chart (D12)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.009038191653447816,
+     "offset": 5.126306300173343,
+     "span": 1.9696902826009908,
+     "gridline_pdf": [
+      401.2208,
+      456.5402,
+      511.8624
+     ],
+     "gridline_residual": [
+      -4e-06,
+      9e-06,
+      -4e-06
+     ],
+     "frame_pdf": [
+      348.3507080078125,
+      566.2803955078125
+     ],
+     "frame_value": [
+      1.9778458385844946,
+      0.008155555983504037
+     ],
+     "worst_over_span": 4.48108980057342e-06,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_gray": {
+     "paths": [
+      26
+     ],
+     "points": 442,
+     "x_range": [
+      377.8451227827707,
+      721.1493145888655
+     ],
+     "y_range": [
+      0.5688941455768042,
+      1.1668976230225039
+     ]
+    },
+    "dye_density_c": {
+     "paths": [
+      27
+     ],
+     "points": 253,
+     "x_range": [
+      487.7225052694079,
+      722.5441757534718
+     ],
+     "y_range": [
+      0.1438063638287863,
+      1.1109208540125763
+     ]
+    },
+    "dye_density_m": {
+     "paths": [
+      28
+     ],
+     "points": 442,
+     "x_range": [
+      377.8451227827707,
+      648.7247560162523
+     ],
+     "y_range": [
+      0.09758422574203252,
+      0.8988410990818689
+     ]
+    },
+    "dye_density_y": {
+     "paths": [
+      29
+     ],
+     "points": 316,
+     "x_range": [
+      377.2849737949726,
+      698.1321012619946
+     ],
+     "y_range": [
+      0.02983309377732013,
+      0.7073989684257747
+     ]
+    }
+   }
+  },
+  "sensitivity": {
+   "page": 0,
+   "page_rotation": 0,
+   "frame_pdf": [
+    61.92964172363281,
+    556.1934814453125,
+    271.66156005859375,
+    672.9844970703125
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 1.6359241939041758,
+     "offset": 288.99177031712475,
+     "span": 343.1055194380974,
+     "gridline_pdf": [
+      67.5273,
+      98.3969,
+      129.2661,
+      159.7924,
+      190.3193,
+      220.5034,
+      251.0297
+     ],
+     "gridline_residual": [
+      -0.538689,
+      -0.038316,
+      0.461258,
+      0.40008,
+      0.339702,
+      -0.281428,
+      -0.342606
+     ],
+     "frame_pdf": [
+      61.92964172363281,
+      271.66156005859375
+     ],
+     "frame_value": [
+      390.3039695326332,
+      733.4094889707305
+     ],
+     "worst_over_span": 0.0015700393853036985,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.02557442557442571,
+     "offset": 17.198005119880207,
+     "span": 2.986863136863153,
+     "gridline_pdf": [
+      594.2657,
+      633.3673
+     ],
+     "gridline_residual": [
+      0.0,
+      0.0
+     ],
+     "frame_pdf": [
+      556.1934814453125,
+      672.9844970703125
+     ],
+     "frame_value": [
+      2.9736763236763366,
+      -0.013186813186816693
+     ],
+     "worst_over_span": 2.3788928491257305e-15,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Relative spectral sensitivity (log): each channel's level is renormalised (D12 step 7), so only the scale matters; it is set by the two labelled gridlines (2.0, 1.0)"
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      12
+     ],
+     "points": 568,
+     "x_range": [
+      391.34559314047056,
+      503.86251014689066
+     ],
+     "y_range": [
+      0.30289710289710214,
+      2.5555808407120466
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      13
+     ],
+     "points": 316,
+     "x_range": [
+      447.60365224812546,
+      570.0407560534205
+     ],
+     "y_range": [
+      0.17542457542457157,
+      1.7343108624449783
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      "14.0"
+     ],
+     "points": 127,
+     "x_range": [
+      644.9849356044349,
+      714.5915679941706
+     ],
+     "y_range": [
+      0.23586413586413357,
+      0.7014332274563344
+     ]
+    },
+    "log_sensitivity_r_blue": {
+     "paths": [
+      "15.0"
+     ],
+     "points": 64,
+     "x_range": [
+      390.86871484761866,
+      433.3004986270082
+     ],
+     "y_range": [
+      0.25819180819180687,
+      1.2495004995005026
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}

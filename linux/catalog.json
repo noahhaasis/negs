@@ -2317,6 +2317,61 @@
       "times": []
     },
     {
+      "id": "fujifilm_eterna_cp_3512",
+      "name": "Fujifilm Eterna-CP 3512",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_eterna_cp_3513di",
+      "name": "Fujifilm Eterna-CP 3513DI",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_eterna_cp_3514di",
+      "name": "Fujifilm Eterna-CP 3514DI",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_eterna_cp_3521xd",
+      "name": "Fujifilm Eterna-CP 3521XD",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_eterna_cp_3523xd",
+      "name": "Fujifilm Eterna-CP 3523XD",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
       "id": "kodak_2383",
       "name": "Kodak Vision 2383",
       "paper": true,
