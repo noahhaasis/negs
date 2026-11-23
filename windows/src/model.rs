@@ -16,6 +16,7 @@ use crate::border::{BorderColor, BorderSettings, BorderStyle};
 use crate::crop::{CropSession, CropSettings, Size};
 use crate::engine::{self, EngineClient, EnginePaths, ExportEngine, ExportHandle, ExportRequest};
 use crate::histogram::{Histogram, Waveform};
+use crate::inspector_view;
 use crate::json;
 use crate::picture::Picture;
 use crate::presets::{self, PresetFile, Status as PresetStatus};
@@ -26,6 +27,10 @@ use crate::state::{self, EditState, Stock};
 use crate::tone_graph::{self, Controls, Curve, FilmHistogram};
 use spektrafilm_io::image_size::PHOTO_LONG_SIDE_RANGE;
 use crate::ui::{self, App};
+// The export's choices the inspector shows; pure, so they live with it.
+pub use crate::inspector_view::output::{BorderWidth, COLOR_SPACES, OutputFormat, PROPHOTO, QUALITY_RANGE, percent};
+#[cfg(test)]
+use crate::inspector_view::output::PROPHOTO_FALLBACK;
 
 // The library: sidecars, ratings, flags and per-photograph edits.
 mod batch;
@@ -77,65 +82,9 @@ pub fn is_photo(path: &Path) -> bool {
         .is_some_and(|e| RAW_EXTENSIONS.contains(&e.as_str()) || IMAGE_EXTENSIONS.contains(&e.as_str()))
 }
 
-/// A reduction such as 68%; below 10% with one decimal.
-pub fn percent(fraction: f64) -> String {
-    format!("{:.*}%", if fraction < 0.1 { 1 } else { 0 }, fraction * 100.0)
-}
-
 pub fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
-
-/// The image format a save or export writes; the engine picks the encoder
-/// from the file extension.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutputFormat {
-    Png,
-    Jpeg,
-    Tiff,
-}
-
-impl OutputFormat {
-    pub const ALL: [OutputFormat; 3] = [OutputFormat::Png, OutputFormat::Jpeg, OutputFormat::Tiff];
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Png => "png",
-            Self::Jpeg => "jpeg",
-            Self::Tiff => "tiff",
-        }
-    }
-    pub fn from_key(key: &str) -> Self {
-        Self::ALL.into_iter().find(|f| f.key() == key).unwrap_or(Self::Png)
-    }
-    pub fn extension(self) -> &'static str {
-        match self {
-            Self::Png => "png",
-            Self::Jpeg => "jpg",
-            Self::Tiff => "tif",
-        }
-    }
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Png => "PNG (lossless)",
-            Self::Jpeg => "JPEG (smaller)",
-            Self::Tiff => "TIFF (lossless)",
-        }
-    }
-    pub fn pattern(self) -> &'static str {
-        match self {
-            Self::Png => "*.png",
-            Self::Jpeg => "*.jpg;*.jpeg",
-            Self::Tiff => "*.tif;*.tiff",
-        }
-    }
-}
-
-/// The colour spaces a save offers, as colour names them.
-pub const COLOR_SPACES: [&str; 4] = ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB"];
-/// ProPhoto RGB bands at 8 bits, so it needs 16; Adobe RGB stands in.
-pub const PROPHOTO: usize = 3;
-pub const PROPHOTO_FALLBACK: usize = 2;
-pub const QUALITY_RANGE: (u32, u32) = (1, 100);
 
 /// How a save encodes the file: bits per channel, colour space and JPEG
 /// quality. The colour space is the one the file is in; ProPhoto RGB at
@@ -150,8 +99,7 @@ pub struct SaveSettings {
 impl SaveSettings {
     /// The colour space a save with `bit_depth` uses when `chosen` was picked.
     pub fn effective_space(chosen: usize, bit_depth: u32) -> usize {
-        let chosen = chosen.min(COLOR_SPACES.len() - 1);
-        if chosen == PROPHOTO && bit_depth == 8 { PROPHOTO_FALLBACK } else { chosen }
+        crate::inspector_view::output::effective_space(chosen, bit_depth)
     }
     pub fn space_name(self) -> &'static str {
         COLOR_SPACES[self.color_space.min(COLOR_SPACES.len() - 1)]
@@ -919,15 +867,10 @@ impl Model {
     }
     /// The camera colour filter in front of the lens, or `ColorFilter::NONE`.
     pub fn color_filter(&self) -> &str {
-        match self.value(state::ColorFilter::PATH).as_str() {
-            Some(key) if !key.is_empty() => key,
-            _ => state::ColorFilter::NONE,
-        }
+        self.color_filter_facts().key()
     }
-    /// The catalog's filter in front of the lens; None for none.
-    pub fn chosen_color_filter(&self) -> Option<&state::ColorFilter> {
-        let key = self.color_filter();
-        self.color_filters.iter().find(|f| f.key == key)
+    fn color_filter_facts(&self) -> inspector_view::ColorFilters<'_> {
+        inspector_view::ColorFilters { params: self.params(), filters: &self.color_filters, catalog: &self.catalog }
     }
     /// Lab › Camera › Color Filter: puts the glass `key` in front of the lens
     /// (or takes it off), one undo step.
@@ -944,20 +887,8 @@ impl Model {
         let key = if on { self.last_color_filter.clone() } else { state::ColorFilter::NONE.to_string() };
         self.set_color_filter(&key);
     }
-    /// How many stops the filter takes on the current film; None for colour
-    /// films and for a film the glass leaves blind.
-    pub fn color_filter_stops(&self, key: &str) -> Option<f64> {
-        let film = &self.state.film;
-        let profile = self.catalog["profiles"].as_array()?.iter().find(|p| p["id"].as_str() == Some(film.as_str()))?;
-        profile["color_filter_stops"][key].as_f64()
-    }
-    /// The module shows for B&W films, or while a filter is set (by a
-    /// preset, or kept from a B&W film), with a warning on colour film.
-    pub fn shows_color_filter(&self) -> bool {
-        !self.color_filters.is_empty() && (self.film_is_bw() || self.color_filter() != state::ColorFilter::NONE)
-    }
     pub fn filter_link(&self) -> state::FilterLink {
-        state::FilterLink::from_key(&self.prefs.filter_shift_link)
+        self.inspector_prefs().filter_link()
     }
     /// Enlarger › Shifts move.
     pub fn set_filter_link(&mut self, link: state::FilterLink) {
@@ -1048,20 +979,12 @@ impl Model {
         self.state.crop.size_of(if self.image.is_some() { self.image_size } else { self.placeholder_size })
     }
     pub fn size_mode(&self) -> state::SizeMode {
-        state::size_mode(&self.state.params)
-    }
-    /// The frame and photograph the current edit develops, uncapped, with the
-    /// engine's resolver; None until the source's size is known.
-    pub fn resolved_size(&self) -> Option<Result<spektrafilm_io::image_size::ResolvedSize, spektrafilm_io::image_size::SizeError>> {
-        (self.source_size.0 > 0).then(|| state::resolve_size(self.source_size, &self.state.params, &self.state.crop))
+        self.params().size_mode()
     }
     /// The exported photograph, cropped, before rotation, borders and export
     /// reductions; zero until known.
     pub fn photograph_size(&self) -> Size {
-        match self.resolved_size() {
-            Some(Ok(size)) => Size::new(size.photo.0 as f64, size.photo.1 as f64),
-            _ => Size::ZERO,
-        }
+        inspector_view::facts::photograph_size(self.source_size, &self.state)
     }
     /// The crop being drawn, resolved like an export: with a target, a
     /// smaller crop needs a larger frame. None before the source's size is known.
@@ -1209,38 +1132,21 @@ impl Model {
 
     // MARK: Parameters
 
+    /// The edit with its defaults and catalog (`inspector_view::Params`,
+    /// which holds the readers below).
+    pub fn params(&self) -> inspector_view::Params<'_> {
+        inspector_view::Params { state: &self.state, defaults: &self.defaults, stocks: &self.stocks }
+    }
     pub fn value(&self, path: &str) -> &Value {
-        let value = self.state.value(path);
-        match state::grain_lane(path) {
-            Some((field, index)) if value.is_null() => self.grain_preset(field, index),
-            _ => value,
-        }
+        self.params().value(path)
     }
     /// A grain preset lane defaults to the film's preset, not the engine's
     /// null.
     pub fn default_value(&self, path: &str) -> &Value {
-        match state::grain_lane(path) {
-            Some((field, index)) => self.grain_preset(field, index),
-            None => json::get(&self.defaults, path),
-        }
+        self.params().default_value(path)
     }
     fn film_stock(&self) -> Option<&Stock> {
-        self.stocks.iter().find(|s| !s.paper && s.id == self.state.film)
-    }
-    pub fn film_is_bw(&self) -> bool {
-        self.film_stock().is_some_and(|s| s.bw)
-    }
-    fn grain_preset(&self, field: &str, index: usize) -> &Value {
-        static NULL: Value = Value::Null;
-        self.film_stock().map_or(&NULL, |s| json::get(&s.grain, &format!("{field}.{index}")))
-    }
-    pub fn is_modified(&self, path: &str) -> bool {
-        let (current, original) = (self.value(path), self.default_value(path));
-        if let (Some(a), Some(b)) = (current.as_f64(), original.as_f64()) {
-            // Rust defaults arrive as widened f32 values; slider edits are decimal.
-            return (a - b).abs() > 1e-6 * b.abs().max(1.0);
-        }
-        !json::same(current, original)
+        self.params().film_stock()
     }
     pub fn set(&mut self, path: &str, value: Value) {
         let mut next = self.state.clone();
@@ -1519,8 +1425,9 @@ impl Model {
     }
 
     /// Whether the Lab shows the long-edge slider.
+    #[cfg(test)]
     pub fn film_format_custom(&self) -> bool {
-        self.custom_film_format || state::film_format(json::number(self.value(state::FILM_FORMAT.path()))).is_none()
+        self.params().film_format_custom(self.custom_film_format)
     }
 
     /// Stars a film or paper, or unstars it; favourites lead the grid.
@@ -2753,7 +2660,7 @@ impl Model {
     /// The colour space the preview develops in: the one Save and Export
     /// last used, so editing shows the export's gamut.
     pub fn preview_space(&self) -> &str {
-        COLOR_SPACES.iter().find(|s| **s == self.prefs.color_space).copied().unwrap_or(COLOR_SPACES[0])
+        inspector_view::facts::preview_space(&self.prefs.color_space)
     }
 
     /// The edit as the helper renders it: in the preview space. Sessions
@@ -3429,69 +3336,43 @@ impl Model {
 
     // MARK: Camera brightness
 
+    /// Prep › Match camera brightness and the Exposure above it
+    /// (`inspector_view::Brightness`, which holds the readers below).
+    pub fn brightness(&self) -> inspector_view::Brightness<'_> {
+        inspector_view::Brightness {
+            params: self.params(),
+            is_raw: self.is_raw,
+            failure: self.brightness_failure.as_ref(),
+            generation: self.source_generation,
+            matching: self.matching_brightness,
+        }
+    }
+
     /// Prep › Match camera brightness for this photograph.
     pub fn matches_brightness(&self) -> bool {
-        self.state.brightness_match.is_some()
+        self.brightness().matches()
     }
 
     /// Why matching can't run for this photograph, or None.
+    #[cfg(test)]
     pub fn brightness_match_unavailable(&self) -> Option<String> {
-        if let Some((generation, None, message)) = &self.brightness_failure
-            && *generation == self.source_generation
-        {
-            return Some(message.clone());
-        }
-        if !self.is_raw && json::string(self.value("io.input_interpretation.mode")) != "auto" {
-            return Some("Matching reads the file’s own colour tags. Set Input Colour to Automatic to use it.".into());
-        }
-        None
-    }
-
-    fn brightness_match_failed_here(&self) -> bool {
-        matches!(&self.brightness_failure, Some((generation, Some(inputs), _))
-            if *generation == self.source_generation && json::same(inputs, &state::match_inputs(&self.state)))
+        self.brightness().unavailable()
     }
 
     /// On, possible, and not failed for the current settings: the meter then
     /// only sets where the highlight limit starts.
     pub fn brightness_match_active(&self) -> bool {
-        self.matches_brightness() && self.brightness_match_unavailable().is_none() && !self.brightness_match_failed_here()
+        self.brightness().active()
     }
 
     /// On and not yet solved for the current settings. Save and Export wait.
     pub fn brightness_match_pending(&self) -> bool {
-        let Some(m) = &self.state.brightness_match else { return false };
-        if !self.brightness_match_active() {
-            return false;
-        }
-        m.ev.is_none() || !m.inputs.as_ref().is_some_and(|inputs| json::same(inputs, &state::match_inputs(&self.state)))
+        self.brightness().pending()
     }
 
     /// The note under the Exposure slider.
     pub fn brightness_match_note(&self) -> Option<String> {
-        if !self.matches_brightness() {
-            return None;
-        }
-        if let Some(unavailable) = self.brightness_match_unavailable() {
-            return Some(unavailable);
-        }
-        if self.brightness_match_failed_here()
-            && let Some((_, _, message)) = &self.brightness_failure
-        {
-            return Some(message.clone());
-        }
-        if self.brightness_match_pending() || self.matching_brightness {
-            return Some("Matching…".into());
-        }
-        let m = self.state.brightness_match.as_ref()?;
-        let ev = m.ev?;
-        let value = format!("{}{:.2}", if ev >= 0.0 { "+" } else { "−" }, ev.abs());
-        let reference = if self.is_raw { "the camera" } else { "the original" };
-        Some(if m.highlight_limited {
-            format!("Starts at {value} EV to match {reference}, held back to protect highlights.")
-        } else {
-            format!("Starts at {value} EV to match {reference}.")
-        })
+        self.brightness().note()
     }
 
     /// Turns matching on (from the match, Exposure back to 0) or off (the
@@ -3511,18 +3392,18 @@ impl Model {
     }
 
     fn matched_ev(&self) -> f64 {
-        if self.brightness_match_active() { self.state.brightness_match.as_ref().and_then(|m| m.ev).unwrap_or(0.0) } else { 0.0 }
+        self.brightness().matched_ev()
     }
 
     /// The Exposure slider's range: the engine's total stays within ±3 EV.
     pub fn exposure_offset_range(&self) -> (f64, f64) {
-        let matched = self.matched_ev();
-        (state::PREP_EXPOSURE_RANGE.0 - matched, state::PREP_EXPOSURE_RANGE.1 - matched)
+        self.brightness().exposure_offset_range()
     }
 
     /// The Exposure slider: the user's exposure above the match.
+    #[cfg(test)]
     pub fn exposure_offset(&self) -> f64 {
-        json::number(self.value(state::PREP_EXPOSURE)) - self.matched_ev()
+        self.brightness().exposure_offset()
     }
 
     pub fn set_exposure_offset(&mut self, value: f64) {
@@ -3534,8 +3415,9 @@ impl Model {
         self.set(state::PREP_EXPOSURE, json::num(total.clamp(min, max)));
     }
 
+    #[cfg(test)]
     pub fn exposure_offset_modified(&self) -> bool {
-        (json::number(self.value(state::PREP_EXPOSURE)) - self.matched_ev()).abs() > 1e-6
+        self.brightness().exposure_offset_modified()
     }
 
     pub fn reset_exposure_offset(&mut self) {
@@ -3546,8 +3428,59 @@ impl Model {
     /// Whether Prep shows Auto exposure and Metering: while matched the meter
     /// only sets where the highlight limit starts, so they show when matching
     /// is off or unavailable, or when changed.
+    #[cfg(test)]
     pub fn shows_meter(&self) -> bool {
-        !self.brightness_match_active() || self.is_modified("camera.auto_exposure") || self.is_modified("camera.auto_exposure_method")
+        self.brightness().shows_meter()
+    }
+
+    /// The preferences the inspector reads.
+    fn inspector_prefs(&self) -> inspector_view::Prefs<'_> {
+        let p = &self.prefs;
+        inspector_view::Prefs {
+            lab_all_controls: p.lab_all_controls,
+            more_adjustments: &p.more_adjustments,
+            match_new_photos: p.match_new_photos,
+            color_space: &p.color_space,
+            output_format: &p.output_format,
+            jpeg_quality: p.jpeg_quality,
+            png_bit_depth: p.png_bit_depth,
+            tiff_bit_depth: p.tiff_bit_depth,
+            filter_shift_link: &p.filter_shift_link,
+            tone_graph_channel: &p.tone_graph_channel,
+        }
+    }
+
+    /// Everything the inspector's view and the tabs' edit lists read
+    /// (`inspector_view::build`, `edits`).
+    pub fn inspector_facts(&self) -> inspector_view::InspectorFacts<'_> {
+        let negative = self.is_negative().then(|| inspector_view::NegativeFacts {
+            sentence: self.negative_sentence(),
+            warning: self.negative_warning(),
+            base: self.negative_base(),
+            flat_field: self.flat_field(),
+            busy: self.negative_busy(),
+            backlight_shown: self.negative.backlight_shown,
+        });
+        inspector_view::InspectorFacts {
+            params: self.params(),
+            color_filters: self.color_filter_facts(),
+            brightness: self.brightness(),
+            prefs: self.inspector_prefs(),
+            is_raw: self.is_raw,
+            lens_supported: self.lens_supported,
+            has_source: self.source.is_some(),
+            photo_size: self.photo_size(),
+            source_size: self.source_size,
+            preview_scale: self.preview_scale,
+            image_shown: self.image.is_some(),
+            size_error: self.size_error.as_deref(),
+            custom_film_format: self.custom_film_format,
+            balancing_print: self.balancing_print,
+            can_balance_print: self.can_balance_print(),
+            can_export: self.can_export(),
+            cropping: self.cropping(),
+            negative,
+        }
     }
 
     fn cancel_brightness_match(&mut self) {
@@ -4146,37 +4079,6 @@ impl Model {
         self.error = Some(format!("{error:#}"));
         self.status = "Could not complete the operation".into();
         self.mark(dirty::ERROR | dirty::STATUS);
-    }
-}
-
-/// The three border width settings, in percent of the long edge.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BorderWidth {
-    Mat,
-    Line,
-    Film,
-}
-
-impl BorderWidth {
-    pub fn range(self) -> (f64, f64, f64) {
-        match self {
-            BorderWidth::Mat | BorderWidth::Film => (0.0, 15.0, 0.1),
-            BorderWidth::Line => (0.05, 2.0, 0.05),
-        }
-    }
-    pub fn get(self, b: &BorderSettings) -> f64 {
-        match self {
-            BorderWidth::Mat => b.width,
-            BorderWidth::Line => b.line,
-            BorderWidth::Film => b.film_width,
-        }
-    }
-    pub fn set(self, b: &mut BorderSettings, value: f64) {
-        match self {
-            BorderWidth::Mat => b.width = value,
-            BorderWidth::Line => b.line = value,
-            BorderWidth::Film => b.film_width = value,
-        }
     }
 }
 

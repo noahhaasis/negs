@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 use crate::json;
-use crate::model::{COLOR_SPACES, Model};
+use crate::inspector_view::{COLOR_SPACES, InspectorFacts};
 use crate::state::{self, ADJUSTMENT_GROUPS, Adjustment, Section};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -60,95 +60,95 @@ pub const FILM_DEVELOPMENT: &str = "film_render.development_time";
 pub const PRINT_DEVELOPMENT: &str = "print_render.development_time";
 const CAMERA_LOOSE: [&str; 4] = ["camera.exposure_compensation_ev", "camera.film_format_mm", "camera.lens_blur_um", state::ColorFilter::PATH];
 
-fn control_modified(control: &Adjustment, model: &Model) -> bool {
-    !matches!(control, Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. }) && model.is_modified(control.path())
+fn control_modified(control: &Adjustment, facts: &InspectorFacts) -> bool {
+    !matches!(control, Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. }) && facts.is_modified(control.path())
 }
 
 /// A module's count: its switch, then its controls.
-pub fn group_count(index: usize, model: &Model) -> usize {
+pub fn group_count(index: usize, facts: &InspectorFacts) -> usize {
     let group = &ADJUSTMENT_GROUPS[index];
-    group.enable.is_some_and(|path| model.is_modified(path)) as usize + group.controls.iter().filter(|c| control_modified(c, model)).count()
+    group.enable.is_some_and(|path| facts.is_modified(path)) as usize + group.controls.iter().filter(|c| control_modified(c, facts)).count()
 }
 
-pub fn scan_film_modified(model: &Model) -> bool {
-    let positive = model.stocks.iter().find(|s| !s.paper && s.id == model.state.film).is_some_and(|s| s.positive);
-    json::boolean(model.value("io.scan_film")) != positive
+pub fn scan_film_modified(facts: &InspectorFacts) -> bool {
+    let positive = facts.stocks().iter().find(|s| !s.paper && s.id == facts.state().film).is_some_and(|s| s.positive);
+    json::boolean(facts.value("io.scan_film")) != positive
 }
 
 /// The Lab's Output module: the preview's colour space and its curve.
-pub fn output_count(model: &Model) -> usize {
-    (model.preview_space() != COLOR_SPACES[0]) as usize + model.is_modified("io.output_cctf_encoding") as usize
+pub fn output_count(facts: &InspectorFacts) -> usize {
+    (facts.preview_space() != COLOR_SPACES[0]) as usize + facts.is_modified("io.output_cctf_encoding") as usize
 }
 
-pub fn section_count(section: Section, model: &Model) -> usize {
-    let groups: usize = ADJUSTMENT_GROUPS.iter().enumerate().filter(|(_, g)| g.section == section).map(|(i, _)| group_count(i, model)).sum();
+pub fn section_count(section: Section, facts: &InspectorFacts) -> usize {
+    let groups: usize = ADJUSTMENT_GROUPS.iter().enumerate().filter(|(_, g)| g.section == section).map(|(i, _)| group_count(i, facts)).sum();
     groups
         + match section {
-            Section::Camera => CAMERA_LOOSE.iter().filter(|p| model.is_modified(p)).count(),
-            Section::Film => model.is_modified(FILM_DEVELOPMENT) as usize,
-            Section::Print => scan_film_modified(model) as usize + model.is_modified(PRINT_DEVELOPMENT) as usize,
-            Section::Scan => output_count(model),
+            Section::Camera => CAMERA_LOOSE.iter().filter(|p| facts.is_modified(p)).count(),
+            Section::Film => facts.is_modified(FILM_DEVELOPMENT) as usize,
+            Section::Print => scan_film_modified(facts) as usize + facts.is_modified(PRINT_DEVELOPMENT) as usize,
+            Section::Scan => output_count(facts),
         }
 }
 
-pub fn brightness_count(model: &Model) -> usize {
-    (model.matches_brightness() != model.prefs.match_new_photos) as usize
-        + model.exposure_offset_modified() as usize
-        + ["camera.auto_exposure", "camera.auto_exposure_method"].iter().filter(|p| model.is_modified(p)).count()
+pub fn brightness_count(facts: &InspectorFacts) -> usize {
+    (facts.matches_brightness() != facts.prefs.match_new_photos) as usize
+        + facts.exposure_offset_modified() as usize
+        + ["camera.auto_exposure", "camera.auto_exposure_method"].iter().filter(|p| facts.is_modified(p)).count()
 }
 
-fn prep_count(model: &Model) -> usize {
-    let mut count = brightness_count(model);
-    count += state::PREP_TONE.iter().chain(state::PREP_COLOR).chain(state::PREP_DETAIL).filter(|c| control_modified(c, model)).count();
-    if model.is_raw {
-        count += WHITE_BALANCE_PATHS.iter().filter(|p| model.is_modified(p)).count();
-        if model.lens_supported && model.is_modified(state::LENS_CORRECTION) {
+fn prep_count(facts: &InspectorFacts) -> usize {
+    let mut count = brightness_count(facts);
+    count += state::PREP_TONE.iter().chain(state::PREP_COLOR).chain(state::PREP_DETAIL).filter(|c| control_modified(c, facts)).count();
+    if facts.is_raw {
+        count += WHITE_BALANCE_PATHS.iter().filter(|p| facts.is_modified(p)).count();
+        if facts.lens_supported && facts.is_modified(state::LENS_CORRECTION) {
             count += 1;
         }
     } else {
-        count += INPUT_PATHS.iter().filter(|p| model.is_modified(p)).count();
+        count += INPUT_PATHS.iter().filter(|p| facts.is_modified(p)).count();
     }
     count
 }
 
-pub fn count(tab: Tab, model: &Model) -> usize {
+pub fn count(tab: Tab, facts: &InspectorFacts) -> usize {
     match tab {
-        Tab::Prep => prep_count(model),
-        Tab::Lab => [Section::Camera, Section::Film, Section::Print, Section::Scan].into_iter().map(|s| section_count(s, model)).sum(),
-        Tab::Output => model.is_modified(state::SIZE_TARGET) as usize + model.state.border.enabled as usize,
+        Tab::Prep => prep_count(facts),
+        Tab::Lab => [Section::Camera, Section::Film, Section::Print, Section::Scan].into_iter().map(|s| section_count(s, facts)).sum(),
+        Tab::Output => facts.is_modified(state::SIZE_TARGET) as usize + facts.state().border.enabled as usize,
     }
 }
 
 /// The controls on `tab` that are off their defaults, in the tab's order.
-/// Always as many as `count(tab, model)`.
-pub fn edits(tab: Tab, model: &Model, decimal: char) -> Vec<Edit> {
+/// Always as many as `count(tab, facts)`.
+pub fn edits(tab: Tab, facts: &InspectorFacts, decimal: char) -> Vec<Edit> {
     let mut out = vec![];
     let f = Format { decimal };
     let path = |out: &mut Vec<Edit>, title: &str, path: &'static str, unit: &str| {
-        if model.is_modified(path) {
-            out.push(Edit { title: title.into(), value: f.display(model.value(path)) + unit, target: Target::Param(path) });
+        if facts.is_modified(path) {
+            out.push(Edit { title: title.into(), value: f.display(facts.value(path)) + unit, target: Target::Param(path) });
         }
     };
     match tab {
         Tab::Prep => {
-            if model.is_raw {
+            if facts.is_raw {
                 path(&mut out, "White balance", WHITE_BALANCE_PATHS[0], "");
                 path(&mut out, "Temperature (K)", WHITE_BALANCE_PATHS[1], "");
                 path(&mut out, "Tint", WHITE_BALANCE_PATHS[2], "");
             }
-            if model.matches_brightness() != model.prefs.match_new_photos {
-                out.push(Edit { title: "Match camera brightness".into(), value: on_off(model.matches_brightness()), target: Target::MatchBrightness });
+            if facts.matches_brightness() != facts.prefs.match_new_photos {
+                out.push(Edit { title: "Match camera brightness".into(), value: on_off(facts.matches_brightness()), target: Target::MatchBrightness });
             }
-            if model.exposure_offset_modified() {
-                out.push(Edit { title: "Exposure".into(), value: f.signed(model.exposure_offset()), target: Target::Exposure });
+            if facts.exposure_offset_modified() {
+                out.push(Edit { title: "Exposure".into(), value: f.signed(facts.exposure_offset()), target: Target::Exposure });
             }
             path(&mut out, "Auto exposure", "camera.auto_exposure", "");
             path(&mut out, "Metering", "camera.auto_exposure_method", "");
             for control in state::PREP_TONE.iter().chain(state::PREP_COLOR).chain(state::PREP_DETAIL) {
-                append(&mut out, control, None, model, &f);
+                append(&mut out, control, None, facts, &f);
             }
-            if model.is_raw {
-                if model.lens_supported {
+            if facts.is_raw {
+                if facts.lens_supported {
                     path(&mut out, "Lens corrections", state::LENS_CORRECTION, "");
                 }
             } else {
@@ -163,48 +163,48 @@ pub fn edits(tab: Tab, model: &Model, decimal: char) -> Vec<Edit> {
                     Section::Camera => {
                         path(&mut out, "Exposure compensation", "camera.exposure_compensation_ev", "");
                         let format = state::FILM_FORMAT.path();
-                        if model.is_modified(format) {
-                            let mm = json::number(model.value(format));
+                        if facts.is_modified(format) {
+                            let mm = json::number(facts.value(format));
                             let value = state::film_format(mm).map_or_else(|| format!("{} mm", f.number(mm)), |i| state::FILM_FORMATS[i].0.to_string());
                             out.push(Edit { title: "Film format".into(), value, target: Target::FilmFormat });
                         }
                         path(&mut out, "Lens blur (µm)", "camera.lens_blur_um", "");
-                        if model.is_modified(state::ColorFilter::PATH) {
-                            let value = model.chosen_color_filter().map_or_else(|| "None".into(), |f| f.name.clone());
+                        if facts.is_modified(state::ColorFilter::PATH) {
+                            let value = facts.chosen_color_filter().map_or_else(|| "None".into(), |f| f.name.clone());
                             out.push(Edit { title: "Color filter".into(), value, target: Target::Param(state::ColorFilter::PATH) });
                         }
                     }
                     Section::Film => path(&mut out, "Film development", FILM_DEVELOPMENT, " min"),
                     Section::Print => {
-                        if scan_film_modified(model) {
-                            out.push(Edit { title: "Scan film directly".into(), value: on_off(json::boolean(model.value("io.scan_film"))), target: Target::ScanFilm });
+                        if scan_film_modified(facts) {
+                            out.push(Edit { title: "Scan film directly".into(), value: on_off(json::boolean(facts.value("io.scan_film"))), target: Target::ScanFilm });
                         }
                         path(&mut out, "Print development", PRINT_DEVELOPMENT, " min");
                     }
                     Section::Scan => {
-                        if model.preview_space() != COLOR_SPACES[0] {
-                            out.push(Edit { title: "Colour space".into(), value: model.preview_space().into(), target: Target::PreviewSpace });
+                        if facts.preview_space() != COLOR_SPACES[0] {
+                            out.push(Edit { title: "Colour space".into(), value: facts.preview_space().into(), target: Target::PreviewSpace });
                         }
                         path(&mut out, "Encode with the colour space’s curve", "io.output_cctf_encoding", "");
                     }
                 }
                 for group in ADJUSTMENT_GROUPS.iter().filter(|g| g.section == section) {
                     if let Some(enable) = group.enable
-                        && model.is_modified(enable)
+                        && facts.is_modified(enable)
                     {
-                        out.push(Edit { title: group.title.into(), value: on_off(json::boolean(model.value(enable))), target: Target::Param(enable) });
+                        out.push(Edit { title: group.title.into(), value: on_off(json::boolean(facts.value(enable))), target: Target::Param(enable) });
                     }
                     for control in group.controls {
-                        append(&mut out, control, Some(group.title), model, &f);
+                        append(&mut out, control, Some(group.title), facts, &f);
                     }
                 }
             }
         }
         Tab::Output => {
-            if model.is_modified(state::SIZE_TARGET) {
-                out.push(Edit { title: "Image size".into(), value: format!("{} px", f.number(json::number(model.value(state::SIZE_TARGET)))), target: Target::Param(state::SIZE_TARGET) });
+            if facts.is_modified(state::SIZE_TARGET) {
+                out.push(Edit { title: "Image size".into(), value: format!("{} px", f.number(json::number(facts.value(state::SIZE_TARGET)))), target: Target::Param(state::SIZE_TARGET) });
             }
-            if model.state.border.enabled {
+            if facts.state().border.enabled {
                 out.push(Edit { title: "Border".into(), value: "On".into(), target: Target::Border });
             }
         }
@@ -212,19 +212,19 @@ pub fn edits(tab: Tab, model: &Model, decimal: char) -> Vec<Edit> {
     out
 }
 
-fn append(out: &mut Vec<Edit>, control: &Adjustment, group: Option<&str>, model: &Model, f: &Format) {
-    if !control_modified(control, model) {
+fn append(out: &mut Vec<Edit>, control: &Adjustment, group: Option<&str>, facts: &InspectorFacts, f: &Format) {
+    if !control_modified(control, facts) {
         return;
     }
     let titled = |title: &str| group.map_or_else(|| title.to_string(), |g| format!("{g} · {title}"));
     match *control {
         Adjustment::Slider { title, path, low, .. } => {
-            let title = if model.film_is_bw() { state::bw_title(path).unwrap_or(title) } else { title };
-            let value = json::number(model.value(path));
+            let title = if facts.film_is_bw() { state::bw_title(path).unwrap_or(title) } else { title };
+            let value = json::number(facts.value(path));
             out.push(Edit { title: titled(title), value: if low < 0.0 { f.signed(value) } else { f.number(value) }, target: Target::Param(path) });
         }
-        Adjustment::Toggle { title, path } => out.push(Edit { title: titled(title), value: on_off(json::boolean(model.value(path))), target: Target::Param(path) }),
-        Adjustment::Choice { title, path, .. } => out.push(Edit { title: titled(title), value: state::option_title(&json::string(model.value(path))), target: Target::Param(path) }),
+        Adjustment::Toggle { title, path } => out.push(Edit { title: titled(title), value: on_off(json::boolean(facts.value(path))), target: Target::Param(path) }),
+        Adjustment::Choice { title, path, .. } => out.push(Edit { title: titled(title), value: state::option_title(&json::string(facts.value(path))), target: Target::Param(path) }),
         Adjustment::BalancePrint { .. } | Adjustment::FilterLink { .. } => {}
     }
 }
@@ -288,25 +288,25 @@ pub fn section_key(section: Section) -> String {
 }
 
 /// Whether a section's extra modules and rows show.
-pub fn shows_section(model: &Model, section: Section) -> bool {
-    model.prefs.lab_all_controls || model.prefs.revealed(&section_key(section))
+pub fn shows_section(facts: &InspectorFacts, section: Section) -> bool {
+    facts.prefs.lab_all_controls || facts.prefs.revealed(&section_key(section))
 }
 
 /// A module shows when it has basics, its section's extras show, or something in it changed.
-pub fn group_shows(model: &Model, index: usize) -> bool {
+pub fn group_shows(facts: &InspectorFacts, index: usize) -> bool {
     let group = &ADJUSTMENT_GROUPS[index];
-    group.basic > 0 || shows_section(model, group.section) || group_count(index, model) > 0
+    group.basic > 0 || shows_section(facts, group.section) || group_count(index, facts) > 0
 }
 
 /// Whether a module's control at `place` shows: a basic, revealed, or changed.
-pub fn control_shows(model: &Model, index: usize, place: usize) -> bool {
+pub fn control_shows(facts: &InspectorFacts, index: usize, place: usize) -> bool {
     let group = &ADJUSTMENT_GROUPS[index];
-    model.prefs.lab_all_controls || model.prefs.revealed(group.title) || place < group.basic || control_modified(&group.controls[place], model)
+    facts.prefs.lab_all_controls || facts.prefs.revealed(group.title) || place < group.basic || control_modified(&group.controls[place], facts)
 }
 
 /// Whether a control draws at all: a B&W film has one grain lane, not three.
-fn drawn(model: &Model, control: &Adjustment) -> bool {
-    !(state::color_only(control.path()) && model.film_is_bw())
+fn drawn(facts: &InspectorFacts, control: &Adjustment) -> bool {
+    !(state::color_only(control.path()) && facts.film_is_bw())
 }
 
 /// What a "N more" line does when clicked.
@@ -319,70 +319,71 @@ pub enum MoreAction {
 }
 
 /// A module's "N more controls…", or once clicked "Hide N controls".
-pub fn module_more(model: &Model, index: usize) -> Option<(String, MoreAction)> {
+pub fn module_more(facts: &InspectorFacts, index: usize) -> Option<(String, MoreAction)> {
     let group = &ADJUSTMENT_GROUPS[index];
-    let drawn: Vec<usize> = (0..group.controls.len()).filter(|&i| drawn(model, &group.controls[i])).collect();
-    let shown = drawn.iter().filter(|&&i| control_shows(model, index, i)).count();
+    let drawn: Vec<usize> = (0..group.controls.len()).filter(|&i| drawn(facts, &group.controls[i])).collect();
+    let shown = drawn.iter().filter(|&&i| control_shows(facts, index, i)).count();
     let plural = |n: usize| if n == 1 { "" } else { "s" };
     let more = drawn.len() - shown;
     if more > 0 {
         return Some((format!("{more} more control{}…", plural(more)), MoreAction::Reveal(group.title.into())));
     }
-    if model.prefs.lab_all_controls || !model.prefs.revealed(group.title) {
+    if facts.prefs.lab_all_controls || !facts.prefs.revealed(group.title) {
         return None;
     }
-    let fewer = drawn.iter().filter(|&&i| i >= group.basic && !control_modified(&group.controls[i], model)).count();
+    let fewer = drawn.iter().filter(|&&i| i >= group.basic && !control_modified(&group.controls[i], facts)).count();
     (fewer > 0).then(|| (format!("Hide {fewer} control{}", plural(fewer)), MoreAction::Conceal(group.title.into())))
 }
 
 /// A section's "2 more: Scanner, Color Management…" for the modules and
 /// rows it keeps back; once clicked, "Hide Scanner, Color Management".
-pub fn section_more(model: &Model, section: Section) -> Option<(String, MoreAction)> {
-    let scanning = json::boolean(model.value("io.scan_film"));
+pub fn section_more(facts: &InspectorFacts, section: Section) -> Option<(String, MoreAction)> {
+    let scanning = json::boolean(facts.value("io.scan_film"));
     let loose: &[&str] = match section {
-        Section::Camera if model.is_modified("camera.lens_blur_um") => &[],
+        Section::Camera if facts.is_modified("camera.lens_blur_um") => &[],
         Section::Camera => &["Lens blur"],
         Section::Film => &[],
         Section::Print if scanning => return None,
         Section::Print => &["Scan film directly"],
-        Section::Scan if output_count(model) > 0 => &[],
+        Section::Scan if output_count(facts) > 0 => &[],
         Section::Scan => &["Output"],
     };
     let groups = || ADJUSTMENT_GROUPS.iter().enumerate().filter(|(_, g)| g.section == section);
     let key = section_key(section);
-    if !shows_section(model, section) {
-        let hidden: Vec<&str> = groups().filter(|(i, _)| !group_shows(model, *i)).map(|(_, g)| g.title).chain(loose.iter().copied()).collect();
+    if !shows_section(facts, section) {
+        let hidden: Vec<&str> = groups().filter(|(i, _)| !group_shows(facts, *i)).map(|(_, g)| g.title).chain(loose.iter().copied()).collect();
         return (!hidden.is_empty()).then(|| (format!("{} more: {}…", hidden.len(), hidden.join(", ")), MoreAction::Reveal(key)));
     }
-    if model.prefs.lab_all_controls || !model.prefs.revealed(&key) {
+    if facts.prefs.lab_all_controls || !facts.prefs.revealed(&key) {
         return None;
     }
-    let foldable: Vec<&str> = groups().filter(|(i, g)| g.basic == 0 && group_count(*i, model) == 0).map(|(_, g)| g.title).chain(loose.iter().copied()).collect();
+    let foldable: Vec<&str> = groups().filter(|(i, g)| g.basic == 0 && group_count(*i, facts) == 0).map(|(_, g)| g.title).chain(loose.iter().copied()).collect();
     (!foldable.is_empty()).then(|| (format!("Hide {}", foldable.join(", ")), MoreAction::Conceal(key)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inspector_view::fixture::Fixture;
 
     #[test]
     fn more_lines_reveal_and_fold_back() {
-        let mut model = crate::model::Model::new(crate::session::Preferences::default());
+        let mut model = Fixture::new();
         let (index, group) = ADJUSTMENT_GROUPS.iter().enumerate().find(|(_, g)| g.basic > 0 && g.basic < g.controls.len()).unwrap();
-        let (text, action) = module_more(&model, index).unwrap();
+        let (text, action) = module_more(&model.facts(), index).unwrap();
         assert!(text.ends_with("more control…") || text.ends_with("more controls…"), "{text}");
         assert_eq!(action, MoreAction::Reveal(group.title.into()));
-        model.prefs.set_revealed(group.title, true);
-        assert!((0..group.controls.len()).all(|i| control_shows(&model, index, i)));
-        let (text, action) = module_more(&model, index).unwrap();
+        model.reveal(group.title, true);
+        assert!((0..group.controls.len()).all(|i| control_shows(&model.facts(), index, i)));
+        let (text, action) = module_more(&model.facts(), index).unwrap();
         assert!(text.starts_with("Hide "), "{text}");
         assert_eq!(action, MoreAction::Conceal(group.title.into()));
         // A section keeps back its expert modules and loose rows.
-        let (text, _) = section_more(&model, Section::Camera).unwrap();
+        let (text, _) = section_more(&model.facts(), Section::Camera).unwrap();
         assert!(text.contains("Lens blur"), "{text}");
-        model.prefs.lab_all_controls = true;
-        assert_eq!(section_more(&model, Section::Camera), None);
-        assert_eq!(module_more(&model, index), None);
+        model.lab_all_controls = true;
+        assert_eq!(section_more(&model.facts(), Section::Camera), None);
+        assert_eq!(module_more(&model.facts(), index), None);
     }
 
     #[test]
@@ -404,17 +405,21 @@ mod tests {
 
     #[test]
     fn counts_match_the_lists() {
-        let mut model = crate::model::Model::new(crate::session::Preferences::default());
+        let mut model = Fixture::new();
         // A fresh model already differs from new photos' brightness match.
-        let before = count(Tab::Prep, &model);
+        let before = count(Tab::Prep, &model.facts());
+        assert_eq!(before, 1);
         model.set("prep.highlights", json::num(12.0));
         model.set("film_render.grain.active", Value::Bool(false));
-        model.set_border(|b| b.enabled = true, "Change Border");
+        model.state.border.enabled = true;
+        let facts = model.facts();
         for tab in Tab::ALL {
-            assert_eq!(edits(tab, &model, '.').len(), count(tab, &model), "{tab:?}");
+            assert_eq!(edits(tab, &facts, '.').len(), count(tab, &facts), "{tab:?}");
         }
-        assert_eq!(count(Tab::Prep, &model), before + 1);
-        assert!(edits(Tab::Prep, &model, '.').iter().any(|e| e.value == "+12"));
-        assert_eq!(count(Tab::Output, &model), 1);
+        assert_eq!(count(Tab::Prep, &facts), before + 1);
+        assert!(edits(Tab::Prep, &facts, '.').iter().any(|e| e.value == "+12"));
+        assert_eq!(count(Tab::Output, &facts), 1);
+        let lab: Vec<(String, String)> = edits(Tab::Lab, &facts, ',').into_iter().map(|e| (e.title, e.value)).collect();
+        assert_eq!(lab, [("Grain".to_string(), "Off".to_string())]);
     }
 }

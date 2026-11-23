@@ -18,6 +18,7 @@ mod gpu;
 mod help;
 mod histogram;
 mod icc;
+mod inspector_view;
 mod json;
 mod lightroom;
 mod match_cache;

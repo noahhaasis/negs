@@ -364,6 +364,7 @@ impl Preferences {
         }
     }
 
+    #[cfg(test)]
     pub fn expanded(&self, title: &str) -> bool {
         self.expanded_adjustments.split(',').any(|t| t == title)
     }
@@ -374,11 +375,6 @@ impl Preferences {
             titles.push(title);
         }
         self.expanded_adjustments = titles.join(",");
-    }
-
-    /// Whether a module's or section's "N more" was clicked.
-    pub fn revealed(&self, key: &str) -> bool {
-        self.more_adjustments.split(',').any(|t| t == key)
     }
 
     /// Shows or folds back `key`'s extra controls; kept sorted, as on the Mac.
