@@ -443,7 +443,13 @@ import UserNotifications
         films.filter { (fotufilmFilms.lists($0) && NegsBuiltFilms.lists($0, shown: showNegsBuiltFilms)) || kept.contains($0.id) }
     }
     var filmGroups: [StockGroup] { StockGroup.films(listedFilms, papers: papers) }
-    var paperGroups: [StockGroup] { StockGroup.papers(papers) }
+    /// The papers the menus and the tray list (Show Negs-built films hides
+    /// the Negs-built print films), keeping the one in use as for films.
+    var listedPapers: [Stock] { listedPapers(keeping: [paper, tray?.before.paper].compactMap { $0 }) }
+    func listedPapers(keeping kept: [String]) -> [Stock] {
+        papers.filter { NegsBuiltFilms.lists($0, shown: showNegsBuiltFilms) || kept.contains($0.id) }
+    }
+    var paperGroups: [StockGroup] { StockGroup.papers(listedPapers) }
     var filmName: String { films.first { $0.id == film }?.name ?? film }
     var paperName: String { papers.first { $0.id == paper }?.name ?? paper }
     var canSave: Bool { previewCurrent && image != nil && !rendering && !saving && !cropping }
@@ -3781,7 +3787,10 @@ import UserNotifications
             let readAs = tray?.readAs ?? false
             entries += previews.filmsFavoritesFirst.filter { listed.contains($0.stock.id) && (!readAs || NegativeScan.readable($0.stock)) }
         }
-        if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papersFavoritesFirst }
+        if previews.paperOpen, previews.paperShown, !scanning {
+            let listed = Set(listedPapers.map(\.id))
+            entries += previews.papersFavoritesFirst.filter { listed.contains($0.stock.id) }
+        }
         for entry in entries {
             let command = PreviewRules.request(for: entry.stock, keepPaper: previews.keepPaper, state: rendered, stocks: stocks,
                                                source: source, generation: generation, negative: tray?.readAs ?? false,

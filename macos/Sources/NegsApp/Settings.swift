@@ -142,7 +142,8 @@ struct SettingsView: View {
                 StruckRow(title: "Paper", value: model.papers.first { $0.id == model.newPhotoPaper }?.name ?? model.newPhotoPaper)
                 HintText("not printed — scanning the film")
             } else {
-                ChoiceRow(title: "Paper", items: Self.items(model.paperGroups), selection: model.newPhotoPaper) { model.setNewPhotoPaper($0) }
+                ChoiceRow(title: "Paper", items: Self.items(StockGroup.papers(model.listedPapers(keeping: [model.newPhotoPaper]))),
+                          selection: model.newPhotoPaper) { model.setNewPhotoPaper($0) }
                     .inkDisabled(model.papers.isEmpty)
             }
             HintText("A photo you haven’t edited opens with this film and paper, and its thumbnail shows them. Photos you’ve edited keep their own.")

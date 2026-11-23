@@ -208,7 +208,7 @@ struct StockTray: View {
                                            query: visit.query)
         }
         let sections = StockTrayRules.sections(paper ? model.paperGroups : model.filmGroups,
-                                               favorites: model.previews.favorites(in: paper ? model.papers : model.listedFilms, paper: paper),
+                                               favorites: model.previews.favorites(in: paper ? model.listedPapers : model.listedFilms, paper: paper),
                                                query: visit.query)
         // Your negative, while not searching: always the first group, so
         // the order never changes from one photograph to the next.

@@ -893,7 +893,8 @@ function buildPanes() {
 }
 
 // The pickers' sections, in desktop's order (macOS StockGroup).
-const isMotionPicturePrint = (p) => p.paper && (p.name.includes("Vision") || p.name.includes("Print Film"));
+// A catalog from before `cine_print` still knows Kodak's by name.
+const isMotionPicturePrint = (p) => p.paper && (p.cine_print === true || p.name.includes("Vision") || p.name.includes("Print Film"));
 function stockGroups(stocks, order, kind) {
   return order.map((title) => ({ title, stocks: stocks.filter((s) => kind(s) === title) })).filter((g) => g.stocks.length);
 }
@@ -902,22 +903,26 @@ function stockGroups(stocks, order, kind) {
 // hidden film keeps it, and the film in use stays listed.
 const FOTUFILM_FILMS = ["all", "datasheets", "off"];
 let fotufilmFilms = FOTUFILM_FILMS.find((choice) => choice === remembered("fotufilmFilms", "all")) ?? "all";
-// Settings › Show Negs-built films (macOS NegsBuiltFilms): the films Negs
-// prepared itself from datasheets stay out of the lists until shown.
+// Settings › Show Negs-built films (macOS NegsBuiltFilms): the films and
+// print films Negs prepared itself from datasheets stay out of the lists
+// until shown.
 let showNegsBuilt = remembered("showNegsBuiltFilms", false) === true;
 const listsFotufilm = (s) => !s.fotufilm || fotufilmFilms === "all" || (fotufilmFilms === "datasheets" && s.manufacturer_data !== false);
 const listsFilm = (s) => listsFotufilm(s) && (showNegsBuilt || s.negs_built !== true);
 const listedFilms = () => films().filter((s) => listsFilm(s) || s.id === state.film);
 // The grid has a tile for every film (`all`) and hides the rest.
 const unlistedFilms = () => films().filter((s) => !listsFilm(s) && s.id !== state.film).map((s) => s.id);
+const listsPaper = (s) => showNegsBuilt || s.negs_built !== true;
+const listedPapers = () => papers().filter((s) => listsPaper(s) || s.id === state.paper);
+const unlistedPapers = () => papers().filter((s) => !listsPaper(s) && s.id !== state.paper).map((s) => s.id);
 function filmGroups(all = false) {
   const cinemaPrints = new Set(papers().filter(isMotionPicturePrint).map((p) => p.id));
   const stocks = all ? films : listedFilms;
   return stockGroups(stocks(), ["Color Negative", "Color Slide", "Motion Picture", "Black & White"],
     (s) => s.bw ? "Black & White" : s.positive ? "Color Slide" : cinemaPrints.has(s.target_print) ? "Motion Picture" : "Color Negative");
 }
-function paperGroups() {
-  return stockGroups(papers(), ["Color Paper", "Motion Picture Print", "Black & White"],
+function paperGroups(all = false) {
+  return stockGroups((all ? papers : listedPapers)(), ["Color Paper", "Motion Picture Print", "Black & White"],
     (s) => s.bw ? "Black & White" : isMotionPicturePrint(s) ? "Motion Picture Print" : "Color Paper");
 }
 
@@ -934,8 +939,8 @@ const stockValue = (value) => (value.startsWith(FAVORITE) ? value.slice(FAVORITE
 function fillFavorites(which) {
   const select = $(which);
   select.querySelector("optgroup.favorites")?.remove();
-  const listed = which === "film" ? new Set(listedFilms().map((s) => s.id)) : null;
-  const ids = favorites(which).filter((id) => stock(id)?.paper === (which === "paper") && (!listed || listed.has(id)));
+  const listed = new Set((which === "film" ? listedFilms() : listedPapers()).map((s) => s.id));
+  const ids = favorites(which).filter((id) => stock(id)?.paper === (which === "paper") && listed.has(id));
   if (!ids.length) return;
   const og = Object.assign(document.createElement("optgroup"), { label: tr("Favorites"), className: "favorites" });
   for (const id of ids) og.append(new Option(`★ ${stock(id).name}`, FAVORITE + id));
@@ -956,6 +961,17 @@ function refillFilms() {
   fillFavorites("film");
   folds?.film.hide(unlistedFilms());
 }
+let paperMenuListed = "";
+function refillPapers() {
+  const listed = listedPapers().map((s) => s.id).join();
+  if (listed === paperMenuListed) return;
+  paperMenuListed = listed;
+  const select = $("paper");
+  for (const og of [...select.querySelectorAll("optgroup")]) og.remove();
+  fillGroups(select, paperGroups());
+  fillFavorites("paper");
+  folds?.paper.hide(unlistedPapers());
+}
 function fillGroups(select, groups) {
   for (const g of groups) {
     const og = Object.assign(document.createElement("optgroup"), { label: tr(g.title) });
@@ -966,8 +982,7 @@ function fillGroups(select, groups) {
 
 function fillStocks() {
   refillFilms();
-  fillGroups($("paper"), paperGroups());
-  fillFavorites("paper");
+  refillPapers();
   labelInfo($("film").closest("label"), Help.FILM);
   labelInfo($("paper-row"), Help.PAPER);
   labelInfo($("film-time-row"), Help.PATHS["film_render.development_time"]);
@@ -1965,13 +1980,14 @@ function buildPreviews() {
   // One grid open at a time: opening one folds the other (and a remembered
   // pair opens on the film's).
   if (opened.film && opened.paper) opened.paper = false;
-  folds = { film: fold("film", "Film", filmGroups(true), chooseFilm, "Search films"), paper: fold("paper", "Paper", paperGroups(), choosePaper) };
+  folds = { film: fold("film", "Film", filmGroups(true), chooseFilm, "Search films"), paper: fold("paper", "Paper", paperGroups(true), choosePaper) };
   for (const [one, other] of [[folds.film, folds.paper], [folds.paper, folds.film]]) {
     one.root.addEventListener("toggle", () => { if (one.root.open) other.root.open = false; });
   }
   folds.film.root.querySelector(".stock-title").after(info("Film", Help.FILM));
   folds.paper.root.querySelector(".stock-title").after(info("Paper", Help.PAPER));
   folds.film.hide(unlistedFilms());
+  folds.paper.hide(unlistedPapers());
   $("film").closest("label").after(folds.film.root);
   $("paper-row").after(folds.paper.root);
   $("previews").addEventListener("change", () => setPreviews($("previews").checked));
@@ -2063,10 +2079,11 @@ $("negs-built-films").addEventListener("change", () => {
   showNegsBuilt = $("negs-built-films").checked;
   remember("showNegsBuiltFilms", showNegsBuilt);
   refillFilms();
+  refillPapers();
   pumpPreviews();
 });
-// A hidden film leaves the lists once another is chosen.
-syncs.push(refillFilms);
+// A hidden film or print film leaves the lists once another is chosen.
+syncs.push(refillFilms, refillPapers);
 // The interface language (web/i18n.js): a new one is a reload away, its
 // dictionary loading before the page renders.
 $("lang").addEventListener("change", () => {

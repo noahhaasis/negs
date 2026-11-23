@@ -99,6 +99,8 @@ struct Stock: Identifiable, Sendable {
     let manufacturerData: Bool
     /// Prepared by Negs itself from datasheets (Settings › Show Negs-built films).
     let negsBuilt: Bool
+    /// A motion-picture print film (film on the printing stage, catalog `cine_print`).
+    let cinePrint: Bool
     /// How many stops each camera colour filter takes on this film, by key;
     /// empty for colour films and papers.
     let filterStops: [String: Double]
@@ -124,17 +126,18 @@ struct Stock: Identifiable, Sendable {
         fotufilm = value["fotufilm"].bool
         manufacturerData = value["manufacturer_data"] != .bool(false)
         negsBuilt = value["negs_built"].bool
+        cinePrint = value["cine_print"].bool
         filterStops = (value["color_filter_stops"].object ?? [:]).mapValues(\.double)
     }
 }
 
-/// Settings › Show Negs-built films: the films Negs prepared itself from
-/// datasheets (catalog `negs_built`) stay out of the film menus and the tray
-/// until shown. Only the lists, as for Fotufilm films: an edit, a preset or a
+/// Settings › Show Negs-built films: the films and print films Negs prepared
+/// itself from datasheets (catalog `negs_built`) stay out of the stock menus
+/// and the tray until shown. Only the lists, as for Fotufilm films: an edit, a preset or a
 /// thumbnail with one keeps it.
 enum NegsBuiltFilms {
     static let key = "showNegsBuiltFilms"
-    static let hint = "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; and the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides. Photos already using one keep it."
+    static let hint = "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it."
 
     static func lists(_ stock: Stock, shown: Bool) -> Bool { shown || !stock.negsBuilt }
 }
@@ -270,7 +273,8 @@ struct StockGroup: Identifiable {
 }
 
 extension Stock {
-    var isMotionPicturePrint: Bool { paper && (name.contains("Vision") || name.contains("Print Film")) }
+    /// A catalog from before `cine_print` still knows Kodak's by name.
+    var isMotionPicturePrint: Bool { paper && (cinePrint || name.contains("Vision") || name.contains("Print Film")) }
 }
 
 /// Human-readable names for engine option identifiers.

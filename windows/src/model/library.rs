@@ -897,7 +897,10 @@ impl Model {
 
     /// Settings' Paper list, in the paper menu's groups.
     pub fn new_photo_paper_choices(&self) -> Vec<(String, String)> {
-        crate::state::paper_groups(&self.papers()).into_iter().flat_map(|g| g.stocks).map(|s| (s.id.clone(), s.name.clone())).collect()
+        let (_, paper) = self.new_photo_stocks();
+        let papers: Vec<&crate::state::Stock> =
+            self.stocks.iter().filter(|s| s.paper && (crate::state::lists_negs_built(s, self.prefs.show_negs_built_films) || s.id == paper)).collect();
+        crate::state::paper_groups(&papers).into_iter().flat_map(|g| g.stocks).map(|s| (s.id.clone(), s.name.clone())).collect()
     }
 
     /// Whether the new photographs' film is a slide, scanned without a paper.
