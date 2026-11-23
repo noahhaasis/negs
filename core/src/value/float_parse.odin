@@ -208,3 +208,43 @@ compare_halfway :: proc(digits: []u8, e: int, bits: u64) -> int {
 	}
 	return big_cmp(&lhs, &rhs)
 }
+
+// Whether the double `bits` (finite, not zero) lies exactly halfway
+// between `digits` (ASCII, its shortest digits, 10^(point-1) <= |v| <
+// 10^point) and the next number of as many digits above them. Rust's
+// shortest formatting (core::fmt's flt2dec) rounds such a tie up; Żmij
+// (core:strconv, and zmij in serde_json) rounds it to even.
+halfway_above :: proc(digits: []u8, point: int, bits: u64) -> bool {
+	biased := int(bits >> 52) & 0x7FF
+	m := bits & (1 << 52 - 1)
+	k: int
+	if biased == 0 {
+		k = -1074
+	} else {
+		m |= 1 << 52
+		k = biased - 1075
+	}
+	// m × 2^k == (2D + 1) × 10^e / 2, e the last digit's exponent:
+	// m × 2^(k+1) == (2D + 1) × 10^e.
+	e := point - len(digits)
+	lhs := make(Big, 0, 48)
+	rhs := make(Big, 0, 48)
+	defer delete(lhs)
+	defer delete(rhs)
+	append(&lhs, u32(m), u32(m >> 32))
+	for d in digits {
+		big_mul_small(&rhs, 10, u32(d - '0'))
+	}
+	big_mul_small(&rhs, 2, 1)
+	if k + 1 >= 0 {
+		big_shl(&lhs, k + 1)
+	} else {
+		big_shl(&rhs, -(k + 1))
+	}
+	if e >= 0 {
+		big_mul_pow10(&rhs, e)
+	} else {
+		big_mul_pow10(&lhs, -e)
+	}
+	return big_cmp(&lhs, &rhs) == 0
+}

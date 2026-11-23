@@ -107,6 +107,21 @@ write_display :: proc(b: ^strings.Builder, v: f64) {
 	}
 	buf: [48]u8
 	digits, point := shortest(v, &buf)
+	if halfway_above(digits, point, bits) {
+		// Rust rounds a tie between two shortest candidates up.
+		i := len(digits) - 1
+		for i >= 0 && digits[i] == '9' {
+			i -= 1
+		}
+		if i < 0 {
+			digits = digits[:1]
+			digits[0] = '1'
+			point += 1
+		} else {
+			digits[i] += 1
+			digits = digits[:i + 1]
+		}
+	}
 	if point <= 0 {
 		strings.write_string(b, "0.")
 		for _ in 0 ..< -point {

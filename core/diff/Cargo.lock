@@ -869,6 +869,7 @@ dependencies = [
  "negs-marks",
  "negs-media-oracle",
  "negs-state-oracle",
+ "serde",
  "serde_json",
  "spektrafilm-io",
  "spektrafilm-math",
