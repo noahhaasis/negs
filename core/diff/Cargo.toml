@@ -34,6 +34,11 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 negs-core-diff-picture = { path = "picture" }
 spektrafilm-io = { path = "../../crates/spektrafilm-io", default-features = false }
 spektrafilm-math = { path = "../../crates/spektrafilm-math" }
+# Phase 4: windows/src's state, json, session, presets, batch, match_cache
+# and rendered_preview as they were (core/diff/state-oracle).
+negs-state-oracle = { path = "state-oracle" }
+# The differential tests write the oracles' states with serde.
+serde = "1"
 # The image crate (model/compare's oracle resizes with it; the picture
 # oracles read PNGs), as windows/ has it.
 image = { version = "0.25", default-features = false, features = ["png"] }

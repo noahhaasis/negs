@@ -1,0 +1,17 @@
+# Portable stand-ins for the `windows` crate items the Phase 4 oracles call
+# (MoveFileExW, NormalizeString, FindNLSStringEx, their error codes), so the
+# frozen windows/src modules run on macOS. negs-state-oracle depends on it
+# under the name `windows`.
+[package]
+name = "negs-windows-stand-in"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+icu_normalizer = { version = "2.2", default-features = false, features = ["compiled_data"] }
