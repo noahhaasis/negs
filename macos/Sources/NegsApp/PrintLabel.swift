@@ -246,7 +246,7 @@ struct StockName: View {
             model.toggleTray(paper: paper, readAs: readAs)
         } else {
             let keep: (Stock) -> Bool = { !readAs || NegativeScan.readable($0) }
-            let stocks = (paper ? model.papers : model.listedFilms).filter(keep)
+            let stocks = (paper ? model.listedPapers : model.listedFilms).filter(keep)
             let groups = (paper ? model.paperGroups : model.filmGroups).compactMap { group -> StockGroup? in
                 let stocks = group.stocks.filter(keep)
                 return stocks.isEmpty ? nil : StockGroup(title: group.title, stocks: stocks)

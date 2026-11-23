@@ -2266,8 +2266,8 @@ fn enable_all(controls: &[HWND], on: bool) {
 /// group's heading (None, can't be chosen) and stocks. A favourite stays in
 /// its group too; the closed menu shows that entry, with the plain name.
 pub(super) fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
-    let (films, papers) = (model.listed_films(), model.papers());
-    let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
+    let (films, papers) = (model.listed_films(), model.listed_papers());
+    let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &model.papers()) };
     let mut entries: Vec<(String, Option<(String, bool)>)> =
         model.favorite_stocks(paper).iter().map(|s| (format!("★ {}", s.name), Some((s.id.clone(), true)))).collect();
     for group in groups {
@@ -4091,7 +4091,7 @@ mod tests {
     fn a_search_shows_each_match_once_under_its_group() {
         use crate::session::Preferences;
         let stock = |id: &str, name: &str, bw: bool| state::Stock {
-            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
+            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false, cine_print: false,
         };
         let mut model = Model::new(Preferences { previews: true, favorite_films: vec!["gold".into()], ..Preferences::default() });
         model.stocks = vec![stock("gold", "Gold 200", false), stock("portra", "Portra 400", false), stock("trix", "Tri-X 400", true)];

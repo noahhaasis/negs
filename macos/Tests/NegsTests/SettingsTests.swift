@@ -86,5 +86,16 @@ import XCTest
         XCTAssertEqual(listed(true), ["portra", "eterna"])
         // A catalog cached before the field lists the film.
         XCTAssertTrue(NegsBuiltFilms.lists(stock("old", [:]), shown: false))
+        // The Negs-built print films too, grouped with Kodak's by `cine_print`.
+        let print = { (id: String, name: String, provenance: [String: JSONValue]) in
+            Stock(.object(["id": .string(id), "name": .string(name), "paper": .bool(true), "positive": .bool(false), "bw": .bool(false),
+                           "development_times": .array([])].merging(provenance) { $1 }))
+        }
+        let k2383 = print("kodak_2383", "Kodak Vision 2383", ["cine_print": .bool(true)])
+        let cp = print("fujifilm_eterna_cp_3513di", "Fujifilm Eterna-CP 3513DI", ["cine_print": .bool(true), "negs_built": .bool(true)])
+        let endura = print("kodak_portra_endura", "Kodak Professional Portra Endura", [:])
+        XCTAssertEqual([k2383, cp, endura].filter { NegsBuiltFilms.lists($0, shown: false) }.map(\.id), ["kodak_2383", "kodak_portra_endura"])
+        XCTAssertEqual(StockGroup.papers([k2383, cp, endura]).map { "\($0.title): \($0.stocks.map(\.id))" },
+                       ["Color Paper: [\"kodak_portra_endura\"]", "Motion Picture Print: [\"kodak_2383\", \"fujifilm_eterna_cp_3513di\"]"])
     }
 }
