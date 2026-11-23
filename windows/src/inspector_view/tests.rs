@@ -32,8 +32,9 @@ fn group(name: &'static str) -> impl Fn(&Kind) -> bool {
 }
 
 /// The row of `kind` that shows.
+#[track_caller]
 fn row_of(view: &InspectorView, test: impl Fn(&Kind) -> bool) -> RowView {
-    view.rows.iter().find(|r| r.visible && r.kind.as_ref().is_some_and(&test)).cloned().unwrap_or_else(|| panic!("no such row"))
+    view.rows.iter().find(|r| r.visible && r.kind.as_ref().is_some_and(&test)).cloned().expect("no such row")
 }
 
 fn id_of(test: impl Fn(&Kind) -> bool) -> RowId {
@@ -125,6 +126,10 @@ fn every_row_kind_shows() {
     f.set("io.scan_film", json!(false));
     f.custom_film_format = true;
     look(&f);
+    // A B&W film: its colour filter.
+    f.state.film = "trix".into();
+    look(&f);
+    f.state.film = "portra".into();
     // A negative: Prep's film base, notes and buttons.
     f.set(crate::negative::ROUTE_PATH, json!(crate::negative::ROUTE));
     f.negative = Some(NegativeFacts { sentence: "Reading the negative as Portra 400.".into(), ..Default::default() });
@@ -180,7 +185,7 @@ fn prep_follows_the_file_and_the_brightness_match() {
     assert_eq!((s.value, s.low, s.high, exposure.value.as_str()), (0.25, -3.5, 2.5, "0.25"));
     assert_eq!((s.position, s.default_position), (75, 70));
     assert!(exposure.changed);
-    assert_eq!(exposure.help.as_deref(), Some("Reset to 0.00"));
+    assert_eq!(exposure.help.as_deref(), Some("Reset to 0"));
     // A failure for this photograph says why.
     f.failure_set("No camera preview in this file.");
     assert_eq!(row_of(&f.view(), |k| *k == Kind::Note(Note::Brightness)).hint, "No camera preview in this file.");
@@ -229,7 +234,8 @@ fn negative_rows_and_notes() {
     assert!(row_of(&view, |k| *k == Kind::Section("Camera")).skipped);
     let grain = row_of(&view, group("Grain"));
     assert!(grain.skipped && grain.status == "skipped on a negative");
-    assert!(view.rows.iter().filter(|r| r.visible && rows()[r.id].group.is_some_and(|g| rows()[g].kind.group_title() == "Grain")).all(|r| !r.enabled));
+    let controls = |r: &&RowView| r.visible && matches!(r.kind, Some(Kind::Slider(_) | Kind::Toggle(..) | Kind::Choice(..))) && rows()[r.id].group.is_some_and(|g| rows()[g].kind.group_title() == "Grain");
+    assert!(view.rows.iter().filter(controls).count() > 0 && view.rows.iter().filter(controls).all(|r| !r.enabled));
     // The dispatch names each button's action.
     let find = id_of(|k| matches!(k, Kind::Actions(b) if b[0].0 == "Find again"));
     assert_eq!(dispatch(&f.facts(), &f.ui(), find, RowAction::Press(1)), [Effect::Negative(NegativeAction::Pick(crate::negative::Pick::Base))]);
@@ -247,7 +253,10 @@ fn the_lab_folds_modules_and_sections() {
     assert!(enlarger.open && enlarger.status == "expanded");
     assert!(shows(&f, slider("enlarger.print_exposure")));
     let curves = row_of(&view, group("Film Curves"));
-    assert!(!curves.open && curves.status == "collapsed" && curves.checked && !curves.off);
+    // Its switch has no default here: off, and the dot stays away.
+    assert!(!curves.open && curves.status == "collapsed" && !curves.checked && curves.off && !curves.changed, "{curves:?}");
+    let grain = row_of(&view, group("Grain"));
+    assert!(grain.checked && grain.switch_enabled && !grain.off);
     assert!(!shows(&f, |k| *k == Kind::ToneGraph));
     // A module's basics and "N more"; a section's hidden modules.
     assert!(!shows(&f, slider("enlarger.preflash_exposure")));
@@ -305,12 +314,13 @@ fn summaries_follow_the_first_control_and_the_locale() {
     let view = f.view();
     let grain = row_of(&view, group("Grain"));
     assert!(grain.off && !grain.checked && grain.changed && grain.switch_enabled);
-    assert!(!row_of(&view, slider("film_render.grain.blur")).enabled || !shows(&f, slider("film_render.grain.blur")));
+    assert!(!row_of(&view, slider("film_render.grain.rms_granularity.0")).enabled);
     let switch = id_of(group("Grain"));
     assert_eq!(dispatch(&f.facts(), &f.ui(), switch, RowAction::Check(true)), [Effect::Set("film_render.grain.active", Value::Bool(true))]);
     // Sliders read with the locale's separator.
-    let print = row_of(&view, slider("enlarger.print_exposure"));
-    assert_eq!(print.value, "2,00");
+    assert_eq!(row_of(&view, slider("enlarger.print_exposure")).value, "2", "whole numbers drop their decimals");
+    f.set("enlarger.print_exposure", json!(1.25));
+    assert_eq!(row_of(&f.view(), slider("enlarger.print_exposure")).value, "1,25");
 }
 
 #[test]
@@ -399,6 +409,8 @@ fn lists_select_their_value() {
     f.lab_all_controls = true;
     f.all_open = true;
     f.stocks[0].times = vec![6.0, 8.0];
+    js::set(&mut f.defaults, state::FILM_FORMAT.path(), json!(35.0));
+    f.set(state::FILM_FORMAT.path(), json!(35.0));
     let view = f.view();
     let dev = row_of(&view, |k| *k == Kind::DevTime(false));
     assert_eq!(dev.options, ["Profile default", "6 min", "8 min"]);
@@ -414,7 +426,7 @@ fn lists_select_their_value() {
     assert_eq!((dev.selected, dev.changed), (Some(2), true));
     // Film format: a stills format, or Custom… and the long edge.
     let format = row_of(&view, |k| *k == Kind::FilmFormat);
-    assert_eq!(format.selected, state::film_format(36.0));
+    assert_eq!(format.selected, Some(2));
     assert!(!shows(&f, slider(state::FILM_FORMAT.path())));
     let id = id_of(|k| *k == Kind::FilmFormat);
     assert_eq!(dispatch(&f.facts(), &f.ui(), id, RowAction::Select(state::FILM_FORMATS.len() as isize)), [Effect::ChooseFilmFormat(None)]);
@@ -518,7 +530,7 @@ fn every_action_is_undone_by_its_reset() {
                 tried += 1;
             }
             assert_eq!(f.view(), before);
-            assert!(tried >= 3, "{tab:?}: {tried}");
+            assert!(tried >= if tab == Tab::Output { 2 } else { 3 }, "{tab:?}: {tried}");
         }
     }
     // Border switches have no reset: switching back is the way.

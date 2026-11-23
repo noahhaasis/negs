@@ -1573,80 +1573,99 @@ pub fn parse_number(text: &str) -> Option<f64> {
 }
 
 /// Makes the model changes a row's action asks for, in order.
+/// What applying an effect to the model left for the window.
+#[derive(Debug, PartialEq)]
+enum Applied {
+    Done,
+    /// The inspector's rows change: slide them into place.
+    Slide,
+    /// A dialog first.
+    Dialog(Effect),
+}
+
+/// An effect on the model alone: everything but the dialogs.
+fn apply_to_model(model: &mut Model, effect: Effect) -> Applied {
+    match effect {
+        Effect::Set(path, value) => model.set(path, value),
+        Effect::SetFilterShift(path, value) => model.set_filter_shift(path, value),
+        Effect::ResetValue(path) => model.reset_value(path),
+        Effect::ResetFilterShift(path) => model.reset_filter_shift(path),
+        Effect::ResetFilterShiftAfterClick(path) => model.reset_filter_shift_after_click(path),
+        Effect::SetExposureOffset(value) => model.set_exposure_offset(value),
+        Effect::ResetExposureOffset => model.reset_exposure_offset(),
+        Effect::SetBorderPercent(field, value) => model.set_border_percent(field, value),
+        Effect::Border(change, undo) => model.set_border(|b| change.apply(b), undo),
+        Effect::BeginInteraction => model.begin_interaction(),
+        Effect::EndInteraction(undo) => model.end_interaction(undo),
+        Effect::SetMatchesBrightness(on) => model.set_matches_brightness(on),
+        Effect::SwitchColorFilter(on) => model.switch_color_filter(on),
+        Effect::ChooseFilmFormat(format) => model.choose_film_format(format),
+        Effect::ChoosePreviewSpace(space) => model.choose_preview_space(space),
+        Effect::ChooseImageSize(mode) => model.choose_image_size(mode),
+        Effect::SetFilterLink(link) => model.set_filter_link(link),
+        Effect::BalancePrint => model.balance_print(),
+        Effect::ClearFlatField => model.clear_flat_field(),
+        Effect::Negative(action) => {
+            use crate::negative::Pick;
+            match action {
+                NegativeAction::FindAgain => model.redetect_negative_base(),
+                NegativeAction::Pick(Pick::Base) => model.begin_negative_pick(Pick::Base),
+                NegativeAction::CropToPicture => model.crop_to_picture(),
+                NegativeAction::AutoPrint => model.auto_print_negative(),
+                NegativeAction::Pick(Pick::Neutral) => model.begin_negative_pick(Pick::Neutral),
+                NegativeAction::UseForRoll => model.use_negative_for_roll(),
+                NegativeAction::RollFiltration => model.use_roll_filtration(),
+            }
+        }
+        Effect::ToneGraphChannel(channel) => {
+            model.prefs.tone_graph_channel = channel.into();
+            model.prefs.save();
+            model.dirty |= dirty::INSPECTOR;
+        }
+        Effect::SetExpanded(title, open) => {
+            model.prefs.set_expanded(title, open);
+            model.prefs.save();
+            model.dirty |= dirty::STRUCTURE;
+            return Applied::Slide;
+        }
+        Effect::More(action) => {
+            let prefs = &mut model.prefs;
+            match action {
+                MoreAction::Reveal(key) => prefs.set_revealed(&key, true),
+                MoreAction::Conceal(key) => prefs.set_revealed(&key, false),
+                MoreAction::ShowFewer => prefs.lab_all_controls = false,
+            }
+            prefs.save();
+            model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
+            return Applied::Slide;
+        }
+        Effect::ShowBacklight => {
+            model.negative.backlight_shown = true;
+            model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
+            return Applied::Slide;
+        }
+        Effect::ResetEdits(targets, undo) => model.reset_edits(&targets, undo),
+        dialog @ (Effect::ChooseLightFrame | Effect::ChooseBorderColor { .. }) => return Applied::Dialog(dialog),
+    }
+    Applied::Done
+}
+
 fn apply(app: &mut App, effects: Vec<Effect>) {
     for effect in effects {
-        let model = &mut app.model;
-        match effect {
-            Effect::Set(path, value) => model.set(path, value),
-            Effect::SetFilterShift(path, value) => model.set_filter_shift(path, value),
-            Effect::ResetValue(path) => model.reset_value(path),
-            Effect::ResetFilterShift(path) => model.reset_filter_shift(path),
-            Effect::ResetFilterShiftAfterClick(path) => model.reset_filter_shift_after_click(path),
-            Effect::SetExposureOffset(value) => model.set_exposure_offset(value),
-            Effect::ResetExposureOffset => model.reset_exposure_offset(),
-            Effect::SetBorderPercent(field, value) => model.set_border_percent(field, value),
-            Effect::Border(change, undo) => model.set_border(|b| change.apply(b), undo),
-            Effect::BeginInteraction => model.begin_interaction(),
-            Effect::EndInteraction(undo) => model.end_interaction(undo),
-            Effect::SetMatchesBrightness(on) => model.set_matches_brightness(on),
-            Effect::SwitchColorFilter(on) => model.switch_color_filter(on),
-            Effect::ChooseFilmFormat(format) => model.choose_film_format(format),
-            Effect::ChoosePreviewSpace(space) => model.choose_preview_space(space),
-            Effect::ChooseImageSize(mode) => model.choose_image_size(mode),
-            Effect::SetFilterLink(link) => model.set_filter_link(link),
-            Effect::BalancePrint => model.balance_print(),
-            Effect::ChooseLightFrame => {
-                let main = app.main;
-                if let Some(light) = super::dialogs::choose_light_frame(main, app.model.source.as_deref()) {
+        match apply_to_model(&mut app.model, effect) {
+            Applied::Done => {}
+            Applied::Slide => app.inspector.slide = true,
+            Applied::Dialog(Effect::ChooseLightFrame) => {
+                if let Some(light) = super::dialogs::choose_light_frame(app.main, app.model.source.as_deref()) {
                     app.model.choose_flat_field(&light);
                 }
             }
-            Effect::ClearFlatField => model.clear_flat_field(),
-            Effect::Negative(action) => {
-                use crate::negative::Pick;
-                match action {
-                    NegativeAction::FindAgain => model.redetect_negative_base(),
-                    NegativeAction::Pick(Pick::Base) => model.begin_negative_pick(Pick::Base),
-                    NegativeAction::CropToPicture => model.crop_to_picture(),
-                    NegativeAction::AutoPrint => model.auto_print_negative(),
-                    NegativeAction::Pick(Pick::Neutral) => model.begin_negative_pick(Pick::Neutral),
-                    NegativeAction::UseForRoll => model.use_negative_for_roll(),
-                    NegativeAction::RollFiltration => model.use_roll_filtration(),
-                }
-            }
-            Effect::ToneGraphChannel(channel) => {
-                model.prefs.tone_graph_channel = channel.into();
-                model.prefs.save();
-                model.dirty |= dirty::INSPECTOR;
-            }
-            Effect::SetExpanded(title, open) => {
-                app.inspector.slide = true;
-                app.model.prefs.set_expanded(title, open);
-                app.model.prefs.save();
-                app.model.dirty |= dirty::STRUCTURE;
-            }
-            Effect::More(action) => {
-                let prefs = &mut model.prefs;
-                match action {
-                    MoreAction::Reveal(key) => prefs.set_revealed(&key, true),
-                    MoreAction::Conceal(key) => prefs.set_revealed(&key, false),
-                    MoreAction::ShowFewer => prefs.lab_all_controls = false,
-                }
-                prefs.save();
-                app.inspector.slide = true;
-                app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
-            }
-            Effect::ShowBacklight => {
-                model.negative.backlight_shown = true;
-                app.inspector.slide = true;
-                app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
-            }
-            Effect::ChooseBorderColor { line, current } => {
+            Applied::Dialog(Effect::ChooseBorderColor { line, current }) => {
                 if let Some(color) = choose_color(app.main, current) {
                     app.model.set_border_color(line, color);
                 }
             }
-            Effect::ResetEdits(targets, undo) => model.reset_edits(&targets, undo),
+            Applied::Dialog(_) => {}
         }
     }
 }
@@ -3440,6 +3459,83 @@ mod tests {
             model.prefs.choose_tab(name);
             assert!(shown(&model).iter().all(|k| !matches!(k, Kind::DevTime(_))) || name == "Lab", "{name}");
         }
+    }
+
+    /// The schema row of `test`.
+    fn row_id(test: impl Fn(&Kind) -> bool) -> usize {
+        view::rows().iter().position(|r| test(&r.kind)).unwrap()
+    }
+
+    /// An action on a real model, as a click does it.
+    fn act(model: &mut Model, id: usize, action: RowAction) {
+        for effect in view::dispatch(&model.inspector_facts(), &ui_state(model, '.'), id, action) {
+            assert_eq!(apply_to_model(model, effect), Applied::Done);
+        }
+    }
+
+    /// The view's counts are the edit lists' lengths on a real model, and
+    /// the header's total is theirs while a photograph is open.
+    #[test]
+    fn counts_match_the_lists() {
+        let mut model = model();
+        model.source = Some(std::path::PathBuf::from("photo.png"));
+        let before = build_view(&model, '.').counts;
+        model.set("prep.highlights", crate::json::num(12.0));
+        model.set("film_render.grain.active", Value::Bool(false));
+        model.set_border(|b| b.enabled = true, "Change Border");
+        let view = build_view(&model, '.');
+        for (i, tab) in Tab::ALL.into_iter().enumerate() {
+            assert_eq!(crate::edits::edits(tab, &model.inspector_facts(), '.').len(), view.counts[i], "{tab:?}");
+        }
+        assert_eq!(view.counts[0], before[0] + 1);
+        assert_eq!(view.counts[2], 1);
+        assert_eq!(view.total, view.counts.iter().sum::<usize>());
+        model.source = None;
+        assert_eq!(build_view(&model, '.').total, 0);
+    }
+
+    /// Each control's action is one undo step with the Mac's name, and its
+    /// reset another; undoing both puts the edit back.
+    #[test]
+    fn actions_and_resets_are_undo_steps() {
+        let mut model = model();
+        model.source = Some(std::path::PathBuf::from("photo.png"));
+        model.prefs.choose_tab("Lab");
+        let start = model.state.clone();
+        let print = row_id(|k| matches!(k, Kind::Slider(a) if a.path() == "enlarger.print_exposure"));
+        act(&mut model, print, RowAction::Set(1.5));
+        assert_eq!(crate::json::number(model.value("enlarger.print_exposure")), 1.5);
+        assert_eq!(model.undo_title(), Some("Change Adjustment"));
+        assert!(view::resettable(&model.inspector_facts(), print) && build_view(&model, '.').row(print).changed);
+        act(&mut model, print, RowAction::Reset { double_click: false });
+        assert_eq!(crate::json::number(model.value("enlarger.print_exposure")), 1.0);
+        assert!(!view::resettable(&model.inspector_facts(), print));
+        model.perform_undo();
+        model.perform_undo();
+        assert!(crate::json::same(&model.state.params, &start.params));
+        assert_eq!(model.undo_title(), None);
+        // A drag: live values, one step when let go.
+        act(&mut model, print, RowAction::Track(150, Track::Drag));
+        act(&mut model, print, RowAction::Track(160, Track::Drag));
+        assert_eq!(model.undo_title(), None, "no step while dragging");
+        assert!(!crate::json::same(&model.state.params, &start.params));
+        act(&mut model, print, RowAction::Track(160, Track::End));
+        assert_eq!(model.undo_title(), Some("Change Adjustment"));
+        model.perform_undo();
+        assert!(crate::json::same(&model.state.params, &start.params));
+        // The border's switch and the edit list's reset name their steps.
+        model.prefs.choose_tab("Output");
+        let border = row_id(|k| matches!(k, Kind::BorderToggle(_, 0)));
+        act(&mut model, border, RowAction::Check(true));
+        assert!(model.state.border.enabled);
+        assert_eq!(model.undo_title(), Some(view::command::CHANGE_BORDER));
+        let list = crate::edits::edits(Tab::Output, &model.inspector_facts(), '.');
+        let all = view::edit_list(Tab::Output, &list, view::EditChoice::All).unwrap();
+        assert_eq!(apply_to_model(&mut model, all), Applied::Done);
+        assert_eq!(model.undo_title(), Some("Reset Output"));
+        assert!(!model.state.border.enabled);
+        // Dialogs are left to the window.
+        assert_eq!(apply_to_model(&mut model, Effect::ChooseLightFrame), Applied::Dialog(Effect::ChooseLightFrame));
     }
 }
 
