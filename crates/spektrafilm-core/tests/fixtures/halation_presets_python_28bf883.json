@@ -347,6 +347,91 @@
    ]
   },
   {
+   "stock": "fujifilm_eterna_cp_3512",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_cp_3513di",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_cp_3514di",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_cp_3521xd",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_cp_3523xd",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_eterna_vivid_160",
    "use": "cine",
    "antihalation": "strong",

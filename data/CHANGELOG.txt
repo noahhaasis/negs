@@ -191,3 +191,28 @@ by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
   Existing sections unchanged.
 - borders/35mm/: edge-print strips for the 7 new slides,
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: five Fujifilm Eterna-CP colour print films prepared from
+Fujifilm's brochures (CC BY-SA 4.0; method from spektrafilm by Andrea
+Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: fujifilm_eterna_cp_3513di, fujifilm_eterna_cp_3521xd,
+  fujifilm_eterna_cp_3512, fujifilm_eterna_cp_3514di and
+  fujifilm_eterna_cp_3523xd, built by tools/film_profiles (build_print.py)
+  with spektrafilm's public-era steps for papers and print films, a neutral
+  pre-alignment before the unmixing, and the author's print normalisation
+  (#557: TH-KG3 through Y50 M50 and Vision3 250D's mid-scale neutral gives
+  raw 1, as the shipped 2383). Fujifilm's dye curves carry the film base,
+  which is taken off; their undrawn ends and the sensitivities' undrawn
+  tails are filled as each profile's datasource says (3513DI's dyes, Kodak
+  2383's sensitivity shape). Kodak 2383 and 2393 were rebuilt from
+  spektrafilm's public raw data only for calibration; their shipped
+  profiles are unchanged. Document, pages, SHA-256 and every choice in each
+  profile's datasource and in profile-sources/fujifilm-print/. No existing
+  profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for every film in the
+  2383 table on each new print, from solve_neutral_filters; the twelve
+  films 2383 stores at C0 M50 Y50 (slides, Tri-X Reversal) get the same.
+  Existing entries unchanged.
+- borders/35mm/: edge-print strips for the five prints,
+  crates/spektrafilm-io/src/film35.rs.
