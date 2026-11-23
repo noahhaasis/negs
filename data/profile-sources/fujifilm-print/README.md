@@ -19,11 +19,11 @@ Each profile's `metadata.datasource` lists every choice and recorded exception. 
 
 | Print | Curve fit | Filters on Vision3 250D (M, Y) | Camera ramp drift, mean | Scene ramp C*ab, mean / max | ColorChecker ΔE00 vs 2383, mean |
 |---|---|---|---|---|---|
-| 3513DI | 0.015 D | 48.4, 50.6 | 0.113 | 5.3 / 8.4 | 4.7 |
-| 3521XD | 0.013 D | 48.9, 51.3 | 0.109 | 2.3 / 6.0 | 4.3 |
-| 3512 | 0.029 D (recorded) | 49.3, 51.2 | 0.148 | 6.8 / 11 | 3.9 |
-| 3514DI | 0.024 D (recorded) | 49.1, 51.8 | 0.151 | 6.0 / 11 | 3.6 |
-| 3523XD | 0.023 D (recorded) | 49.1, 51.4 | 0.149 | 5.7 / 11 | 3.6 |
+| 3513DI | 0.015 D | 48.5, 50.7 | 0.109 | 5.4 / 8.4 | 4.7 |
+| 3521XD | 0.013 D | 49.0, 51.3 | 0.106 | 2.3 / 6.0 | 4.3 |
+| 3512 | 0.029 D (recorded) | 49.3, 51.2 | 0.143 | 6.8 / 11 | 3.9 |
+| 3514DI | 0.024 D (recorded) | 49.2, 51.8 | 0.146 | 6.0 / 11 | 3.6 |
+| 3523XD | 0.023 D (recorded) | 49.2, 51.4 | 0.145 | 5.7 / 11 | 3.5 |
 | *Kodak 2383 (shipped)* | | 51.2, 52.0 | 0.070 | 2.9 / 6.3 | – |
 
 The worst shipped cine pair, 2383 with Portra 400, drifts 0.225 on the camera ramp; every Fuji pair stays below that. For every negative, the neutral filters are within about 3 CC of 2383's.
