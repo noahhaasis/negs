@@ -130,12 +130,11 @@ pub fn create(parent: HWND, id: u16, label: HWND) -> HWND {
     graph
 }
 
-/// The channel buttons' choices, as Settings keeps them.
-pub const CHANNELS: [&str; 4] = ["rgb", "r", "g", "b"];
-
-pub fn channel(key: &str) -> Option<usize> {
-    CHANNELS.iter().position(|c| *c == key).and_then(|i| i.checked_sub(1))
-}
+/// The channel buttons' choices, as Settings keeps them (the inspector
+/// view's).
+#[cfg(test)]
+use crate::inspector_view::schema::TONE_CHANNELS as CHANNELS;
+pub use crate::inspector_view::schema::tone_channel as channel;
 
 /// Brings the graph up to the model; redraws only if what it shows changed.
 pub fn update(graph: HWND, model: &Model, enabled: bool, dpi: u32, decimal: char) {
