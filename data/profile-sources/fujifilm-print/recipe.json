@@ -1,0 +1,1379 @@
+{
+ "about": "Fujifilm Eterna-CP colour print films (ECP-2B) from Fujifilm's brochures, and Kodak 2383/2393 rebuilt from spektrafilm's public raw data as calibration. Procedure: docs/adding-film-stocks.md D12; tools/film_profiles/build_print.py.",
+ "stocks": {
+  "kodak_2383": {
+   "calibration": true,
+   "stock": "kodak_2383",
+   "name": "Kodak Vision 2383 (rebuilt)",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": "extrapolate"
+  },
+  "kodak_2393": {
+   "calibration": true,
+   "stock": "kodak_2393",
+   "name": "Kodak Vision Premier 2393 (rebuilt)",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": "extrapolate"
+  },
+  "fujifilm_eterna_cp_3513di": {
+   "stock": "fujifilm_eterna_cp_3513di",
+   "name": "Fujifilm Eterna-CP 3513DI",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": {
+    "donor": "kodak_2383"
+   },
+   "plot_shift_log_h": {
+    "r": 0.0,
+    "g": 1.0,
+    "b": 2.0
+   },
+   "dye_prep": {
+    "base_from": "fujifilm_eterna_cp_3513di",
+    "fill": "gray",
+    "fill_range_nm": [
+     400,
+     695
+    ]
+   },
+   "ships": true,
+   "product_code": "3513DI",
+   "edge_print": "3513DI FUJI",
+   "exposure_as_printed": "2854K tungsten, 1/100 s, Fuji SC-41 + CC-90Y + CC-60M",
+   "process": "ECP-2B",
+   "densitometry_as_printed": "three colour diffuse densities (status A)",
+   "sensitivity_as_printed": "reciprocal of exposure (erg/cm2) for density 1.0 above minimum density",
+   "notes": []
+  },
+  "fujifilm_eterna_cp_3521xd": {
+   "stock": "fujifilm_eterna_cp_3521xd",
+   "name": "Fujifilm Eterna-CP 3521XD",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": {
+    "donor": "kodak_2383"
+   },
+   "plot_shift_log_h": {
+    "r": 0.0,
+    "g": 1.0,
+    "b": 2.0
+   },
+   "dye_prep": {
+    "base_from": "fujifilm_eterna_cp_3513di",
+    "fill": {
+     "donor": "fujifilm_eterna_cp_3513di",
+     "match_nm": 30
+    },
+    "fill_range_nm": [
+     400,
+     695
+    ]
+   },
+   "ships": true,
+   "product_code": "3521XD",
+   "edge_print": "3521XD FUJI",
+   "exposure_as_printed": "2854K tungsten, 1/100 s, Fuji SC-41 + CC-90Y + CC-60M",
+   "process": "ECP-2B",
+   "densitometry_as_printed": "three colour diffuse densities (status A)",
+   "sensitivity_as_printed": "reciprocal of exposure (erg/cm2) for density 1.0 above minimum density",
+   "notes": []
+  },
+  "fujifilm_eterna_cp_3512": {
+   "stock": "fujifilm_eterna_cp_3512",
+   "name": "Fujifilm Eterna-CP 3512",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": {
+    "donor": "kodak_2383"
+   },
+   "plot_shift_log_h": {
+    "r": 0.0,
+    "g": 1.0,
+    "b": 2.0
+   },
+   "dye_prep": {
+    "base_from": "fujifilm_eterna_cp_3513di",
+    "fill": {
+     "donor": "fujifilm_eterna_cp_3513di",
+     "match_nm": 30
+    },
+    "fill_range_nm": [
+     400,
+     695
+    ]
+   },
+   "ships": true,
+   "product_code": "3512",
+   "edge_print": "3512 FUJI",
+   "exposure_as_printed": "2854K tungsten, 1/100 s, Fuji SC-41 + CC-90Y + CC-60M",
+   "process": "ECP-2B",
+   "densitometry_as_printed": "three colour diffuse densities (status A)",
+   "sensitivity_as_printed": "reciprocal of exposure (erg/cm2) for density 1.0 above minimum density",
+   "notes": [],
+   "gate_exceptions": [
+    {
+     "check": "curve fit",
+     "gate": 0.03,
+     "reason": "the brochure's blue curve is straight and steep from D 1 to about 2.8 and then turns into its shoulder within about 0.1 log H; three norm_cdfs per channel cannot follow both, so blue misses by up to 0.029 D around D 1-2.3 (red and green within 0.017 D). Upstream fits with the same model."
+    }
+   ]
+  },
+  "fujifilm_eterna_cp_3514di": {
+   "stock": "fujifilm_eterna_cp_3514di",
+   "name": "Fujifilm Eterna-CP 3514DI",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": {
+    "donor": "kodak_2383"
+   },
+   "plot_shift_log_h": {
+    "r": 0.0,
+    "g": 1.0,
+    "b": 2.0
+   },
+   "dye_prep": {
+    "base_from": "fujifilm_eterna_cp_3513di",
+    "fill": {
+     "donor": "fujifilm_eterna_cp_3513di",
+     "match_nm": 30
+    },
+    "fill_range_nm": [
+     400,
+     695
+    ]
+   },
+   "ships": true,
+   "product_code": "3514DI",
+   "edge_print": "3514DI FUJI",
+   "exposure_as_printed": "2854K tungsten, 1/100 s, Fuji SC-41 + CC-90Y + CC-60M",
+   "process": "ECP-2B",
+   "densitometry_as_printed": "three colour diffuse densities (status A)",
+   "sensitivity_as_printed": "reciprocal of exposure (erg/cm2) for density 1.0 above minimum density",
+   "notes": [],
+   "gate_exceptions": [
+    {
+     "check": "curve fit",
+     "gate": 0.03,
+     "reason": "the brochure's blue curve is straight and steep from D 1 to about 2.8 and then turns into its shoulder within about 0.1 log H; three norm_cdfs per channel cannot follow both, so blue misses by up to 0.024 D around D 1-2.3 (red and green within 0.017 D). Upstream fits with the same model."
+    }
+   ]
+  },
+  "fujifilm_eterna_cp_3523xd": {
+   "stock": "fujifilm_eterna_cp_3523xd",
+   "name": "Fujifilm Eterna-CP 3523XD",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": {
+    "donor": "kodak_2383"
+   },
+   "plot_shift_log_h": {
+    "r": 0.0,
+    "g": 1.0,
+    "b": 2.0
+   },
+   "dye_prep": {
+    "base_from": "fujifilm_eterna_cp_3513di",
+    "fill": {
+     "donor": "fujifilm_eterna_cp_3513di",
+     "match_nm": 30
+    },
+    "fill_range_nm": [
+     400,
+     695
+    ]
+   },
+   "ships": true,
+   "product_code": "3523XD",
+   "edge_print": "3523XD FUJI",
+   "exposure_as_printed": "2854K tungsten, 1/100 s, Fuji SC-41 + CC-90Y + CC-60M",
+   "process": "ECP-2B",
+   "densitometry_as_printed": "three colour diffuse densities (status A)",
+   "sensitivity_as_printed": "reciprocal of exposure (erg/cm2) for density 1.0 above minimum density",
+   "notes": [],
+   "gate_exceptions": [
+    {
+     "check": "curve fit",
+     "gate": 0.03,
+     "reason": "the brochure's blue curve is straight and steep from D 1 to about 2.8 and then turns into its shoulder within about 0.1 log H; three norm_cdfs per channel cannot follow both, so blue misses by up to 0.023 D around D 1-2.3 (red and green within 0.017 D). Upstream fits with the same model."
+    }
+   ]
+  }
+ },
+ "extraction": {
+  "fujifilm_eterna_cp_3513di": {
+   "info": "Fujifilm Eterna-CP 3513DI KB-505E 2005",
+   "source": {
+    "file": "eterna_cp_3513di.pdf",
+    "sha256": "ce5f63f622dc2024557b4c1f0ec018efdc0c0426eb00c3348629c05d30dfaf74",
+    "document": "FUJICOLOR POSITIVE FILM ETERNA-CP 3513DI/3613DI brochure, Ref. No. KB-505E",
+    "edition": "(c) 2005 FUJIFILM Corporation"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      331.83,
+      104.08,
+      541.76,
+      271.96
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+        3.5,
+        4.0,
+        4.5
+       ],
+       "frame": null,
+       "relative_reason": "Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square"
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [
+        0.0,
+        0.44,
+        0.74
+       ]
+      },
+      "density_curve_g": {
+       "color": [
+        0.0,
+        0.65,
+        0.31
+       ]
+      },
+      "density_curve_r": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ]
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      70.59,
+      104.07,
+      239.75,
+      322.4
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        500,
+        600
+       ],
+       "frame": [
+        400,
+        700
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        2.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "dye_density_gray": {
+       "color": [
+        0.5,
+        0.51,
+        0.52
+       ]
+      },
+      "dye_density_c": {
+       "color": [
+        0.0,
+        0.68,
+        0.94
+       ]
+      },
+      "dye_density_m": {
+       "color": [
+        0.93,
+        0.0,
+        0.55
+       ]
+      },
+      "dye_density_y": {
+       "color": [
+        1.0,
+        0.95,
+        0.0
+       ]
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      332.02,
+      438.9,
+      541.28,
+      556.23
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700,
+        750
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.0
+       ],
+       "frame": [
+        3.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [
+        0.0,
+        0.44,
+        0.74
+       ]
+      },
+      "log_sensitivity_g": {
+       "color": [
+        0.0,
+        0.65,
+        0.31
+       ]
+      },
+      "log_sensitivity_r": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ],
+       "width": 0.85
+      },
+      "log_sensitivity_r_blue": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ],
+       "width": 0.9
+      }
+     }
+    }
+   }
+  },
+  "fujifilm_eterna_cp_3521xd": {
+   "info": "Fujifilm Eterna-CP 3521XD KB-0601E 2006",
+   "source": {
+    "file": "eterna_cp_type3521xd.pdf",
+    "sha256": "bcac8295757c75e439af15c9a76efdb1acbed79be7371ee900681d30382e105b",
+    "document": "FUJICOLOR POSITIVE FILM ETERNA-CP 3521XD brochure, Ref. No. KB-0601E",
+    "edition": "(c) 2006 FUJIFILM Corporation"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      61.77,
+      53.9,
+      271.63,
+      221.26
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+        3.5,
+        4.0,
+        4.5
+       ],
+       "frame": null,
+       "relative_reason": "Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square"
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        4.5,
+        4.0,
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        5.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [
+        0.0,
+        0.45,
+        0.74
+       ]
+      },
+      "density_curve_g": {
+       "color": [
+        0.0,
+        0.65,
+        0.32
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 1
+       }
+      },
+      "density_curve_r": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ]
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      347.8,
+      348.35,
+      516.06,
+      566.28
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null,
+       "gate": 0.007,
+       "gate_reason": "Hand-drafted grid shared by four brochures (3521XD, 3512, 3514DI, 3523XD): the 400/500/600/700 nm gridlines are 50.4, 47.5 and 48.7 pt apart; the worst is 0.63 % of span (2 nm). Physical check: the dye peaks fall within 3 nm of 3513DI's precisely drawn chart (D12)."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": null
+      }
+     },
+     "curves": {
+      "dye_density_gray": {
+       "color": [
+        0.5,
+        0.51,
+        0.52
+       ]
+      },
+      "dye_density_c": {
+       "color": [
+        0.0,
+        0.68,
+        0.94
+       ]
+      },
+      "dye_density_m": {
+       "color": [
+        0.93,
+        0.0,
+        0.55
+       ]
+      },
+      "dye_density_y": {
+       "color": [
+        1.0,
+        0.95,
+        0.0
+       ]
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      61.93,
+      556.19,
+      271.66,
+      672.98
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.0
+       ],
+       "frame": null,
+       "relative_reason": "Relative spectral sensitivity (log): each channel's level is renormalised (D12 step 7), so only the scale matters; it is set by the two labelled gridlines (2.0, 1.0)"
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [
+        0.0,
+        0.4,
+        0.7
+       ]
+      },
+      "log_sensitivity_g": {
+       "color": [
+        0.0,
+        0.67,
+        0.31
+       ]
+      },
+      "log_sensitivity_r": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 2
+       }
+      },
+      "log_sensitivity_r_blue": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "fujifilm_eterna_cp_3512": {
+   "info": "Fujifilm Eterna-CP 3512 KB-1002E 2010",
+   "source": {
+    "file": "eterna_cp_type3512.pdf",
+    "sha256": "5236a371b0a211ca0a99876b14c3f06bb76d34820a5e15839001db25c581192e",
+    "document": "FUJICOLOR POSITIVE FILM ETERNA-CP 3512/3612 brochure, Ref. No. KB-1002E",
+    "edition": "(c) 2010 FUJIFILM Corporation"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      82.28,
+      62.19,
+      311.28,
+      229.39
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+        3.5,
+        4.0,
+        4.5,
+        5.0,
+        5.5,
+        6.0
+       ],
+       "frame": null,
+       "relative_reason": "Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square",
+       "gate": 0.004,
+       "gate_reason": "Hand-drafted grid: the 12 log H gridlines are spaced 17.3-19.4 pt for one 0.5 log H square, so no straight line meets all of them; the worst is 0.38 % of span (0.02 log H). The neutral pre-alignment fixes each channel's position, so only the slope matters, and it is the mean square."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        4.0,
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.5,
+        0.0
+       ],
+       "gate": 0.004,
+       "gate_reason": "Hand-drafted grid: the density gridlines are spaced 18.0-19.1 pt for 0.5 D; the worst is 0.33 % of span (0.015 D). Checked against the drawn D-max of the companion brochure (3512/3514DI/3523XD share the template)."
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [
+        0.0,
+        0.45,
+        0.74
+       ]
+      },
+      "density_curve_g": {
+       "color": [
+        0.0,
+        0.65,
+        0.32
+       ]
+      },
+      "density_curve_r": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ]
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      369.59,
+      62.19,
+      538.37,
+      252.14
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null,
+       "gate": 0.007,
+       "gate_reason": "Hand-drafted grid shared by four brochures (3521XD, 3512, 3514DI, 3523XD): the 400/500/600/700 nm gridlines are 50.4, 47.5 and 48.7 pt apart; the worst is 0.63 % of span (2 nm). Physical check: the dye peaks fall within 3 nm of 3513DI's precisely drawn chart (D12)."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": null
+      }
+     },
+     "curves": {
+      "dye_density_gray": {
+       "color": [
+        0.5,
+        0.51,
+        0.52
+       ]
+      },
+      "dye_density_c": {
+       "color": [
+        0.0,
+        0.68,
+        0.94
+       ]
+      },
+      "dye_density_m": {
+       "color": [
+        0.93,
+        0.0,
+        0.55
+       ]
+      },
+      "dye_density_y": {
+       "color": [
+        1.0,
+        0.95,
+        0.0
+       ]
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      89.03,
+      345.39,
+      302.14,
+      461.81
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.0
+       ],
+       "frame": null,
+       "relative_reason": "Relative spectral sensitivity (log): each channel's level is renormalised (D12 step 7), so only the scale matters; it is set by the two labelled gridlines (2.0, 1.0)"
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [
+        0.0,
+        0.4,
+        0.7
+       ]
+      },
+      "log_sensitivity_g": {
+       "color": [
+        0.0,
+        0.67,
+        0.31
+       ]
+      },
+      "log_sensitivity_r": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 2
+       }
+      },
+      "log_sensitivity_r_blue": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "fujifilm_eterna_cp_3514di": {
+   "info": "Fujifilm Eterna-CP 3514DI KB-1003E 2010",
+   "source": {
+    "file": "eterna_cp_type3514di.pdf",
+    "sha256": "5e1d65402628c5e18f0612ec979a4157a01a08632f62f6012a3e6451daed5510",
+    "document": "FUJICOLOR POSITIVE FILM ETERNA-CP 3514DI/3614DI brochure, Ref. No. KB-1003E",
+    "edition": "(c) 2010 FUJIFILM Corporation"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      82.28,
+      62.78,
+      311.28,
+      229.98
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+        3.5,
+        4.0,
+        4.5,
+        5.0,
+        5.5,
+        6.0
+       ],
+       "frame": null,
+       "relative_reason": "Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square",
+       "gate": 0.004,
+       "gate_reason": "Hand-drafted grid: the 12 log H gridlines are spaced 17.3-19.4 pt for one 0.5 log H square, so no straight line meets all of them; the worst is 0.38 % of span (0.02 log H). The neutral pre-alignment fixes each channel's position, so only the slope matters, and it is the mean square."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        4.0,
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.5,
+        0.0
+       ],
+       "gate": 0.004,
+       "gate_reason": "Hand-drafted grid: the density gridlines are spaced 18.0-19.1 pt for 0.5 D; the worst is 0.33 % of span (0.015 D). Checked against the drawn D-max of the companion brochure (3512/3514DI/3523XD share the template)."
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [
+        0.0,
+        0.4,
+        0.7
+       ]
+      },
+      "density_curve_g": {
+       "color": [
+        0.0,
+        0.67,
+        0.31
+       ]
+      },
+      "density_curve_r": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ]
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      369.59,
+      62.78,
+      538.37,
+      252.74
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null,
+       "gate": 0.007,
+       "gate_reason": "Hand-drafted grid shared by four brochures (3521XD, 3512, 3514DI, 3523XD): the 400/500/600/700 nm gridlines are 50.4, 47.5 and 48.7 pt apart; the worst is 0.63 % of span (2 nm). Physical check: the dye peaks fall within 3 nm of 3513DI's precisely drawn chart (D12)."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": null
+      }
+     },
+     "curves": {
+      "dye_density_gray": {
+       "color": [
+        0.5,
+        0.51,
+        0.52
+       ]
+      },
+      "dye_density_c": {
+       "color": [
+        0.0,
+        0.68,
+        0.94
+       ]
+      },
+      "dye_density_m": {
+       "color": [
+        0.93,
+        0.0,
+        0.55
+       ]
+      },
+      "dye_density_y": {
+       "color": [
+        1.0,
+        0.95,
+        0.0
+       ]
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      89.03,
+      345.4,
+      302.14,
+      461.82
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.0
+       ],
+       "frame": null,
+       "relative_reason": "Relative spectral sensitivity (log): each channel's level is renormalised (D12 step 7), so only the scale matters; it is set by the two labelled gridlines (2.0, 1.0)"
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [
+        0.0,
+        0.4,
+        0.7
+       ]
+      },
+      "log_sensitivity_g": {
+       "color": [
+        0.0,
+        0.67,
+        0.31
+       ]
+      },
+      "log_sensitivity_r": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 2
+       }
+      },
+      "log_sensitivity_r_blue": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "fujifilm_eterna_cp_3523xd": {
+   "info": "Fujifilm Eterna-CP 3523XD KB-1004E 2010",
+   "source": {
+    "file": "eterna_cp_3523xd.pdf",
+    "sha256": "83c3fd5bcd77dff2f5f50242fa1bcacbd4f4fce843adf2e0903820b98c74ccfc",
+    "document": "FUJICOLOR POSITIVE FILM ETERNA-CP 3523XD brochure, Ref. No. KB-1004E",
+    "edition": "(c) 2010 FUJIFILM Corporation"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      74.36,
+      62.69,
+      303.36,
+      229.89
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+        3.5,
+        4.0,
+        4.5,
+        5.0,
+        5.5,
+        6.0
+       ],
+       "frame": null,
+       "relative_reason": "Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square",
+       "gate": 0.004,
+       "gate_reason": "Hand-drafted grid: the 12 log H gridlines are spaced 17.3-19.4 pt for one 0.5 log H square, so no straight line meets all of them; the worst is 0.38 % of span (0.02 log H). The neutral pre-alignment fixes each channel's position, so only the slope matters, and it is the mean square."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        4.0,
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.5,
+        0.0
+       ],
+       "gate": 0.004,
+       "gate_reason": "Hand-drafted grid: the density gridlines are spaced 18.0-19.1 pt for 0.5 D; the worst is 0.33 % of span (0.015 D). Checked against the drawn D-max of the companion brochure (3512/3514DI/3523XD share the template)."
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [
+        0.0,
+        0.4,
+        0.7
+       ]
+      },
+      "density_curve_g": {
+       "color": [
+        0.0,
+        0.67,
+        0.31
+       ]
+      },
+      "density_curve_r": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ]
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      637.23,
+      62.92,
+      806.01,
+      252.88
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null,
+       "gate": 0.007,
+       "gate_reason": "Hand-drafted grid shared by four brochures (3521XD, 3512, 3514DI, 3523XD): the 400/500/600/700 nm gridlines are 50.4, 47.5 and 48.7 pt apart; the worst is 0.63 % of span (2 nm). Physical check: the dye peaks fall within 3 nm of 3513DI's precisely drawn chart (D12)."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": null
+      }
+     },
+     "curves": {
+      "dye_density_gray": {
+       "color": [
+        0.5,
+        0.51,
+        0.52
+       ]
+      },
+      "dye_density_c": {
+       "color": [
+        0.0,
+        0.68,
+        0.94
+       ]
+      },
+      "dye_density_m": {
+       "color": [
+        0.93,
+        0.0,
+        0.55
+       ]
+      },
+      "dye_density_y": {
+       "color": [
+        1.0,
+        0.95,
+        0.0
+       ]
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 0,
+     "frame_kind": "fill",
+     "frame": [
+      361.77,
+      348.9,
+      574.87,
+      465.31
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.0
+       ],
+       "frame": null,
+       "relative_reason": "Relative spectral sensitivity (log): each channel's level is renormalised (D12 step 7), so only the scale matters; it is set by the two labelled gridlines (2.0, 1.0)"
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [
+        0.0,
+        0.4,
+        0.7
+       ]
+      },
+      "log_sensitivity_g": {
+       "color": [
+        0.0,
+        0.67,
+        0.31
+       ]
+      },
+      "log_sensitivity_r": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 2
+       }
+      },
+      "log_sensitivity_r_blue": {
+       "color": [
+        0.94,
+        0.25,
+        0.14
+       ],
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

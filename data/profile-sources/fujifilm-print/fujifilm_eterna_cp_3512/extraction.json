@@ -1,0 +1,418 @@
+{
+ "stock": "fujifilm_eterna_cp_3512",
+ "source": {
+  "file": "eterna_cp_type3512.pdf",
+  "sha256": "5236a371b0a211ca0a99876b14c3f06bb76d34820a5e15839001db25c581192e",
+  "document": "FUJICOLOR POSITIVE FILM ETERNA-CP 3512/3612 brochure, Ref. No. KB-1002E",
+  "edition": "(c) 2010 FUJIFILM Corporation"
+ },
+ "panels": {
+  "characteristic": {
+   "page": 0,
+   "page_rotation": 0,
+   "frame_pdf": [
+    82.27801513671875,
+    62.18902587890625,
+    311.27801513671875,
+    229.3900146484375
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 0.02740808456015979,
+     "offset": -2.0118581154959343,
+     "span": 6.276451364276592,
+     "gridline_pdf": [
+      91.6602,
+      110.3496,
+      128.0796,
+      146.375,
+      164.499,
+      182.3989,
+      200.9175,
+      220.0308,
+      237.3364,
+      255.1895,
+      273.7563,
+      293.1909
+     ],
+     "gridline_residual": [
+      0.000372,
+      0.012613,
+      -0.001441,
+      0.0,
+      -0.003256,
+      -0.012654,
+      -0.005094,
+      0.018765,
+      -0.006922,
+      -0.017603,
+      -0.008723,
+      0.023943
+     ],
+     "frame_pdf": [
+      82.27801513671875,
+      311.27801513671875
+     ],
+     "frame_value": [
+      0.24322468081336046,
+      6.519676045089952
+     ],
+     "worst_over_span": 0.003814658736997273,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "Hand-drafted grid: the 12 log H gridlines are spaced 17.3-19.4 pt for one 0.5 log H square, so no straight line meets all of them; the worst is 0.38 % of span (0.02 log H). The neutral pre-alignment fixes each channel's position, so only the slope matters, and it is the mean square.",
+     "relative_reason": "Exposure [log H] carries no numbers, only a 0.5 log H scale bar spanning one grid square; the offset is arbitrary (log E 0 is set by step 2 and the neutral pre-alignment) and the scale is 0.5 log H per square"
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.026986080375867843,
+     "offset": 6.179774247027208,
+     "span": 4.5120993218591465,
+     "gridline_pdf": [
+      81.318,
+      99.527,
+      117.5543,
+      135.9469,
+      154.7086,
+      173.1012,
+      191.8649,
+      210.6227
+     ],
+     "gridline_residual": [
+      -0.01468,
+      -0.00607,
+      0.007444,
+      0.0111,
+      0.004795,
+      0.008451,
+      0.002093,
+      -0.004107
+     ],
+     "frame_pdf": [
+      62.18902587890625,
+      229.3900146484375
+     ],
+     "frame_value": [
+      4.501536196162118,
+      -0.01056312569702822
+     ],
+     "frame_residual": [
+      0.001536,
+      -0.010563
+     ],
+     "worst_over_span": 0.003253397466527022,
+     "gate": 0.004,
+     "pass": 1.0,
+     "gate_reason": "Hand-drafted grid: the density gridlines are spaced 18.0-19.1 pt for 0.5 D; the worst is 0.33 % of span (0.015 D). Checked against the drawn D-max of the companion brochure (3512/3514DI/3523XD share the template)."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "density_curve_b": {
+     "paths": [
+      1468
+     ],
+     "points": 191,
+     "x_range": [
+      0.41473306176227176,
+      3.494277857534453
+     ],
+     "y_range": [
+      0.09394864017269633,
+      3.4923615589802757
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      1469
+     ],
+     "points": 253,
+     "x_range": [
+      1.4126259727637156,
+      4.480056358357459
+     ],
+     "y_range": [
+      0.0838799201203475,
+      3.742485270352649
+     ]
+    },
+    "density_curve_r": {
+     "paths": [
+      1470
+     ],
+     "points": 379,
+     "x_range": [
+      2.421399562109912,
+      5.505960000553754
+     ],
+     "y_range": [
+      0.06401013370590114,
+      3.543784407937095
+     ]
+    }
+   }
+  },
+  "spectral_density": {
+   "page": 0,
+   "page_rotation": 0,
+   "frame_pdf": [
+    369.592041015625,
+    62.18902587890625,
+    538.3740234375,
+    252.14404296875
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 2.045921401296522,
+     "offset": -379.1095351724669,
+     "span": 345.3146699901675,
+     "gridline_pdf": [
+      380.1748,
+      430.75,
+      478.3862,
+      527.1997
+     ],
+     "gridline_residual": [
+      -1.301766,
+      2.171108,
+      -0.368971,
+      -0.500372
+     ],
+     "frame_pdf": [
+      369.592041015625,
+      538.3740234375
+     ],
+     "frame_value": [
+      377.04673129026224,
+      722.3614012804298
+     ],
+     "worst_over_span": 0.006287333335915969,
+     "gate": 0.007,
+     "pass": 1.0,
+     "gate_reason": "Hand-drafted grid shared by four brochures (3521XD, 3512, 3514DI, 3523XD): the 400/500/600/700 nm gridlines are 50.4, 47.5 and 48.7 pt apart; the worst is 0.63 % of span (2 nm). Physical check: the dye peaks fall within 3 nm of 3513DI's precisely drawn chart (D12)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.010368573546645457,
+     "offset": 2.6204640514380375,
+     "span": 1.9695625652503397,
+     "gridline_pdf": [
+      108.0641,
+      156.2848,
+      204.5094
+     ],
+     "gridline_residual": [
+      -7e-06,
+      1.3e-05,
+      -7e-06
+     ],
+     "frame_pdf": [
+      62.18902587890625,
+      252.14404296875
+     ],
+     "frame_value": [
+      1.9756525628183605,
+      0.006089997568020866
+     ],
+     "worst_over_span": 6.8011407496144295e-06,
+     "gate": 0.002,
+     "pass": 1.0
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_gray": {
+     "paths": [
+      2042
+     ],
+     "points": 442,
+     "x_range": [
+      376.97343076154147,
+      722.2226672303298
+     ],
+     "y_range": [
+      0.5689078647018566,
+      1.166884207907313
+     ]
+    },
+    "dye_density_c": {
+     "paths": [
+      2043
+     ],
+     "points": 253,
+     "x_range": [
+      487.7217885393533,
+      722.5464632626515
+     ],
+     "y_range": [
+      0.14382268798845432,
+      1.110925932839257
+     ]
+    },
+    "dye_density_m": {
+     "paths": [
+      2044
+     ],
+     "points": 442,
+     "x_range": [
+      377.07607647637707,
+      648.7253384528942
+     ],
+     "y_range": [
+      0.0975938931698046,
+      0.8988357926859392
+     ]
+    },
+    "dye_density_y": {
+     "paths": [
+      2045
+     ],
+     "points": 316,
+     "x_range": [
+      377.28498922688783,
+      698.1305191763538
+     ],
+     "y_range": [
+      0.029840764487308213,
+      0.7074161278881721
+     ]
+    }
+   }
+  },
+  "sensitivity": {
+   "page": 0,
+   "page_rotation": 0,
+   "frame_pdf": [
+    89.03201293945312,
+    345.39398193359375,
+    302.1400146484375,
+    461.8070068359375
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 1.6412072506556812,
+     "offset": 244.18123912386642,
+     "span": 349.75439757752844,
+     "gridline_pdf": [
+      94.6128,
+      125.3833,
+      156.1538,
+      186.5825,
+      217.0103,
+      247.0962,
+      277.5249
+     ],
+     "gridline_residual": [
+      -0.539559,
+      -0.038779,
+      0.461977,
+      0.401798,
+      0.340116,
+      -0.282675,
+      -0.342879
+     ],
+     "frame_pdf": [
+      89.03201293945312,
+      302.1400146484375
+     ],
+     "frame_value": [
+      390.30122430056736,
+      740.0556218780957
+     ],
+     "worst_over_span": 0.001542679819820232,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.02565642408891426,
+     "offset": 11.835169532996384,
+     "span": 2.9867419363678676,
+     "gridline_pdf": [
+      383.3414,
+      422.318
+     ],
+     "gridline_residual": [
+      0.0,
+      0.0
+     ],
+     "frame_pdf": [
+      345.39398193359375,
+      461.8070068359375
+     ],
+     "frame_value": [
+      2.973595054749312,
+      -0.013146881618554929
+     ],
+     "worst_over_span": 1.1894946917044005e-15,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Relative spectral sensitivity (log): each channel's level is renormalised (D12 step 7), so only the scale matters; it is set by the two labelled gridlines (2.0, 1.0)"
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      2133
+     ],
+     "points": 505,
+     "x_range": [
+      391.34731361444653,
+      503.8619174897121
+     ],
+     "y_range": [
+      0.30296863805948604,
+      2.55483193765248
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      2134
+     ],
+     "points": 316,
+     "x_range": [
+      447.6052666657957,
+      570.0393125390083
+     ],
+     "y_range": [
+      0.17545148118714593,
+      1.7343288264650027
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      "2128.0"
+     ],
+     "points": 127,
+     "x_range": [
+      644.9844045504714,
+      714.5912656296412
+     ],
+     "y_range": [
+      0.23594389223174872,
+      0.701462910076085
+     ]
+    },
+    "log_sensitivity_r_blue": {
+     "paths": [
+      "2129.0"
+     ],
+     "points": 64,
+     "x_range": [
+      390.86806887635146,
+      433.30147533006027
+     ],
+     "y_range": [
+      0.2582366689242406,
+      1.2495237573256848
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}

@@ -454,12 +454,12 @@ The full checklist is in `negs-stock-integration.md` §3; the touch points are:
 - Process with `process_paper_profile`: `remove_density_min`, then `adjust_log_exposure` (zero where green is 0.735 over D-min), then `balance_metameric_neutral` (a D-mid seen under `viewing_illuminant` is neutral at 0.184), then `unmix_density` (status A), then the fit (`factory.py:532`).
 - The base spectrum is synthesised from the channel D-mins at 445/530/610 nm with σ 20 nm. That fills the brochures' missing base.
 - Use the per-dye spectra given. They have no masking couplers.
-- Set `reference_illuminant` to `TH-KG3-L` and `viewing_illuminant` to `K75P` (as 2383). Use `support: film`, `stage: printing`, `densitometer: status_A`, `log_sensitivity_density_over_min: 1.0`.
-- **Private era [F #557]:** normalise the print sensitivities to TH-KG3-L attenuated by a target film's D-mid and by Y50 M50 CC filters (100 CC = 1 OD). For Fuji the target is an Eterna negative with a published D-mid (Kodak prints use Vision3 250D) [N].
+- Set `reference_illuminant` to `TH-KG3` and `viewing_illuminant` to `K75P` (as 2383; the runtime's lamp is `TH-KG3`, and the shipped 2383 normalises to it exactly). Use `support: film`, `stage: printing`, `densitometer: status_A`, `log_sensitivity_density_over_min: 1.0`.
+- **Private era [F #557]:** normalise the print sensitivities to TH-KG3 attenuated by a target film's D-mid and by Y50 M50 CC filters (100 CC = 1 OD). Kodak prints use Vision3 250D; the Eterna-CP prints do too [N], so every print shares one reference (§D12).
 - **Integration:**
-  - The name must contain "Print Film", or the UIs file it as a colour paper (`isMotionPicturePrint`, `Parameters.swift:226`, `web/app.js:803`, `windows/src/state.rs:240`, `linux/src/catalog.rs:51`).
-  - Every colour negative needs a neutral-filter entry for the new print (38+ entries).
-  - It needs a `film35.rs` `EdgePrint::Print(..)` entry.
+  - `support: film` with `stage: printing` makes the catalog's `cine_print`, which files it under Motion Picture Print in every UI (older catalogs fall back to the name containing "Vision" or "Print Film").
+  - Every film needs a neutral-filter entry for the new print, as the 2383 table has (55 today).
+  - It needs a `film35.rs` `EdgePrint::Print(..)` entry and strips.
   - No grain preset.
 - **Validation:** a grey ramp of Vision3 250D and of the new Eterna stocks through it; check the 3521XD/3513DI comparison plot. Kodak's 2393 had odd data (#234), so expect trouble.
 
@@ -472,7 +472,7 @@ The full checklist is in `negs-stock-integration.md` §3; the touch points are:
 - Negs expects mid-grey to view at Y 0.18 (`tools/fotufilm_port/slide_neutral.py`).
 - Steep slides fold, so run the fold check.
 
-The full slide procedure is §D11.
+The full slide procedure is §D11; the print-film procedure, §D12.
 
 ### D11. Procedure: colour reversal (slides)
 
@@ -535,6 +535,32 @@ Shipped (2026-11-21, behind Settings › Show Negs-built films): Velvia 100F, Pr
 
 ---
 
+### D12. Procedure: colour print films (Eterna-CP, 2026-11-24)
+
+Worked example: `data/profile-sources/fujifilm-print/` (five Eterna-CP brochures; Kodak 2383 and 2393 rebuilt from spektrafilm's public raw data as calibration). Tools: `tools/film_profiles/print_spectra.py` (runtime env: the K75P viewing light and each reference film's printing light), `build_print.py` (creator env), `check_print.py` (runtime env), `finalize_print.py`.
+
+1. **Extract** as §D1 (`extract_pdf.py`, recipe `extraction`). The brochures' characteristic log H axis has no numbers, only a 0.5 log H scale bar: calibrate it as relative (0.5 per square). G and B are plotted 1.0 and 2.0 log H left of R (recipe `plot_shift_log_h`). Red sensitivity is drawn in two pieces (a blue-region bump and the red peak); keep them as separate CSVs (`log_sensitivity_r.csv`, `_r_blue.csv`). The four brochures other than 3513DI share one hand-drafted template; record the gate exceptions with their gridline spacing.
+2. **Calibrate first (step 0).** Rebuild 2383 and 2393 from the public raw data with the same steps and compare with the shipped profiles through `check_print.py` (filters, camera ramp, scene ramp, ColorChecker ΔE00). Result on 2026-11-23: ΔE00 0.88–0.98 mean, ≤ 2.6 max; filters within about 3 CC. That is the evidence that the public method plus the pre-alignment reproduces the private profiles; it is Option A (no Negs refinement).
+3. **Build** (`build_print.py`): the public creator's paper order (§D10), with three additions.
+   - *Neutral pre-alignment [F private, V]:* before unmixing, shift each status-A curve along log E so log E 0 develops the metameric neutral's status-A density. Without it 2383's public data unmix wrongly.
+   - *Dye preparation [N]:* Fujifilm draws each dye curve with the film base under it (where all four are drawn, Y + M + C − Gray = 2 × base). Take off the base 3513DI's precisely drawn chart implies (smoothed 20 nm). Fill 3513DI's short undrawn yellow end from Gray; fill the shared template's missing cyan (< 488 nm) and magenta (> 649 nm) from 3513DI's net dye, scaled over the overlap and joined without a step. The shared template's Gray disagrees with its dyes by up to 0.1 D, so Gray can't be used there.
+   - *Sensitivity tails [N]:* Fujifilm draws sensitivity only near each peak (red from 630–645 nm). Beyond each drawn end, continue with Kodak 2383's shape, joined at the end and only falling (a running minimum outward). Straight-line tails kept red at about 1.5 decades below peak down to 520 nm, where an orange-masked negative passes the most light; Kodak's measured red falls 3 decades by 560 nm. 3513DI's drawing reaches 630 nm and agrees with the joined shape. The tails give 13% (3513DI) and 25% (shared template) of the red raw exposure, mostly 600–640 nm.
+4. **Normalise [F #557]:** TH-KG3 × Y50 M50 × Vision3 250D's D-mid → raw 1 per channel (exact).
+5. **Gates:**
+   - curve fit ≤ 0.02 D (3512/3514DI/3523XD: 0.023–0.029 D at the blue curve's abrupt shoulder, recorded);
+   - status-A remix within 0.02–0.05 D of the sheet up to D 2 (recorded per stock);
+   - on the runtime: C = 0 and M/Y in 2383's range per film (all within about 3 CC of 2383's value for the same negative);
+   - camera-ramp drift no worse than the worst shipped cine pair (2383 + Portra 400: mean 0.225);
+   - the scene ramp's colour recorded.
+6. **Neutral filters:** `solve_neutral_filters` for every film in the 2383 table. The twelve films 2383 keeps at the fallback C0 M50 Y50 (slides, Tri-X Reversal) keep it on the new prints too.
+7. **Finalise** (`finalize_print.py`), then integrate as §D7. Negs-built prints are behind Settings › Show Negs-built films, like the films.
+
+What they look like (2026-11-24, Vision3 250D, ColorChecker ΔE00 against 2383): about 4–5 mean.
+- 3521XD has the most neutral grey ramp of all five (C*ab ≤ 6, as 2383).
+- 3513DI's shadows go slightly green-blue.
+- 3512, 3514DI and 3523XD warm their shadows and highlights (C*ab up to 11). The brochures' blue curve is steeper than green between D 1 and 2 (1.0 → 2.0 D over 0.21 log H against 0.30); the trace follows the drawing.
+- Through Vision3, 3513DI and 3521XD are less saturated than 2383 (chart C*ab 21–28 against 32–35).
+
 ## E. Fuji plan
 
 Inputs are in `~/Downloads/fuji spectral/`. Page contents are in `fuji-data-inventory.md` §2–4.
@@ -548,7 +574,7 @@ Inputs are in `~/Downloads/fuji spectral/`. Page contents are in `fuji-data-inve
 | 3 | Eterna 250 (8553) | `eterna250.pdf` KB-0506ER | `T` | yes |
 | 4 | Eterna 400 (8583) | `eterna400.pdf` KB-0508E; RMS 3.7 | `T` | yes |
 | 5 | Eterna Vivid 160 (8543) | `eterna_vivid160.pdf` KB-0701E | `T` | yes |
-| 6 | Eterna-CP 3513DI, then 3521XD, 3512, 3514DI, 3523XD | print brochures: S, curves (unlabelled), per-dye, Gray | base synthesised; G and B −1.0 log H; target-film D-mid from #1 | deferred (decision 2) |
+| 6 | Eterna-CP 3513DI, then 3521XD, 3512, 3514DI, 3523XD | print brochures: S, curves (unlabelled), per-dye, Gray | base synthesised; G and B plotted 1.0/2.0 log H left; reference film Vision3 250D; §D12 | yes, behind Show Negs-built films (2026-11-24) |
 | – | F-64D, Reala 500D, Eterna Vivid 500 | brochures | already shipped (Fotufilm) | re-derive only if decision 5 changes; Reala drops its 4th layer |
 | – | Eterna-RDI, Eterna-CI, F-CP | | not camera film, or curves only | not attempted |
 
