@@ -12,7 +12,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
 | 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
 | 3 | Pure Domain Rules & Media Helpers | done (Mac + Windows); **Go** for Phase 4 from Noah 2026-11-22 | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs and 0 leaks on Mac and PC, ASan clean; Windows app on the core; screenshots identical; startup within noise |
-| 4 | State, Presets & Data-Driven Inspector | in progress | Wave 1: `core-p4-base` (serde-faithful value, `EditState`, ABI 5, oracles) running; `core-p4i-inspector` merged `885e8fb` (PC checks pending); wave 2: 4a state rules + edits + ViewModel, 4b presets + session, 4c batch + caches |
+| 4 | State, Presets & Data-Driven Inspector | in progress | Wave 1 merged: `core-p4i-inspector` `885e8fb` (PC checks pending), `core-p4-base` `4cf7119`; wave 2: 4a state rules + edits, 4b presets + session, 4c batch + caches; then 4d ViewModel in Odin |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
 | 7 | Performance, Memory & Compile-Time Evaluation + Optimization | not started | Odin vs. Rust comparison report + optimization pass |
@@ -42,6 +42,80 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-24: Phase 4 groundwork merged (`core-p4-base`, `4cf7119`)
+
+**Checks.**
+- **Full Mac gate:** passes on the groundwork plus the inspector merge.
+  - `build.py test`, `test --asan`, `diff` (146 s) and `diff --asan`.
+  - The wrapper crate with `--features track` (85).
+  - The inspector check crate (55).
+  - The Windows cross-check, with and without `--tests`.
+  - The any-OS crates (7+18, 17, 20).
+- **After another session's merge:** `eterna-cp-prints` (`22456c9`) landed on main in the meantime. The groundwork was merged again on top of it, and the checks that touch its changes passed again: `test`, the inspector crate, the cross-check both ways and the wrapper crate. It changed `windows/src/state.rs`'s `Stock` (`cine_print`, `NEGS_BUILT_HINT`), which is 4a's half, so 4a ports `state.rs` as it is on main, not as frozen at `b05e49e`.
+- **Build time:** `build.py lib` 1.71–1.91 s (1.44–1.53 s after Phase 3), with two new packages.
+
+**`core/src/value`: serde_json's `Value`.**
+- **Types:** u64/i64/f64 numbers; objects sorted by key bytes, the last duplicate wins.
+- **Reading:** accept/reject as `from_slice`, recursion limit 128, correctly rounded doubles (Eisel-Lemire plus an exact bignum fallback).
+- **Writing:** compact and pretty, with serde's escaping.
+- **Also:** Rust's `{}` for f64; `json.rs`'s helpers; a bridge to `library.Json` (lossy points in the header).
+
+The tests corrected two assumptions:
+- **Exponents:** serde_json 1.0.149+ writes doubles with zmij, which always signs the exponent (`1e+16`, `1e-7`).
+- **Ties:** Rust's `Display` rounds a tie between two shortest candidates up, where zmij rounds to even. A million random doubles found 194 such cases, so Display now does an exact tie check.
+
+**`core/src/state`: `Edit_State`, `Roll`, `Brightness_Match`.**
+- **serde:** as the derives do it.
+  - Object and array forms, defaults, duplicate and unknown fields.
+  - Declaration order or sorted (`to_value`); compact or pretty.
+  - Crop and border serde had stayed Rust-only in 3b, so they were written here too.
+- **Rules:** `PartialEq`, `rendered`, `match_inputs`, `restored_params`, `size_mode`/`size_target`, `Roll`.
+
+**ABI 5.**
+- **Sections:** header sections, layout tables (`layout_4{base,a,b,c}`), sys modules (`state`, `settings`, `caches`) and wrapper regions, one per slice.
+- **Calls:** `negs_value_*` and `negs_json_*`; an opaque `negs_state_t` (parse/default/write/eq/rendered/…; its own arena; the caller frees it); handle-free leaf calls.
+- **A fix:** `check_3a/3b/3c` were declared but never called; they now run and pass.
+- **Wrappers:** `negs-core-rules` gained `state` (its half) and `json` modules. `windows/src/state.rs` and `json.rs` aren't switched yet.
+
+**Oracles:** `state`, `json`, `session`, `presets`, `batch`, `match_cache` and `rendered_preview`, frozen at `b05e49e` in the `core/diff/state-oracle` crate. Its portable stand-ins:
+- `rename`/`renamex_np` for `MoveFileExW`;
+- `UF_HIDDEN` for hidden files;
+- ICU NFC for `NormalizeString`;
+- an ICU fold for `FindNLSStringEx` (Windows' invariant locale also folds ß and ligatures).
+
+**Differential tests:** default seeds, 0 differences, 0 leaks.
+- **Value:** 30k writes; 50k texts read; 2M double comparisons (serde text and Display); 280k helper comparisons; 200 restorings of the real defaults.
+- **Edit state:** 60k serde comparisons; 30k mutated texts read; 220k rule comparisons, through both the handle and the wrapper.
+- **Mutation checks, all caught:**
+  - exponent written without `+`;
+  - recursion limit 129;
+  - restoring nulls a value;
+  - duplicate struct fields accepted;
+  - `rendered()` keeps the border.
+
+**Costs** (release build, a realistic 5.2 KB state):
+
+| Call | Core | Rust |
+|---|---:|---:|
+| parse | 32 µs | |
+| write | 15 µs | |
+| `==` | 91 µs | 13 µs |
+| `rendered()` | 90 µs | 8.6 µs |
+| `match_inputs` | 82 µs | 24 µs |
+| `json::set` on whole params | 73 µs | 0.11 µs |
+| leaf calls | 0.5–1 µs | |
+
+**Coordinator decisions.**
+- **`windows/src/json.rs` stays Rust in Phase 4.**
+  - These are in-place helpers on Rust-owned trees; through the core each `set` would be ~700× slower.
+  - Phase 5 moves the state into the core.
+  - The core's versions are held equal by the differential tests.
+- **Wrappers never panic where the Rust didn't.** A NaN in a typed f64 field can't cross as JSON, so those calls fall back to a small Rust path. This answers the groundwork agent's question; it isn't a product decision.
+- **The Odin Inspector ViewModel (`view.rs`, `command.rs`) is its own slice, 4d, after 4a.** 4a ports the rest of `state.rs` and `edits.rs`, with a core-side facts input that 4d reuses.
+- **Text folding and NFC are host callbacks** registered through the ABI, so the Windows wrapper keeps the Win32 calls (4a's matching, 4b's preset names). There are no Unicode tables in Odin.
+
+**Dates:** three commits made Tue 24 Nov 08:55–09:12 were re-dated to after main's tip (24 Nov 00:50–00:52).
 
 ### 2026-11-23: Inspector ViewModel in Rust merged (`core-p4i-inspector`, `885e8fb`)
 
