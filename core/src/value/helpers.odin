@@ -173,7 +173,7 @@ same :: proc(a, b: Value) -> bool {
 // `nullable` (the catalog's `nullable_paths`, `[*]` for every element)
 // says it is a value.
 restoring :: proc(defaults, saved: Value, nullable: []string, allocator := context.allocator) -> Value {
-	path := strings.builder_make(0, 128, context.temp_allocator)
+	path := strings.builder_make(0, 128)
 	defer strings.builder_destroy(&path)
 	return restoring_at(defaults, saved, nullable, &path, allocator)
 }

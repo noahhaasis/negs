@@ -85,8 +85,8 @@ layout :: proc "c" (name: [^]u8, n: uint) -> i64 {
 			return entry.value
 		}
 	}
-	// Phase 3's slices each keep their own table (layout_3a.odin, ...).
-	for table in ([?]^[]Layout_Entry{&layout_3a, &layout_3b, &layout_3c}) {
+	// Phase 3's and 4's slices each keep their own table (layout_3a.odin, ...).
+	for table in ([?]^[]Layout_Entry{&layout_3a, &layout_3b, &layout_3c, &layout_4base, &layout_4a, &layout_4b, &layout_4c}) {
 		for entry in table^ {
 			if entry.name == key {
 				return entry.value

@@ -6,7 +6,7 @@
 // like a BTreeMap<String, Value>, each key once. Reading follows
 // `serde_json::from_slice` (parse.odin), writing `to_string` and
 // `to_string_pretty` (write.odin), byte for byte; numbers are written as
-// ryu and itoa write them, and Rust's `{}` for f64 is display.odin's.
+// zmij and itoa write them (number.odin), with Rust's `{}` for f64.
 // core/diff/tests/value.rs holds all of it to serde_json.
 //
 // The library's JSON (core/src/library/json*.odin) is the macOS app's

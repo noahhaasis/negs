@@ -28,7 +28,7 @@ extern "C" {
 #endif
 
 /* Bumped on every change a host must be rebuilt for. */
-#define NEGS_CORE_ABI_VERSION 4u
+#define NEGS_CORE_ABI_VERSION 5u
 
 /* ------------------------------------------------------------------ */
 /* Basics                                                              */
@@ -1337,9 +1337,126 @@ uint8_t negs_help_constant(uint32_t which, negs_help_str_t *out);
 /* Row `index` of table 0 (paths) or 1 (groups); 0 past its end. */
 uint8_t negs_help_row(uint32_t table, size_t index, negs_help_str_t *key, negs_help_str_t *text);
 
+/* ------------------------------------------------------------------ */
+/* Phase 4 base: value, edit state (core/src/value, core/src/state)     */
+/* ------------------------------------------------------------------ */
+/* JSON as serde_json 1.0 (float_roundtrip) reads and writes it, and
+ * windows/src/state.rs's EditState, Roll and BrightnessMatch. Everything
+ * crosses as UTF-8 JSON text, borrowed for the call: (pointer, length),
+ * not NUL-terminated. A text the core can't read as `serde_json::from_slice`
+ * would makes the call return 0 (or NULL) with an empty `out`. Results are
+ * owned negs_buf_t (free with negs_buf_free; `out` may be NULL to drop
+ * one), the caller's buffer as in Phase 3a (`out`, `cap`; returns the whole
+ * length), or static words (const char *, NUL-terminated, never freed).
+ *
+ * Text written here is byte for byte serde_json's: compact is
+ * `to_string`, NEGS_JSON_PRETTY `to_string_pretty`; objects come out with
+ * their keys sorted (serde_json's Value is a BTreeMap), except an edit
+ * state's own fields, which keep EditState's declaration order unless
+ * NEGS_JSON_SORTED asks for `to_value`'s order (as inside `json!`). */
 
+#define NEGS_JSON_PRETTY 1u
+#define NEGS_JSON_SORTED 2u
 
+/* A borrowed UTF-8 string, for lists the host passes. */
+typedef struct negs_str_t {
+    const uint8_t *data;
+    size_t len;
+} negs_str_t;
 
+/* The text read and written again (canonical: sorted keys, serde's
+ * number kinds and zmij doubles). 1 if it is JSON. */
+uint8_t negs_value_rewrite(const uint8_t *text, size_t len, uint32_t flags, negs_buf_t *out);
+/* serde_json's text for a double (zmij: "1.0", "1e+16", "1.5e-7"; "null"
+ * when not finite). */
+size_t negs_value_write_f64(double v, uint8_t *out, size_t cap);
+/* Rust's `format!("{v}")` for a double: shortest digits, no exponent,
+ * "-0", "NaN", "inf". At most 330 bytes. */
+size_t negs_value_display_f64(double v, uint8_t *out, size_t cap);
+
+/* windows/src/json.rs. `get` writes the value at `path` ("a.b.0"), null
+ * when missing; `set` writes the whole tree with `item` (JSON) put there,
+ * as json::set does (missing keys become objects; an index past an
+ * array's end or a scalar on the way changes nothing). */
+uint8_t negs_json_get(const uint8_t *value, size_t len, const uint8_t *path, size_t path_len, negs_buf_t *out);
+uint8_t negs_json_set(const uint8_t *value, size_t len, const uint8_t *path, size_t path_len, const uint8_t *item,
+                      size_t item_len, negs_buf_t *out);
+/* json::number (0 for what isn't a number), json::boolean, json::string
+ * (the string's bytes, empty when it isn't one). Text that isn't JSON
+ * counts as null. */
+double negs_json_number(const uint8_t *value, size_t len);
+uint8_t negs_json_boolean(const uint8_t *value, size_t len);
+uint8_t negs_json_string(const uint8_t *value, size_t len, negs_buf_t *out);
+/* json::num's value as JSON text: an integer when `v` is a whole number
+ * below 9e15, else a double; "null" when not finite. */
+size_t negs_json_num(double v, uint8_t *out, size_t cap);
+/* json::same: 1 or 0; 2 when either text isn't JSON. */
+uint8_t negs_json_same(const uint8_t *a, size_t a_len, const uint8_t *b, size_t b_len);
+/* json::restoring(defaults, saved, nullable). `nullable` is borrowed. */
+uint8_t negs_json_restoring(const uint8_t *defaults, size_t defaults_len, const uint8_t *saved, size_t saved_len,
+                            const negs_str_t *nullable, size_t nullable_count, negs_buf_t *out);
+
+/* An edit state, parsed once: what `serde_json::from_slice::<EditState>`
+ * reads (NULL where that fails). The caller owns it until negs_state_free;
+ * the core never keeps it. Handles share nothing: one is used from one
+ * thread at a time, different ones from different threads. */
+typedef struct negs_state_t negs_state_t;
+
+negs_state_t *negs_state_parse(const uint8_t *json, size_t len);
+/* EditState::default(). */
+negs_state_t *negs_state_default(void);
+void negs_state_free(negs_state_t *state);
+/* serde_json::to_string(&state) (flags: NEGS_JSON_PRETTY, NEGS_JSON_SORTED).
+ * An empty buf for NULL. */
+negs_buf_t negs_state_write(const negs_state_t *state, uint32_t flags);
+/* EditState's PartialEq. */
+uint8_t negs_state_eq(const negs_state_t *a, const negs_state_t *b);
+/* EditState::rendered(): a new handle the caller frees. */
+negs_state_t *negs_state_rendered(const negs_state_t *state);
+/* EditState::match_inputs() as JSON (sorted keys, as json! writes it). */
+negs_buf_t negs_state_match_inputs(const negs_state_t *state);
+int32_t negs_state_rotation(const negs_state_t *state);
+uint8_t negs_state_flip(const negs_state_t *state);
+void negs_state_orientation(const negs_state_t *state, negs_orientation_t *out);
+/* EditState::size_target(): 1 and `out` when it has one. */
+uint8_t negs_state_size_target(const negs_state_t *state, uint32_t *out);
+/* Roll::filtered for a roll with these shifts. */
+uint8_t negs_state_roll_filtered(const negs_state_t *state, double roll_magenta, double roll_yellow);
+/* Roll::own_filtration: the roll's paper (has_paper 0 for None) against
+ * the state's `paper`. Static. */
+const char *negs_state_roll_own_filtration(const uint8_t *roll_paper, size_t len, uint8_t has_paper,
+                                           const uint8_t *paper, size_t paper_len);
+
+/* The same rules on the JSON of one value (what the state holds at the
+ * path), for hosts that keep the state themselves: io.rotate_cw, io.flip,
+ * the size target's path, a whole params object, the two enlarger shifts.
+ * Text that isn't JSON counts as null. */
+int32_t negs_state_rotation_of(const uint8_t *value, size_t len);
+uint8_t negs_state_flip_of(const uint8_t *value, size_t len);
+uint8_t negs_state_size_target_of(const uint8_t *value, size_t len, uint32_t *out);
+uint8_t negs_state_params_size_target(const uint8_t *params, size_t len, uint32_t *out);
+uint8_t negs_state_roll_filtered_of(double roll_magenta, double roll_yellow, const uint8_t *magenta, size_t magenta_len,
+                                    const uint8_t *yellow, size_t yellow_len);
+/* EditState::restored_params(defaults, saved, nullable) as JSON. */
+uint8_t negs_state_restored_params(const uint8_t *defaults, size_t defaults_len, const uint8_t *saved,
+                                   size_t saved_len, const negs_str_t *nullable, size_t nullable_count,
+                                   negs_buf_t *out);
+/* 0 PREP_EXPOSURE, 1 FLIP, 2 SIZE_TARGET, 3 SIZE_FACTOR, 4 LENS_CORRECTION,
+ * 5 the default film, 6 the default paper, 7 and 8 Roll::own_filtration's
+ * two words. Static; NULL past them. */
+const char *negs_state_constant(uint32_t which);
+
+/* ------------------------------------------------------------------ */
+/* Phase 4a: state rules, edits, inspector                              */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Phase 4b: presets, session                                           */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Phase 4c: batch, match cache, rendered preview                       */
+/* ------------------------------------------------------------------ */
 
 #ifdef __cplusplus
 }

@@ -1,8 +1,8 @@
-// Numbers as text: serde_json's (itoa for integers, ryu for doubles, null
-// for a double that isn't finite) and Rust's `{}` for f64. Both use the
-// shortest digits that read back as the same double, the closest of them
-// when several are as short (Żmij, core:strconv); they differ only in how
-// the digits are laid out.
+// Numbers as text: serde_json's (itoa for integers, zmij for doubles in
+// serde_json 1.0.149 and 1.0.154, null for a double that isn't finite)
+// and Rust's `{}` for f64. Both use the shortest digits that read back as
+// the same double, the closest of them when several are as short (Żmij,
+// core:strconv); they differ only in how the digits are laid out.
 package value
 
 import "core:strconv"
@@ -24,9 +24,11 @@ shortest :: proc "contextless" (v: f64, buf: ^[48]u8) -> (digits: []u8, point: i
 	return d.digits, d.decimal_point
 }
 
-// A double as serde_json writes it (ryu's `format64`, `pretty` layout):
-// "1.0", "0.1", "1e16", "1.5e-7", "-0.0", "123456789.0"; null when it isn't
-// finite. Decimal from 10^-5 to below 10^16, exponent form outside.
+// A double as serde_json writes it (zmij's `Buffer::format_finite`):
+// "1.0", "0.1", "1e+16", "1.5e-7", "-0.0", "123456789.0"; null when it
+// isn't finite. Decimal from 10^-5 to below 10^16, exponent form outside,
+// its exponent always signed. (ryu, in older serde_json, had the same
+// layout but wrote "1e16".)
 write_f64 :: proc(b: ^strings.Builder, v: f64) {
 	bits := transmute(u64)v
 	if (bits >> 52) & 0x7FF == 0x7FF {
@@ -67,16 +69,20 @@ write_f64 :: proc(b: ^strings.Builder, v: f64) {
 	case length == 1:
 		// 1e30
 		strings.write_byte(b, digits[0])
-		strings.write_byte(b, 'e')
-		strings.write_int(b, kk - 1)
+		write_exponent(b, kk - 1)
 	case:
 		// 1234e30 -> 1.234e33
 		strings.write_byte(b, digits[0])
 		strings.write_byte(b, '.')
 		strings.write_bytes(b, digits[1:])
-		strings.write_byte(b, 'e')
-		strings.write_int(b, kk - 1)
+		write_exponent(b, kk - 1)
 	}
+}
+
+@(private)
+write_exponent :: proc(b: ^strings.Builder, e: int) {
+	strings.write_string(b, "e+" if e >= 0 else "e-")
+	strings.write_int(b, abs(e))
 }
 
 // A double as Rust's `{}` (Display) writes it: shortest round-trip digits,

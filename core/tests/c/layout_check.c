@@ -98,6 +98,13 @@ int main(void) {
         failures++;
     }
     negs_strokes_free(&star);
+    check_3a();
+    check_3b();
+    check_3c();
+    check_4base();
+    check_4a();
+    check_4b();
+    check_4c();
     negs_alloc_stats_t stats;
     negs_core_alloc_stats(&stats);
     if (stats.tracked && (stats.live_count != 0 || stats.bad_frees != 0)) {

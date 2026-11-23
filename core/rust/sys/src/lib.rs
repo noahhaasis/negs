@@ -18,8 +18,17 @@ pub mod picture;
 // Phase 3c
 pub mod media;
 
+// Phase 4 base and Phase 4a
+pub mod state;
+
+// Phase 4b
+pub mod settings;
+
+// Phase 4c
+pub mod caches;
+
 /// NEGS_CORE_ABI_VERSION of the header these declarations follow.
-pub const NEGS_CORE_ABI_VERSION: u32 = 4;
+pub const NEGS_CORE_ABI_VERSION: u32 = 5;
 
 #[repr(C)]
 #[derive(Debug)]

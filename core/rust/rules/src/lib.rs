@@ -25,3 +25,21 @@ pub mod embedded_preview;
 pub mod help;
 pub mod photo_facts;
 pub mod tone_graph;
+
+
+
+// Phase 4 base: json, state (the value and the edit state).
+pub mod json;
+pub mod state;
+
+
+
+// Phase 4a
+
+
+
+// Phase 4b
+
+
+
+// Phase 4c
