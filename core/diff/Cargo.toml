@@ -46,6 +46,17 @@ serde = "1"
 # oracles read PNGs), as windows/ has it.
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# Phase 4a: the live windows/src state.rs (tests/windows_inspector.rs) and
+# the film search's differential test (tests/state_rules.rs) fold text with
+# FindNLSStringEx: the real `windows` crate on Windows (named `windows` by
+# those tests, as Cargo wants one source per name), the oracle's stand-in
+# everywhere else.
+[target.'cfg(windows)'.dependencies]
+windows-crate = { package = "windows", version = "0.58", features = ["Win32_Foundation", "Win32_Globalization"] }
+
+[target.'cfg(not(windows))'.dependencies]
+windows = { package = "negs-windows-stand-in", path = "state-oracle/windows" }
+
 # The engine's rawler, as windows/Cargo.toml patches it (vendor/README.md).
 [patch.crates-io]
 rawler = { path = "../../vendor/rawler" }
