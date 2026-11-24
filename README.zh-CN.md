@@ -15,11 +15,11 @@ Negs 建立在两个开源项目之上：Andrea Volpato 的 [spektrafilm](https:
 
 **[▶ 在浏览器里试试](https://getnegs.com/try/)** · 无需安装 · 所有处理均在本地完成，照片不会被上传。
 
-**[Mac 版下载](https://github.com/noahhaasis/negs/releases/download/v0.18.0/Negs-0.18.0-macos-universal.dmg)** · macOS 14 及以上 · Apple 芯片与 Intel 通用 · [安装步骤](#macos-暂无中文版本)
+**[Mac 版下载](https://github.com/noahhaasis/negs/releases/download/v0.19.0/Negs-0.19.0-macos-universal.dmg)** · macOS 14 及以上 · Apple 芯片与 Intel 通用 · [安装步骤](#macos-暂无中文版本)
 
-**[Windows 版下载](https://github.com/noahhaasis/negs/releases/download/v0.18.0/Negs-0.18.0-windows-x64-Setup.exe)** · Windows x64 · [便携版](https://github.com/noahhaasis/negs/releases/download/v0.18.0/Negs-0.18.0-windows-x64-portable.zip) · [安装步骤](#windows-暂无中文版本)
+**[Windows 版下载](https://github.com/noahhaasis/negs/releases/download/v0.19.0/Negs-0.19.0-windows-x64-Setup.exe)** · Windows x64 · [便携版](https://github.com/noahhaasis/negs/releases/download/v0.19.0/Negs-0.19.0-windows-x64-portable.zip) · [安装步骤](#windows-暂无中文版本)
 
-**Linux** · x86_64 · [Flatpak](https://github.com/noahhaasis/negs/releases/download/v0.18.0/negs-0.18.0-linux-x86_64.flatpak) · [AppImage](https://github.com/noahhaasis/negs/releases/download/v0.18.0/Negs-0.18.0-x86_64.AppImage) · [Arch 与 Omarchy](#arch-与-omarchy) · [安装步骤](#linux-暂无中文版本)
+**Linux** · x86_64 · [Flatpak](https://github.com/noahhaasis/negs/releases/download/v0.19.0/negs-0.19.0-linux-x86_64.flatpak) · [AppImage](https://github.com/noahhaasis/negs/releases/download/v0.19.0/Negs-0.19.0-x86_64.AppImage) · [Arch 与 Omarchy](#arch-与-omarchy) · [安装步骤](#linux-暂无中文版本)
 
 [getnegs.com](https://getnegs.com)
 
@@ -145,10 +145,10 @@ Negs 更新：用 **Negs → 检查更新…**，或在设置中开关自动检�
 
 ![Negs Windows 应用：罗马黄昏的照片用 Kodak Portra 800 显影，下方是胶片条，右侧是胶片与相纸控制](docs/readme/windows-app.webp)
 
-1. **下载** [`Negs-0.18.0-windows-x64-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.18.0/Negs-0.18.0-windows-x64-Setup.exe) 并运行安装，并把 Negs 加入**打开方式**，不会更改你的默认照片应用。
+1. **下载** [`Negs-0.19.0-windows-x64-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.19.0/Negs-0.19.0-windows-x64-Setup.exe) 并运行安装，并把 Negs 加入**打开方式**，不会更改你的默认照片应用。
 2. **如果 Windows SmartScreen 警告**，点**更多信息 → 仍要运行**。Negs 没有代码签名——那需要付费证书。
 
-不想用安装器？解压 [`Negs-0.18.0-windows-x64-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.18.0/Negs-0.18.0-windows-x64-portable.zip) 并运行 `Negs.exe`。
+不想用安装器？解压 [`Negs-0.19.0-windows-x64-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.19.0/Negs-0.19.0-windows-x64-portable.zip) 并运行 `Negs.exe`。
 
 Windows 版本暂时没有自动更新：从 [releases 页面](https://github.com/noahhaasis/negs/releases)下载新版安装器，在旧版上运行即可。编辑面板和胶片条默认开启，使用中可用 F7/F6 切换。
 
@@ -160,10 +160,10 @@ Windows 包可以用 [`windows/package.ps1`](windows/package.ps1) 从源码构�
 
 原生 GTK4 应用，同一个胶片引擎，x86_64。有三种安装方式；都需要 Vulkan 驱动来加速 GPU（没有时引擎回退到 CPU）。
 
-**Flatpak**，适用于任何装有 [Flatpak](https://flatpak.org/setup/) 的发行版。下载 [`negs-0.18.0-linux-x86_64.flatpak`](https://github.com/noahhaasis/negs/releases/download/v0.18.0/negs-0.18.0-linux-x86_64.flatpak) 并安装：
+**Flatpak**，适用于任何装有 [Flatpak](https://flatpak.org/setup/) 的发行版。下载 [`negs-0.19.0-linux-x86_64.flatpak`](https://github.com/noahhaasis/negs/releases/download/v0.19.0/negs-0.19.0-linux-x86_64.flatpak) 并安装：
 
 ```sh
-flatpak install --user negs-0.18.0-linux-x86_64.flatpak
+flatpak install --user negs-0.19.0-linux-x86_64.flatpak
 ```
 
 如果没有 GNOME 运行时，Flatpak 会从 Flathub 获取。Negs 在沙箱中运行：它只能看到你打开的照片和文件夹，别无其他。用**打开文件夹…**可在胶片条里浏览整个文件夹。更新时以同样方式安装新的包。
@@ -171,11 +171,11 @@ flatpak install --user negs-0.18.0-linux-x86_64.flatpak
 **AppImage**，单个文件，在 Ubuntu 24.04 及以上、当前版 Fedora、Arch 及类似发行版上直接运行，无需安装：
 
 ```sh
-chmod +x Negs-0.18.0-x86_64.AppImage
-./Negs-0.18.0-x86_64.AppImage
+chmod +x Negs-0.19.0-x86_64.AppImage
+./Negs-0.19.0-x86_64.AppImage
 ```
 
-下载 [`Negs-0.18.0-x86_64.AppImage`](https://github.com/noahhaasis/negs/releases/download/v0.18.0/Negs-0.18.0-x86_64.AppImage)。如果系统没有 FUSE，用 `--appimage-extract-and-run` 运行。更新时下载新的 AppImage。两种方式的设置和预设都保存在 `~/.config/negs`。
+下载 [`Negs-0.19.0-x86_64.AppImage`](https://github.com/noahhaasis/negs/releases/download/v0.19.0/Negs-0.19.0-x86_64.AppImage)。如果系统没有 FUSE，用 `--appimage-extract-and-run` 运行。更新时下载新的 AppImage。两种方式的设置和预设都保存在 `~/.config/negs`。
 
 AppImage 在可用时优先使用 X11/XWayland，以避开某些 Wayland 桌面上报告的 GTK 崩溃。若仍要用原生 Wayland，以 `GDK_BACKEND=wayland` 运行。
 
