@@ -284,15 +284,16 @@ split_at_dot :: proc "contextless" (name: string) -> (stem: string, ext: string,
 	return name, "", false
 }
 
-file_stem :: proc "contextless" (path: string, style := STYLE) -> (string, bool) {
+file_stem :: proc "contextless" (path: string, style := STYLE) -> (stem: string, ok: bool) {
 	name := file_name(path, style) or_return
-	stem, _, _ := split_at_dot(name)
+	stem, _, _ = split_at_dot(name)
 	return stem, true
 }
 
-extension :: proc "contextless" (path: string, style := STYLE) -> (string, bool) {
+extension :: proc "contextless" (path: string, style := STYLE) -> (ext: string, ok: bool) {
 	name := file_name(path, style) or_return
-	_, ext, has := split_at_dot(name)
+	has: bool
+	_, ext, has = split_at_dot(name)
 	return ext, has
 }
 

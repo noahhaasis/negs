@@ -3,6 +3,7 @@
 // an Item's status, reason and written `#[serde(default)]`).
 package batch
 
+import "core:slice"
 import "core:strings"
 import "../../state"
 import "../../value"
@@ -77,11 +78,11 @@ read_options :: proc(p: ^value.Parser) -> (Options, bool) {
 		case 6:
 			o.jpeg_quality = serde.read_u32(p) or_return
 		case 7:
-			o.naming = Naming(serde.read_variant(p, NAMING_KEYS[:]) or_return)
+			o.naming = Naming(serde.read_variant(p, slice.enumerated_array(&NAMING_KEYS)) or_return)
 		case 8:
 			text(p, &o.custom) or_return
 		case 9:
-			o.existing = Existing(serde.read_variant(p, EXISTING_KEYS[:]) or_return)
+			o.existing = Existing(serde.read_variant(p, slice.enumerated_array(&EXISTING_KEYS)) or_return)
 		case 10:
 			o.low_memory = serde.read_bool(p) or_return
 		case 11:
@@ -131,7 +132,7 @@ read_item :: proc(p: ^value.Parser) -> (Item, bool) {
 		case 9:
 			read_opt_string(p, &it.look) or_return
 		case 10:
-			it.status = Status(serde.read_variant(p, STATUS_KEYS[:]) or_return)
+			it.status = Status(serde.read_variant(p, slice.enumerated_array(&STATUS_KEYS)) or_return)
 		case 11:
 			read_opt_string(p, &it.reason) or_return
 		case 12:
@@ -152,7 +153,7 @@ read_item :: proc(p: ^value.Parser) -> (Item, bool) {
 
 // `Vec<Item>`: an array only.
 @(private = "file")
-read_items :: proc(p: ^value.Parser) -> ([]Item, bool) {
+read_items :: proc(p: ^value.Parser) -> (out: []Item, done: bool) {
 	c, any := value.peek_ws(p)
 	if !any {
 		return nil, value.fail(p, .Eof)

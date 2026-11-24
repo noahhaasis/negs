@@ -66,15 +66,15 @@ read_number :: proc(p: ^Parser) -> (value.Value, bool) {
 }
 
 // `deserialize_f64`: any JSON number, as a double.
-read_f64 :: proc(p: ^Parser) -> (f64, bool) {
+read_f64 :: proc(p: ^Parser) -> (n: f64, ok: bool) {
 	v := read_number(p) or_return
-	n, _ := value.as_f64(v)
+	n, _ = value.as_f64(v)
 	return n, true
 }
 
 // `deserialize_u64`: a non-negative integer (a negative one is an invalid
 // value, a double the wrong type).
-read_u64 :: proc(p: ^Parser) -> (u64, bool) {
+read_u64 :: proc(p: ^Parser) -> (out: u64, ok: bool) {
 	v := read_number(p) or_return
 	#partial switch n in v {
 	case u64:
@@ -85,7 +85,7 @@ read_u64 :: proc(p: ^Parser) -> (u64, bool) {
 	return 0, value.fail(p, .Invalid_Type)
 }
 
-read_u32 :: proc(p: ^Parser) -> (u32, bool) {
+read_u32 :: proc(p: ^Parser) -> (out: u32, ok: bool) {
 	n := read_u64(p) or_return
 	if n > u64(max(u32)) {
 		return 0, value.fail(p, .Invalid_Value)
@@ -93,7 +93,7 @@ read_u32 :: proc(p: ^Parser) -> (u32, bool) {
 	return u32(n), true
 }
 
-read_i32 :: proc(p: ^Parser) -> (i32, bool) {
+read_i32 :: proc(p: ^Parser) -> (out: i32, ok: bool) {
 	v := read_number(p) or_return
 	#partial switch n in v {
 	case u64:

@@ -19,7 +19,7 @@ stamp :: proc(path: string) -> (size: u64, modified: f64, ok: bool) {
 // `1|{file}|{size}|{modified}|{engine}|{request}`, the request
 // `{"film","paper","params"}` as `serde_json::to_string(&json!(…))`
 // writes it (keys sorted).
-key_text :: proc(file: string, film, paper: string, params: value.Value, engine: string, allocator := context.allocator) -> (string, bool) {
+key_text :: proc(file: string, film, paper: string, params: value.Value, engine: string, allocator := context.allocator) -> (text: string, ok: bool) {
 	size, modified := stamp(file) or_return
 	b := strings.builder_make(0, 256, allocator)
 	strings.write_string(&b, "1|")
@@ -42,10 +42,10 @@ key_text :: proc(file: string, film, paper: string, params: value.Value, engine:
 
 // `key`: the SHA-256 of key_text in lower-case hex; none if the file
 // can't be read (nothing is then looked up or kept).
-key :: proc(file: string, film, paper: string, params: value.Value, engine: string, allocator := context.allocator) -> (string, bool) {
+key :: proc(file: string, film, paper: string, params: value.Value, engine: string, allocator := context.allocator) -> (hex: string, ok: bool) {
 	text := key_text(file, film, paper, params, engine, context.temp_allocator) or_return
 	digest := library.sha256(transmute([]u8)text)
-	HEX :: "0123456789abcdef"
+	HEX := "0123456789abcdef"
 	out := make([]u8, 64, allocator)
 	for d, i in digest {
 		out[2 * i] = HEX[d >> 4]

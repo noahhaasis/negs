@@ -135,8 +135,9 @@ read :: proc(path: string, allocator := context.allocator) -> ([]u8, Error) {
 			reserve(&out, max(cap(out) * 2, 4096))
 		}
 		start := len(out)
+		room := cap(out) - start
 		resize(&out, cap(out))
-		n := posix.read(fd, raw_data(out[start:]), uint(len(out) - start))
+		n := posix.read(fd, raw_data(out[start:]), uint(room))
 		if n < 0 {
 			resize(&out, start)
 			if posix.errno() == .EINTR {
