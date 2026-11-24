@@ -36,7 +36,7 @@ The curves were read from their vector paths.
 
 ## Recorded exceptions
 
-- **Axis calibration** (to confirm). The sheets reuse the Data Guide's hand-drafted grid: Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %. Axes over 0.2 % get a 0.3 % gate with a `gate_reason`: Reala Ace's characteristic y (0.23 %), and on the unshipped sheets up to 0.25 %. That is under the 0.41 % approved for the guide; Natura 1600 against the guide's Superia 1600 (above) bounds the effect.
+- **Axis calibration** (approved 24 November 2026). The sheets reuse the Data Guide's hand-drafted grid: Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %. Axes over 0.2 % get a 0.3 % gate with a `gate_reason`: Reala Ace's characteristic y (0.23 %), and on the unshipped sheets up to 0.25 %. That is under the 0.41 % approved for the guide; Natura 1600 against the guide's Superia 1600 (above) bounds the effect.
 - **Relative sensitivity axes.** As in the guide: 比感度（対数）, a 1.0 scale bar and no tick values. D5 removes the offset.
 - **Fourth layer.** The dashed fourth-layer curve is not modelled (three-layer model), as for the guide's stocks.
 - **Dye reconstruction.** Reala Ace reproduces D-mid within 0.043 D (worst at 585 nm), over 0.03 D; weighted per Crystal Archive channel it is +0.002/+0.004/+0.009 D, within the approved 0.01 D.
