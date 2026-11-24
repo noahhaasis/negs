@@ -58,6 +58,8 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 /// Hides a temporary file next to a destination: a dot prefix doesn't.
+/// (The core hides presets' order file itself; the presets tests use this.)
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn hide_file(path: &Path) {
     let w = wide(path);
     unsafe {

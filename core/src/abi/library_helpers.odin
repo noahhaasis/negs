@@ -5,6 +5,7 @@ package negs_core
 
 import "base:runtime"
 import lib "../library"
+import fs "../platform/fs"
 
 // A sidecar's bytes read (Foundation's JSONDecoder) and written again as
 // the Mac writes them. 0 and the reason in *out when they aren't JSON.
@@ -143,7 +144,7 @@ xmp_embed_in_file :: proc "c" (path: [^]u8, path_len: uint, rating: i32, error: 
 	done, err := lib.xmp_embed_in_file(host_string(path, path_len), rating)
 	if err != 0 {
 		if error != nil {
-			error^ = buf_text(lib.io_error_text(err, context.temp_allocator))
+			error^ = buf_text(fs.error_text(err, context.temp_allocator))
 		}
 		return 2
 	}

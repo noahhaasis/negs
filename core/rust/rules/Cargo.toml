@@ -16,6 +16,10 @@ publish = false
 track = ["negs-core-sys/track", "negs-library/track"]
 # PhotoFacts::read, which asks the engine for the file's EXIF (Phase 3c).
 io = []
+# Phase 4b: windows/'s test builds (its dev-dependency turns it on), as
+# cfg!(test) was there: a scratch profile folder, and the test-only
+# Library::new and Preferences::expanded.
+host-tests = []
 
 [dependencies]
 negs-core-sys = { path = "../sys" }
@@ -31,6 +35,8 @@ image = { version = "0.25", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = false }
+# Phase 4b: presets and session keep windows/src's anyhow results.
+anyhow = "1"
 
 # The engine's rawler, as the workspace and windows/ patch it.
 [patch.crates-io]

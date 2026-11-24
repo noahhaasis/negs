@@ -18,9 +18,9 @@ pub struct Stock {
     /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
     #[serde(default)]
     pub grain: serde_json::Value,
-    /// Prepared by Negs itself from datasheets, still being checked: the Mac,
-    /// web and Windows apps hide these until Settings › Show Negs-built films;
-    /// Linux has no such setting yet, so it leaves them out.
+    /// Prepared by Negs itself from datasheets, still being checked: the film
+    /// and paper menus and grids leave these out until Settings › Show
+    /// Negs-built films (see `lists`).
     #[serde(default)]
     pub negs_built: bool,
 }
@@ -84,6 +84,17 @@ pub fn install(value: &serde_json::Value) -> Result<(), String> {
 pub fn preset_kept() -> Option<&'static [String]> {
     LIVE.get()?.preset_kept.as_deref()
 }
+/// Settings › Show Negs-built films (`NegsBuiltFilms` in `Parameters.swift`):
+/// the films and print films Negs prepared itself from datasheets stay out of
+/// the menus and grids until shown. Only the lists: an edit or a preset with
+/// one keeps it.
+pub fn lists(stock: &Stock, shown: bool) -> bool {
+    shown || !stock.negs_built
+}
+/// Settings › Show Negs-built films' hint, as on the Mac and Windows.
+pub const NEGS_BUILT_HINT: &str = "Films Negs prepared itself from Fujifilm’s and Kodak’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC and 400VC; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it.";
+/// Every film (or paper), Negs-built ones too; the menus and grids list
+/// those `lists` allows.
 pub fn stocks(paper: bool) -> Vec<&'static Stock> {
     static CATALOG: OnceLock<Catalog> = OnceLock::new();
     let mut stocks: Vec<_> = LIVE
@@ -96,7 +107,7 @@ pub fn stocks(paper: bool) -> Vec<&'static Stock> {
         })
         .profiles
         .iter()
-        .filter(|s| s.paper == paper && !s.negs_built)
+        .filter(|s| s.paper == paper)
         .collect();
     // Match the macOS menu sections while retaining catalog order within each.
     stocks.sort_by_key(|stock| group_order(&stock.group));
@@ -219,12 +230,14 @@ mod tests {
     fn complete_catalog_and_pairing_metadata() {
         let films = super::stocks(false);
         let papers = super::stocks(true);
-        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm. The 17
-        // Negs-built Fujifilm films and 5 Eterna-CP prints (catalog
-        // `negs_built`) are left out: Linux has no Settings › Show Negs-built
-        // films yet.
-        assert_eq!(films.len(), 52);
-        assert_eq!(papers.len(), 10);
+        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm, and
+        // the 20 Negs-built films and 4 Eterna-CP prints (catalog
+        // `negs_built`), listed only with Settings › Show Negs-built films.
+        assert_eq!(films.len(), 72);
+        assert_eq!(papers.len(), 14);
+        let listed = |stocks: &[&super::Stock], shown| stocks.iter().filter(|s| super::lists(s, shown)).count();
+        assert_eq!((listed(&films, false), listed(&papers, false)), (52, 10));
+        assert_eq!((listed(&films, true), listed(&papers, true)), (72, 14));
         assert!(
             films
                 .iter()

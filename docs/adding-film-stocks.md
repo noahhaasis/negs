@@ -559,6 +559,7 @@ What they look like (2026-11-24, Vision3 250D, ColorChecker ΔE00 against 2383):
 - 3521XD has the most neutral grey ramp of all five (C*ab ≤ 6, as 2383).
 - 3513DI's shadows go slightly green-blue.
 - 3512, 3514DI and 3523XD warm their shadows and highlights (C*ab up to 11). The brochures' blue curve is steeper than green between D 1 and 2 (1.0 → 2.0 D over 0.21 log H against 0.30); the trace follows the drawing.
+- 3512 and 3514DI render the same (mean ΔE00 0.5–0.6 on four negatives and under camera, print-exposure, filter and preflash changes; worst 2.5 in the deepest shadows), so only 3514DI ships, the better fit. 3523XD differs from 3514DI in its blacks.
 - Through Vision3, 3513DI and 3521XD are less saturated than 2383 (chart C*ab 21–28 against 32–35).
 
 **Why (investigation, 2026-11-24).** Checked independently by Claude and Gemini 4 Neon on the 28bf883 runtime, Vision3 250D unless stated. Nothing in the pipeline is at fault; both findings come from Fujifilm's drawings, and the prints stay as drawn (Noah, 2026-11-24).
@@ -584,7 +585,7 @@ Inputs are in `~/Downloads/fuji spectral/`. Page contents are in `fuji-data-inve
 | 3 | Eterna 250 (8553) | `eterna250.pdf` KB-0506ER | `T` | yes |
 | 4 | Eterna 400 (8583) | `eterna400.pdf` KB-0508E; RMS 3.7 | `T` | yes |
 | 5 | Eterna Vivid 160 (8543) | `eterna_vivid160.pdf` KB-0701E | `T` | yes |
-| 6 | Eterna-CP 3513DI, then 3521XD, 3512, 3514DI, 3523XD | print brochures: S, curves (unlabelled), per-dye, Gray | base synthesised; G and B plotted 1.0/2.0 log H left; reference film Vision3 250D; §D12 | yes, behind Show Negs-built films (2026-11-24) |
+| 6 | Eterna-CP 3513DI, then 3521XD, 3512, 3514DI, 3523XD | print brochures: S, curves (unlabelled), per-dye, Gray | base synthesised; G and B plotted 1.0/2.0 log H left; reference film Vision3 250D; §D12 | yes, behind Show Negs-built films (2026-11-24), except 3512 (renders as 3514DI) |
 | – | F-64D, Reala 500D, Eterna Vivid 500 | brochures | already shipped (Fotufilm) | re-derive only if decision 5 changes; Reala drops its 4th layer |
 | – | Eterna-RDI, Eterna-CI, F-CP | | not camera film, or curves only | not attempted |
 
@@ -602,7 +603,13 @@ The FUJIFILM Professional Film Data Guide (AF3-207U, 2005) has each still negati
 - **Fourth layer.** Fujifilm's cyan-sensitive fourth layer (dashed) is not modelled; recorded in each profile's notes.
 - **Product codes are not identities.** True Definition 400 carries X-TRA 400's [CH] but different curves (up to 0.59 D); compare traces before treating two stocks as one. Noah decided (2026-11-20) to ship it as a film of its own.
 
-Shipped: Pro 160S, Pro 160C, Pro 800Z, Superia 1600, and True Definition 400 (2026-11-21). Stopped at D8 and kept for a decision: NPL 160 and Superia 100 (print-weighted dye residual 0.013/0.011 D, bound 0.01), X-TRA 800 (check 8). Calibration only: Pro 400H, X-TRA 400, Reala, Superia 200.
+Shipped: Pro 160S, Pro 160C, Pro 800Z, Superia 1600, and True Definition 400 (2026-11-21).
+
+### E.2 Fujifilm Japan data sheets and Kodak E-190 (2026-11-24)
+
+- **Fujifilm Japan** (`data/profile-sources/fujifilm-jp`): the Japanese data sheets reuse the Data Guide's hand-drafted grid and relative sensitivity axes, so E.1 applies unchanged. Reala Ace shipped. Natura 1600 is the Data Guide's Superia 1600 (0.009 D) and serves as the second trace that bounds the sheets' 0.3 % axis gates. Superia Venus 800 stopped at check 6 (print-weighted 0.016 D) and is not the guide's X-TRA 800.
+- **Kodak E-190** (`data/profile-sources/kodak-e190`): black 0.72 pt polylines on frames with tick marks only. `extract_pdf.py` options: panel `ticks` and `grid_width` (take only 0.43 pt ticks and gridlines), `frame_any_re` (a frame drawn inside a longer path), curve `polyline` with `width` (a curve that is a run of line segments). Target print `kodak_portra_endura`; D8 check 7's comparison is the shipped Kodak negatives on that paper. E-190 has no RMS granularity (only a Print Grain Index); the grain copies the shipped Portra of the same speed. The 1998 sheet agrees with an independent trace of the 2003 edition within 0.001 D. Shipped: Portra 400NC and 400VC. 160NC and 160VC were built and pass every check but are not shipped: in Negs each renders within about 0.5 ΔE00 of the 400 of its line (ColorChecker through Portra Endura; Kodak matched the speeds and E-190 prints one sensitivity chart per speed for both lines), so they would add near-duplicate tiles; the difference is grain, which the grain control covers. Their curves stay in the packet; finalize them to ship.
+- `finalize.py` takes `data_owner`, `still_precedent`, `print_grain_index_135_4x6` and `check6_fallback` from the recipe; the defaults keep the Fujifilm packets' wording. Stopped at D8 and kept for a decision: NPL 160 and Superia 100 (print-weighted dye residual 0.013/0.011 D, bound 0.01), X-TRA 800 (check 8). Calibration only: Pro 400H, X-TRA 400, Reala, Superia 200.
 
 ---
 

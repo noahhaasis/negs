@@ -5,6 +5,7 @@ package library
 
 import "core:slice"
 import "core:strings"
+import fs "../platform/fs"
 
 // RAW files (`EditorModel.rawExtensions`).
 RAW_EXTENSIONS := [30]string {
@@ -61,10 +62,12 @@ Listing :: struct {
 }
 
 // Lists `directory` (`PhotoFolder.listing`). Hidden files are skipped, and
-// so is anything that isn't a regular file.
-listing :: proc(directory: string, pairing: bool) -> (Listing, Io_Error) {
+// so is anything that isn't a regular file. An entry the OS fails to give
+// ends the listing, as std's iterator does (the Rust skips it, then gets
+// no more).
+listing :: proc(directory: string, pairing: bool) -> (Listing, fs.Error) {
 	ta := context.temp_allocator
-	entries, err := fs_read_dir(directory, ta)
+	entries, err, _ := fs.read_dir(directory, true, ta)
 	if err != 0 {
 		return {}, err
 	}
@@ -75,7 +78,9 @@ listing :: proc(directory: string, pairing: bool) -> (Listing, Io_Error) {
 	}
 	heifs := make([dynamic]string, 0, 4, ta)
 	for entry in entries {
-		path := join(directory, entry.name, ta)
+		// `file_name().to_string_lossy()`.
+		name := fs.display(entry.name, allocator = ta)
+		path := join(directory, name, ta)
 		ext := extension_lower(path)
 		is_sidecar := ext == SIDECAR_EXTENSION
 		photo := slice.contains(IMAGE_EXTENSIONS[:], ext) || slice.contains(RAW_EXTENSIONS[:], ext)
@@ -83,7 +88,10 @@ listing :: proc(directory: string, pairing: bool) -> (Listing, Io_Error) {
 		if !(is_sidecar || heif || photo) {
 			continue
 		}
-		if !entry.ok || !entry.stat.regular || entry.hidden {
+		// `entry.metadata()` read, `file_type().is_file()`, and not hidden: a
+		// leading period, or (Windows) the hidden attribute.
+		hidden := strings.has_prefix(name, ".") || (ODIN_OS == .Windows && entry.stat.hidden)
+		if !entry.stat_ok || !entry.kind_ok || entry.kind != .File || hidden {
 			continue
 		}
 		if heif {
@@ -93,10 +101,10 @@ listing :: proc(directory: string, pairing: bool) -> (Listing, Io_Error) {
 		file := Photo_File {
 			path         = path,
 			name         = file_name(path),
-			has_modified = true,
-			modified     = entry.stat.modified,
+			has_modified = entry.stat.modified != nil,
+			modified     = fs.unix_nanos(entry.stat.modified.? or_else {}),
 			has_size     = true,
-			size         = u64(entry.stat.size),
+			size         = entry.stat.size,
 		}
 		if is_sidecar {
 			stem, _, _ := split_extension(file.name)

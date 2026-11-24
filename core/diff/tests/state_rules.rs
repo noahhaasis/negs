@@ -12,6 +12,10 @@
 //! on both sides: the core asks it through negs_text_set_contains, as the
 //! Windows app registers Win32's.
 
+// The real crate on Windows under the name windows/src uses (Cargo.toml).
+#[cfg(windows)]
+extern crate windows_crate as windows;
+
 mod rules_common;
 mod state_common;
 

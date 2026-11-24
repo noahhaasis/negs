@@ -10,6 +10,10 @@
 //! skips, as on a PC without a release helper.
 #![allow(dead_code, unused_imports)]
 
+// The real crate on Windows under the name windows/src uses (Cargo.toml).
+#[cfg(windows)]
+extern crate windows_crate as windows;
+
 #[path = "../../../windows/src/state.rs"]
 pub mod state;
 #[path = "../../../windows/src/edits.rs"]

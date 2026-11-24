@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import fs "../platform/fs"
 
 // The rating an export embeds: the stars, or −1 for a reject; false (no
 // packet) for an unrated, unrejected photograph.
@@ -58,9 +59,9 @@ xmp_embed :: proc(bytes: []u8, rating: i32, allocator := context.allocator) -> (
 
 // Adds the rating to the file at `path` through a hidden file beside it
 // and a rename. False when it isn't a PNG, JPEG or TIFF.
-xmp_embed_in_file :: proc(path: string, rating: i32) -> (bool, Io_Error) {
+xmp_embed_in_file :: proc(path: string, rating: i32) -> (bool, fs.Error) {
 	ta := context.temp_allocator
-	bytes, err := fs_read(path, max(int), ta)
+	bytes, err := fs.read(path, max(int), ta)
 	if err != 0 {
 		return false, err
 	}
@@ -70,12 +71,12 @@ xmp_embed_in_file :: proc(path: string, rating: i32) -> (bool, Io_Error) {
 	}
 	dir := path[:len(path) - len(file_name(path))]
 	staging := fmt.aprintf("%s.negs-rating-%d-%s", dir, os.get_pid(), file_name(path), allocator = ta)
-	err = fs_write(staging, out)
+	err = fs.write(staging, out)
 	if err == 0 {
-		err = fs_rename(staging, path)
+		err = fs.rename(staging, path)
 	}
 	if err != 0 {
-		fs_remove(staging)
+		fs.remove_file(staging)
 		return false, err
 	}
 	return true, 0

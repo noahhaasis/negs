@@ -2,3 +2,6 @@
 # default, which changes the bytes of the film data and presets (and so the
 # golden test's data hashes) without changing the repository.
 * text=auto eol=lf
+
+# Manufacturer data sheets kept with their source packets
+*.pdf binary

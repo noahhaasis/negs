@@ -4,7 +4,11 @@ Five Fujifilm colour print films (ECP-2B), extracted from Fujifilm's own brochur
 
 The brochures came from a pixls.us forum thread (topic 58032). They are © FUJIFILM Corporation and are not in the repository; each stock's `extraction.json` has the document, edition and SHA-256.
 
-**Status: the five ship (24 November 2026) behind Settings › Show Negs-built films**, which now covers papers too. This is Option A: spektrafilm's public method plus the neutral pre-alignment, with no Negs refinement step.
+**Status: four ship (24 November 2026) behind Settings › Show Negs-built films; 3512 is built but not shipped (below)**, which now covers papers too. This is Option A: spektrafilm's public method plus the neutral pre-alignment, with no Negs refinement step.
+
+## Why 3512 is not shipped
+
+3512 and 3514DI render the same: ColorChecker plus a grey ramp from −7 to +4 EV, mean ΔE00 0.5–0.6 on Vision3 250D and 500T, Eterna 250D and Portra 400, and through camera ±2 EV, print exposure ×2 and ×½, M +10, Y −10 and preflash (worst 2.5, in the deepest shadows, where 3514DI is about 1 L* darker). Two identical tiles would only crowd the paper list, so 3514DI ships, the better fit of the two (0.024 against 0.029 D). 3512's traces and build report stay here; `finalize_print.py` ships it.
 
 ## Choices, briefly
 

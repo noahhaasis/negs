@@ -859,6 +859,7 @@ dependencies = [
 name = "negs-core-diff"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "image",
  "negs-core-diff-picture",
  "negs-core-library",
@@ -874,6 +875,7 @@ dependencies = [
  "serde_json",
  "spektrafilm-io",
  "spektrafilm-math",
+ "windows",
 ]
 
 [[package]]
@@ -906,6 +908,7 @@ dependencies = [
 name = "negs-core-rules"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "image",
  "negs-core-library",
  "negs-core-sys",
@@ -920,11 +923,11 @@ version = "0.0.0"
 
 [[package]]
 name = "negs-library"
-version = "0.18.0"
+version = "0.19.0"
 
 [[package]]
 name = "negs-marks"
-version = "0.18.0"
+version = "0.19.0"
 
 [[package]]
 name = "negs-media-oracle"
@@ -946,6 +949,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spektrafilm-io",
+ "windows",
 ]
 
 [[package]]
@@ -1406,7 +1410,7 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -1422,7 +1426,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "byteorder",
  "half",
@@ -1729,6 +1733,16 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "windows"
+version = "0.58.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd04d41d93c4992d421894c18c8b43496aa748dd4c081bac0dc93eb0489272b6"
+dependencies = [
+ "windows-core",
+ "windows-targets",
+]
 
 [[package]]
 name = "windows-core"

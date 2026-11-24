@@ -39,8 +39,13 @@ pub mod edits;
 
 
 
-// Phase 4b
+// Phase 4b: presets, session (the settings files).
+pub mod presets;
+pub mod session;
 
 
 
-// Phase 4c
+// Phase 4c: batch, match_cache, rendered_preview.
+pub mod batch;
+pub mod match_cache;
+pub mod rendered_preview;

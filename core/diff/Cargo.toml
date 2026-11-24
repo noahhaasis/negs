@@ -37,15 +37,25 @@ spektrafilm-math = { path = "../../crates/spektrafilm-math" }
 # Phase 4: windows/src's state, json, session, presets, batch, match_cache
 # and rendered_preview as they were (core/diff/state-oracle).
 negs-state-oracle = { path = "state-oracle" }
-# Phase 4a: the live windows/src state.rs (tests/windows_inspector.rs) and
-# the film search's differential test fold text with the oracle's
-# FindNLSStringEx stand-in.
-windows = { package = "negs-windows-stand-in", path = "state-oracle/windows" }
+# Phase 4c: windows/src's batch and rendered_preview compiled in the tests
+# (core/diff/tests/{batch,rendered_preview}.rs) return anyhow's Result.
+anyhow = "1"
 # The differential tests write the oracles' states with serde.
 serde = "1"
 # The image crate (model/compare's oracle resizes with it; the picture
 # oracles read PNGs), as windows/ has it.
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Phase 4a: the live windows/src state.rs (tests/windows_inspector.rs) and
+# the film search's differential test (tests/state_rules.rs) fold text with
+# FindNLSStringEx: the real `windows` crate on Windows (named `windows` by
+# those tests, as Cargo wants one source per name), the oracle's stand-in
+# everywhere else.
+[target.'cfg(windows)'.dependencies]
+windows-crate = { package = "windows", version = "0.58", features = ["Win32_Foundation", "Win32_Globalization"] }
+
+[target.'cfg(not(windows))'.dependencies]
+windows = { package = "negs-windows-stand-in", path = "state-oracle/windows" }
 
 # The engine's rawler, as windows/Cargo.toml patches it (vendor/README.md).
 [patch.crates-io]
@@ -64,3 +74,20 @@ path = "../../crates/negs-library/tests/library.rs"
 name = "state"
 path = "../../crates/negs-library/tests/state.rs"
 
+# Phase 4c: without libtest, so windows/src's own unit tests (compiled in
+# caches_units: a match cache's delayed write keeps core memory for a
+# second) never run beside these tests' leak checks.
+[[test]]
+name = "batch"
+path = "tests/batch.rs"
+harness = false
+
+[[test]]
+name = "match_cache"
+path = "tests/match_cache.rs"
+harness = false
+
+[[test]]
+name = "rendered_preview"
+path = "tests/rendered_preview.rs"
+harness = false

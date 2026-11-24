@@ -4,6 +4,7 @@ package library
 
 import "base:runtime"
 import "core:strings"
+import fs "../platform/fs"
 
 // Lists the folder again and reads the sidecars that are new, changed or
 // gone since. Returns the photographs whose sidecars another app changed
@@ -16,7 +17,7 @@ library_refresh :: proc(lib: ^Library, interacting: bool) -> ([]string, Outcome)
 	outcome := Outcome{}
 	found, err := listing(lib.folder, lib.pairing)
 	if err != 0 {
-		set_failed(lib, true, io_error_text(err, ta))
+		set_failed(lib, true, fs.error_text(err, ta))
 		return nil, outcome
 	}
 	set_failed(lib, false, "")
@@ -134,8 +135,8 @@ reload :: proc(lib: ^Library, photo_in: string) {
 	// What this read saw, so the next listing tells another app's changes
 	// from the library's own.
 	stamp := Stamp{}
-	if st, err := fs_stat(sidecar_path(photo, ta)); err == 0 {
-		stamp = Stamp{true, st.modified, u64(st.size)}
+	if st, err := fs.stat(sidecar_path(photo, ta)); err == 0 {
+		stamp = Stamp{true, fs.unix_nanos(st.modified.? or_else {}), st.size}
 	}
 	if photo in lib.sidecar_files {
 		lib.sidecar_files[photo] = stamp

@@ -12,7 +12,7 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
 | 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
 | 3 | Pure Domain Rules & Media Helpers | done (Mac + Windows); **Go** for Phase 4 from Noah 2026-11-22 | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs and 0 leaks on Mac and PC, ASan clean; Windows app on the core; screenshots identical; startup within noise |
-| 4 | State, Presets & Data-Driven Inspector | in progress | Wave 1 merged: `core-p4i-inspector` `885e8fb` (PC checks pending), `core-p4-base` `4cf7119`; wave 2: 4a state rules + edits, 4b presets + session, 4c batch + caches; then 4d ViewModel in Odin |
+| 4 | State, Presets & Data-Driven Inspector | in progress | Wave 1 merged: `core-p4i-inspector` `885e8fb` (PC checks pending), `core-p4-base` `4cf7119`; wave 2: 4b presets + session `2640ad3` and 4c batch + caches `4fabcd57` merged, 4a state rules + edits running; then 4d ViewModel in Odin and one shared file layer |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
 | 7 | Performance, Memory & Compile-Time Evaluation + Optimization | not started | Odin vs. Rust comparison report + optimization pass |
@@ -42,6 +42,74 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-24: Phase 4b and 4c merged (`core-p4b-settings` `2640ad3`, `core-p4c-caches` `4fabcd57`)
+
+**Checks.** Each merge passed the full Mac gate on its merged tree:
+- `build.py test`, `test --asan`, `diff` and `diff --asan`;
+- the wrapper crate with `--features track` (100, then 103 with both);
+- the inspector check crate (55);
+- the Windows cross-check, with and without `--tests`;
+- the any-OS crates.
+
+**Merge fixes.**
+- **Lock files (`5b3e5a5`):** 4b added `anyhow` to `negs-core-rules`, so the any-OS crates' lock files needed it; resolved offline.
+- **4c against 4b:** both bench workloads kept; one `anyhow` line in `core/diff/Cargo.toml`; caches' Odin package renamed `cache_files` (imported as `files`), since 4b's `settings/files` is also `package files`.
+- **Another session's merge:** it landed film work on main meanwhile (`datasheet-batch-2`, up to `ab24bb96`), touching only `windows/src/state.rs` and `model/lifecycle_tests.rs`. The 4c merge was redone on top of it, with the same `core/` resolution, and the Windows-side checks passed again.
+
+**4b: presets + session.** In `core/src/settings/{paths,files,presets,session}`.
+- **Presets:** all of `Library` (list; `.order.json` in serde's pretty form; add, rename, delete, read, verify, set_order), the name rules, `text`, `read_file`.
+  - Win32 file calls in Odin: `MoveFileExW` without replace, `FILE_ATTRIBUTE_HIDDEN`.
+  - A sharing or lock violation reports "open in another program" with no retry, as the Rust does (the brief's "retries" was wrong).
+  - NFC and lower case are host callbacks (`negs_settings_text_functions`): Windows registers `NormalizeString` (raw-dylib `normaliz`), the diff test registers the ICU stand-in.
+- **Session:** `EditorSession` and `Preferences` serde exactly as the derives (incl. the flattened `LibraryPreferences`), defaults, renames, migrate, validate, the stores, folders, `write_atomic`, the catalog cache.
+  - The wrapper's `EditorSession<S>` and `Preferences<L>` stay Rust structs with their derives (generic, because their parts live in other slices' files).
+  - Data crosses as serde's JSON text. Non-finite doubles fall back to serde's bytes; nothing panics.
+- **Differential tests:**
+  - Names: 50k comparisons.
+  - Lockstep: 100 runs × 100 steps on two scratch folders, with folder bytes compared after every step, including other programs' writes, hidden files and unicode, case-variant and reserved names.
+  - Preset JSON: the GUI default plus a 1,000-item corpus, byte for byte.
+  - Preferences, session and stores: about 145k comparisons.
+  - 7 mutation checks, all caught.
+- **Bench** (indicative):
+
+  | Workload | Rust | Core |
+  |---|---:|---:|
+  | list 200 presets | 1.23 ms | 1.02 ms (core without NFC) |
+  | load preferences | 0.022 ms | 0.042 ms |
+  | save preferences | 0.174 ms | 0.201 ms |
+
+**4c: batch + match cache + rendered preview.** In `core/src/caches/{files,serde,batch,match_cache,preview}`.
+- **Batch:** file names, numbering candidates (the `taken` loop stays Rust), `unique`, the matched-exposure arithmetic, `Run`'s counts and words, the journal (serde, staged write, schema check).
+  - `Options`, `Item`, `Journal` and `Run` stay Rust types: they hold `EditState` and model types.
+- **Match cache:** the key (SHA-256 of serde text), `engine_stamp`, and the LRU with its file. The core writes keys sorted and breaks LRU ties by key, where Rust's HashMap order was random. The mutex, the shared instance and the delayed write stay Rust.
+- **Rendered preview:** the key (every data file stamped, created times: macOS birthtime, Windows `ftCreationTime`, Linux statx), `checksum` (SipHash-1-3, zero keys, usize length prefix, bit for bit), and the header + pixels file. The mpsc writer stays Rust.
+- **Fallbacks:** states and journals serde can't carry (a NaN) fall back to Rust's bytes; nothing panics.
+- **Journal errors:** replace errors now show the OS text instead of "Could not move the file to …". Both callers ignore the result (`let _ =`), so nothing a user sees changes.
+- **Differential tests:** about 280k comparisons, including 20 keys on the real `data/` folder (1,068 files). Two harness blind spots were found by mutation and widened (the 0.05 EV edge, the tenth-of-limit eviction). Every mutation is caught.
+- **Bench** (indicative):
+
+  | Workload | Rust | Core |
+  |---|---:|---:|
+  | preview key on `data/` | 8.61 ms (6,461 allocations) | 6.49 ms (13 Rust + 78 core) |
+  | 12 MP checksum | 30.7 ms | 28.1 ms |
+
+**Follow-up before the PC gate (coordinator):** the core now has three file layers: the library's `fsys`, `settings/files` and `caches/files`.
+- Merge them into one shared package.
+- Give it Rust std's `\\?\` prefix for paths over MAX_PATH. Neither new layer has it, so a very long path would fail or miss the cache where the Rust worked.
+- Give it real Windows error text (caches' `os_message` is a placeholder).
+
+**Risks for the PC gate:** neither slice's Windows file code has ever run, beyond `odin check -target:windows_amd64` and the cross-check. Watch:
+- stat via FindFirstFileW, read_dir, birth time;
+- `MoveFileExW`, `GetEnvironmentVariableW`;
+- the raw-dylib `normaliz` link;
+- `FormatMessageW` text.
+
+The Windows tests (`a_file_open_elsewhere_is_reported_not_skipped`, `caches_units`), a batch resume and a startup-frame restore cover them.
+
+**Build time:** `build.py lib` 1.8–2.0 s on a quiet machine, with all of 4b and 4c in.
+
+**Dates:** both slices' commits were made Tue 24 Nov 10:25–13:07, so they were re-dated after main's tip (01:06–01:18; merges 01:04 and 01:19).
 
 ### 2026-11-24: Phase 4 groundwork merged (`core-p4-base`, `4cf7119`)
 

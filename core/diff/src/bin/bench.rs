@@ -474,6 +474,129 @@ fn edits() {
     println!("  ({SYNCS} syncs: each ms above is µs per sync)");
 }
 
+// MARK: Phase 4b: presets and preferences
+
+/// A Presets folder of 200 GUI-default presets in a user's order, then
+/// listing it and loading and saving preferences (NEGS_PROFILE_DIR set to
+/// a scratch folder), the frozen Rust and the core side by side.
+fn settings(scratch: &Path) {
+    use negs_state_oracle::{model::LibraryPreferences, presets as oracle_presets, session as oracle_session};
+    let folder = scratch.join("Presets");
+    let _ = std::fs::remove_dir_all(scratch);
+    let gui = std::fs::read(repo().join("data/presets/spektrafilm-gui-default-28bf883.json")).unwrap();
+    let oracle_library = oracle_presets::Library { folder: folder.clone() };
+    for i in 0..200 {
+        oracle_library.add(&gui, &format!("Preset {i}")).unwrap();
+    }
+    let core_library = negs_core_rules::presets::Library { folder: folder.clone() };
+    let rust = median_ms(RUNS, || {
+        black_box(oracle_library.list().unwrap());
+    });
+    let core = median_ms(RUNS, || {
+        black_box(core_library.list().unwrap());
+    });
+    println!("presets_list_200 rust: {rust:.3} ms");
+    println!("presets_list_200 core: {core:.3} ms");
+    counted("presets_list_200 core", || {
+        black_box(core_library.list().unwrap());
+    });
+
+    unsafe { std::env::set_var("NEGS_PROFILE_DIR", scratch) };
+    let mut prefs = oracle_session::Preferences::default();
+    for i in 0..10 {
+        prefs.note_recent(&scratch.join(format!("photo {i}.NEF")));
+    }
+    prefs.library.library_filter = Some(serde_json::json!({"rating": 3, "flag": "picked", "films": ["kodak_gold_200", "kodak_portra_400"]}));
+    prefs.save();
+    let rust_load = median_ms(RUNS * 3, || {
+        black_box(oracle_session::Preferences::load());
+    });
+    let core_load = median_ms(RUNS * 3, || {
+        black_box(negs_core_rules::session::Preferences::<LibraryPreferences>::load());
+    });
+    let core_prefs = negs_core_rules::session::Preferences::<LibraryPreferences>::load();
+    let rust_save = median_ms(RUNS * 3, || prefs.save());
+    let core_save = median_ms(RUNS * 3, || core_prefs.save());
+    println!("preferences_load rust: {rust_load:.3} ms");
+    println!("preferences_load core: {core_load:.3} ms");
+    println!("preferences_save rust: {rust_save:.3} ms");
+    println!("preferences_save core: {core_save:.3} ms");
+    unsafe { std::env::remove_var("NEGS_PROFILE_DIR") };
+    let _ = std::fs::remove_dir_all(scratch);
+}
+
+// MARK: Phase 4c: caches
+
+/// Phase 4c: rendered_preview's key on the real data folder (data/, every
+/// file stamped) for an edit state with the engine's real parameters, and
+/// the checksum of a 12 MP RGBA frame; the frozen Rust, then the core.
+fn caches() {
+    let defaults: serde_json::Value = serde_json::from_str(include_str!("../../tests/state_common/engine_defaults.json")).unwrap();
+    let state = negs_state_oracle::state::EditState { params: defaults["defaults"].clone(), ..Default::default() };
+    let repo = repo();
+    let source = repo.join("README.md");
+    let paths = negs_state_oracle::engine::EnginePaths {
+        helper: repo.join("core/include/negs_core.h"),
+        exporter: repo.join("Cargo.toml"),
+        data: repo.join("data"),
+        fast_exporter: None,
+    };
+    let files = walk(&paths.data);
+    let rust = negs_state_oracle::rendered_preview::key(&source, &state, &paths).unwrap();
+    let ms = median_ms(RUNS, || {
+        black_box(negs_state_oracle::rendered_preview::key(&source, &state, &paths));
+    });
+    println!("rendered_preview_key_{files}_data_files: {ms:.2} ms ({} bytes)", rust.len());
+    counted("rendered_preview_key", || {
+        black_box(negs_state_oracle::rendered_preview::key(&source, &state, &paths));
+    });
+    let core_key = || {
+        // As the app's wrapper: the state's serde text, then the core.
+        let json = serde_json::to_vec(&state).unwrap();
+        negs_core_rules::rendered_preview::key(&source, &paths.helper, &paths.data, negs_core_rules::rendered_preview::KeyState::State(&json))
+    };
+    assert_eq!(core_key(), Ok(Some(rust)), "the core's key is the Rust's");
+    let ms = median_ms(RUNS, || {
+        black_box(core_key()).ok();
+    });
+    println!("core_rendered_preview_key_{files}_data_files: {ms:.2} ms");
+    counted("core_rendered_preview_key", || {
+        black_box(core_key()).ok();
+    });
+
+    let pixels: Vec<u8> = (0..4000usize * 3000 * 4).map(|i| (i * 31 % 251) as u8).collect();
+    let rust_sum = || {
+        use std::hash::{Hash, Hasher};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        pixels.hash(&mut hash);
+        hash.finish()
+    };
+    assert_eq!(rust_sum(), negs_core_rules::rendered_preview::checksum(&pixels), "the core's checksum is the Rust's");
+    let ms = median_ms(RUNS, || {
+        black_box(rust_sum());
+    });
+    println!("preview_checksum_12mp_rgba: {ms:.2} ms");
+    let ms = median_ms(RUNS, || {
+        black_box(negs_core_rules::rendered_preview::checksum(black_box(&pixels)));
+    });
+    println!("core_preview_checksum_12mp_rgba: {ms:.2} ms");
+}
+
+fn walk(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| match e.file_type() {
+                    Ok(t) if t.is_dir() => walk(&e.path()),
+                    Ok(t) if t.is_file() => 1,
+                    _ => 0,
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let which = args.get(1).map(String::as_str).unwrap_or("all");
@@ -497,6 +620,8 @@ fn main() {
         "fit" => fit(),
         // Phase 4a: count x3 + edits(tab) per sync, and a facts update.
         "edits" => edits(),
+        "settings" => settings(&scratch),
+        "caches" => caches(),
         "embedded" => {
             let folder = Path::new(args.get(2).expect("raw folder"));
             embedded(folder);

@@ -4,6 +4,7 @@
 package library
 
 import "core:fmt"
+import fs "../platform/fs"
 
 // Undoes the last library action; false when there's none.
 library_undo :: proc(lib: ^Library) -> (Outcome, bool) {
@@ -93,11 +94,11 @@ apply_inverse :: proc(lib: ^Library, step: Step) -> (Step, Outcome) {
 		library_refresh(lib, false)
 		restored := make([dynamic]Item, 0, len(step.plan.items), ta)
 		for i in step.plan.items {
-			if fs_exists(i.photo) {
+			if fs.exists(i.photo) {
 				append(&restored, i)
 			}
 		}
-		if step.has_reopen && fs_exists(step.reopen.photo) {
+		if step.has_reopen && fs.exists(step.reopen.photo) {
 			outcome.has_open = true
 			outcome.open = step.reopen
 		}
@@ -132,7 +133,7 @@ put_back :: proc(lib: ^Library, changes: []File_Change, outcome: ^Outcome) -> []
 		}
 		recorder_touch(&recorder, change.photo)
 		if err := sidecar_write_bytes(change.photo, change.before, !change.has_before); err != 0 {
-			outcome_error(outcome, fmt.aprintf("Edits to “%s” couldn’t be put back: %s", file_name(change.photo), io_error_text(err, ta), allocator = ta))
+			outcome_error(outcome, fmt.aprintf("Edits to “%s” couldn’t be put back: %s", file_name(change.photo), fs.error_text(err, ta), allocator = ta))
 		}
 		reload(lib, change.photo)
 	}

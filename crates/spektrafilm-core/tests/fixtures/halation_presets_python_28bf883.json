@@ -347,23 +347,6 @@
    ]
   },
   {
-   "stock": "fujifilm_eterna_cp_3512",
-   "use": "cine",
-   "antihalation": "strong",
-   "is_film": true,
-   "is_bw": false,
-   "halation_first_sigma_um": [
-    50.0,
-    50.0,
-    50.0
-   ],
-   "halation_strength": [
-    0.015,
-    0.005,
-    0.0
-   ]
-  },
-  {
    "stock": "fujifilm_eterna_cp_3513di",
    "use": "cine",
    "antihalation": "strong",
@@ -666,6 +649,23 @@
    "halation_strength": [
     0.015,
     0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_reala_ace",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
     0.0
    ]
   },
@@ -1198,6 +1198,40 @@
   },
   {
    "stock": "kodak_portra_400",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_400nc",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_400vc",
    "use": "still",
    "antihalation": "strong",
    "is_film": true,

@@ -1,5 +1,6 @@
 //! Phase 4's oracles (core/diff/oracle, frozen at b05e49e; state.rs, edits.rs
-//! and inspector_view/ at b0f1f5b), compiled as they are on macOS.
+//! and inspector_view/ at b0f1f5b), compiled as they are on macOS and, with
+//! the real `windows` crate and platform.rs's helpers, on Windows.
 //!
 //! - `copied` holds the windows/src items they name through `crate::`
 //!   (model's save and export settings and LibraryPreferences, engine's
@@ -9,8 +10,8 @@
 //!   `windows` (the stand-in crate) for the Win32 calls; `stand_ins` for
 //!   `std::os::windows::fs::MetadataExt` (see build.rs).
 //!
-//! How they differ from Windows (none of it is what the differential tests
-//! compare):
+//! How they differ from Windows off Windows (none of it is what the
+//! differential tests compare):
 //! - replace_file and presets' move_no_replace are rename(2) and
 //!   renamex_np(RENAME_EXCL): atomic on APFS, write-through ignored. macOS
 //!   never reports sharing or lock violations, so the "open in another
@@ -28,6 +29,10 @@
 //! - match_cache's engine stamp has this crate's CARGO_PKG_VERSION
 //!   ("0.0.0"), not the app's.
 #![allow(dead_code, unused_imports, clippy::all)]
+
+// The real crate under the name the oracles use (Cargo.toml).
+#[cfg(windows)]
+pub extern crate windows_crate as windows;
 
 #[path = "../../oracle/border.rs"]
 pub mod border;
@@ -65,6 +70,7 @@ mod copied;
 pub use copied::{engine, model, picture, sheet_rules};
 
 /// windows/src/platform.rs's helpers the oracles call, on macOS.
+#[cfg(not(windows))]
 pub mod platform {
     use anyhow::{Result, anyhow};
     use std::ffi::OsStr;
@@ -103,7 +109,40 @@ pub mod platform {
     }
 }
 
+/// windows/src/platform.rs's helpers the oracles call, as it has them.
+#[cfg(windows)]
+pub mod platform {
+    use anyhow::{Result, anyhow};
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, SetFileAttributesW};
+    use windows::core::PCWSTR;
+
+    pub fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
+        s.as_ref().encode_wide().chain(Some(0)).collect()
+    }
+
+    pub fn pcwstr(w: &[u16]) -> PCWSTR {
+        PCWSTR(w.as_ptr())
+    }
+
+    pub fn replace_file(from: &Path, to: &Path) -> Result<()> {
+        let (f, t) = (wide(from), wide(to));
+        unsafe { MoveFileExW(pcwstr(&f), pcwstr(&t), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) }
+            .map_err(|e| anyhow!("Could not move the file to {}: {}", to.display(), e.message()))
+    }
+
+    pub fn hide_file(path: &Path) {
+        let w = wide(path);
+        unsafe {
+            let _ = SetFileAttributesW(pcwstr(&w), FILE_ATTRIBUTE_HIDDEN);
+        }
+    }
+}
+
 /// `std::os::windows::fs::MetadataExt`, for presets.rs (build.rs).
+#[cfg(not(windows))]
 pub mod stand_ins {
     pub trait MetadataExt {
         /// FILE_ATTRIBUTE_HIDDEN (2) when the file has UF_HIDDEN; nothing else.
@@ -117,3 +156,7 @@ pub mod stand_ins {
         }
     }
 }
+
+/// The Win32 calls the oracles make (the real crate on Windows, the stand-ins
+/// elsewhere), for the tests' host callbacks.
+pub use windows as win;
