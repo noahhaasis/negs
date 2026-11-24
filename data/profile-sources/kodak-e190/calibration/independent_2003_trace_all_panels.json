@@ -1,0 +1,97 @@
+{
+ "about": "Every panel of this packet's extraction (E-190, November 1998) against an independent vector trace of E-190's May 2003 edition (Toni-Chan/spektrafilm, GPL-3.0, commit 69fef0ce59, src/spektrafilm_profile_builder/data/raw/kodak_technical_data/negative/<stock>_e190; used only as a cross-check, none of its data is in this repository). Curves aligned at green 0.2 over D-min; spectra as max/mean difference in D; sensitivity as offset-free shape difference in log units.",
+ "stocks": {
+  "kodak_portra_160nc": {
+   "curve_r_max": 0.001,
+   "dmin_r": -0.0,
+   "curve_g_max": 0.001,
+   "dmin_g": 0.0,
+   "curve_b_max": 0.001,
+   "dmin_b": 0.0,
+   "dye_density_min_max": 0.0,
+   "dye_density_min_mean": 0.0,
+   "dye_density_min_at500": [
+    0.688,
+    0.688
+   ],
+   "dye_density_mid_max": 0.0,
+   "dye_density_mid_mean": -0.0,
+   "dye_density_mid_at500": [
+    1.202,
+    1.202
+   ],
+   "sens_b_shape": 0.002,
+   "sens_g_shape": 0.001,
+   "sens_r_shape": 0.002
+  },
+  "kodak_portra_160vc": {
+   "curve_r_max": 0.0,
+   "dmin_r": 0.0,
+   "curve_g_max": 0.001,
+   "dmin_g": -0.0,
+   "curve_b_max": 0.001,
+   "dmin_b": -0.0,
+   "dye_density_min_max": 0.0,
+   "dye_density_min_mean": 0.0,
+   "dye_density_min_at500": [
+    0.687,
+    0.687
+   ],
+   "dye_density_mid_max": 0.001,
+   "dye_density_mid_mean": 0.0,
+   "dye_density_mid_at500": [
+    1.239,
+    1.239
+   ],
+   "sens_b_shape": 0.002,
+   "sens_g_shape": 0.001,
+   "sens_r_shape": 0.002
+  },
+  "kodak_portra_400nc": {
+   "curve_r_max": 0.0,
+   "dmin_r": -0.0,
+   "curve_g_max": 0.0,
+   "dmin_g": -0.0,
+   "curve_b_max": 0.001,
+   "dmin_b": -0.0,
+   "dye_density_min_max": 0.0,
+   "dye_density_min_mean": 0.0,
+   "dye_density_min_at500": [
+    0.737,
+    0.737
+   ],
+   "dye_density_mid_max": 0.001,
+   "dye_density_mid_mean": 0.0,
+   "dye_density_mid_at500": [
+    1.258,
+    1.258
+   ],
+   "sens_b_shape": 0.002,
+   "sens_g_shape": 0.002,
+   "sens_r_shape": 0.001
+  },
+  "kodak_portra_400vc": {
+   "curve_r_max": 0.0,
+   "dmin_r": -0.0,
+   "curve_g_max": 0.001,
+   "dmin_g": -0.0,
+   "curve_b_max": 0.001,
+   "dmin_b": -0.0,
+   "dye_density_min_max": 0.0,
+   "dye_density_min_mean": 0.0,
+   "dye_density_min_at500": [
+    0.738,
+    0.738
+   ],
+   "dye_density_mid_max": 0.001,
+   "dye_density_mid_mean": 0.0,
+   "dye_density_mid_at500": [
+    1.3,
+    1.3
+   ],
+   "sens_b_shape": 0.002,
+   "sens_g_shape": 0.002,
+   "sens_r_shape": 0.001
+  }
+ }
+}

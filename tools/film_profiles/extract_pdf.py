@@ -39,6 +39,18 @@ the earlier recipes extract exactly as before:
     distance from the end so far to the next part's path) must be within "join_tol" pt
     (default 0.5) and is reported.
 
+Options for Kodak's technical data sheets (E-190), also opt-in:
+  * panel "ticks": true also takes tick marks as gridlines: a short (2-12 pt) axis-parallel
+    segment with one end on a frame edge, running inward, perpendicular to that edge. Labels
+    drawn under the frame (Kodak's bar-notation overbars) never touch it, so they are left out.
+    Label the frame edges ("frame") so each axis has at least 3 positions;
+  * panel "frame_any_re": true also finds the frame as a rectangle inside a longer path
+    (E-190's Portra 160VC page draws its frame and two label overbars as one path);
+  * panel "grid_width": take gridlines and ticks only from strokes of this width (to 0.005 pt);
+  * curve "polyline": true accepts curves drawn as runs of line segments only (no Beziers).
+    It needs "width", so gridlines are never taken for curves, and a run needs at least
+    "min_items" segments (default 10).
+
 Writes, per stock, <out>/<stock>/<curve>.csv (two columns, no header, as spektrafilm's
 loader reads them), trace/<curve>.csv (data x, data y, pdf x, pdf y), extraction.json
 (hashes, axis fits, residuals, point counts) and overlay PNGs of every panel with the
@@ -110,37 +122,65 @@ def quad_rect(items):
     return pymupdf.Rect(min(xs), min(ys), max(xs), max(ys))
 
 
-def find_frame(drawings, rect, tol=3.0, kinds=("s", "fs"), quads=False):
+def find_frame(drawings, rect, tol=3.0, kinds=("s", "fs"), quads=False, any_re=False):
     best = None
     for d in drawings:
         if d["type"] not in kinds:
             continue
         if len(d["items"]) == 1 and d["items"][0][0] == "re":
-            r = d["items"][0][1]
+            rects = [d["items"][0][1]]
         elif quads and quad_rect(d["items"]) is not None:
-            r = quad_rect(d["items"])
+            rects = [quad_rect(d["items"])]
+        elif any_re:
+            rects = [it[1] for it in d["items"] if it[0] == "re"]
         else:
             continue
-        err = max(abs(r.x0 - rect[0]), abs(r.y0 - rect[1]), abs(r.x1 - rect[2]), abs(r.y1 - rect[3]))
-        if err < tol and (best is None or err < best[0]):
-            best = (err, r)
+        for r in rects:
+            err = max(abs(r.x0 - rect[0]), abs(r.y0 - rect[1]), abs(r.x1 - rect[2]), abs(r.y1 - rect[3]))
+            if err < tol and (best is None or err < best[0]):
+                best = (err, r)
     if best is None:
         raise ValueError(f"no frame near {rect}")
     return best[1]
 
 
-def gridlines(drawings, frame, min_frac=0.3, crossing=False):
+def is_tick(a, b, frame, tol=0.6, lo=2.0, hi=12.0):
+    """'x' or 'y' (the PDF coordinate the tick marks) for a short segment with one end on a
+    frame edge running inward and perpendicular to it, else None."""
+    if abs(a.x - b.x) < 0.02 and lo <= abs(a.y - b.y) <= hi and frame.x0 < a.x < frame.x1:
+        for e, inward in ((frame.y0, 1), (frame.y1, -1)):
+            for p, q in ((a, b), (b, a)):
+                if abs(p.y - e) <= tol and (q.y - p.y) * inward > 0:
+                    return "x"
+    if abs(a.y - b.y) < 0.02 and lo <= abs(a.x - b.x) <= hi and frame.y0 < a.y < frame.y1:
+        for e, inward in ((frame.x0, 1), (frame.x1, -1)):
+            for p, q in ((a, b), (b, a)):
+                if abs(p.x - e) <= tol and (q.x - p.x) * inward > 0:
+                    return "y"
+    return None
+
+
+def gridlines(drawings, frame, min_frac=0.3, crossing=False, ticks=False, width=None):
     """Axis-parallel stroked line segments inside the frame: {'x': [...], 'y': [...]}
     holding the constant coordinate of each (deduplicated to 0.05 pt). With crossing,
-    a segment may run past the frame; its part inside must still be min_frac long."""
+    a segment may run past the frame; its part inside must still be min_frac long. With
+    ticks, tick marks on the frame edges count too (is_tick); width keeps only strokes of
+    that width."""
     found = {"x": [], "y": []}
     for d in drawings:
         if d["type"] not in ("s", "fs"):
+            continue
+        if width is not None and abs((d.get("width") or 0) - width) > 0.005:
             continue
         for it in d["items"]:
             if it[0] != "l":
                 continue
             a, b = it[1], it[2]
+            if ticks:
+                k = is_tick(a, b, frame)
+                if k is not None:
+                    found[k].append((a.x + b.x) / 2 if k == "x" else (a.y + b.y) / 2)
+                    continue
             inside = all(frame.x0 - 0.6 <= p.x <= frame.x1 + 0.6 and frame.y0 - 0.6 <= p.y <= frame.y1 + 0.6 for p in (a, b))
             if crossing and not inside:
                 if abs(a.x - b.x) < 0.02 and frame.x0 < a.x < frame.x1:
@@ -244,7 +284,7 @@ def select_subpath(drawings, frame, name, cs):
         if any(it[0] not in ("l", "c") for it in d["items"]):  # rectangles and quads are never curves
             continue
         for j, run in enumerate(split_subpaths(d["items"])):
-            if not any(it[0] == "c" for it in run):
+            if not any(it[0] == "c" for it in run) and not (cs.get("polyline") and len(run) >= cs.get("min_items", 10)):
                 continue
             pts = sample_items(run)
             if not (pts[:, 0].min() >= frame.x0 - 1 and pts[:, 0].max() <= frame.x1 + 1
@@ -263,11 +303,16 @@ def select_subpath(drawings, frame, name, cs):
 
 
 def select_paths(drawings, frame, name, cs):
+    if cs.get("polyline") and "width" not in cs:
+        raise ValueError(f"{name}: a polyline curve needs its stroke width, so gridlines are never taken")
     if "select" in cs:
         return select_subpath(drawings, frame, name, cs)
     paths = []
     for i, d in enumerate(drawings):
-        if d["type"] not in ("s", "fs") or not any(it[0] == "c" for it in d["items"]):
+        if d["type"] not in ("s", "fs"):
+            continue
+        if not any(it[0] == "c" for it in d["items"]) and not (
+                cs.get("polyline") and all(it[0] == "l" for it in d["items"]) and len(d["items"]) >= cs.get("min_items", 10)):
             continue
         r = d["rect"]
         if not (r.x0 >= frame.x0 - 1 and r.x1 <= frame.x1 + 1 and r.y0 >= frame.y0 - 1 and r.y1 <= frame.y1 + 1):
@@ -311,8 +356,10 @@ def join_parts(drawings, frame, name, cs, k):
 
 def extract_panel(page, drawings, panel):
     fill = panel.get("frame_kind") == "fill"
-    frame = find_frame(drawings, panel["frame"], kinds=("f", "fs") if fill else ("s", "fs"), quads=fill)
-    grid = gridlines(drawings, frame, crossing=panel.get("grid_crossing", False))
+    frame = find_frame(drawings, panel["frame"], kinds=("f", "fs") if fill else ("s", "fs"), quads=fill,
+                       any_re=panel.get("frame_any_re", False))
+    grid = gridlines(drawings, frame, crossing=panel.get("grid_crossing", False), ticks=panel.get("ticks", False),
+                     width=panel.get("grid_width"))
     for ign in panel.get("grid_ignore", []):  # a stray line drawn next to a gridline
         if not ign.get("reason"):
             raise ValueError("grid_ignore needs a reason")
