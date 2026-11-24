@@ -179,10 +179,22 @@ pub fn apply(ui: &Rc<Editor>) {
     }
 }
 
+/// The films (or papers) the menu and grid list: Settings › Show Negs-built
+/// films leaves those out until shown, but the photograph's own stays listed,
+/// so the menu always shows its choice.
+pub fn listed_stocks(ui: &Editor, paper: bool) -> Vec<&'static Stock> {
+    let shown = ui.preferences.borrow().show_negs_built_films;
+    let current = &crate::catalog::selected(&ui.history.borrow().state, paper).id;
+    crate::catalog::stocks(paper)
+        .into_iter()
+        .filter(|s| crate::catalog::lists(s, shown) || s.id == *current)
+        .collect()
+}
+
 /// Catalog ordering within each category is stable; favourites lead all
 /// categories, in the same order the catalog uses.
 pub fn ordered_stocks(ui: &Editor, paper: bool) -> Vec<&'static Stock> {
-    let mut stocks = crate::catalog::stocks(paper);
+    let mut stocks = listed_stocks(ui, paper);
     let preferences = ui.preferences.borrow();
     let favorites = if paper {
         &preferences.favorite_papers
@@ -321,6 +333,8 @@ fn favorite_context(ui: &Rc<Editor>, stock: &'static Stock, button: &gtk::Button
 
 /// Refreshes grids and plain menus without rebuilding controls or dropping
 /// rendered thumbnails. A preference-only change creates no edit/undo entry.
+/// Rebuilds the menus and grids: the favourites or the listed stocks
+/// (Settings › Show Negs-built films) changed.
 pub fn refresh_favorites(ui: &Rc<Editor>) {
     for grid in ui.stock_browser.grids.borrow().iter() {
         arrange(ui, grid);
@@ -334,7 +348,7 @@ fn arrange(ui: &Editor, grid: &Grid) {
     let query = grid.search.as_ref().map(|s| s.text()).unwrap_or_default();
     let searching = !query.trim().is_empty();
     let stocks = if searching {
-        crate::catalog::stocks(grid.paper)
+        listed_stocks(ui, grid.paper)
             .into_iter()
             .filter(|s| crate::catalog::matches(s, &query))
             .collect()
@@ -730,6 +744,10 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
         move |s| {
             let selected = crate::catalog::selected(s, paper);
             current.set_text(&selected.name);
+            // A photograph or preset with a film the settings don't list.
+            if !grid.order.borrow().iter().any(|(id, _)| *id == selected.id) {
+                arrange(&ui, &grid);
+            }
             for tile in &grid.tiles {
                 if tile.stock.id == selected.id {
                     tile.button.add_css_class("selected-stock");
@@ -888,7 +906,13 @@ pub fn menu(ui: &Rc<Editor>, paper: bool) -> adw::ComboRow {
         #[weak]
         menu,
         move |state| {
-            select_menu(&ui, &menu, crate::catalog::selected(state, paper));
+            let selected = crate::catalog::selected(state, paper);
+            // A photograph or preset with a film the settings don't list.
+            if menu.ids.borrow().contains(&selected.id) {
+                select_menu(&ui, &menu, selected);
+            } else {
+                refresh_menu(&ui, &menu);
+            }
         }
     )));
     ui.stock_browser.menus.borrow_mut().push(menu);
@@ -1207,10 +1231,26 @@ mod tests {
         search.emit_by_name::<()>("stop-search", &[]);
         assert!(search.text().is_empty());
         assert_grid_tiles(&film);
-        assert_eq!(
-            film.order.borrow().len(),
-            crate::catalog::stocks(false).len()
-        );
+        assert_eq!(film.order.borrow().len(), listed_stocks(&ui, false).len());
+        // Settings › Show Negs-built films lists them all; off, a photograph
+        // already using one keeps it listed.
+        let built = crate::catalog::stocks(false).into_iter().find(|s| s.negs_built).unwrap();
+        assert!(!film.order.borrow().iter().any(|(id, _)| *id == built.id));
+        ui.preferences.borrow_mut().show_negs_built_films = true;
+        refresh_favorites(&ui);
+        assert_eq!(film.order.borrow().len(), crate::catalog::stocks(false).len());
+        assert_grid_tiles(&film);
+        ui.preferences.borrow_mut().show_negs_built_films = false;
+        refresh_favorites(&ui);
+        let before_built = ui.history.borrow().state.clone();
+        ui.history.borrow_mut().state.choices.insert("Film ID".into(), built.id.clone());
+        ui.sync_state();
+        assert!(film.order.borrow().iter().any(|(id, _)| *id == built.id));
+        assert_grid_tiles(&film);
+        ui.history.borrow_mut().state = before_built;
+        ui.sync_state();
+        refresh_favorites(&ui);
+        assert_eq!(film.order.borrow().len(), listed_stocks(&ui, false).len());
         assert!(tile.thumb.picture.paintable().is_some());
         paper.row.set_expanded(true);
         assert!(!film.row.is_expanded());
@@ -1331,7 +1371,7 @@ mod tests {
         assert!(!is_favorite(&ui, false, &tile.stock.id));
         assert_eq!(
             picker.ids.borrow().as_slice(),
-            crate::catalog::stocks(false)
+            listed_stocks(&ui, false)
                 .iter()
                 .map(|s| s.id.clone())
                 .collect::<Vec<_>>()
