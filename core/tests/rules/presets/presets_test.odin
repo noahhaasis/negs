@@ -1,11 +1,9 @@
-#+build darwin, linux
 // core/src/settings/presets: presets.rs's name rules and its tests of the
 // folder (in a scratch folder). std::path's joins are tested with the rest
 // of the file layer, in core/tests/platform/fs.
 package presets_tests
 
 import "core:strings"
-import "core:sys/posix"
 import "core:testing"
 import fs "../../../src/platform/fs"
 import "../../../src/settings/presets"
@@ -65,16 +63,16 @@ scratch :: proc(tag: string) -> string {
 	strings.write_string(&b, tag)
 	strings.write_byte(&b, '-')
 	strings.write_u64(&b, u64(fs.process_id()))
-	return fs.join(fs.temp_dir(), strings.to_string(b), .Unix)
+	return fs.join(fs.temp_dir(), strings.to_string(b))
 }
 
 @(private)
 remove_folder :: proc(folder: string) {
 	entries, _, _ := fs.read_dir(folder)
 	for e in entries {
-		_ = fs.remove_file(fs.join(folder, e.name, .Unix))
+		_ = fs.remove_file(fs.join(folder, e.name))
 	}
-	posix.rmdir(strings.clone_to_cstring(folder))
+	remove_empty_folder(folder)
 }
 
 @(private)
@@ -110,9 +108,9 @@ adding_never_replaces_and_renaming_checks_names :: proc(t: ^testing.T) {
 	second, _, ok2 := presets.add(folder, transmute([]u8)string("2"), "portra")
 	testing.expect(t, ok2)
 	testing.expect_value(t, presets.file_name_of(second), "portra 2")
-	_ = fs.write(fs.join(folder, ".partial.tmp", .Unix), nil)
-	_ = fs.write(fs.join(folder, "notes.txt", .Unix), nil)
-	hidden := fs.join(folder, "Hidden.json", .Unix)
+	_ = fs.write(fs.join(folder, ".partial.tmp"), nil)
+	_ = fs.write(fs.join(folder, "notes.txt"), nil)
+	hidden := fs.join(folder, "Hidden.json")
 	_ = fs.write(hidden, transmute([]u8)string("{}"))
 	fs.hide(hidden)
 	listed, _, _ := presets.list(folder)
@@ -145,8 +143,8 @@ the_users_order_is_remembered :: proc(t: ^testing.T) {
 	testing.expect(t, same(names_of(listed), {"Zeta", "Alpha", "Mid"}))
 	_, ok := presets.set_order(folder, {listed[2], listed[0], listed[1]})
 	testing.expect(t, ok)
-	_ = fs.write(fs.join(folder, "Copied B.json", .Unix), transmute([]u8)string("x"))
-	_ = fs.write(fs.join(folder, "Copied A.json", .Unix), transmute([]u8)string("x"))
+	_ = fs.write(fs.join(folder, "Copied B.json"), transmute([]u8)string("x"))
+	_ = fs.write(fs.join(folder, "Copied A.json"), transmute([]u8)string("x"))
 	listed, _, _ = presets.list(folder)
 	testing.expect(t, same(names_of(listed), {"Mid", "Zeta", "Alpha", "Copied A", "Copied B"}))
 	_, _, ok = presets.rename(folder, listed[1], "Omega")
@@ -156,7 +154,7 @@ the_users_order_is_remembered :: proc(t: ^testing.T) {
 	_, _, ok = presets.add(folder, transmute([]u8)string("n"), "Newest")
 	listed, _, _ = presets.list(folder)
 	testing.expect(t, same(names_of(listed), {"Omega", "Alpha", "Copied A", "Copied B", "Newest"}))
-	order, _ := fs.read(fs.join(folder, ".order.json", .Unix))
+	order, _ := fs.read(fs.join(folder, ".order.json"))
 	testing.expect(t, strings.has_prefix(string(order), "{\n  \"order\": [\n    \"Omega.json\",\n"))
 }
 
