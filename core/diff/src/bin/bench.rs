@@ -261,6 +261,219 @@ fn core_embedded(folder: &Path) {
     println!("core_embedded_preview_{}_raws (find + read largest, warm cache): {ms:.2} ms ({found} with previews)", files.len());
 }
 
+// MARK: Phase 4a: the edit lists per sync
+
+/// windows/src/edits.rs's Facts impl over the frozen InspectorFacts, as
+/// the Windows app asks the core (host mode).
+struct HostFacts<'a, 'b>(&'b negs_state_oracle::inspector_view::facts::InspectorFacts<'a>);
+
+impl negs_core_rules::edits::Facts for HostFacts<'_, '_> {
+    fn value(&self, path: &str) -> &serde_json::Value {
+        self.0.value(path)
+    }
+    fn is_modified(&self, path: &str) -> bool {
+        self.0.is_modified(path)
+    }
+    fn film_is_bw(&self) -> bool {
+        self.0.film_is_bw()
+    }
+    fn film_positive(&self) -> bool {
+        self.0.stocks().iter().find(|s| !s.paper && s.id == self.0.state().film).is_some_and(|s| s.positive)
+    }
+    fn border_enabled(&self) -> bool {
+        self.0.state().border.enabled
+    }
+    fn matches_brightness(&self) -> bool {
+        self.0.matches_brightness()
+    }
+    fn exposure_offset(&self) -> f64 {
+        self.0.exposure_offset()
+    }
+    fn exposure_offset_modified(&self) -> bool {
+        self.0.exposure_offset_modified()
+    }
+    fn chosen_color_filter_name(&self) -> Option<&str> {
+        self.0.chosen_color_filter().map(|f| f.name.as_str())
+    }
+    fn prefs(&self) -> negs_core_rules::edits::Prefs<'_> {
+        let p = &self.0.prefs;
+        negs_core_rules::edits::Prefs {
+            lab_all_controls: p.lab_all_controls,
+            more_adjustments: p.more_adjustments,
+            match_new_photos: p.match_new_photos,
+            color_space: p.color_space,
+        }
+    }
+    fn is_raw(&self) -> bool {
+        self.0.is_raw
+    }
+    fn lens_supported(&self) -> bool {
+        self.0.lens_supported
+    }
+}
+
+fn s(text: &str) -> negs_core_sys::state::negs_str_t {
+    negs_core_sys::state::negs_str_t { data: text.as_ptr(), len: text.len() }
+}
+
+/// A sync's edit lists (the counts beside the three tabs and the open
+/// tab's list, Lab) on a Portra 400 edit with ten controls changed, a
+/// solved brightness match and the real catalog: the frozen Rust, the core
+/// asked by the Rust facts (Windows today), and the core on its own facts
+/// (4d), with what a facts update costs.
+fn edits() {
+    use negs_core_sys::state as sys;
+    use negs_state_oracle::edits as oe;
+    use negs_state_oracle::inspector_view::facts::{Brightness, ColorFilters, InspectorFacts, Params, Prefs};
+    use negs_state_oracle::state::{self as os, Adjustment, BrightnessMatch, ColorFilter, EditState, Stock};
+    use negs_core_rules::edits as ce;
+    use serde_json::{Value, json};
+
+    const SYNCS: usize = 1000;
+    let catalog: Value = serde_json::from_str(include_str!("../../tests/state_common/catalog.json")).unwrap();
+    let engine: Value = serde_json::from_str(include_str!("../../tests/state_common/engine_defaults.json")).unwrap();
+    let defaults = engine["defaults"].clone();
+    let stocks: Vec<Stock> = catalog["profiles"].as_array().unwrap().iter().map(Stock::new).collect();
+    let filters: Vec<ColorFilter> = catalog["color_filters"].as_array().unwrap().iter().map(ColorFilter::new).collect();
+    let mut state = EditState { params: defaults.clone(), film: "kodak_portra_400".into(), paper: "kodak_portra_endura".into(), ..Default::default() };
+    let mut changed = 0;
+    for g in os::ADJUSTMENT_GROUPS {
+        if let Some(Adjustment::Slider { path, low, high, .. }) = g.controls.first()
+            && changed < 10
+        {
+            negs_state_oracle::json::set(&mut state.params, path, json!(low + (high - low) * 0.3));
+            changed += 1;
+        }
+    }
+    state.brightness_match = Some(BrightnessMatch { ev: Some(0.7), inputs: None, highlight_limited: false });
+    let inputs = os::match_inputs(&state);
+    state.brightness_match.as_mut().unwrap().inputs = Some(inputs);
+    let params = Params { state: &state, defaults: &defaults, stocks: &stocks };
+    let f = InspectorFacts {
+        params,
+        color_filters: ColorFilters { params, filters: &filters, catalog: &catalog },
+        brightness: Brightness { params, is_raw: true, failure: None, generation: 1, matching: false },
+        prefs: Prefs { more_adjustments: "Grain,section:Film", color_space: "sRGB", filter_shift_link: "together", ..Default::default() },
+        is_raw: true,
+        lens_supported: true,
+        has_source: true,
+        photo_size: negs_state_oracle::crop::Size::new(6000.0, 4000.0),
+        source_size: (6000, 4000),
+        preview_scale: 0.25,
+        image_shown: true,
+        size_error: None,
+        custom_film_format: false,
+        balancing_print: false,
+        can_balance_print: true,
+        can_export: true,
+        cropping: false,
+        negative: None,
+    };
+    let counts = |c: [usize; 3], n: usize| println!("  counts {c:?}, Lab list {n} edits");
+
+    let rust = median_ms(RUNS, || {
+        for _ in 0..SYNCS {
+            for tab in oe::Tab::ALL {
+                black_box(oe::count(tab, &f));
+            }
+            black_box(oe::edits(oe::Tab::Lab, &f, '.'));
+        }
+    });
+    println!("edits_rust_{SYNCS}_syncs (count x3 + edits(Lab)): {rust:.2} ms");
+    counts(oe::Tab::ALL.map(|t| oe::count(t, &f)), oe::edits(oe::Tab::Lab, &f, '.').len());
+
+    let host = HostFacts(&f);
+    let core_host = median_ms(RUNS, || {
+        for _ in 0..SYNCS {
+            for tab in ce::Tab::ALL {
+                black_box(ce::count(tab, &host));
+            }
+            black_box(ce::edits(ce::Tab::Lab, &host, '.'));
+        }
+    });
+    println!("core_edits_host_{SYNCS}_syncs (Windows: the core asking the Rust facts): {core_host:.2} ms");
+    counts(ce::Tab::ALL.map(|t| ce::count(t, &host)), ce::edits(ce::Tab::Lab, &host, '.').len());
+    counted("core_edits_host one sync", || {
+        for tab in ce::Tab::ALL {
+            black_box(ce::count(tab, &host));
+        }
+        black_box(ce::edits(ce::Tab::Lab, &host, '.'));
+    });
+
+    // Native (4d): the core's catalog, state and facts.
+    let defaults_text = serde_json::to_vec(&defaults).unwrap();
+    let rules: Vec<negs_core_rules::state::Stock> = catalog["profiles"].as_array().unwrap().iter().map(negs_core_rules::state::Stock::new).collect();
+    let grains: Vec<Vec<u8>> = rules.iter().map(|s| serde_json::to_vec(&s.grain).unwrap()).collect();
+    let c_stocks: Vec<sys::negs_stock_t> = rules.iter().zip(&grains).map(|(s, g)| negs_core_rules::state::sys_stock_with_grain(s, g)).collect();
+    let c_filters: Vec<sys::negs_color_filter_t> =
+        filters.iter().map(|f| sys::negs_color_filter_t { key: s(&f.key), name: s(&f.name), glass: s(&f.glass), colour: f.colour }).collect();
+    let catalog_text = serde_json::to_vec(&catalog).unwrap();
+    let state_text = serde_json::to_vec(&state).unwrap();
+    let mut input: sys::negs_facts_input_t = unsafe { std::mem::zeroed() };
+    input.prefs.more_adjustments = s("Grain,section:Film");
+    input.prefs.color_space = s("sRGB");
+    input.prefs.filter_shift_link = s("together");
+    input.photo_size = [6000.0, 4000.0];
+    input.preview_scale = 0.25;
+    input.generation = 1;
+    input.source_width = 6000;
+    input.source_height = 4000;
+    (input.is_raw, input.lens_supported, input.has_source, input.image_shown, input.can_balance_print, input.can_export) = (1, 1, 1, 1, 1, 1);
+    unsafe {
+        let cat = sys::negs_catalog_new(
+            defaults_text.as_ptr(),
+            defaults_text.len(),
+            c_stocks.as_ptr(),
+            c_stocks.len(),
+            c_filters.as_ptr(),
+            c_filters.len(),
+            catalog_text.as_ptr(),
+            catalog_text.len(),
+        );
+        let h = sys::negs_facts_new(cat);
+        let st = sys::negs_state_parse(state_text.as_ptr(), state_text.len());
+        let native = median_ms(RUNS, || {
+            for _ in 0..SYNCS {
+                sys::negs_facts_update(h, st, &input, sys::NEGS_FACTS_BORROW);
+                for tab in 0..3 {
+                    black_box(sys::negs_edits_count(h, tab));
+                }
+                let mut n = 0;
+                black_box(sys::negs_edits_list(h, 1, '.' as u32, &mut n));
+            }
+        });
+        println!("core_edits_native_{SYNCS}_syncs (4d: update + count x3 + edits(Lab)): {native:.2} ms");
+        sys::negs_facts_update(h, st, &input, sys::NEGS_FACTS_BORROW);
+        let mut n = 0;
+        sys::negs_edits_list(h, 1, '.' as u32, &mut n);
+        counts([0, 1, 2].map(|t| sys::negs_edits_count(h, t)), n);
+        let borrow = median_ms(RUNS, || {
+            for _ in 0..SYNCS {
+                sys::negs_facts_update(h, st, &input, sys::NEGS_FACTS_BORROW);
+            }
+        });
+        let copy = median_ms(RUNS, || {
+            for _ in 0..SYNCS {
+                sys::negs_facts_update(h, st, &input, 0);
+            }
+        });
+        println!("core_facts_update_{SYNCS} (borrowed strings): {borrow:.3} ms, copied: {copy:.3} ms");
+        let parse = median_ms(RUNS, || {
+            for _ in 0..SYNCS {
+                let p = sys::negs_state_parse(state_text.as_ptr(), state_text.len());
+                sys::negs_state_free(black_box(p));
+            }
+        });
+        println!("  for scale, core_state_parse_{SYNCS} ({} bytes): {parse:.2} ms", state_text.len());
+        counted("core_facts_update one", || sys::negs_facts_update(h, st, &input, 0));
+        sys::negs_facts_free(h);
+        sys::negs_state_free(st);
+        sys::negs_catalog_free(cat);
+    }
+    ce::release_thread_facts();
+    println!("  ({SYNCS} syncs: each ms above is µs per sync)");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let which = args.get(1).map(String::as_str).unwrap_or("all");
@@ -282,6 +495,8 @@ fn main() {
             core_sheet();
         }
         "fit" => fit(),
+        // Phase 4a: count x3 + edits(tab) per sync, and a facts update.
+        "edits" => edits(),
         "embedded" => {
             let folder = Path::new(args.get(2).expect("raw folder"));
             embedded(folder);
@@ -294,6 +509,7 @@ fn main() {
             core_marks();
             sheet();
             core_sheet();
+            edits();
         }
         other => panic!("unknown workload {other}"),
     }
