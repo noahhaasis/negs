@@ -767,6 +767,7 @@ dependencies = [
 name = "negs-core-rules"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "image",
  "negs-core-library",
  "negs-core-sys",
