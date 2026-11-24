@@ -1,0 +1,140 @@
+{
+ "about": "Per-stock build recipe for tools/film_profiles/build.py. Source: Agfa Technical Data PF, 1st edition 09/1998 (agfa_films.pdf, 125px.com mirror). Characteristic curves: daylight 1/100 s, Process AP 70 / C-41, status M; sensitivity: equal-energy spectrum, reading density 1.0 above minimum density; RMS granularity measured at diffuse density 1.0, 48 um aperture.",
+ "stocks": {
+  "agfa_portrait_xps_160": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "kodak_portra_endura",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "weak",
+   "stock": "agfa_portrait_xps_160",
+   "name": "Agfa Portrait XPS 160",
+   "rms_granularity": 3.5,
+   "iso": 160,
+   "datasheet_heading": "AGFACOLOR PORTRAIT XPS 160 PROFESSIONAL (ISO 160/23°, daylight, AP 70/C-41, RMS 3.5)",
+   "data_owner": "Agfa-Gevaert AG",
+   "still_precedent": "the shipped still portrait negatives (Kodak Portra 160, Fujifilm Pro 160S)",
+   "notes": [
+    "Negs has no Agfacolor RA-4 print paper; refined against kodak_portra_endura as the portrait RA-4 reference paper.",
+    "The characteristic y-axis fits the 7 interior gridlines (0.5..3.5 D) and top frame edge (4.0 D); the bottom box border sits ~1.03 pt below the uniform 0.0 D gridline spacing (the '0' text label aligns with the gridline spacing, not the box edge)."
+   ],
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  }
+ },
+ "extraction": {
+  "agfa_portrait_xps_160": {
+   "info": "Agfacolor Portrait XPS 160 Professional, Agfa Technical Data PF, 1st edition 09/1998, PDF page 8",
+   "source": {
+    "file": "agfa_films.pdf",
+    "sha256": "982d920110a598a910e7f31f7fa2d7446f4238d84408ae83bfa32e92d1188d79",
+    "document": "Agfa Technical Data PF, Range of Professional Films",
+    "edition": "1st edition, 09/1998"
+   },
+   "panels": {
+    "sensitivity": {
+     "page": 7,
+     "frame": [53.393, 80.237, 179.782, 175.002],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [400, 450, 500, 550, 600, 650, 700],
+       "frame": [350, 750]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [1.5, 1.0, 0.5, 0.0, -0.5],
+       "frame": [2.0, -1.0]
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": "any",
+       "dashes": "[ 2.011 .503 ] 0",
+       "width": 0.503
+      },
+      "log_sensitivity_g": {
+       "color": "any",
+       "dashes": "[] 0",
+       "width": 0.503
+      },
+      "log_sensitivity_r": {
+       "color": "any",
+       "dashes": "[ 2.011 .503 .503 .503 ] 0",
+       "width": 0.503
+      }
+     }
+    },
+    "dye_density": {
+     "page": 7,
+     "frame": [53.691, 227.511, 179.797, 290.439],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [400, 450, 500, 550, 600, 650, 700],
+       "frame": [350, 750]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [1.5, 1.0, 0.5],
+       "frame": [2.0, 0.0]
+      }
+     },
+     "curves": {
+      "dye_density_min": {
+       "color": "any",
+       "dashes": "[] 0",
+       "width": 0.787
+      },
+      "dye_density_mid": {
+       "color": "any",
+       "dashes": "[ 3.15 .787 ] 0",
+       "width": 0.787
+      }
+     }
+    },
+    "characteristic": {
+     "page": 7,
+     "frame": [54.610, 476.079, 179.568, 576.061],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [-3.0, -2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0],
+       "frame": [-3.5, 1.5]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5],
+       "frame": [4.0, null]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": "any",
+       "dashes": "[ 3.157 .789 ] 0",
+       "width": 0.789
+      },
+      "density_curve_g": {
+       "color": "any",
+       "dashes": "[] 0",
+       "width": 0.789
+      },
+      "density_curve_r": {
+       "color": "any",
+       "dashes": "[ 3.157 .789 .789 .789 ] 0",
+       "width": 0.789
+      }
+     }
+    }
+   }
+  }
+ }
+}

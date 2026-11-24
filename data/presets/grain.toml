@@ -303,3 +303,15 @@ rms_granularity = [4.5, 4.5, 4.5]
 # rule above ([3.5, 5.5, 7.0] x RMS / 3.5), rounded to 0.1.
 [kodak_exr_100t]
 rms_granularity = [5.0, 7.9, 10.0]
+# --- Negs only, not upstream: classic 160-ISO portrait colour negatives
+# prepared from manufacturer datasheets (tools/film_profiles,
+# data/profile-sources/agfa-pf and data/profile-sources/konica-pro160).
+# rms_granularity is the diffuse RMS granularity on every layer (48 um
+# aperture, D 1.0): 3.5 from Agfa Technical Data PF (09/1998, p. 8) and 4.0
+# for Konica Minolta Professional 160 (brochure AB3 0407T02M6 omits RMS;
+# cross-verified from fresh-era datasheet compilations cacreeks.com/films.htm
+# and foto-35mm.narod.ru). The rest from upstream's colour defaults.
+[agfa_portrait_xps_160]
+rms_granularity = [3.5, 3.5, 3.5]
+[konica_professional_160]
+rms_granularity = [4.0, 4.0, 4.0]
