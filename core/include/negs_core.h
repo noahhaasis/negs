@@ -1753,7 +1753,9 @@ uint64_t negs_preview_checksum(const uint8_t *bytes, size_t len);
 uint8_t negs_preview_read(const uint8_t *file, size_t file_len, const uint8_t *key, size_t key_len,
                           negs_preview_frame_t *frame, negs_buf_t *display_space, negs_buf_t *file_bytes,
                           size_t *pixels_offset);
-/* write(file, key, frame): 0, or the OS error (-1 a NUL in the path). */
+/* write(file, key, frame): 0, or the OS error (-1 a NUL in the path, -2
+   a folder that has no parent to create it under: std's "failed to
+   create whole tree"). */
 int32_t negs_preview_write(const uint8_t *file, size_t file_len, const uint8_t *key, size_t key_len,
                            const negs_preview_frame_t *frame, const uint8_t *display_space, size_t display_len,
                            const uint8_t *pixels, size_t len);
