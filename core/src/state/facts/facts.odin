@@ -7,7 +7,7 @@
 //
 // A host that keeps the state itself can answer the state's questions
 // instead (`Host`): the edit lists then ask it, so nothing is converted.
-package facts
+package state_facts
 
 import "base:runtime"
 import "core:strings"

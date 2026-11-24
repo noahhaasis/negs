@@ -6,7 +6,7 @@
 package edits
 
 import "../../value"
-import "../facts"
+import facts "../facts"
 import ".."
 
 Tab :: enum u32 {

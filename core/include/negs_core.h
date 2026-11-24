@@ -1449,6 +1449,309 @@ const char *negs_state_constant(uint32_t which);
 /* ------------------------------------------------------------------ */
 /* Phase 4a: state rules, edits, inspector                              */
 /* ------------------------------------------------------------------ */
+/* The rest of windows/src/state.rs, edits.rs, and the facts the inspector
+ * reads (inspector_view/facts.rs). Strings cross as negs_str_t (UTF-8,
+ * borrowed for the call). Results are static words (const char *, never
+ * freed), the caller's buffer (`out`, `cap`; returns the whole length),
+ * owned negs_buf_t, or, for a facts handle, borrowed from the handle until
+ * the next call on it. Indexes past a table read as nothing (0, NULL). */
+
+/* state.rs's Stock, as the host built it from the catalog. `grain` is the
+ * preset's JSON (empty: null); only negs_catalog_new reads it and the
+ * times. */
+typedef struct negs_stock_t {
+    negs_str_t id, name, target, grain;
+    const double *times;
+    size_t times_len;
+    uint8_t paper, positive, bw, fotufilm, manufacturer_data, negs_built, cine_print;
+} negs_stock_t;
+
+/* state.rs's ColorFilter. */
+typedef struct negs_color_filter_t {
+    negs_str_t key, name, glass;
+    uint32_t colour;
+} negs_color_filter_t;
+
+/* Stock::new / ColorFilter::new on one catalog entry's JSON: `out`'s
+ * strings and times point into `storage`, an owned block the caller frees
+ * (negs_buf_free) once it has copied them. 0 when the text isn't JSON. */
+uint8_t negs_stock_read(const uint8_t *json, size_t len, negs_stock_t *out, negs_buf_t *storage);
+uint8_t negs_color_filter_read(const uint8_t *json, size_t len, negs_color_filter_t *out, negs_buf_t *storage);
+uint8_t negs_stock_is_motion_picture_print(const negs_stock_t *stock);
+uint8_t negs_stock_lists_negs_built(const negs_stock_t *stock, uint8_t shown);
+
+/* FotufilmFilms: 0 All, 1 Datasheets, 2 Off. `which` 0 the key, 1 the
+ * title (static). */
+uint32_t negs_fotufilm_from_key(const uint8_t *key, size_t len);
+const char *negs_fotufilm_word(uint32_t choice, uint32_t which);
+uint8_t negs_fotufilm_lists(uint32_t choice, const negs_stock_t *stock);
+
+/* ColorFilter::effect (static), ::hint and ::help (`filter` NULL for
+ * none; `decimal` a Unicode scalar). */
+const char *negs_color_filter_effect(const uint8_t *key, size_t len);
+void negs_color_filter_hint(const negs_color_filter_t *filter, uint8_t has_stops, double stops, const uint8_t *film,
+                            size_t film_len, uint8_t metered, uint32_t decimal, negs_buf_t *out);
+void negs_color_filter_help(const negs_color_filter_t *filter, negs_buf_t *out);
+
+/* FilterLink: 0 Separate, 1 Together, 2 Opposite. `which` 0 the key, 1 the
+ * title (static). `out` gets the (magenta, yellow) shifts. */
+uint32_t negs_filter_link_from_key(const uint8_t *key, size_t len);
+const char *negs_filter_link_word(uint32_t link, uint32_t which);
+uint8_t negs_filter_link_links(const uint8_t *path, size_t len);
+void negs_filter_link_shifts(uint32_t link, const uint8_t *path, size_t len, double value, double magenta,
+                             double yellow, double out[2]);
+
+/* grain_lane: the field's place in GRAIN_STOCK_FIELDS and the lane. */
+uint8_t negs_grain_lane(const uint8_t *path, size_t len, uint32_t *field, uint64_t *lane);
+uint8_t negs_color_only(const uint8_t *path, size_t len);
+/* Static; NULL for none. */
+const char *negs_bw_title(const uint8_t *path, size_t len);
+
+size_t negs_option_title(const uint8_t *option, size_t len, uint8_t *out, size_t cap);
+double negs_snap(double value, double low, double high, double step);
+size_t negs_decimals(double step);
+size_t negs_format_value(double value, double step, uint8_t *out, size_t cap);
+/* The format's place in FILM_FORMATS; -1 for Custom. */
+int32_t negs_film_format(double mm);
+size_t negs_ratio_name(double width, double height, uint8_t *out, size_t cap);
+
+/* The inspector's controls, static. `kind`: 0 slider, 1 toggle, 2 choice,
+ * 3 Balance Print, 4 the filter link. `path` is "" for the last two,
+ * `help` "" but for them, `title` "" for the link. */
+typedef struct negs_adjustment_t {
+    uint32_t kind;
+    const char *title, *path, *help;
+    double low, high, step;
+    const char *const *options;
+    size_t options_len;
+} negs_adjustment_t;
+
+/* `section`: 0 Camera, 1 Film, 2 Print, 3 Scan. `enable` NULL for none. */
+typedef struct negs_adjustment_group_t {
+    const char *title;
+    uint32_t section;
+    const char *enable;
+    size_t basic;
+    const negs_adjustment_t *controls;
+    size_t controls_len;
+} negs_adjustment_group_t;
+
+size_t negs_adjustment_group_count(void);
+uint8_t negs_adjustment_group(size_t index, negs_adjustment_group_t *out);
+/* 0 PREP_TONE, 1 PREP_COLOR, 2 PREP_DETAIL, 3 NEGATIVE_EXPOSURE,
+ * 4 LENS_BLUR, 5 WB_TEMPERATURE, 6 WB_TINT, 7 FILM_FORMAT. */
+const negs_adjustment_t *negs_adjustments(uint32_t which, size_t *count);
+/* 0 METERING, 1 INPUT_MODES, 2 ASSUMED_SPACES, 3 MANUAL_SPACES,
+ * 4 WHITE_BALANCE, 5 GRAIN_STOCK_FIELDS, 6 DIR_HALATION_STOCK_PATHS,
+ * 7 the choice paths (negs_choice_t's `nulls` bits). */
+const char *const *negs_state_words(uint32_t which, size_t *count);
+uint8_t negs_film_format_row(size_t index, const char **name, double *mm);
+/* 0 NEGS_BUILT_HINT, 1 the filter link's help, 2 Balance Print's help,
+ * 3 ColorFilter::PATH, 4 ColorFilter::NONE, 5 FilterLink::MAGENTA,
+ * 6 FilterLink::YELLOW, 7 io.scan_film. */
+const char *negs_state_rules_constant(uint32_t which);
+/* 0 and 1 PREP_EXPOSURE_RANGE, 2 PREP_EXPOSURE_STEP, 3 and 4
+ * FilterLink::RANGE; NaN past them. */
+double negs_state_rules_number(uint32_t which);
+
+/* What choosing a stock sets (`choosing`, `pair_film`): the film and
+ * paper (borrowed from the call's inputs: the film, the paper, `id` or a
+ * stock's target), the params to set to null (bit i: negs_state_words(7)
+ * [i]), and io.scan_film when `sets_scan`. */
+typedef struct negs_choice_t {
+    negs_str_t film, paper;
+    uint32_t nulls;
+    uint8_t sets_scan, scan;
+} negs_choice_t;
+
+void negs_choosing_plan(const uint8_t *film, size_t film_len, const uint8_t *paper, size_t paper_len,
+                        const uint8_t *id, size_t id_len, uint8_t is_paper, uint8_t keep_paper,
+                        const negs_stock_t *stocks, size_t count, negs_choice_t *out);
+void negs_pair_film_plan(const uint8_t *film, size_t film_len, const uint8_t *paper, size_t paper_len,
+                         const negs_stock_t *stocks, size_t count, uint8_t with_paper, negs_choice_t *out);
+/* `choosing` on a state: a new handle the caller frees. */
+negs_state_t *negs_choosing(const negs_state_t *state, const uint8_t *id, size_t id_len, uint8_t is_paper,
+                            uint8_t keep_paper, const negs_stock_t *stocks, size_t count);
+
+/* A stock menu's section: its title (static) and `count` of the call's
+ * `places` from `start`. film_groups gives up to 4, paper_groups 3;
+ * `places` has room for every stock passed. Returns the groups' number. */
+typedef struct negs_stock_group_t {
+    const char *title;
+    size_t start, count;
+} negs_stock_group_t;
+
+size_t negs_film_groups(const negs_stock_t *films, size_t film_count, const negs_stock_t *papers, size_t paper_count,
+                        negs_stock_group_t *out, size_t cap, uint32_t *places);
+size_t negs_paper_groups(const negs_stock_t *papers, size_t paper_count, negs_stock_group_t *out, size_t cap,
+                         uint32_t *places);
+/* `matching`: group i is `titles[i]` with `counts[i]` stocks, one group's
+ * after another in `stocks`; `keep` (one per stock) gets 1 for each kept.
+ * Returns 0 for a query without words (all kept). */
+uint8_t negs_stock_matching(const uint8_t *query, size_t query_len, const negs_str_t *titles, const size_t *counts,
+                            size_t group_count, const negs_stock_t *stocks, uint8_t *keep);
+/* The host's case- and accent-blind `contains` for the film search
+ * (Windows: FindNLSStringEx, invariant locale). Set once, before the first
+ * search, from one thread; NULL: a plain byte search. */
+typedef uint8_t (*negs_contains_fn)(const uint8_t *text, size_t text_len, const uint8_t *word, size_t word_len);
+void negs_text_set_contains(negs_contains_fn contains);
+
+/* The catalog the facts read: the engine's defaults (JSON), the stocks
+ * and filters the host built, and the catalog's JSON (each profile's
+ * color_filter_stops). All copied; empty texts read as null. NULL when a
+ * text isn't JSON. Free with negs_catalog_free, after every facts handle
+ * reading it. */
+typedef struct negs_catalog_t negs_catalog_t;
+negs_catalog_t *negs_catalog_new(const uint8_t *defaults, size_t defaults_len, const negs_stock_t *stocks,
+                                 size_t stock_count, const negs_color_filter_t *filters, size_t filter_count,
+                                 const uint8_t *catalog, size_t catalog_len);
+void negs_catalog_free(negs_catalog_t *catalog);
+
+/* InspectorFacts' plain data. */
+typedef struct negs_facts_prefs_t {
+    negs_str_t more_adjustments, color_space, output_format, filter_shift_link, tone_graph_channel;
+    uint32_t jpeg_quality, png_bit_depth, tiff_bit_depth;
+    uint8_t lab_all_controls, match_new_photos;
+} negs_facts_prefs_t;
+
+typedef struct negs_facts_negative_t {
+    negs_str_t sentence, warning, edge, flat_path, flat_reason;
+    uint8_t has_warning, has_base, base_found, base_picked, base_by_hand, base_from_roll, has_edge;
+    uint8_t has_flat_used, flat_used, has_flat_reason, busy, backlight_shown;
+} negs_facts_negative_t;
+
+/* The brightness match's failure (`has_failure`): its generation, the
+ * inputs it failed for (JSON, when `failure_has_inputs`), the message. */
+typedef struct negs_facts_input_t {
+    negs_facts_prefs_t prefs;
+    double photo_size[2];
+    double preview_scale;
+    uint64_t generation;
+    uint64_t failure_generation;
+    negs_str_t failure_inputs, failure_message, size_error;
+    negs_facts_negative_t negative;
+    uint32_t source_width, source_height;
+    uint8_t is_raw, lens_supported, has_source, image_shown, has_size_error, custom_film_format;
+    uint8_t balancing_print, can_balance_print, can_export, cropping, has_failure, failure_has_inputs;
+    uint8_t matching, has_negative;
+} negs_facts_input_t;
+
+typedef struct negs_facts_exposure_t {
+    double offset;
+    uint8_t modified;
+} negs_facts_exposure_t;
+
+/* A host keeping the state itself answers the edit lists' questions
+ * (paths borrowed for the call): whether a path is modified, its value as
+ * JSON into `out` (returns the whole length; asked again with room when
+ * longer), NEGS_FACTS_FILM_BW | FILM_POSITIVE | BORDER | MATCHES, the
+ * exposure above the match, and the chosen colour filter's name (borrowed
+ * until the host's next answer; 0 for none). */
+typedef struct negs_facts_host_t {
+    void *user;
+    uint8_t (*is_modified)(void *user, const uint8_t *path, size_t len);
+    size_t (*value)(void *user, const uint8_t *path, size_t len, uint8_t *out, size_t cap);
+    uint32_t (*flags)(void *user);
+    void (*exposure)(void *user, negs_facts_exposure_t *out);
+    uint8_t (*color_filter)(void *user, negs_str_t *name);
+} negs_facts_host_t;
+
+#define NEGS_FACTS_BORROW 1u
+
+#define NEGS_FACTS_FILM_BW 1u
+#define NEGS_FACTS_FILM_POSITIVE 2u
+#define NEGS_FACTS_BORDER 4u
+#define NEGS_FACTS_MATCHES 8u
+#define NEGS_FACTS_ACTIVE 16u
+#define NEGS_FACTS_PENDING 32u
+#define NEGS_FACTS_FAILED_HERE 64u
+#define NEGS_FACTS_OFFSET_MODIFIED 128u
+#define NEGS_FACTS_SHOWS_METER 256u
+#define NEGS_FACTS_FILM_FORMAT_CUSTOM 512u
+#define NEGS_FACTS_NEGATIVE 1024u
+#define NEGS_FACTS_COLOR_FILTER_SHOWN 2048u
+#define NEGS_FACTS_HAS_CATALOG 4096u
+#define NEGS_FACTS_NEGATIVE_BUSY 8192u
+
+/* What the inspector reads, per sync: negs_facts_update sets the state
+ * (borrowed until the next update or the handle's end; NULL for none) and
+ * the input (copied; NEGS_FACTS_BORROW: its strings borrowed until the
+ * next update). `catalog` is borrowed for the handle's life (NULL: none).
+ * The host is copied; its `user` must stay valid while it's set. One
+ * handle is used from one thread at a time. */
+typedef struct negs_facts_t negs_facts_t;
+negs_facts_t *negs_facts_new(const negs_catalog_t *catalog);
+void negs_facts_free(negs_facts_t *facts);
+void negs_facts_update(negs_facts_t *facts, const negs_state_t *state, const negs_facts_input_t *input,
+                       uint32_t flags);
+void negs_facts_set_host(negs_facts_t *facts, const negs_facts_host_t *host);
+
+/* facts.rs's readers. value and default_value as JSON (owned). */
+uint8_t negs_facts_value(negs_facts_t *facts, const uint8_t *path, size_t len, negs_buf_t *out);
+uint8_t negs_facts_default_value(negs_facts_t *facts, const uint8_t *path, size_t len, negs_buf_t *out);
+uint8_t negs_facts_is_modified(negs_facts_t *facts, const uint8_t *path, size_t len);
+uint32_t negs_facts_flags(negs_facts_t *facts);
+
+typedef struct negs_facts_brightness_t {
+    double matched_ev, exposure_offset, range_low, range_high;
+} negs_facts_brightness_t;
+
+void negs_facts_brightness(negs_facts_t *facts, negs_facts_brightness_t *out);
+/* Prep's Exposure note; borrowed until the next call. 0 for none. */
+uint8_t negs_facts_note(negs_facts_t *facts, negs_str_t *out);
+/* The filter in front of the lens (`key`, borrowed until the next update)
+ * and its place in the catalog's filters; -1 for none. */
+int64_t negs_facts_color_filter(negs_facts_t *facts, negs_str_t *key);
+uint8_t negs_facts_color_filter_stops(negs_facts_t *facts, const uint8_t *key, size_t len, double *out);
+/* The film's place in the catalog's stocks; -1 for none. */
+int64_t negs_facts_film_stock(negs_facts_t *facts);
+uint8_t negs_facts_revealed(negs_facts_t *facts, const uint8_t *key, size_t len);
+/* Static. */
+const char *negs_facts_preview_space(negs_facts_t *facts);
+const char *negs_preview_space(const uint8_t *chosen, size_t len);
+/* 0 the SizeMode (state.rs's order), 1 the FilterLink. */
+uint32_t negs_facts_choice(negs_facts_t *facts, uint32_t which);
+/* Borrowed from the catalog. */
+const double *negs_facts_stock_times(negs_facts_t *facts, uint8_t paper, size_t *count);
+uint8_t negs_facts_photo_pixels(negs_facts_t *facts, uint32_t *width, uint32_t *height);
+
+/* edits.rs. Tabs: 0 Prep, 1 Lab, 2 Output. Targets: 0 a parameter
+ * (`path`, static), 1 Match camera brightness, 2 Exposure, 3 Scan film,
+ * 4 the preview's colour space, 5 Border, 6 Film format. */
+#define NEGS_TARGET_PARAM 0u
+
+typedef struct negs_edit_t {
+    negs_str_t title, value;
+    uint32_t target;
+    const char *path;
+} negs_edit_t;
+
+/* A "N more" line: its words, the key it reveals or conceals, and
+ * `action` 0 Reveal, 1 Conceal, 2 Show fewer. */
+typedef struct negs_more_t {
+    negs_str_t text, key;
+    uint32_t action;
+} negs_more_t;
+
+size_t negs_edits_count(negs_facts_t *facts, uint32_t tab);
+/* Borrowed until the next call on `facts`. */
+const negs_edit_t *negs_edits_list(negs_facts_t *facts, uint32_t tab, uint32_t decimal, size_t *count);
+size_t negs_edits_group_count(negs_facts_t *facts, size_t index);
+size_t negs_edits_section_count(negs_facts_t *facts, uint32_t section);
+/* 0 brightness_count, 1 output_count, 2 scan_film_modified. */
+size_t negs_edits_other_count(negs_facts_t *facts, uint32_t which);
+uint8_t negs_edits_shows_section(negs_facts_t *facts, uint32_t section);
+uint8_t negs_edits_group_shows(negs_facts_t *facts, size_t index);
+uint8_t negs_edits_control_shows(negs_facts_t *facts, size_t index, size_t place);
+/* Borrowed until the next call on `facts`; 0 for none. */
+uint8_t negs_edits_module_more(negs_facts_t *facts, size_t index, negs_more_t *out);
+uint8_t negs_edits_section_more(negs_facts_t *facts, uint32_t section, negs_more_t *out);
+const char *negs_edits_section_title(uint32_t section);
+const char *negs_edits_tab_title(uint32_t tab);
+size_t negs_edits_words(const uint8_t *text, size_t len, uint8_t *out, size_t cap);
+/* 0 WHITE_BALANCE_PATHS, 1 INPUT_PATHS, 2 CAMERA_LOOSE, 3 the film's and
+ * the print's development time. Static. */
+const char *const *negs_edits_paths(uint32_t which, size_t *count);
 
 /* ------------------------------------------------------------------ */
 /* Phase 4b: presets, session                                           */

@@ -8,7 +8,7 @@ import "core:strings"
 import "core:testing"
 import "../../../src/state"
 import "../../../src/state/edits"
-import "../../../src/state/facts"
+import facts "../../../src/state/facts"
 import "../../../src/value"
 
 DEFAULTS :: `{

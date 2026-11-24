@@ -1,7 +1,7 @@
 // facts.rs's readers: values with their grain-lane defaults, whether one is
 // modified, the film, the colour filters, the preferences. Where a host
 // answers (`Facts.host`), the readers the edit lists use ask it.
-package facts
+package state_facts
 
 import "core:strings"
 import "../../value"

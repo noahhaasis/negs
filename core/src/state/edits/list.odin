@@ -6,7 +6,7 @@ package edits
 import "base:runtime"
 import "core:strings"
 import "../../value"
-import "../facts"
+import facts "../facts"
 import ".."
 
 @(private)

@@ -2,7 +2,7 @@
 // `Brightness`). The match's inputs (`match_inputs`, a copy of the
 // params) are worked out once per update, and only when a failure or a
 // pending match needs them.
-package facts
+package state_facts
 
 import "core:strings"
 import "../../value"
