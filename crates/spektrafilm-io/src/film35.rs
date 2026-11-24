@@ -115,6 +115,7 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("agfa_agfachrome_100", Kind::Slide, EdgePrint::Still(&["AGFACHROME 100"])),
     ("agfa_agfachrome_200", Kind::Slide, EdgePrint::Still(&["AGFACHROME 200"])),
     ("agfa_agfachrome_50", Kind::Slide, EdgePrint::Still(&["AGFACHROME 50"])),
+    ("agfa_portrait_xps_160", Kind::Negative, EdgePrint::Still(&["AGFA", "PORTRAIT XPS 160"])),
     ("cinestill_400d", Kind::Negative, EdgePrint::Still(&["CINESTILL 400D"])),
     ("cinestill_800t", Kind::Negative, EdgePrint::Still(&["CINESTILL 800T"])),
     ("fotufilm_infrared_color", Kind::Slide, EdgePrint::Still(&["INFRARED"])),
@@ -258,6 +259,7 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
         Kind::Negative,
         EdgePrint::Cine { product: "5203", keykode: Some("ER") },
     ),
+    ("konica_professional_160", Kind::Negative, EdgePrint::Still(&["KONICA PRO 160"])),
     ("lomography_color_100", Kind::Negative, EdgePrint::Still(&["LOMOGRAPHY 100"])),
     (
         "lomography_lomochrome_metropolis",

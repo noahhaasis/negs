@@ -143,6 +143,23 @@
    ]
   },
   {
+   "stock": "agfa_portrait_xps_160",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "cinestill_400d",
    "use": "still",
    "antihalation": "no",
@@ -1516,6 +1533,23 @@
    "halation_strength": [
     0.015,
     0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "konica_professional_160",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
     0.0
    ]
   },

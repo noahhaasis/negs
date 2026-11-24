@@ -256,3 +256,26 @@ Andrea Volpato; measurement data (c) Eastman Kodak Company):
   sections unchanged.
 - borders/35mm/: edge-print strips for kodak_exr_100t,
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: two 160-ISO portrait still negatives prepared from Agfa's and
+Konica Minolta's datasheets (CC BY-SA 4.0; method and generic dye spectra
+from spektrafilm by Andrea Volpato; measurement data (c) Agfa-Gevaert AG
+and (c) Konica Minolta Photo Imaging, Inc.):
+
+- profiles/: agfa_portrait_xps_160, built by tools/film_profiles from Agfa
+  Technical Data PF, Range of Professional Films, 1st edition, 09/1998,
+  PDF page 8; and konica_professional_160, built the same way from the
+  Konica Minolta PROFESSIONAL 160 for Color Print brochure (AB3 0407T02M6),
+  April 2004, PDF page 4; both refined through kodak_portra_endura.
+  Document, pages, SHA-256 and every choice in each profile's datasource
+  and in profile-sources/agfa-pf/ and profile-sources/konica-pro160/. No
+  existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 2 new films on
+  every colour paper and Eterna-CP print, from solve_neutral_filters.
+  Existing entries unchanged.
+- presets/grain.toml: grain sections for the 2 new films in a Negs-only
+  block at the end (Agfa Portrait XPS 160: RMS 3.5 from Technical Data PF;
+  Konica Minolta Professional 160: RMS 4.0 cross-verified from fresh-era
+  datasheet compilations). Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 2 new films,
+  crates/spektrafilm-io/src/film35.rs.
