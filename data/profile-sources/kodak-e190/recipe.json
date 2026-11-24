@@ -1,0 +1,1008 @@
+{
+ "about": "Per-stock build recipe for tools/film_profiles/build.py, as data/profile-sources/fujifilm-pfdg/recipe.json; see README.md. Source: KODAK PROFESSIONAL PORTRA Films technical data E-190, November 1998, the original edition, which covers the four first-generation NC/VC stocks. Charts are vector polylines on tick-marked frames (extract_pdf.py options ticks, polyline, grid_width, frame_any_re).",
+ "stocks": {
+  "kodak_portra_160nc": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "kodak_portra_endura",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 0.2,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "strong",
+   "stock": "kodak_portra_160nc",
+   "name": "Kodak Portra 160NC",
+   "iso": 160,
+   "datasheet_heading": "KODAK PROFESSIONAL PORTRA 160NC Film (E-190, 1998): Characteristic Curves (Status M, C-41), Spectral-Sensitivity Curves (effective exposure 1/25 s, 0.2 above D-min), Spectral-Dye-Density Curves (midscale neutral and D-min)",
+   "notes": [
+    "E-190 gives no RMS granularity, only a Print Grain Index (30 for a 4x6 print from 135, 4.4x; Kodak: not convertible to rms). The grain preset copies the shipped kodak_portra_160 (same speed; NC and VC differ by 3 PGI, under one just-noticeable step of 4)."
+   ],
+   "print_grain_index_135_4x6": 30,
+   "grain_preset_from": "kodak_portra_160",
+   "data_owner": "Eastman Kodak Company",
+   "still_precedent": "the shipped Kodak Portra 160 and 400 (spektrafilm)",
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  },
+  "kodak_portra_160vc": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "kodak_portra_endura",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 0.2,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "strong",
+   "stock": "kodak_portra_160vc",
+   "name": "Kodak Portra 160VC",
+   "iso": 160,
+   "datasheet_heading": "KODAK PROFESSIONAL PORTRA 160VC Film (E-190, 1998): Characteristic Curves (Status M, C-41), Spectral-Sensitivity Curves (effective exposure 1/25 s, 0.2 above D-min), Spectral-Dye-Density Curves (midscale neutral and D-min)",
+   "notes": [
+    "E-190 gives no RMS granularity, only a Print Grain Index (33 for a 4x6 print from 135, 4.4x; Kodak: not convertible to rms). The grain preset copies the shipped kodak_portra_160 (same speed; NC and VC differ by 3 PGI, under one just-noticeable step of 4)."
+   ],
+   "print_grain_index_135_4x6": 33,
+   "grain_preset_from": "kodak_portra_160",
+   "data_owner": "Eastman Kodak Company",
+   "still_precedent": "the shipped Kodak Portra 160 and 400 (spektrafilm)",
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  },
+  "kodak_portra_400nc": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "kodak_portra_endura",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 0.2,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "strong",
+   "stock": "kodak_portra_400nc",
+   "name": "Kodak Portra 400NC",
+   "iso": 400,
+   "datasheet_heading": "KODAK PROFESSIONAL PORTRA 400NC Film (E-190, 1998): Characteristic Curves (Status M, C-41), Spectral-Sensitivity Curves (effective exposure 1/50 s, 0.2 above D-min), Spectral-Dye-Density Curves (midscale neutral and D-min)",
+   "notes": [
+    "E-190 gives no RMS granularity, only a Print Grain Index (41 for a 4x6 print from 135, 4.4x; Kodak: not convertible to rms). The grain preset copies the shipped kodak_portra_400 (same speed; NC and VC differ by 3 PGI, under one just-noticeable step of 4)."
+   ],
+   "print_grain_index_135_4x6": 41,
+   "grain_preset_from": "kodak_portra_400",
+   "data_owner": "Eastman Kodak Company",
+   "still_precedent": "the shipped Kodak Portra 160 and 400 (spektrafilm)",
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  },
+  "kodak_portra_400vc": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "kodak_portra_endura",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 0.2,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "strong",
+   "stock": "kodak_portra_400vc",
+   "name": "Kodak Portra 400VC",
+   "iso": 400,
+   "datasheet_heading": "KODAK PROFESSIONAL PORTRA 400VC Film (E-190, 1998): Characteristic Curves (Status M, C-41), Spectral-Sensitivity Curves (effective exposure 1/50 s, 0.2 above D-min), Spectral-Dye-Density Curves (midscale neutral and D-min)",
+   "notes": [
+    "E-190 gives no RMS granularity, only a Print Grain Index (43 for a 4x6 print from 135, 4.4x; Kodak: not convertible to rms). The grain preset copies the shipped kodak_portra_400 (same speed; NC and VC differ by 3 PGI, under one just-noticeable step of 4)."
+   ],
+   "print_grain_index_135_4x6": 43,
+   "grain_preset_from": "kodak_portra_400",
+   "data_owner": "Eastman Kodak Company",
+   "still_precedent": "the shipped Kodak Portra 160 and 400 (spektrafilm)",
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  }
+ },
+ "extraction": {
+  "kodak_portra_160nc": {
+   "info": "Kodak Professional Portra 160NC, KODAK Publication No. E-190, November 1998, PDF page 8",
+   "source": {
+    "file": "e190.pdf",
+    "sha256": "fa3e715bc7057e70a755a25b5535abf47a50ce868fe86e8b7c7732d51113cc23",
+    "document": "KODAK PROFESSIONAL PORTRA Films, Technical Data / Color Negative Film, KODAK Publication No. E-190",
+    "edition": "November 1998 (©Eastman Kodak Company, 1998; Minor Revision 11-98)"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 7,
+     "frame": [
+      74.7,
+      77.38,
+      259.21,
+      261.89
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        -3.0,
+        -2.0,
+        -1.0,
+        0.0
+       ],
+       "frame": [
+        -4.0,
+        1.0
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "density_curve_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "density_curve_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 7,
+     "frame": [
+      350.75,
+      75.17,
+      551.28,
+      226.64
+     ],
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": [
+        250,
+        750
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "log_sensitivity_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "log_sensitivity_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 7,
+     "frame": [
+      210.66,
+      345.99,
+      395.01,
+      530.33
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        500,
+        600
+       ],
+       "frame": [
+        400,
+        700
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        2.5,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "kodak_portra_160vc": {
+   "info": "Kodak Professional Portra 160VC, KODAK Publication No. E-190, November 1998, PDF page 9",
+   "source": {
+    "file": "e190.pdf",
+    "sha256": "fa3e715bc7057e70a755a25b5535abf47a50ce868fe86e8b7c7732d51113cc23",
+    "document": "KODAK PROFESSIONAL PORTRA Films, Technical Data / Color Negative Film, KODAK Publication No. E-190",
+    "edition": "November 1998 (©Eastman Kodak Company, 1998; Minor Revision 11-98)"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 8,
+     "frame": [
+      86.7,
+      77.38,
+      271.21,
+      261.89
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        -3.0,
+        -2.0,
+        -1.0,
+        0.0
+       ],
+       "frame": [
+        -4.0,
+        1.0
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "density_curve_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "density_curve_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     },
+     "frame_any_re": true
+    },
+    "sensitivity": {
+     "page": 8,
+     "frame": [
+      362.75,
+      76.57,
+      563.28,
+      228.04
+     ],
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": [
+        250,
+        750
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "log_sensitivity_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "log_sensitivity_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 8,
+     "frame": [
+      225.16,
+      346.39,
+      409.51,
+      530.74
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        500,
+        600
+       ],
+       "frame": [
+        400,
+        700
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        2.5,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "kodak_portra_400nc": {
+   "info": "Kodak Professional Portra 400NC, KODAK Publication No. E-190, November 1998, PDF page 10",
+   "source": {
+    "file": "e190.pdf",
+    "sha256": "fa3e715bc7057e70a755a25b5535abf47a50ce868fe86e8b7c7732d51113cc23",
+    "document": "KODAK PROFESSIONAL PORTRA Films, Technical Data / Color Negative Film, KODAK Publication No. E-190",
+    "edition": "November 1998 (©Eastman Kodak Company, 1998; Minor Revision 11-98)"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 9,
+     "frame": [
+      74.7,
+      77.38,
+      259.21,
+      261.89
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        -3.0,
+        -2.0,
+        -1.0,
+        0.0
+       ],
+       "frame": [
+        -4.0,
+        1.0
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "density_curve_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "density_curve_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 9,
+     "frame": [
+      350.75,
+      76.57,
+      551.28,
+      228.04
+     ],
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": [
+        250,
+        750
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "log_sensitivity_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "log_sensitivity_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 9,
+     "frame": [
+      210.66,
+      346.19,
+      395.01,
+      530.54
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        500,
+        600
+       ],
+       "frame": [
+        400,
+        700
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        2.5,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "kodak_portra_400vc": {
+   "info": "Kodak Professional Portra 400VC, KODAK Publication No. E-190, November 1998, PDF page 11",
+   "source": {
+    "file": "e190.pdf",
+    "sha256": "fa3e715bc7057e70a755a25b5535abf47a50ce868fe86e8b7c7732d51113cc23",
+    "document": "KODAK PROFESSIONAL PORTRA Films, Technical Data / Color Negative Film, KODAK Publication No. E-190",
+    "edition": "November 1998 (©Eastman Kodak Company, 1998; Minor Revision 11-98)"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 10,
+     "frame": [
+      86.7,
+      79.38,
+      271.21,
+      263.89
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        -3.0,
+        -2.0,
+        -1.0,
+        0.0
+       ],
+       "frame": [
+        -4.0,
+        1.0
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "density_curve_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "density_curve_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 10,
+     "frame": [
+      362.75,
+      82.57,
+      563.28,
+      234.04
+     ],
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700
+       ],
+       "frame": [
+        250,
+        750
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.0,
+        2.0,
+        1.0
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "log_sensitivity_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "log_sensitivity_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 10,
+     "frame": [
+      225.16,
+      349.99,
+      409.51,
+      534.34
+     ],
+     "ticks": true,
+     "grid_width": 0.43,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        500,
+        600
+       ],
+       "frame": [
+        400,
+        700
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        2.5,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": "any",
+       "dashed": false,
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

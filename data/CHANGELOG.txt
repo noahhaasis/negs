@@ -216,3 +216,27 @@ Volpato; measurement data (c) FUJIFILM Corporation):
   Existing entries unchanged.
 - borders/35mm/: edge-print strips for the five prints,
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: one Fujifilm still negative from Fujifilm Japan's data sheets
+and four Kodak still negatives from Kodak's E-190 (CC BY-SA 4.0; method and
+generic dye spectra from spektrafilm by Andrea Volpato; measurement data
+(c) FUJIFILM Corporation and (c) Eastman Kodak Company):
+
+- profiles/: fujifilm_reala_ace, built by tools/film_profiles as the
+  2026-11-20 entry from Fujifilm Japan's Reala Ace data sheet (013Ai158A),
+  through fujifilm_crystal_archive_typeii; kodak_portra_160nc,
+  kodak_portra_160vc, kodak_portra_400nc and kodak_portra_400vc, built the
+  same way from KODAK PROFESSIONAL PORTRA Films technical data E-190,
+  November 1998, through kodak_portra_endura. Document, pages, SHA-256 and
+  every choice in each profile's datasource and in
+  profile-sources/fujifilm-jp/ and profile-sources/kodak-e190/. No existing
+  profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 5 new films on
+  every colour paper and Eterna-CP print, from solve_neutral_filters.
+  Existing entries unchanged.
+- presets/grain.toml: grain sections for the 5 new films in two Negs-only
+  blocks at the end (Reala Ace: the sheet's RMS granularity on every layer;
+  the Portras: the shipped Portra of the same speed, as E-190 gives only a
+  Print Grain Index). Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 5 new films,
+  crates/spektrafilm-io/src/film35.rs.
