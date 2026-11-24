@@ -204,6 +204,17 @@ fn hide(path: &Path) {
     negs_state_oracle::platform::hide_file(path);
 }
 
+/// A DOS device name, also with an extension, on Windows before 11
+/// ("CON.json" is the console there, "COM1.txt" a serial port): another
+/// program can't make such a file, and the steps that open a path
+/// directly would read the console and wait for ever, so they skip them
+/// there. The libraries' own calls refuse these names (`name::problem`).
+fn device(file: &str) -> bool {
+    let stem = file.split('.').next().unwrap_or("").trim_end_matches(' ').to_uppercase();
+    let numbered = |prefix: &str| stem.strip_prefix(prefix).is_some_and(|n| ["1", "2", "3", "4", "5", "6", "7", "8", "9", "\u{B9}", "\u{B2}", "\u{B3}"].contains(&n));
+    cfg!(windows) && (["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&stem.as_str()) || numbered("COM") || numbered("LPT"))
+}
+
 #[test]
 fn lockstep_folders_stay_alike() {
     let _serial = serial();
@@ -293,7 +304,7 @@ fn lockstep_folders_stay_alike() {
                         2 => format!("{}.JSON", name(&mut r)),
                         _ => format!("{}.json", name(&mut r)),
                     };
-                    if n.contains('/') || n.contains('\0') {
+                    if n.contains('/') || n.contains('\0') || device(&n) {
                         continue;
                     }
                     let data = bytes_of(&mut r);
@@ -349,7 +360,7 @@ fn lockstep_folders_stay_alike() {
                 13 => {
                     // read_file: a preset, too large, a folder, missing.
                     let n = format!("{}.json", name(&mut r));
-                    if !n.contains('/') && !n.contains('\0') {
+                    if !n.contains('/') && !n.contains('\0') && !device(&n) {
                         let show = |d: Vec<u8>| format!("{d:?}");
                         tally.check(
                             "read_file",
