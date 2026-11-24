@@ -105,6 +105,9 @@ opt-level = 3
 
 [dev-dependencies]
 spektrafilm-math = { path = "../crates/spektrafilm-math" }
+# Phase 4b: the tests' cfg!(test) in the core's session and presets (a
+# scratch profile, Library::new, Preferences::expanded).
+negs-core-rules = { path = "../core/rust/rules", features = ["io", "host-tests"] }
 
 # The engine's rawler (spektrafilm-io uses its develop_intermediate_owned);
 # see vendor/README.md.

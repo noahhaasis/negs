@@ -1454,6 +1454,122 @@ const char *negs_state_constant(uint32_t which);
 /* Phase 4b: presets, session                                           */
 /* ------------------------------------------------------------------ */
 
+/* windows/src/presets.rs and session.rs: the preset files in a folder and
+ * the settings files, with their file operations in the core (Win32 on
+ * Windows; on macOS and Linux as core/diff/state-oracle stands in for it).
+ * Paths are UTF-8. Errors are the Rust's messages, in an owned negs_buf_t
+ * (`error`, may be NULL). */
+
+/* Text functions the host gives the core for preset names: NFC and lower
+ * case (Windows: NormalizeString, Rust's str::to_lowercase). Each writes up
+ * to `cap` bytes of its result into `out` and returns the whole length; the
+ * core calls again with a larger buffer when it was short. */
+typedef size_t (*negs_text_fn)(void *user, const uint8_t *text, size_t len, uint8_t *out, size_t cap);
+/* Registers them for the process (NULL for the core's stand-ins: NFC
+ * leaves text as it is, lower case is per character). Call before any
+ * preset call, from one thread. */
+void negs_settings_text_functions(negs_text_fn nfc, negs_text_fn lowercase, void *user);
+
+/* A preset as listed: its path, size and modification time (seconds since
+ * 1970, negative before, and nanoseconds), which rename, delete and read
+ * check first. Going in, `path` is the caller's, borrowed for the call. */
+typedef struct negs_preset_file_t {
+  const uint8_t *path;
+  size_t path_len;
+  uint64_t size;
+  int64_t modified_s;
+  uint32_t modified_ns;
+} negs_preset_file_t;
+
+/* Owned: `files` and the paths they point to are one block, freed with
+ * negs_preset_list_free. Empty: files NULL, count 0. */
+typedef struct negs_preset_list_t {
+  negs_preset_file_t *files;
+  size_t count;
+} negs_preset_list_t;
+
+void negs_preset_list_free(negs_preset_list_t list);
+
+/* 0 name::MAX_LENGTH (120 characters), 1 MAX_FILE_SIZE (1 MB). */
+uint64_t negs_presets_limit(uint32_t which);
+
+/* Library::list, add, rename, delete, read and set_order on the folder;
+ * read_file is presets::read_file. 1 done (`out` set when given), 0 failed
+ * (`error`). A one-preset result is a list of one. */
+uint8_t negs_presets_list(const uint8_t *folder, size_t folder_len, negs_preset_list_t *out, negs_buf_t *error);
+uint8_t negs_presets_add(const uint8_t *folder, size_t folder_len, const uint8_t *data, size_t data_len,
+                         const uint8_t *name, size_t name_len, negs_preset_list_t *out, negs_buf_t *error);
+uint8_t negs_presets_rename(const uint8_t *folder, size_t folder_len, const negs_preset_file_t *preset,
+                            const uint8_t *name, size_t name_len, negs_preset_list_t *out, negs_buf_t *error);
+uint8_t negs_presets_delete(const uint8_t *folder, size_t folder_len, const negs_preset_file_t *preset,
+                            negs_buf_t *error);
+uint8_t negs_presets_read(const negs_preset_file_t *preset, negs_buf_t *out, negs_buf_t *error);
+uint8_t negs_presets_read_file(const uint8_t *path, size_t path_len, negs_buf_t *out, negs_buf_t *error);
+uint8_t negs_presets_set_order(const uint8_t *folder, size_t folder_len, const negs_preset_file_t *presets,
+                               size_t count, negs_buf_t *error);
+
+/* name::problem: 1 and the message in `out`, or 0. */
+uint8_t negs_presets_name_problem(const uint8_t *name, size_t name_len, negs_buf_t *out);
+/* name::key, name::unique (`taken` holds keys) and name::from_file_name. */
+negs_buf_t negs_presets_name_key(const uint8_t *name, size_t name_len);
+negs_buf_t negs_presets_name_unique(const uint8_t *name, size_t name_len, const negs_str_t *taken, size_t count);
+negs_buf_t negs_presets_name_from_file_name(const uint8_t *name, size_t name_len);
+/* presets::text: where the text starts (3 past a UTF-8 byte order mark,
+ * else 0), or -1 when it isn't UTF-8. */
+int64_t negs_presets_text_start(const uint8_t *data, size_t len);
+
+/* 0 settings_dir, 1 cache_dir, 2 the Presets folder, 3 settings.json,
+ * 4 session.json, 5 catalog.json. `test` stands for cfg!(test): without
+ * NEGS_PROFILE_DIR, a scratch folder in the temporary one. 1, or 0 for
+ * another `which`. */
+uint8_t negs_settings_path(uint32_t which, uint8_t test, negs_buf_t *out);
+/* session::write_atomic. 1, or 0 and the error. */
+uint8_t negs_settings_write_atomic(const uint8_t *path, size_t path_len, const uint8_t *data, size_t data_len,
+                                   negs_buf_t *error);
+
+/* EditorSession::validate of serde_json's text for the session: 1 valid,
+ * 0 not, 2 the core can't read the text (a double serde wrote as null). */
+uint8_t negs_session_validate(const uint8_t *text, size_t len);
+/* EditorSession::migrate's change to a schema 1 state (the state's JSON):
+ * its DIR and halation values null. 1 and the state's JSON, or 0. */
+uint8_t negs_session_migrate_state(const uint8_t *text, size_t len, negs_buf_t *out);
+/* The session read and written again as the core does (serde_json::to_vec),
+ * for tests: 1, or 0 when it doesn't read. */
+uint8_t negs_session_rewrite(const uint8_t *text, size_t len, negs_buf_t *out);
+/* SessionStore::load of `file`: 0 error (`out` the message), 1 none,
+ * 2 the session (`out` its JSON, migrated and checked), 3 the file isn't a
+ * session (`out` its bytes, for serde's message). */
+uint8_t negs_session_load(const uint8_t *file, size_t file_len, negs_buf_t *out);
+/* SessionStore::save of serde_json's text for the session: 1 saved,
+ * 0 error, 2 the core can't read the text (nothing done). */
+uint8_t negs_session_save(const uint8_t *file, size_t file_len, const uint8_t *text, size_t len, negs_buf_t *error);
+
+/* Preferences read and written again as the core does (flags
+ * NEGS_JSON_PRETTY: to_vec_pretty), for tests: 1, or 0 when they don't
+ * read. */
+uint8_t negs_preferences_rewrite(const uint8_t *text, size_t len, uint32_t flags, negs_buf_t *out);
+/* Preferences::default() as JSON (flags as above). Owned. */
+negs_buf_t negs_preferences_default(uint32_t flags);
+/* Preferences::load of `file`: 1 and their JSON, or 0 (the defaults). */
+uint8_t negs_preferences_load(const uint8_t *file, size_t file_len, negs_buf_t *out);
+/* Preferences::save of serde_json's text for them: 1 saved, 0 the write
+ * failed, 2 the core can't read the text (nothing done). */
+uint8_t negs_preferences_save(const uint8_t *file, size_t file_len, const uint8_t *text, size_t len);
+/* set_expanded (sorted 0) and set_revealed (sorted 1) on a comma-separated
+ * list; list_has is `expanded`. Owned. */
+negs_buf_t negs_preferences_list_set(const uint8_t *list, size_t list_len, const uint8_t *item, size_t item_len,
+                                     uint8_t on, uint8_t sorted);
+uint8_t negs_preferences_list_has(const uint8_t *list, size_t list_len, const uint8_t *item, size_t item_len);
+/* Preferences::tab: 0 Prep, 1 Lab, 2 Output. */
+uint8_t negs_preferences_tab(const uint8_t *tab, size_t tab_len, uint8_t chosen);
+
+/* CatalogCache::load from `file`: 1 and the catalog's JSON, or 0. */
+uint8_t negs_catalog_load(const uint8_t *file, size_t file_len, const uint8_t *helper, size_t helper_len,
+                          const uint8_t *data, size_t data_len, negs_buf_t *out);
+/* CatalogCache::save of the catalog's JSON to `file`; errors ignored. */
+void negs_catalog_save(const uint8_t *file, size_t file_len, const uint8_t *catalog, size_t catalog_len,
+                       const uint8_t *helper, size_t helper_len, const uint8_t *data, size_t data_len);
+
 /* ------------------------------------------------------------------ */
 /* Phase 4c: batch, match cache, rendered preview                       */
 /* ------------------------------------------------------------------ */

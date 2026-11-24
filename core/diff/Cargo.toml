@@ -39,6 +39,10 @@ spektrafilm-math = { path = "../../crates/spektrafilm-math" }
 negs-state-oracle = { path = "state-oracle" }
 # The differential tests write the oracles' states with serde.
 serde = "1"
+# Phase 4b: the oracles' anyhow errors, and the stand-in NormalizeString
+# (ICU's NFC) the presets test gives the core as its NFC.
+anyhow = "1"
+negs-windows-stand-in = { path = "state-oracle/windows" }
 # The image crate (model/compare's oracle resizes with it; the picture
 # oracles read PNGs), as windows/ has it.
 image = { version = "0.25", default-features = false, features = ["png"] }

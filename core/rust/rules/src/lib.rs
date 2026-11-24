@@ -38,7 +38,9 @@ pub mod state;
 
 
 
-// Phase 4b
+// Phase 4b: presets, session (the settings files).
+pub mod presets;
+pub mod session;
 
 
 
