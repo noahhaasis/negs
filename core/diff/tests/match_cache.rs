@@ -1,7 +1,8 @@
 //! windows/src/match_cache.rs on the core (core/src/caches/match_cache,
 //! through negs-core-rules) against the frozen Rust (core/diff/oracle/
-//! match_cache.rs). windows/src/match_cache.rs is compiled here with its
-//! own unit tests, on the oracle's EditState and EnginePaths.
+//! match_cache.rs). windows/src/match_cache.rs is compiled here on the
+//! oracle's EditState and EnginePaths (its own unit tests run in
+//! caches_units; this file runs without libtest, for the leak checks).
 //! - keys byte for byte: random requests (films, papers, the engine's real
 //!   parameters and random values) on scratch files with awkward names, on
 //!   files of this repository, and on missing ones; engine stamps;
@@ -13,7 +14,7 @@
 //!   entries files each side writes read by the other.
 //! Seeded (NEGS_RULES_SEEDS, default 10,000; NEGS_RULES_SEED); each test
 //! checks the core leaked nothing.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)] // the windows files' test modules compile here without their tests
 
 mod rules_common;
 mod state_common;
@@ -58,7 +59,6 @@ fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-#[test]
 fn keys_and_engine_stamps() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -125,7 +125,6 @@ fn tick() {
     }
 }
 
-#[test]
 fn lru_sequences() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -202,4 +201,22 @@ fn lru_sequences() {
     let _ = std::fs::remove_dir_all(&dir);
     t.finish("match cache LRU", n);
     leaks.check("match cache LRU");
+}
+
+/// Without libtest (`harness = false`, see caches_units.rs): each test in
+/// turn; a filter argument runs those whose names contain it.
+fn main() {
+    let filter = std::env::args().skip(1).find(|a| !a.starts_with('-'));
+    let tests: &[(&str, fn())] = &[
+        ("keys_and_engine_stamps", keys_and_engine_stamps),
+        ("lru_sequences", lru_sequences),
+    ];
+    for (name, test) in tests {
+        if filter.as_deref().is_some_and(|f| !name.contains(f)) {
+            continue;
+        }
+        eprintln!("test {name} ...");
+        test();
+        eprintln!("test {name} ... ok");
+    }
 }

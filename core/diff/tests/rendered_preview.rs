@@ -1,7 +1,8 @@
 //! windows/src/rendered_preview.rs on the core (core/src/caches/preview,
 //! through negs-core-rules) against the frozen Rust (core/diff/oracle/
 //! rendered_preview.rs). windows/src/rendered_preview.rs is compiled here
-//! with its own unit tests, on the oracle's EditState and EnginePaths.
+//! on the oracle's EditState and EnginePaths (its own unit tests run in
+//! caches_units; this file runs without libtest, for the leak checks).
 //! - checksums: DefaultHasher (SipHash-1-3) over random bytes of random
 //!   lengths, 0, every length to 80 and past 64 KB;
 //! - keys byte for byte: random states (NaNs too, which the wrapper keys by
@@ -13,7 +14,7 @@
 //!   (header bytes, pixel bytes, truncated, extended) and loaded alike.
 //! Seeded (NEGS_RULES_SEEDS, default 10,000; NEGS_RULES_SEED); each test
 //! checks the core leaked nothing.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)] // the windows files' test modules compile here without their tests
 
 mod rules_common;
 mod state_common;
@@ -26,12 +27,6 @@ mod engine {
 }
 mod session {
     pub use negs_state_oracle::session::*;
-}
-mod picture {
-    pub use negs_state_oracle::picture::*;
-}
-mod crop {
-    pub use negs_state_oracle::crop::*;
 }
 
 #[path = "../../../windows/src/rendered_preview.rs"]
@@ -60,7 +55,6 @@ fn rust_checksum(bytes: &[u8]) -> u64 {
     hash.finish()
 }
 
-#[test]
 fn checksums() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -142,7 +136,6 @@ impl Engine {
     }
 }
 
-#[test]
 fn keys() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -260,7 +253,6 @@ fn oracle_load(file: &Path, engine: &Engine, s: &state::EditState) -> Option<(St
     rx.recv().unwrap()
 }
 
-#[test]
 fn frames_cross_both_ways() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -317,4 +309,23 @@ fn frames_cross_both_ways() {
     let _ = std::fs::remove_dir_all(&dir);
     t.finish("preview frames", n);
     leaks.check("preview frames");
+}
+
+/// Without libtest (`harness = false`, see caches_units.rs): each test in
+/// turn; a filter argument runs those whose names contain it.
+fn main() {
+    let filter = std::env::args().skip(1).find(|a| !a.starts_with('-'));
+    let tests: &[(&str, fn())] = &[
+        ("checksums", checksums),
+        ("keys", keys),
+        ("frames_cross_both_ways", frames_cross_both_ways),
+    ];
+    for (name, test) in tests {
+        if filter.as_deref().is_some_and(|f| !name.contains(f)) {
+            continue;
+        }
+        eprintln!("test {name} ...");
+        test();
+        eprintln!("test {name} ... ok");
+    }
 }

@@ -63,3 +63,20 @@ path = "../../crates/negs-library/tests/library.rs"
 name = "state"
 path = "../../crates/negs-library/tests/state.rs"
 
+# Phase 4c: without libtest, so windows/src's own unit tests (compiled in
+# caches_units: a match cache's delayed write keeps core memory for a
+# second) never run beside these tests' leak checks.
+[[test]]
+name = "batch"
+path = "tests/batch.rs"
+harness = false
+
+[[test]]
+name = "match_cache"
+path = "tests/match_cache.rs"
+harness = false
+
+[[test]]
+name = "rendered_preview"
+path = "tests/rendered_preview.rs"
+harness = false

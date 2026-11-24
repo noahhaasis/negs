@@ -1,8 +1,9 @@
 //! windows/src/batch.rs on the core (core/src/caches/batch, through
 //! negs-core-rules) against the frozen Rust (core/diff/oracle/batch.rs).
-//! windows/src/batch.rs itself is compiled here, its own unit tests
-//! included, on the oracle's EditState and model types (the stand-in
-//! modules below), so both sides share their inputs:
+//! windows/src/batch.rs itself is compiled here on the oracle's EditState
+//! and model types (the stand-in modules below), so both sides share their
+//! inputs (its own unit tests run in caches_units; this file runs without
+//! libtest, one test after another, for the leak checks):
 //! - file names for random choices and names (tokens, characters Windows
 //!   refuses, controls, dots and spaces), and Options::save;
 //! - batch_name on random paths and titles, numbered on random taken sets,
@@ -15,7 +16,7 @@
 //!   and random and mutated journal texts read alike.
 //! Seeded (NEGS_RULES_SEEDS, default 10,000; NEGS_RULES_SEED); each test
 //! checks the core leaked nothing.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)] // the windows files' test modules compile here without their tests
 
 mod rules_common;
 mod state_common;
@@ -89,7 +90,6 @@ fn cross<A: serde::Serialize, B: serde::de::DeserializeOwned>(a: &A) -> B {
     serde_json::from_slice(&serde_json::to_vec(a).unwrap()).unwrap()
 }
 
-#[test]
 fn names() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -150,7 +150,6 @@ fn file_name_like(r: &mut Random) -> String {
     }
 }
 
-#[test]
 fn matched() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -234,7 +233,6 @@ fn o_item(r: &mut Random, d: &Defaults, status: oracle::Status, full: bool) -> o
     }
 }
 
-#[test]
 fn runs_and_words() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -279,7 +277,6 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-#[test]
 fn journals_cross_both_ways() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -328,7 +325,6 @@ fn journals_cross_both_ways() {
     leaks.check("batch journals");
 }
 
-#[test]
 fn journal_texts_read_alike() {
     let _s = serial();
     let leaks = Leaks::start();
@@ -380,8 +376,29 @@ fn journal_texts_read_alike() {
     leaks.check("batch journal texts");
 }
 
-#[test]
 fn options_default_is_serdes() {
     let _s = serial();
     assert_eq!(negs_core_rules::batch::options_default_json(), serde_json::to_vec(&oracle::Options::default()).unwrap());
+}
+
+/// Without libtest (`harness = false`, see caches_units.rs): each test in
+/// turn; a filter argument runs those whose names contain it.
+fn main() {
+    let filter = std::env::args().skip(1).find(|a| !a.starts_with('-'));
+    let tests: &[(&str, fn())] = &[
+        ("names", names),
+        ("matched", matched),
+        ("runs_and_words", runs_and_words),
+        ("journals_cross_both_ways", journals_cross_both_ways),
+        ("journal_texts_read_alike", journal_texts_read_alike),
+        ("options_default_is_serdes", options_default_is_serdes),
+    ];
+    for (name, test) in tests {
+        if filter.as_deref().is_some_and(|f| !name.contains(f)) {
+            continue;
+        }
+        eprintln!("test {name} ...");
+        test();
+        eprintln!("test {name} ... ok");
+    }
 }
