@@ -1,5 +1,5 @@
-//! Phase 4's oracles (core/diff/oracle, frozen at b05e49e), compiled as they
-//! are on macOS.
+//! Phase 4's oracles (core/diff/oracle, frozen at b05e49e; state.rs, edits.rs
+//! and inspector_view/ at b0f1f5b), compiled as they are on macOS.
 //!
 //! - `copied` holds the windows/src items they name through `crate::`
 //!   (model's save and export settings and LibraryPreferences, engine's
@@ -48,6 +48,18 @@ pub mod batch;
 pub mod match_cache;
 #[path = "../../oracle/rendered_preview.rs"]
 pub mod rendered_preview;
+// Phase 4a: edits.rs and the inspector view (windows/src/inspector_view)
+// as they were on b0f1f5b, for 4a's and 4d's differential tests, with
+// Phase 3's frozen negative and help, which they name. Their own tests run
+// in core/diff/tests/inspector_oracle.rs.
+#[path = "../../oracle/negative.rs"]
+pub mod negative;
+#[path = "../../oracle/help.rs"]
+pub mod help;
+#[path = "../../oracle/edits.rs"]
+pub mod edits;
+#[path = "../../oracle/inspector_view/mod.rs"]
+pub mod inspector_view;
 
 mod copied;
 pub use copied::{engine, model, picture, sheet_rules};

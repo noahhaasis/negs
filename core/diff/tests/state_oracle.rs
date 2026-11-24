@@ -32,7 +32,7 @@ fn state_and_json() {
 fn film_search_folds_case_and_accents() {
     let stock = |id: &str, name: &str| state::Stock {
         id: id.into(), name: name.into(), paper: false, positive: false, bw: false, target: String::new(), times: vec![],
-        grain: serde_json::Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false,
+        grain: serde_json::Value::Null, fotufilm: false, manufacturer_data: true, negs_built: false, cine_print: false,
     };
     let films = [stock("cine", "Ciné Noir"), stock("gold", "Gold 200")];
     let f: Vec<&state::Stock> = films.iter().collect();
