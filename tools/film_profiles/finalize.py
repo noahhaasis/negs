@@ -49,15 +49,19 @@ def metadata(recipe, extraction, report, stock, created, packet="data/profile-so
     pages = sorted({p["page"] for p in extraction["panels"].values()})
     page = "page 1" if pages == [0] else ", ".join(f"PDF page {i + 1}" for i in pages)
     rms = recipe.get("rms_granularity_brochure", recipe.get("rms_granularity"))
+    # optional recipe keys for other makers (defaults: the Fujifilm packets' wording)
+    owner = recipe.get("data_owner", "FUJIFILM Corporation")
+    grain = f"RMS granularity {rms}" if rms is not None else (
+        f"no RMS granularity; Print Grain Index {recipe['print_grain_index_135_4x6']} for a 4x6 print from 135")
+    precedent = recipe.get("still_precedent", STILL_PRECEDENT)
     variant = report["chosen_variant"]
     v = report["variants"]
     errs = ", ".join(f"{k} {v[k]['ramp_final']['mean_neutrality_error']:.3f}" for k in v)
     w = report["window"]["params"]
     lines = [
         f"Prepared for Negs from the manufacturer's datasheet: {src['document']}, {src['edition']}, {page} "
-        f"(spectral sensitivity, characteristic curves, minimum and midscale-neutral spectral density; RMS "
-        f"granularity {rms}). PDF sha256 {src['sha256']}. Data (c) FUJIFILM "
-        f"Corporation. The curves were read from the PDF's vector paths (tools/film_profiles/extract_pdf.py); "
+        f"(spectral sensitivity, characteristic curves, minimum and midscale-neutral spectral density; "
+        f"{grain}). PDF sha256 {src['sha256']}. Data (c) {owner}. The curves were read from the PDF's vector paths (tools/film_profiles/extract_pdf.py); "
         f"the points and axis calibration are in {packet}/{stock}/.",
         "Method: spektrafilm's public-era profile creator by Andrea Volpato (commit b2c7fe6), steps 1-8: "
         "D-min removed, log E zero where green is 0.2 over D-min plus 3 stops, dye spectra reconstructed "
@@ -79,7 +83,7 @@ def metadata(recipe, extraction, report, stock, created, packet="data/profile-so
         + ("converted from stops (log10 H = 0.30103 x stops); use 'cine' and antihalation 'strong' as the "
            "Vision3 and Eterna profiles." if recipe["use"] == "cine" else
            f"in log10 H as printed; use '{recipe['use']}' and antihalation '{recipe['antihalation']}' as "
-           f"{STILL_PRECEDENT}."),
+           f"{precedent}."),
     ]
     lines += [f"Note: {n}" for n in recipe.get("notes", [])]
     c = v[variant]
@@ -90,7 +94,7 @@ def metadata(recipe, extraction, report, stock, created, packet="data/profile-so
         lines.append(
             f"Recorded validation exception: the reconstructed dyes reproduce D-mid minus D-min within "
             f"{c['check6_reconstruction_max_D_400_700']:.3f} D (worst at {c['check6_worst_nm']:.0f} nm"
-            f"{', the chart' + chr(39) + 's blue edge' if c['check6_worst_nm'] < 420 else ''}), over the 0.03 D criterion; the §D3 flat extension made it worse. Weighted per "
+            f"{', the chart' + chr(39) + 's blue edge' if c['check6_worst_nm'] < 420 else ''}), over the 0.03 D criterion; {recipe.get('check6_fallback', 'the §D3 flat extension made it worse')}. Weighted per "
             f"{recipe['target_print']} print channel the residual is R/G/B {pw} D, within the 0.01 D the method "
             "accepts for this case (approved by Noah 2026-11-14).")
     rel = relative_axes(extraction)
@@ -102,7 +106,7 @@ def metadata(recipe, extraction, report, stock, created, packet="data/profile-so
     return {
         "version": "negs-datasheet-1",
         "copyright": "Copyright (c) 2026 Noah Haasis (Negs preparation). Method and generic dye spectra by "
-                     "Andrea Volpato (spektrafilm). Measurement data (c) FUJIFILM Corporation.",
+                     f"Andrea Volpato (spektrafilm). Measurement data (c) {owner}.",
         "created": created,
         "license": "Negs film profile, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). "
                    "Prepared with the profile-creation method of spektrafilm by Andrea Volpato "

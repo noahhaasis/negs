@@ -1,0 +1,713 @@
+{
+ "about": "Per-stock build recipe for tools/film_profiles/build.py, as data/profile-sources/fujifilm-pfdg/recipe.json; see README.md. Sources: Fujifilm Japan's film data sheets (fujifilm.com/jp/ja/consumer/support/films/negative-and-reversal/datasheet). rms_granularity is the sheet's diffuse RMS granularity (48 um aperture, D 1.0 over D-min). Characteristic curves: daylight 1/125 s, CN-16X, status M; sensitivity: status M, D-min + 1.0.",
+ "stocks": {
+  "fujifilm_superia_venus_800": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "fujifilm_crystal_archive_typeii",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "weak",
+   "stock": "fujifilm_superia_venus_800",
+   "name": "Fujifilm Superia Venus 800",
+   "rms_granularity": 5,
+   "iso": 800,
+   "datasheet_heading": "フジカラー SUPERIA Venus 800, ISO 800/30°, daylight; sold outside Japan as SUPERIA X-TRA 800",
+   "notes": [
+    "the datasheet's dashed fourth colour layer (第4の感色層, cyan-sensitive) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+   ],
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  },
+  "fujifilm_reala_ace": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "fujifilm_crystal_archive_typeii",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "weak",
+   "stock": "fujifilm_reala_ace",
+   "name": "Fujifilm Reala Ace",
+   "rms_granularity": 4,
+   "iso": 100,
+   "datasheet_heading": "フジカラー REALA ACE, ISO 100/21°, daylight",
+   "notes": [
+    "the datasheet's dashed fourth colour layer (第4の感色層, cyan-sensitive) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+   ],
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  },
+  "fujifilm_natura_1600": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "fujifilm_crystal_archive_typeii",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "weak",
+   "stock": "fujifilm_natura_1600",
+   "name": "Fujifilm Natura 1600",
+   "rms_granularity": 7,
+   "iso": 1600,
+   "datasheet_heading": "フジカラー NATURA 1600, ISO 1600/33°, daylight",
+   "notes": [
+    "the datasheet's dashed fourth colour layer (第4の感色層, cyan-sensitive) is not modelled: the three-layer model takes the blue, green and red sensitive layers only"
+   ],
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  }
+ },
+ "extraction": {
+  "fujifilm_superia_venus_800": {
+   "info": "Fujifilm Superia Venus 800 (Japanese X-TRA 800), FUJICOLOR SUPERIA Venus 800 product information bulletin (Japanese), Ref. No. 013AR284A, 2003 (layout stamp 03.1-HB), PDF page 4",
+   "source": {
+    "file": "datasheet_superiavenus800_01.pdf",
+    "sha256": "f837165e509abe58c4c9fb4cfc4f750a60a644574c99dc23ebbfe0c56c68c45c",
+    "document": "FUJICOLOR SUPERIA Venus 800 product information bulletin (Japanese), Ref. No. 013AR284A",
+    "edition": "2003 (layout stamp 03.1-HB)"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 3,
+     "frame": [
+      90.1,
+      115.8,
+      285.9,
+      288.8
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        -3.5,
+        -3.0,
+        -2.5,
+        -2.0,
+        -1.5,
+        -1.0,
+        -0.5,
+        0.0
+       ],
+       "frame": [
+        -4.0,
+        0.5
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ],
+       "gate": 0.003,
+       "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.22 %, 0.0089 D). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [
+        0.18,
+        0.19,
+        0.57
+       ],
+       "dashed": false,
+       "width": 1.0
+      },
+      "density_curve_g": {
+       "color": [
+        0.0,
+        0.65,
+        0.31
+       ],
+       "dashed": false,
+       "width": 1.0
+      },
+      "density_curve_r": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ],
+       "dashed": false,
+       "width": 1.0
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 3,
+     "frame": [
+      335.8,
+      116.0,
+      530.4,
+      286.7
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.0,
+        0.0
+       ],
+       "frame": null,
+       "relative_reason": "Relative sensitivity (log), no tick values: a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [
+        0.18,
+        0.19,
+        0.57
+       ],
+       "dashed": false,
+       "width": 1.0
+      },
+      "log_sensitivity_g": {
+       "color": [
+        0.0,
+        0.65,
+        0.31
+       ],
+       "dashed": false,
+       "width": 1.0
+      },
+      "log_sensitivity_r": {
+       "color": [
+        0.93,
+        0.11,
+        0.14
+       ],
+       "dashed": false,
+       "width": 1.0
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 3,
+     "frame": [
+      325.9,
+      385.4,
+      531.1,
+      533.8
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null,
+       "gate": 0.003,
+       "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.80 nm). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        null,
+        0.0
+       ],
+       "gate": 0.003,
+       "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.25 %, 0.0062 D). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "fujifilm_reala_ace": {
+   "info": "Fujifilm Reala Ace, FUJICOLOR REALA ACE data sheet (Japanese), Ref. No. 013Ai158A, 1996 (layout stamp 96.3-HB), PDF page 4",
+   "source": {
+    "file": "datasheet_realaace_01.pdf",
+    "sha256": "04bb3116657b2263aa19682ff56cb41c779ed14931272325d42e9f753b64b918",
+    "document": "FUJICOLOR REALA ACE data sheet (Japanese), Ref. No. 013Ai158A",
+    "edition": "1996 (layout stamp 96.3-HB)"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 3,
+     "frame": [
+      88.1,
+      114.8,
+      286.4,
+      289.6
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        -3.0,
+        -2.5,
+        -2.0,
+        -1.5,
+        -1.0,
+        -0.5,
+        0.0,
+        0.5
+       ],
+       "frame": [
+        null,
+        1.0
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ],
+       "gate": 0.003,
+       "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.23 %, 0.009 D). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "density_curve_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "density_curve_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 3,
+     "frame": [
+      330.1,
+      114.0,
+      534.8,
+      293.9
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.0,
+        0.0
+       ],
+       "frame": null,
+       "relative_reason": "Relative sensitivity (log), no tick values: a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "log_sensitivity_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "log_sensitivity_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "x_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 3,
+     "frame": [
+      323.8,
+      373.8,
+      530.2,
+      493.7
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        2.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "fujifilm_natura_1600": {
+   "info": "Fujifilm Natura 1600, FUJICOLOR NATURA 1600 product information bulletin (Japanese), Ref. No. 013AR313B, 2006 (layout stamp 06.4-FP), PDF page 4",
+   "source": {
+    "file": "datasheet_natura1600_01.pdf",
+    "sha256": "43ce5589c48fb37064294d975317e259d3483fe8b3ee1423978d82eaaa38f53b",
+    "document": "FUJICOLOR NATURA 1600 product information bulletin (Japanese), Ref. No. 013AR313B",
+    "edition": "2006 (layout stamp 06.4-FP)"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 3,
+     "frame": [
+      89.4,
+      116.2,
+      285.3,
+      289.2
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        -3.5,
+        -3.0,
+        -2.5,
+        -2.0,
+        -1.5,
+        -1.0,
+        -0.5,
+        0.0
+       ],
+       "frame": [
+        -4.0,
+        0.5
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ],
+       "gate": 0.003,
+       "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.0098 D). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "density_curve_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "density_curve_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 3,
+     "frame": [
+      336.1,
+      116.3,
+      530.7,
+      287.0
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        1.0,
+        0.0
+       ],
+       "frame": null,
+       "relative_reason": "Relative sensitivity (log), no tick values: a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 3
+       }
+      },
+      "log_sensitivity_g": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "x_mid",
+        "index": 1,
+        "of": 3
+       }
+      },
+      "log_sensitivity_r": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "x_mid",
+        "index": 2,
+        "of": 3
+       }
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 3,
+     "frame": [
+      328.0,
+      376.9,
+      533.2,
+      525.3
+     ],
+     "grid_crossing": true,
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": null,
+       "gate": 0.003,
+       "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.80 nm). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        null,
+        0.0
+       ],
+       "gate": 0.003,
+       "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.25 %, 0.0062 D). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": "any",
+       "dashed": false,
+       "width": 1.0,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

@@ -280,3 +280,24 @@ rms_granularity = [8.0, 8.0, 8.0]
 rms_granularity = [13.0, 13.0, 13.0]
 [fujifilm_sensia_400]
 rms_granularity = [13.0, 13.0, 13.0]
+# --- Negs only, not upstream: a Fujifilm still negative prepared from
+# Fujifilm Japan's data sheets (tools/film_profiles,
+# data/profile-sources/fujifilm-jp). rms_granularity is the sheet's diffuse
+# RMS granularity on every layer, as the Data Guide stocks above.
+[fujifilm_reala_ace]
+rms_granularity = [4.0, 4.0, 4.0]
+# --- Negs only, not upstream: the first Kodak Portra NC and VC films
+# prepared from Kodak's technical data E-190, 1998 (tools/film_profiles,
+# data/profile-sources/kodak-e190). E-190 gives a Print Grain Index, not RMS
+# granularity (Kodak: not convertible), so each takes upstream's Portra of
+# the same speed: 160NC/VC as kodak_portra_160, 400NC/VC as kodak_portra_400
+# (PGI 30/33 and 41/43 for a 4x6 print from 135; NC and VC differ by less
+# than one just-noticeable step of 4).
+[kodak_portra_160nc]
+rms_granularity = [3.5, 3.5, 3.5]
+[kodak_portra_160vc]
+rms_granularity = [3.5, 3.5, 3.5]
+[kodak_portra_400nc]
+rms_granularity = [4.5, 4.5, 4.5]
+[kodak_portra_400vc]
+rms_granularity = [4.5, 4.5, 4.5]

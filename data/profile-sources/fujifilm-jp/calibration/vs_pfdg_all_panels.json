@@ -1,0 +1,97 @@
+{
+ "about": "Every panel of a Fujifilm Japan data-sheet extraction against the Professional Film Data Guide AF3-207U trace (fujifilm-pfdg). Curves aligned at green 0.2 over D-min; spectra max/mean difference in D and the value at 500 nm (this packet, the guide); sensitivity as offset-free shape difference.",
+ "pairs": {
+  "natura_1600_vs_pfdg_superia_1600": {
+   "curve_r_max": 0.009,
+   "dmin_r": 0.009,
+   "curve_g_max": 0.009,
+   "dmin_g": 0.009,
+   "curve_b_max": 0.008,
+   "dmin_b": 0.008,
+   "dye_density_min_max": 0.021,
+   "dye_density_min_mean": 0.002,
+   "dye_density_min_at500": [
+    0.724,
+    0.723
+   ],
+   "dye_density_mid_max": 0.019,
+   "dye_density_mid_mean": 0.001,
+   "dye_density_mid_at500": [
+    1.467,
+    1.466
+   ],
+   "sens_b_shape": 0.033,
+   "sens_g_shape": 0.024,
+   "sens_r_shape": 0.034
+  },
+  "venus_800_vs_pfdg_xtra_800": {
+   "curve_r_max": 0.134,
+   "dmin_r": -0.056,
+   "curve_g_max": 0.212,
+   "dmin_g": -0.077,
+   "curve_b_max": 0.279,
+   "dmin_b": -0.078,
+   "dye_density_min_max": 0.495,
+   "dye_density_min_mean": -0.301,
+   "dye_density_min_at500": [
+    0.699,
+    0.987
+   ],
+   "dye_density_mid_max": 0.771,
+   "dye_density_mid_mean": -0.514,
+   "dye_density_mid_at500": [
+    1.508,
+    2.078
+   ],
+   "sens_b_shape": 0.705,
+   "sens_g_shape": 0.538,
+   "sens_r_shape": 0.306
+  },
+  "venus_800_vs_pfdg_xtra_400": {
+   "curve_r_max": 0.174,
+   "dmin_r": 0.008,
+   "curve_g_max": 0.061,
+   "dmin_g": -0.045,
+   "curve_b_max": 0.086,
+   "dmin_b": -0.033,
+   "dye_density_min_max": 0.136,
+   "dye_density_min_mean": 0.018,
+   "dye_density_min_at500": [
+    0.699,
+    0.677
+   ],
+   "dye_density_mid_max": 0.333,
+   "dye_density_mid_mean": -0.118,
+   "dye_density_mid_at500": [
+    1.508,
+    1.484
+   ],
+   "sens_b_shape": 0.311,
+   "sens_g_shape": 0.535,
+   "sens_r_shape": 0.496
+  },
+  "reala_ace_vs_pfdg_superia_reala": {
+   "curve_r_max": 0.29,
+   "dmin_r": 0.03,
+   "curve_g_max": 0.293,
+   "dmin_g": 0.206,
+   "curve_b_max": 0.214,
+   "dmin_b": -0.099,
+   "dye_density_min_max": 0.116,
+   "dye_density_min_mean": -0.051,
+   "dye_density_min_at500": [
+    0.651,
+    0.751
+   ],
+   "dye_density_mid_max": 0.426,
+   "dye_density_mid_mean": -0.166,
+   "dye_density_mid_at500": [
+    1.35,
+    1.498
+   ],
+   "sens_b_shape": 0.577,
+   "sens_g_shape": 0.511,
+   "sens_r_shape": 0.531
+  }
+ }
+}

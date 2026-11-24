@@ -219,8 +219,8 @@ mod tests {
     fn complete_catalog_and_pairing_metadata() {
         let films = super::stocks(false);
         let papers = super::stocks(true);
-        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm. The 17
-        // Negs-built Fujifilm films and 5 Eterna-CP prints (catalog
+        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm. The 22
+        // Negs-built films and 5 Eterna-CP prints (catalog
         // `negs_built`) are left out: Linux has no Settings › Show Negs-built
         // films yet.
         assert_eq!(films.len(), 52);

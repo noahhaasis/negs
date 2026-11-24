@@ -1,0 +1,369 @@
+{
+ "stock": "fujifilm_natura_1600",
+ "source": {
+  "file": "datasheet_natura1600_01.pdf",
+  "sha256": "43ce5589c48fb37064294d975317e259d3483fe8b3ee1423978d82eaaa38f53b",
+  "document": "FUJICOLOR NATURA 1600 product information bulletin (Japanese), Ref. No. 013AR313B",
+  "edition": "2006 (layout stamp 06.4-FP)"
+ },
+ "panels": {
+  "characteristic": {
+   "page": 3,
+   "page_rotation": 0,
+   "frame_pdf": [
+    89.4489974975586,
+    116.2130126953125,
+    285.2919921875,
+    289.2220458984375
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 0.022987383681078957,
+     "offset": -6.057966693021263,
+     "span": 4.501918060189192,
+     "gridline_pdf": [
+      110.985,
+      133.16,
+      155.045,
+      176.645,
+      198.255,
+      220.14,
+      241.743,
+      263.343
+     ],
+     "gridline_residual": [
+      -0.006712,
+      0.003033,
+      0.006112,
+      0.00264,
+      -0.000603,
+      0.002476,
+      -0.000928,
+      -0.0044
+     ],
+     "frame_pdf": [
+      89.4489974975586,
+      285.2919921875
+     ],
+     "frame_value": [
+      -4.001768267657012,
+      0.5001497925321798
+     ],
+     "frame_residual": [
+      -0.001768,
+      0.00015
+     ],
+     "worst_over_span": 0.0014908981142244912,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.023046031044685934,
+     "offset": 6.675182068278609,
+     "span": 3.987171550210318,
+     "gridline_pdf": [
+      137.372,
+      159.455,
+      181.291,
+      202.846,
+      224.752,
+      246.595,
+      268.019
+     ],
+     "gridline_residual": [
+      0.009302,
+      0.000377,
+      -0.002856,
+      0.000387,
+      -0.00446,
+      -0.007853,
+      -0.001592
+     ],
+     "frame_pdf": [
+      116.2130126953125,
+      289.2220458984375
+     ],
+     "frame_value": [
+      3.9969333699059564,
+      0.009761819695638607
+     ],
+     "frame_residual": [
+      -0.003067,
+      0.009762
+     ],
+     "worst_over_span": 0.002448306919506306,
+     "gate": 0.003,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.0098 D). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "density_curve_b": {
+     "paths": [
+      "23.0"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.689783353227476,
+      0.30310214726767715
+     ],
+     "y_range": [
+      0.7464977452381731,
+      3.226897167327784
+     ]
+    },
+    "density_curve_g": {
+     "paths": [
+      "23.2"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.693231495855602,
+      0.34907691462983514
+     ],
+     "y_range": [
+      0.35893366517767067,
+      2.8697061920248443
+     ]
+    },
+    "density_curve_r": {
+     "paths": [
+      "23.1"
+     ],
+     "points": 127,
+     "x_range": [
+      -3.6912775892882883,
+      0.29735530134740706
+     ],
+     "y_range": [
+      0.18435969869055313,
+      2.4203550050509586
+     ]
+    }
+   }
+  },
+  "sensitivity": {
+   "page": 3,
+   "page_rotation": 0,
+   "frame_pdf": [
+    336.0899963378906,
+    116.27899169921875,
+    530.6900024414062,
+    286.98699951171875
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 1.7502764816167478,
+     "offset": -208.42323453351725,
+     "span": 340.60381400545896,
+     "gridline_pdf": [
+      347.446,
+      404.972,
+      461.948,
+      518.899
+     ],
+     "gridline_residual": [
+      -0.296647,
+      0.389706,
+      0.113482,
+      -0.206542
+     ],
+     "frame_pdf": [
+      336.0899963378906,
+      530.6900024414062
+     ],
+     "frame_value": [
+      379.8271817633516,
+      720.4309957688106
+     ],
+     "worst_over_span": 0.0011441630137800254,
+     "gate": 0.002,
+     "pass": 1.0
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.017483726389926374,
+     "offset": 4.030069362928183,
+     "span": 2.984612101163164,
+     "gridline_pdf": [
+      173.308,
+      230.504
+     ],
+     "gridline_residual": [
+      -0.0,
+      -0.0
+     ],
+     "frame_pdf": [
+      116.27899169921875,
+      286.98699951171875
+     ],
+     "frame_value": [
+      1.997079287162522,
+      -0.9875328140006419
+     ],
+     "worst_over_span": 2.9758588037419807e-16,
+     "gate": 0.002,
+     "pass": 1.0,
+     "relative_reason": "Relative sensitivity (log), no tick values: a 1.0 scale bar spans the two gridlines (one log unit). The offset is arbitrary; D5 rescales every channel so it does not reach the profile."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "log_sensitivity_b": {
+     "paths": [
+      "31.0"
+     ],
+     "points": 379,
+     "x_range": [
+      385.8131508327286,
+      503.956813341859
+     ],
+     "y_range": [
+      0.05654252481058464,
+      1.4835049174707766
+     ]
+    },
+    "log_sensitivity_g": {
+     "paths": [
+      "31.1"
+     ],
+     "points": 316,
+     "x_range": [
+      468.07614546871565,
+      614.2242316837142
+     ],
+     "y_range": [
+      0.004091345640805599,
+      1.5002254656948306
+     ]
+    },
+    "log_sensitivity_r": {
+     "paths": [
+      "31.2"
+     ],
+     "points": 253,
+     "x_range": [
+      556.0275386699573,
+      676.796615901513
+     ],
+     "y_range": [
+      -0.05710169672393661,
+      1.4693423167721806
+     ]
+    }
+   }
+  },
+  "spectral_density": {
+   "page": 3,
+   "page_rotation": 0,
+   "frame_pdf": [
+    327.9939880371094,
+    376.8739929199219,
+    533.1950073242188,
+    525.31396484375
+   ],
+   "axes": {
+    "x": {
+     "pdf": "x",
+     "slope": 1.646328947531312,
+     "offset": -158.4536104088092,
+     "span": 337.82837811529924,
+     "gridline_pdf": [
+      339.468,
+      399.815,
+      460.207,
+      521.803
+     ],
+     "gridline_residual": [
+      0.422363,
+      -0.226598,
+      -0.801503,
+      0.605738
+     ],
+     "frame_pdf": [
+      327.9939880371094,
+      533.1950073242188
+     ],
+     "frame_value": [
+      381.5323867129228,
+      719.360764828222
+     ],
+     "worst_over_span": 0.0023725160418163094,
+     "gate": 0.003,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.24 %, 0.80 nm). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+    },
+    "y": {
+     "pdf": "y",
+     "slope": -0.016846205265672206,
+     "offset": 8.84970824961303,
+     "span": 2.500650236659428,
+     "gridline_pdf": [
+      406.763,
+      435.912,
+      466.221,
+      495.605
+     ],
+     "gridline_residual": [
+      -0.002705,
+      0.006245,
+      -0.004347,
+      0.000645
+     ],
+     "frame_pdf": [
+      376.8739929199219,
+      525.31396484375
+     ],
+     "frame_value": [
+      2.500811605590533,
+      0.0001613689311046329
+     ],
+     "frame_residual": [
+      null,
+      0.000161
+     ],
+     "worst_over_span": 0.002497523891830353,
+     "gate": 0.003,
+     "pass": 1.0,
+     "gate_reason": "hand-drafted grid reused across Fujifilm Japan's data sheets (Venus 800 and Natura 1600 share the dye chart's residuals to 0.001 %): no straight axis reproduces the gridlines within 0.2 % (worst 0.25 %, 0.0062 D). The extraction error is bounded by that residual whether the curves were drawn to the true scale or to the drawn grid. Physical check: Natura 1600 from these sheets against the independent Professional Film Data Guide AF3-207U trace of the same emulsion (Superia 1600): curves within 0.009 D, spectra within 0.021 D (README, calibration/natura_1600_vs_pfdg_superia_1600_curves.json, calibration/vs_pfdg_all_panels.json)."
+    }
+   },
+   "conversion": null,
+   "curves": {
+    "dye_density_mid": {
+     "paths": [
+      "41.0"
+     ],
+     "points": 442,
+     "x_range": [
+      400.7911395256579,
+      719.2867081610877
+     ],
+     "y_range": [
+      0.7762063931936378,
+      1.9777612981659756
+     ]
+    },
+    "dye_density_min": {
+     "paths": [
+      "41.1"
+     ],
+     "points": 568,
+     "x_range": [
+      400.74833336527894,
+      719.2867081610877
+     ],
+     "y_range": [
+      0.19560984147325478,
+      1.0676035214936004
+     ]
+    }
+   }
+  }
+ },
+ "pass": true
+}
