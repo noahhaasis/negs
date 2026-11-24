@@ -1,6 +1,7 @@
 //! Phase 4's oracles (core/diff/oracle, frozen at b05e49e; edits.rs and
 //! inspector_view/ at b0f1f5b, state.rs at 73df908a, its last change before
-//! 4a, with NEGS_BUILT_HINT since naming EXR 100T as the core does),
+//! 4a, with NEGS_BUILT_HINT since naming EXR 100T, Agfa Portrait XPS 160 and
+//! Konica Minolta Professional 160 as the core does),
 //! compiled as they are on macOS and, with the real `windows` crate and
 //! platform.rs's helpers, on Windows.
 //!

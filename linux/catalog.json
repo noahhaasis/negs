@@ -2,6 +2,39 @@
   "attribution": "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, and from Fotufilm film profiles by MUAStudio Inc. (https://fotufilm.com), both CC BY-SA 4.0. See data/profiles, SPEKTRAFILM_LICENSE.txt and FOTUFILM_LICENSE.txt. Metadata extraction only; no modifications to profile values.",
   "profiles": [
     {
+      "id": "agfa_portrait_xps_160",
+      "name": "Agfa Portrait XPS 160",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          3.5,
+          3.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
+    },
+    {
       "id": "cinestill_400d",
       "name": "CineStill 400D",
       "paper": false,
@@ -872,6 +905,39 @@
           0.97
         ]
       }
+    },
+    {
+      "id": "konica_professional_160",
+      "name": "Konica Minolta Professional 160",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
     },
     {
       "id": "lomography_lomochrome_metropolis",

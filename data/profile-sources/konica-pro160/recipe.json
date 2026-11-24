@@ -1,0 +1,154 @@
+{
+ "about": "Per-stock build recipe for tools/film_profiles/build.py. Source: Konica Minolta PROFESSIONAL 160 for Color Print brochure (AB3 0407T02M6, April 2004; professional_160.pdf, 125px.com mirror). Characteristic curves: daylight 1/125 s, Process CNK-4 (C-41 compatible), status M; sensitivity: status M, density 1.0 above D-min, relative log scale.",
+ "stocks": {
+  "konica_professional_160": {
+   "type": "negative",
+   "support": "film",
+   "stage": "filming",
+   "use": "still",
+   "channel_model": "color",
+   "target_print": "kodak_portra_endura",
+   "densitometer": "status_M",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "D55",
+   "viewing_illuminant": "D50",
+   "dye_density_cmy_donor": "generic_a",
+   "dye_density_reconstruct_model": "dmid_dmin",
+   "data_trustability": 0.3,
+   "antihalation": "weak",
+   "stock": "konica_professional_160",
+   "name": "Konica Minolta Professional 160",
+   "rms_granularity": 4,
+   "iso": 160,
+   "datasheet_heading": "Konica Minolta PROFESSIONAL 160 (PRO 160, ISO 160, daylight, CNK-4/C-41)",
+   "data_owner": "Konica Minolta Photo Imaging, Inc",
+   "still_precedent": "the shipped still portrait negatives (Kodak Portra 160, Fujifilm Pro 160S)",
+   "notes": [
+    "Negs has no Konica QA RA-4 print paper; refined against kodak_portra_endura as the portrait RA-4 reference paper.",
+    "The 4-page 2004 brochure prints no RMS granularity; diffuse RMS granularity 4 (48 um aperture, D 1.0) is cross-verified from fresh-era datasheet compilations (cacreeks.com/films.htm and foto-35mm.narod.ru, matching Konica Centuria 100/200/400 = 4)."
+   ],
+   "check6_fallback": "the §D3 fallback (a flat extension past 700 nm) was not tried, as the worst point is not near 700 nm"
+  }
+ },
+ "extraction": {
+  "konica_professional_160": {
+   "info": "Konica Minolta Professional 160 (PRO 160), brochure AB3 0407T02M6, April 2004, PDF page 4",
+   "source": {
+    "file": "professional_160.pdf",
+    "sha256": "76a229cf99f7b75d813afa1c907e9335c8544391de4a5da6c4890f94026da4e6",
+    "document": "Konica Minolta PROFESSIONAL 160 for Color Print brochure (AB3 0407T02M6)",
+    "edition": "April 2004"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 3,
+     "frame": [126.552, 59.249, 344.548, 228.750],
+     "frame_kind": "fill",
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [-3.0, -2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5],
+       "frame": [-3.5, 1.0]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [3.0, 2.5, 2.0, 1.5, 1.0, 0.5],
+       "frame": [3.5, 0.0]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [1.0, 0.949, 0.0],
+       "dashed": false,
+       "width": 0.57
+      },
+      "density_curve_g": {
+       "color": [0.926, 0.0, 0.548],
+       "dashed": true,
+       "width": 0.57
+      },
+      "density_curve_r": {
+       "color": [0.0, 0.681, 0.938],
+       "dashed": true,
+       "width": 0.57
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 3,
+     "frame": [379.205, 58.858, 566.178, 228.711],
+     "frame_kind": "fill",
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [400, 500, 600],
+       "frame": [null, 700]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [1.0, 0.0],
+       "frame": null,
+       "relative_reason": "Relative Speed (log) carries a 1.0 scale bar between the two horizontal gridlines and no tick values; the offset is arbitrary and D5 rescales every channel."
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [1.0, 0.949, 0.0],
+       "dashed": false,
+       "width": 0.57
+      },
+      "log_sensitivity_g": {
+       "color": [0.926, 0.0, 0.548],
+       "dashed": true,
+       "width": 0.57
+      },
+      "log_sensitivity_r": {
+       "color": [0.0, 0.681, 0.938],
+       "dashed": true,
+       "width": 0.57
+      }
+     }
+    },
+    "dye_density": {
+     "page": 3,
+     "frame": [378.755, 280.139, 565.821, 507.126],
+     "frame_kind": "fill",
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [500, 600, 700],
+       "frame": [400, null]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [1.5, 1.0, 0.5],
+       "frame": [2.0, 0.0]
+      }
+     },
+     "curves": {
+      "dye_density_mid": {
+       "color": [1.0, 1.0, 1.0],
+       "dashed": false,
+       "width": 0.57,
+       "select": {
+        "sort": "y_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_min": {
+       "color": [1.0, 1.0, 1.0],
+       "dashed": false,
+       "width": 0.57,
+       "select": {
+        "sort": "y_mid",
+        "index": 1,
+        "of": 2
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}
