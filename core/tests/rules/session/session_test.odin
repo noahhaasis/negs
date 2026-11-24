@@ -7,7 +7,17 @@ import "core:testing"
 import "../../../src/settings/session"
 import "../../../src/value"
 
-SESSION :: `{"schema":2,"source":"/photos/DSC_1.NEF","state":{"params":{"io":{"rotate_cw":1}},"film":"kodak_gold_200","paper":"kodak_portra_endura"}}`
+// Absolute on the host, as JSON text (`Path::is_absolute`: "/a" isn't on Windows).
+when ODIN_OS == .Windows {
+	SOURCE :: `C:\\photos\\DSC_1.NEF`
+	A :: `C:\\a`
+} else {
+	SOURCE :: `/photos/DSC_1.NEF`
+	A :: `/a`
+}
+
+SESSION_START :: `{"schema":2,"source":"` + SOURCE + `","state":{"params":{"io":{"rotate_cw":1}},"film"`
+SESSION :: SESSION_START + `:"kodak_gold_200","paper":"kodak_portra_endura"}}`
 
 @(private)
 parse :: proc(text: string) -> (session.Editor_Session, bool) {
@@ -22,7 +32,7 @@ sessions_read_with_their_defaults :: proc(t: ^testing.T) {
 	testing.expect(t, s.inspector_visible && s.fit_image && !s.library)
 	testing.expect(t, session.validate(s))
 	text := string(session.session_text(s))
-	testing.expect(t, strings.has_prefix(text, `{"schema":2,"source":"/photos/DSC_1.NEF","state":{"params":{"io":{"rotate_cw":1}},"film"`))
+	testing.expect(t, strings.has_prefix(text, SESSION_START))
 	testing.expect(t, strings.has_suffix(text, `,"inspectorVisible":true,"fitImage":true,"library":false}`))
 	_, ok = parse(`{"source":"/a","state":{"params":{},"film":"","paper":""}}`)
 	testing.expect(t, !ok, "schema is required")
@@ -54,7 +64,7 @@ validation_rejects_bad_crops_and_rotations :: proc(t: ^testing.T) {
 @(test)
 schema_1_drops_dir_and_halation_values :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
-	s, ok := parse(`{"schema":1,"source":"/a","state":{"params":{"io":{"rotate_cw":1},"film_render":{"dir_couplers":{"gamma_samelayer_rgb":[0.341,0.324,0.273],"amount":0.8},"halation":{"halation_strength":[0.05,0.015,0.0]}}},"film":"","paper":""}}`)
+	s, ok := parse(`{"schema":1,"source":"` + A + `","state":{"params":{"io":{"rotate_cw":1},"film_render":{"dir_couplers":{"gamma_samelayer_rgb":[0.341,0.324,0.273],"amount":0.8},"halation":{"halation_strength":[0.05,0.015,0.0]}}},"film":"","paper":""}}`)
 	testing.expect(t, ok)
 	session.migrate(&s)
 	testing.expect_value(t, s.schema, 2)
