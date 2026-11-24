@@ -29,10 +29,10 @@ use state_common::*;
 
 // MARK: The host's NFC
 
-/// presets.rs's `nfc` on the stand-in's NormalizeString (ICU), as a
-/// negs_text_fn.
+/// presets.rs's `nfc` on the oracles' NormalizeString (Windows' own on
+/// Windows, ICU's elsewhere), as a negs_text_fn.
 unsafe extern "C" fn nfc(_user: *mut std::ffi::c_void, text: *const u8, len: usize, out: *mut u8, cap: usize) -> usize {
-    use negs_windows_stand_in::Win32::Globalization::{NormalizationC, NormalizeString};
+    use negs_state_oracle::win::Win32::Globalization::{NormalizationC, NormalizeString};
     let text = core::text::take(text, len);
     let source: Vec<u16> = text.encode_utf16().collect();
     if source.is_empty() {
@@ -147,16 +147,28 @@ fn file_key(name: &str) -> String {
     if temporary { ".<id>.tmp".into() } else { name.to_string() }
 }
 
+/// FILE_ATTRIBUTE_HIDDEN on Windows, UF_HIDDEN (the stand-in's) elsewhere.
+#[cfg(windows)]
+fn hidden(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    meta.file_attributes() & 2 != 0
+}
+
+#[cfg(not(windows))]
+fn hidden(meta: &std::fs::Metadata) -> bool {
+    use std::os::macos::fs::MetadataExt;
+    meta.st_flags() & 0x8000 != 0
+}
+
 /// The folder as it is: each entry's name, kind, hidden flag and bytes.
 fn snapshot(folder: &Path) -> Vec<(String, String, bool, Vec<u8>)> {
-    use std::os::macos::fs::MetadataExt;
     let Ok(entries) = std::fs::read_dir(folder) else { return vec![("<none>".into(), String::new(), false, vec![])] };
     let mut out: Vec<_> = entries
         .filter_map(|e| e.ok())
         .map(|e| {
             let name = file_key(&e.file_name().to_string_lossy());
             let meta = std::fs::symlink_metadata(e.path()).unwrap();
-            let hidden = meta.st_flags() & 0x8000 != 0;
+            let hidden = hidden(&meta);
             if meta.is_dir() { (name, "dir".into(), hidden, vec![]) } else { (name, "file".into(), hidden, std::fs::read(e.path()).unwrap_or_default()) }
         })
         .collect();

@@ -27,4 +27,12 @@ spektrafilm-io = { path = "../../../crates/spektrafilm-io", default-features = f
 negs_library = { package = "negs-library", path = "../../../crates/negs-library" }
 # border.rs's film-border pictures, as Phase 3b's oracles have it.
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# The Win32 calls: the real `windows` crate on Windows, as windows/ has it
+# (named `windows` in src/lib.rs, as Cargo wants one source per name); the
+# portable stand-ins (windows/) everywhere else.
+[target.'cfg(windows)'.dependencies]
+windows-crate = { package = "windows", version = "0.58", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(not(windows))'.dependencies]
 windows = { package = "negs-windows-stand-in", path = "windows" }
