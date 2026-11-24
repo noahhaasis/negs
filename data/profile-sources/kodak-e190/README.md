@@ -20,7 +20,7 @@ These are the 1998 emulsions, not the shipped Portra 160 and 400 (spektrafilm, f
 - `calibration/`: `ramps_portra_endura/`, the shipped Kodak negatives' grey ramps on the target print, and the comparison with an independent trace (below).
 - `donors/generic_a/` and `densitometer/status_M/`: as in `fujifilm-cine`.
 
-The PDF is not in the repository. The curves were read from its vector paths.
+The data sheet is in `sources/e190.pdf`, unmodified (SHA-256 above), so the extraction can be checked and repeated. Kodak no longer hosts it; this copy was downloaded on 24 November 2026 from the 125px.com mirror (https://125px.com/docs/unsorted/kodak/e190.pdf). The curves were read from its vector paths.
 
 ## How E-190 is drawn
 
@@ -41,8 +41,8 @@ An independent vector trace of E-190's May 2003 edition (Toni-Chan/spektrafilm, 
 
 ## Rebuild
 
-As `fujifilm-cine/README.md`, with `--recipe data/profile-sources/kodak-e190/recipe.json`, `--packet data/profile-sources/kodak-e190` and `--created 2026-11-24`.
+As `fujifilm-cine/README.md`, with `--recipe data/profile-sources/kodak-e190/recipe.json`, `--packet data/profile-sources/kodak-e190`, `--pdf-dir data/profile-sources/kodak-e190/sources` and `--created 2026-11-24`.
 
 ## Licence
 
-The profiles and this preparation are CC BY-SA 4.0; method and generic dye spectra from spektrafilm by Andrea Volpato; measurement data © Eastman Kodak Company. Extracted points are redistributed for verification, not the data sheet. No endorsement by Kodak is claimed.
+The profiles and this preparation are CC BY-SA 4.0; method and generic dye spectra from spektrafilm by Andrea Volpato; measurement data © Eastman Kodak Company. The data sheet in `sources/` is © Eastman Kodak Company and is included unmodified only so the work can be checked; it is not covered by the CC licence. No endorsement by Kodak is claimed.

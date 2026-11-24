@@ -26,7 +26,13 @@ Reala Ace is not the Superia Reala that Negs ships (`fujifilm_reala_100`, a Fotu
 - `calibration/`: the comparisons with the Data Guide traces (`vs_pfdg_all_panels.json`, and the curve comparisons from `check_second_trace.py`).
 - `donors/generic_a/` and `densitometer/status_M/`: as in `fujifilm-cine`.
 
-The PDFs are not in the repository. The curves were read from their vector paths.
+The three sheets are in `sources/`, unmodified, so the extraction can be checked and repeated (SHA-256 in `recipe.json`). They were downloaded on 24 November 2026 from Fujifilm's discontinued-product index:
+
+- `datasheet_realaace_01.pdf`: https://asset.fujifilm.com/www/jp/files/2024-04/2dca996da7fa6b3e34edda4c943870c2/datasheet_realaace_01.pdf
+- `datasheet_natura1600_01.pdf`: https://asset.fujifilm.com/www/jp/files/2024-04/96b634a89ec6a5abda6b70437f4d75a4/datasheet_natura1600_01.pdf
+- `datasheet_superiavenus800_01.pdf`: https://asset.fujifilm.com/www/jp/files/2024-04/e19e7b4cc0678c711c9be30803f3f252/datasheet_superiavenus800_01.pdf
+
+The curves were read from their vector paths.
 
 ## Recorded exceptions
 
@@ -38,8 +44,8 @@ The PDFs are not in the repository. The curves were read from their vector paths
 
 ## Rebuild
 
-As `fujifilm-cine/README.md`, with `--recipe data/profile-sources/fujifilm-jp/recipe.json`, `--packet data/profile-sources/fujifilm-jp`, the sheets' folder as `--pdf-dir` and `--created 2026-11-24`.
+As `fujifilm-cine/README.md`, with `--recipe data/profile-sources/fujifilm-jp/recipe.json`, `--packet data/profile-sources/fujifilm-jp`, `--pdf-dir data/profile-sources/fujifilm-jp/sources` and `--created 2026-11-24`.
 
 ## Licence
 
-As `fujifilm-cine`: the profiles and this preparation are CC BY-SA 4.0; method and generic dye spectra from spektrafilm by Andrea Volpato; measurement data © FUJIFILM Corporation. Extracted points are redistributed for verification, not the sheets. No endorsement by Fujifilm is claimed.
+As `fujifilm-cine`: the profiles and this preparation are CC BY-SA 4.0; method and generic dye spectra from spektrafilm by Andrea Volpato; measurement data © FUJIFILM Corporation. The sheets in `sources/` are © FUJIFILM Corporation and are included unmodified only so the work can be checked; they are not covered by the CC licence. No endorsement by Fujifilm is claimed.
