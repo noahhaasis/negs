@@ -142,7 +142,6 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
         Kind::Negative,
         EdgePrint::Cine { product: "8573", keykode: None },
     ),
-    ("fujifilm_eterna_cp_3512", Kind::Negative, EdgePrint::Print("3512 FUJI")),
     ("fujifilm_eterna_cp_3513di", Kind::Negative, EdgePrint::Print("3513DI FUJI")),
     ("fujifilm_eterna_cp_3514di", Kind::Negative, EdgePrint::Print("3514DI FUJI")),
     ("fujifilm_eterna_cp_3521xd", Kind::Negative, EdgePrint::Print("3521XD FUJI")),

@@ -192,13 +192,12 @@ by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
 - borders/35mm/: edge-print strips for the 7 new slides,
   crates/spektrafilm-io/src/film35.rs.
 
-2026-11-24: five Fujifilm Eterna-CP colour print films prepared from
+2026-11-24: four Fujifilm Eterna-CP colour print films prepared from
 Fujifilm's brochures (CC BY-SA 4.0; method from spektrafilm by Andrea
 Volpato; measurement data (c) FUJIFILM Corporation):
 
 - profiles/: fujifilm_eterna_cp_3513di, fujifilm_eterna_cp_3521xd,
-  fujifilm_eterna_cp_3512, fujifilm_eterna_cp_3514di and
-  fujifilm_eterna_cp_3523xd, built by tools/film_profiles (build_print.py)
+  fujifilm_eterna_cp_3514di and fujifilm_eterna_cp_3523xd, built by tools/film_profiles (build_print.py)
   with spektrafilm's public-era steps for papers and print films, a neutral
   pre-alignment before the unmixing, and the author's print normalisation
   (#557: TH-KG3 through Y50 M50 and Vision3 250D's mid-scale neutral gives

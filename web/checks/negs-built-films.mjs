@@ -48,7 +48,7 @@ export default async ({ evaluate }) => {
   }
   for (const view of ["papers", "paperGrid"]) {
     check(!has(r.off[view], "fujifilm_eterna_cp_3513di") && has(r.off[view], "kodak_2383"), `${view}: off by default hides the Negs-built prints only`);
-    check(has(r.on[view], "fujifilm_eterna_cp_3513di") && r.on[view].length === r.off[view].length + 5, `${view}: on lists the five`);
+    check(has(r.on[view], "fujifilm_eterna_cp_3513di") && r.on[view].length === r.off[view].length + 4, `${view}: on lists the four`);
     check(has(r.inUse[view], "fujifilm_eterna_cp_3513di") && r.inUse[view].length === r.off[view].length + 1, `${view}: the print in use stays listed`);
     check(!has(r.after[view], "fujifilm_eterna_cp_3513di"), `${view}: and leaves once another is chosen`);
   }

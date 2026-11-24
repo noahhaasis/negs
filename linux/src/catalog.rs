@@ -220,7 +220,7 @@ mod tests {
         let films = super::stocks(false);
         let papers = super::stocks(true);
         // 23, plus the 24 colour and 5 B&W films ported from Fotufilm. The 20
-        // Negs-built films and 5 Eterna-CP prints (catalog
+        // Negs-built films and 4 Eterna-CP prints (catalog
         // `negs_built`) are left out: Linux has no Settings › Show Negs-built
         // films yet.
         assert_eq!(films.len(), 52);

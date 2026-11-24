@@ -559,6 +559,7 @@ What they look like (2026-11-24, Vision3 250D, ColorChecker ΔE00 against 2383):
 - 3521XD has the most neutral grey ramp of all five (C*ab ≤ 6, as 2383).
 - 3513DI's shadows go slightly green-blue.
 - 3512, 3514DI and 3523XD warm their shadows and highlights (C*ab up to 11). The brochures' blue curve is steeper than green between D 1 and 2 (1.0 → 2.0 D over 0.21 log H against 0.30); the trace follows the drawing.
+- 3512 and 3514DI render the same (mean ΔE00 0.5–0.6 on four negatives and under camera, print-exposure, filter and preflash changes; worst 2.5 in the deepest shadows), so only 3514DI ships, the better fit. 3523XD differs from 3514DI in its blacks.
 - Through Vision3, 3513DI and 3521XD are less saturated than 2383 (chart C*ab 21–28 against 32–35).
 
 **Why (investigation, 2026-11-24).** Checked independently by Claude and Gemini 4 Neon on the 28bf883 runtime, Vision3 250D unless stated. Nothing in the pipeline is at fault; both findings come from Fujifilm's drawings, and the prints stay as drawn (Noah, 2026-11-24).
@@ -584,7 +585,7 @@ Inputs are in `~/Downloads/fuji spectral/`. Page contents are in `fuji-data-inve
 | 3 | Eterna 250 (8553) | `eterna250.pdf` KB-0506ER | `T` | yes |
 | 4 | Eterna 400 (8583) | `eterna400.pdf` KB-0508E; RMS 3.7 | `T` | yes |
 | 5 | Eterna Vivid 160 (8543) | `eterna_vivid160.pdf` KB-0701E | `T` | yes |
-| 6 | Eterna-CP 3513DI, then 3521XD, 3512, 3514DI, 3523XD | print brochures: S, curves (unlabelled), per-dye, Gray | base synthesised; G and B plotted 1.0/2.0 log H left; reference film Vision3 250D; §D12 | yes, behind Show Negs-built films (2026-11-24) |
+| 6 | Eterna-CP 3513DI, then 3521XD, 3512, 3514DI, 3523XD | print brochures: S, curves (unlabelled), per-dye, Gray | base synthesised; G and B plotted 1.0/2.0 log H left; reference film Vision3 250D; §D12 | yes, behind Show Negs-built films (2026-11-24), except 3512 (renders as 3514DI) |
 | – | F-64D, Reala 500D, Eterna Vivid 500 | brochures | already shipped (Fotufilm) | re-derive only if decision 5 changes; Reala drops its 4th layer |
 | – | Eterna-RDI, Eterna-CI, F-CP | | not camera film, or curves only | not attempted |
 
