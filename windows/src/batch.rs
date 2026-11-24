@@ -4,6 +4,12 @@
 //! unfinished batch leaves for the next launch, and the words its status
 //! line and popover say. The model runs it (`model/batch.rs`); the dialog
 //! and the popover are `ui/dialogs.rs` and `ui/batch.rs`.
+//!
+//! The shared core's (core/src/caches/batch, through negs_core_rules): the
+//! names, the matched exposure, the words and the journal's file run in
+//! Odin (core/diff/tests/batch.rs). Options, Item, Journal and Run stay
+//! here with their serde, as they hold this crate's EditState and model
+//! types.
 
 use std::path::{Path, PathBuf};
 
@@ -14,69 +20,8 @@ use crate::engine::ExportEngine;
 use crate::model::{Edge, ExportSize, OutputFormat, SaveSettings};
 use crate::state::{self, EditState};
 
-/// A batch file's name: `{name}_{film}` as a single export suggests,
-/// `{name}`, or the user's own text with those tokens.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Naming {
-    #[default]
-    NameFilm,
-    Name,
-    Custom,
-}
-
-impl Naming {
-    pub const ALL: [Naming; 3] = [Naming::NameFilm, Naming::Name, Naming::Custom];
-    pub fn title(self) -> &'static str {
-        match self {
-            Naming::NameFilm => "Name_Film",
-            Naming::Name => "Name",
-            Naming::Custom => "Custom",
-        }
-    }
-    /// As the Mac stores it (`batchNaming`).
-    pub fn key(self) -> &'static str {
-        match self {
-            Naming::NameFilm => "nameFilm",
-            Naming::Name => "name",
-            Naming::Custom => "custom",
-        }
-    }
-    pub fn from_key(key: &str) -> Naming {
-        Self::ALL.into_iter().find(|n| n.key() == key).unwrap_or_default()
-    }
-}
-
-/// What a batch does when a file of its name is already there.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Existing {
-    #[default]
-    Number,
-    Replace,
-    Skip,
-}
-
-impl Existing {
-    pub const ALL: [Existing; 3] = [Existing::Number, Existing::Replace, Existing::Skip];
-    pub fn title(self) -> &'static str {
-        match self {
-            Existing::Number => "Add a Number",
-            Existing::Replace => "Replace",
-            Existing::Skip => "Skip",
-        }
-    }
-    pub fn key(self) -> &'static str {
-        match self {
-            Existing::Number => "number",
-            Existing::Replace => "replace",
-            Existing::Skip => "skip",
-        }
-    }
-    pub fn from_key(key: &str) -> Existing {
-        Self::ALL.into_iter().find(|n| n.key() == key).unwrap_or_default()
-    }
-}
+use negs_core_rules::batch as core;
+pub use negs_core_rules::batch::{Existing, Naming, Status, batch_name, exporting, lightroom_title, numbered, unique};
 
 /// The batch dialog's choices, as the journal keeps them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -127,38 +72,16 @@ impl Options {
         ExportSize { edge: Edge::from_key(&self.edge), pixels: self.pixels }
     }
     pub fn save(&self) -> SaveSettings {
-        let bit_depth = if self.output_format() == OutputFormat::Jpeg { 8 } else { self.bit_depth };
-        SaveSettings { bit_depth, color_space: SaveSettings::effective_space(self.color_space, bit_depth), jpeg_quality: self.jpeg_quality }
+        let s = core::save(&self.format, self.bit_depth, self.color_space, self.jpeg_quality);
+        SaveSettings { bit_depth: s.bit_depth, color_space: s.color_space, jpeg_quality: s.jpeg_quality }
     }
 
     /// The file name for a photograph named `name` (without its extension,
     /// a duplicate's number included) developed with `film`. The extension
     /// is Windows' own for the format, as a single export's.
     pub fn file_name(&self, name: &str, film: &str) -> String {
-        let template = match self.naming {
-            Naming::NameFilm => "{name}_{film}",
-            Naming::Name => "{name}",
-            Naming::Custom if self.custom.is_empty() => "{name}",
-            Naming::Custom => self.custom.as_str(),
-        };
-        let mut base = template.replace("{name}", name).replace("{film}", film);
-        // A file name, never a path, and nothing Windows refuses in one.
-        base = base.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '-' } else { c }).collect();
-        let base = base.trim_end_matches(['.', ' ']).to_string();
-        let base = if base.trim().is_empty() || base.starts_with('.') { format!("{name}{base}") } else { base };
-        format!("{base}.{}", self.output_format().extension())
+        core::file_name(self.naming, &self.custom, name, film, self.output_format().key())
     }
-}
-
-/// How a photograph of a batch went.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Status {
-    #[default]
-    Waiting,
-    Done,
-    Failed,
-    Skipped,
 }
 
 /// One photograph of a batch: its edits as they were when Export was
@@ -203,15 +126,6 @@ impl Item {
     }
 }
 
-/// The name `{name}` stands for: the file's without its extension, a
-/// duplicate's number after it (`IMG_0412 (2)`).
-pub fn batch_name(photo: &Path, title: &str) -> String {
-    let file = photo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let suffix = title.strip_prefix(file.as_str()).unwrap_or("");
-    let stem = photo.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    format!("{stem}{suffix}")
-}
-
 /// An unfinished batch, so the next launch can resume it. Written
 /// atomically after each photograph; removed when the batch ends.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -240,55 +154,19 @@ impl Journal {
         self.items.iter().filter(|i| i.status == Status::Waiting).count()
     }
 
+    /// Staged as `active-export.json.tmp` and moved over the file.
     pub fn write(&self, path: &Path) -> anyhow::Result<()> {
-        if let Some(folder) = path.parent() {
-            std::fs::create_dir_all(folder)?;
-        }
-        let staging = path.with_extension("json.tmp");
-        std::fs::write(&staging, serde_json::to_vec(self)?)?;
-        crate::platform::replace_file(&staging, path)
+        let json = serde_json::to_vec(self)?;
+        core::journal_write(path, &json).map_err(anyhow::Error::msg)
     }
 
     pub fn read(path: &Path) -> Option<Journal> {
-        let journal: Journal = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-        (journal.schema == Self::SCHEMA).then_some(journal)
+        serde_json::from_slice(&core::journal_read(path)?).ok()
     }
 
     pub fn remove(path: &Path) {
-        let _ = std::fs::remove_file(path);
+        core::journal_remove(path)
     }
-}
-
-/// `name.ext`, then `name 2.ext`, `name 3.ext`… until `taken` says no.
-pub fn numbered(file_name: &str, taken: impl Fn(&str) -> bool) -> String {
-    if !taken(file_name) {
-        return file_name.to_string();
-    }
-    let path = Path::new(file_name);
-    let base = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = path.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut n = 2;
-    loop {
-        let name = format!("{base} {n}.{ext}");
-        if !taken(&name) {
-            return name;
-        }
-        n += 1;
-    }
-}
-
-/// The batch's own names made unique among themselves, in order, ignoring
-/// case as Windows does (a RAW+JPEG pair would share one).
-pub fn unique(names: &[String]) -> Vec<String> {
-    let mut used = std::collections::HashSet::new();
-    names
-        .iter()
-        .map(|name| {
-            let unique = numbered(name, |n| used.contains(&n.to_lowercase()));
-            used.insert(unique.to_lowercase());
-            unique
-        })
-        .collect()
 }
 
 /// A match solved for `state`'s edits applied as opening applies it
@@ -298,12 +176,9 @@ pub fn unique(names: &[String]) -> Vec<String> {
 pub fn matched(state: &EditState, ev: f64, limited: bool, inputs: Value) -> Option<EditState> {
     let mut matched = state.brightness_match.clone()?;
     let mut next = state.clone();
-    let offset = crate::json::number(next.value(state::PREP_EXPOSURE)) - matched.ev.unwrap_or(0.0);
-    if matched.ev.is_none_or(|old| (ev - old).abs() >= 0.05) {
+    if let Some(total) = core::matched_exposure(next.value(state::PREP_EXPOSURE), matched.ev, ev) {
         matched.ev = Some(ev);
-        let (low, high) = state::PREP_EXPOSURE_RANGE;
-        let total = if offset.abs() < 1e-9 { ev } else { ev + offset };
-        crate::json::set(&mut next.params, state::PREP_EXPOSURE, crate::json::num(total.clamp(low, high)));
+        crate::json::set(&mut next.params, state::PREP_EXPOSURE, total);
     }
     matched.inputs = Some(inputs);
     matched.highlight_limited = limited;
@@ -323,52 +198,41 @@ pub struct Run {
 }
 
 impl Run {
+    fn view(&self) -> core::RunView {
+        core::RunView::new(self.journal.items.iter().map(|i| i.status), self.running, self.cancelled)
+    }
     pub fn total(&self) -> usize {
         self.journal.items.len()
     }
     /// Exported, failed or skipped.
     pub fn finished(&self) -> usize {
-        self.total() - self.journal.remaining()
-    }
-    fn count(&self, status: Status) -> usize {
-        self.journal.items.iter().filter(|i| i.status == status).count()
+        self.view().counts().finished
     }
     pub fn exported(&self) -> usize {
-        self.count(Status::Done)
+        self.view().counts().exported
     }
     pub fn failures(&self) -> Vec<&Item> {
         self.journal.items.iter().filter(|i| i.status == Status::Failed).collect()
     }
     pub fn skipped(&self) -> usize {
-        self.count(Status::Skipped)
+        self.view().counts().skipped
     }
     pub fn fraction(&self) -> f64 {
-        if self.total() == 0 { 1.0 } else { self.finished() as f64 / self.total() as f64 }
+        self.view().counts().fraction
     }
     /// The popover's rule: the share exported, then the share that failed
     /// or was skipped. A batch that all failed draws no yellow.
     pub fn rule_parts(&self) -> (f64, f64) {
-        if self.total() == 0 {
-            return (0.0, 0.0);
-        }
-        let exported = self.exported() as f64 / self.total() as f64;
-        (exported, (self.fraction() - exported).max(0.0))
+        self.view().counts().rule_parts
     }
     /// Ended with something to look at: failures, or a cancel.
     pub fn needs_attention(&self) -> bool {
-        !self.running && (self.count(Status::Failed) > 0 || self.cancelled)
+        self.view().counts().needs_attention
     }
 
     /// The popover's title.
     pub fn title(&self) -> String {
-        let (exported, total) = (self.exported(), self.total());
-        if self.running {
-            return format!("Exporting {} of {total}", (self.finished() + 1).min(total));
-        }
-        if self.cancelled {
-            return format!("Cancelled after {exported} of {total}");
-        }
-        if total == 1 && exported == 1 { "Exported 1 photograph".into() } else { format!("Exported {exported} of {total}") }
+        self.view().title()
     }
 
     /// The status line's and the grid foot's words while it runs.
@@ -378,57 +242,20 @@ impl Run {
 
     /// "Exported 10 of 12 · cancelled", then "· 2 failed" in bold.
     pub fn outcome_words(&self) -> (String, Option<String>) {
-        let failed = self.count(Status::Failed);
-        (
-            format!("Exported {} of {}{}", self.exported(), self.total(), if self.cancelled { " · cancelled" } else { "" }),
-            (failed > 0).then(|| format!("{failed} failed")),
-        )
+        self.view().outcome_words()
     }
 
     /// The status once it ends.
     pub fn finished_words(&self) -> String {
-        let (exported, failed, skipped) = (self.exported(), self.count(Status::Failed), self.skipped());
-        let folder = self.journal.destination.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-        let mut text = if exported == 1 { "Exported 1 photograph".to_string() } else { format!("Exported {exported} photographs") };
-        text += &format!(" to “{folder}”");
-        if failed > 0 {
-            text += &format!("; {failed} failed");
-        }
-        if skipped > 0 {
-            text += &format!("; {skipped} skipped");
-        }
-        if self.cancelled { format!("Export cancelled. {text}") } else { text }
+        self.view().finished_words(&self.journal.destination)
     }
-}
-
-/// Lightroom's name by the key a batch keeps (`Options::lightroom`).
-pub fn lightroom_title(key: &str) -> &'static str {
-    if key == "classic" { "Lightroom Classic" } else { "Lightroom" }
-}
-
-/// "Exporting 5 of 12 photographs", or "Sending 1 of 2 photographs to Lightroom".
-pub fn exporting(finished: usize, total: usize, lightroom: Option<&str>) -> String {
-    let verb = if lightroom.is_none() { "Exporting" } else { "Sending" };
-    let what = if total == 1 { "photograph" } else { "photographs" };
-    let to = lightroom.map(|l| format!(" to {l}")).unwrap_or_default();
-    format!("{verb} {} of {total} {what}{to}", (finished + 1).min(total))
 }
 
 /// The dialog's message: what the batch does, what the engine does, then
 /// the size and colour.
 pub fn message(count: usize, engine: ExportEngine, size: ExportSize, save: SaveSettings, preview_space: &str) -> String {
-    let what = if count == 1 {
-        "With its own edits, crop and border.".to_string()
-    } else {
-        format!("Each of the {count} photographs with its own edits, crop and border, one after another.")
-    };
-    let lead = match engine {
-        ExportEngine::Fast => "Fast looks the same as Reference, in a fraction of the time.",
-        ExportEngine::Reference => "Reference is the most precise; about half a minute for each large photo.",
-    };
-    let size = size.summary().map(|s| format!(" {s}.")).unwrap_or_default();
-    let space = save.summary(true, preview_space).map(|s| format!(" {s}.")).unwrap_or_default();
-    format!("{what} {lead}{size}{space}")
+    let save = core::Save { bit_depth: save.bit_depth, color_space: save.color_space, jpeg_quality: save.jpeg_quality };
+    core::message(count, engine.key(), size.edge.key(), size.pixels, save, preview_space)
 }
 
 #[cfg(test)]
@@ -453,8 +280,9 @@ mod tests {
         assert_eq!(options.file_name("A", "f"), "A.tif");
         assert_eq!(unique(&["a.jpg", "b.jpg", "A.jpg", "a.jpg"].map(String::from)), ["a.jpg", "b.jpg", "A 2.jpg", "a 3.jpg"]);
         assert_eq!(numbered("a.jpg", |n| ["a.jpg", "a 2.jpg"].contains(&n)), "a 3.jpg");
-        assert_eq!(batch_name(Path::new(r"C:\p\IMG.CR3"), "IMG.CR3 (2)"), "IMG (2)");
-        assert_eq!(batch_name(Path::new(r"C:\p\IMG.CR3"), "IMG.CR3"), "IMG");
+        let photo = Path::new(if cfg!(windows) { r"C:\p\IMG.CR3" } else { "/p/IMG.CR3" });
+        assert_eq!(batch_name(photo, "IMG.CR3 (2)"), "IMG (2)");
+        assert_eq!(batch_name(photo, "IMG.CR3"), "IMG");
         assert_eq!(Naming::from_key("custom"), Naming::Custom);
         assert_eq!(Existing::from_key("skip"), Existing::Skip);
         assert_eq!(Existing::from_key("?"), Existing::Number);
@@ -480,7 +308,7 @@ mod tests {
 
     fn run(statuses: &[Status]) -> Run {
         let items = statuses.iter().enumerate().map(|(i, s)| item(&format!("IMG_{i}.CR3"), *s)).collect();
-        Run { journal: Journal::new(PathBuf::from(r"C:\out\Trip"), Options::default(), items), current: None, running: false, cancelled: false }
+        Run { journal: Journal::new(PathBuf::from(if cfg!(windows) { r"C:\out\Trip" } else { "/out/Trip" }), Options::default(), items), current: None, running: false, cancelled: false }
     }
 
     /// The Mac's `testThePopoversRuleIsYellowOnlyForWhatExported`, and the words.

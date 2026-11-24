@@ -288,9 +288,10 @@ pub fn exporting(finished: usize, total: usize, lightroom: Option<&str>) -> Stri
     string(unsafe { sys::negs_batch_exporting(finished as u64, total as u64, title.as_ptr(), title.len(), has) })
 }
 
-/// The dialog's message: `engine` an ExportEngine's index in its ALL, `edge`
-/// an Edge's.
-pub fn message(count: usize, engine: usize, edge: usize, pixels: u32, save: Save, preview_space: &str) -> String {
+/// The dialog's message: `engine` an ExportEngine's key, `edge` an Edge's
+/// (ExportSize's edge, with its `pixels`).
+pub fn message(count: usize, engine: &str, edge: &str, pixels: u32, save: Save, preview_space: &str) -> String {
+    let (engine, edge) = (from_key(7, engine), from_key(6, edge));
     let save = sys::negs_batch_save_t { bit_depth: save.bit_depth, color_space: save.color_space as u64, jpeg_quality: save.jpeg_quality };
     string(unsafe {
         sys::negs_batch_message(count as u64, engine as u32, edge as u32, pixels, &save, preview_space.as_ptr(), preview_space.len())
