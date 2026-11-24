@@ -859,6 +859,7 @@ dependencies = [
 name = "negs-core-diff"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "image",
  "negs-core-diff-picture",
  "negs-core-library",
@@ -869,6 +870,7 @@ dependencies = [
  "negs-marks",
  "negs-media-oracle",
  "negs-state-oracle",
+ "negs-windows-stand-in",
  "serde",
  "serde_json",
  "spektrafilm-io",
@@ -905,6 +907,7 @@ dependencies = [
 name = "negs-core-rules"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "image",
  "negs-core-library",
  "negs-core-sys",
