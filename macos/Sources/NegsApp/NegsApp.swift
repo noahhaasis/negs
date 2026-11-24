@@ -416,6 +416,13 @@ struct CanvasArea: View {
         .environment(\.sheetInk, sheet.ink)
         // On its own dark plate, so it reads on any sheet.
         .overlay(alignment: .topLeading) { developTag }
+        .overlay(alignment: .bottom) {
+            if let readout = model.speedEditReadout, !dropping {
+                SpeedEditTag(text: readout)
+                    .padding(.bottom, Self.labelBand + 16)
+                    .allowsHitTesting(false)
+            }
+        }
         .onContinuousHover { phase in
             let over: Bool
             if case .active(let point) = phase, let print = shownPrint { over = print.contains(point) } else { over = false }

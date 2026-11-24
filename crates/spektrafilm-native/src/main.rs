@@ -87,6 +87,13 @@ enum Command {
     PreviewColourSpace {
         input: PathBuf,
     },
+    /// The Custom temperature and tint that develop a RAW like As shot
+    /// (`spektrafilm_io::as_shot_white_balance`), for the Mac's Custom white
+    /// balance to start from: {"temperature", "tint"}, or nulls when there is
+    /// none (a monochrome RAW, or not a RAW).
+    AsShotWhiteBalance {
+        input: PathBuf,
+    },
     /// A colour-managed camera/original reference for clients without a
     /// native colour-managed extractor. Independent of retained render state.
     BrightnessReference {
@@ -1057,6 +1064,13 @@ impl Session {
                 Ok(json!({"released_bytes": bytes}))
             }
             Command::PreviewColourSpace { input } => Ok(json!({ "colour_space": declared_preview_colour_space(&input)? })),
+            Command::AsShotWhiteBalance { input } => {
+                let found = if spektrafilm_io::is_raw(&input) { spektrafilm_io::as_shot_white_balance(&input)? } else { None };
+                Ok(json!({
+                    "temperature": found.map(|wb| wb.temperature),
+                    "tint": found.map(|wb| wb.tint),
+                }))
+            }
             Command::BrightnessReference { input, reference_path, expected_width, expected_height } => {
                 ensure!(expected_width > 0 && expected_height > 0,
                     "The brightness reference needs the photograph's dimensions");
