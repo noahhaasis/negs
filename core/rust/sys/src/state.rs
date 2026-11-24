@@ -458,6 +458,7 @@ unsafe extern "C" {
     pub fn negs_edits_section_title(section: u32) -> *const c_char;
     pub fn negs_edits_tab_title(tab: u32) -> *const c_char;
     pub fn negs_edits_words(text: *const u8, len: usize, out: *mut u8, cap: usize) -> usize;
+    pub fn negs_edits_number(value: f64, decimal: u32, signed: u8, out: *mut u8, cap: usize) -> usize;
     pub fn negs_edits_paths(which: u32, count: *mut usize) -> *const *const c_char;
 }
 

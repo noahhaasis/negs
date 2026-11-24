@@ -1749,6 +1749,9 @@ uint8_t negs_edits_section_more(negs_facts_t *facts, uint32_t section, negs_more
 const char *negs_edits_section_title(uint32_t section);
 const char *negs_edits_tab_title(uint32_t tab);
 size_t negs_edits_words(const uint8_t *text, size_t len, uint8_t *out, size_t cap);
+/* edits.rs's numbers: up to two decimals with the locale's `decimal`;
+ * `signed` 1 adds a + above zero. */
+size_t negs_edits_number(double value, uint32_t decimal, uint8_t signed_, uint8_t *out, size_t cap);
 /* 0 WHITE_BALANCE_PATHS, 1 INPUT_PATHS, 2 CAMERA_LOOSE, 3 the film's and
  * the print's development time. Static. */
 const char *const *negs_edits_paths(uint32_t which, size_t *count);

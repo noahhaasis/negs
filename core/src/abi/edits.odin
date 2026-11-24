@@ -4,6 +4,7 @@
 package negs_core
 
 import "base:runtime"
+import "core:strings"
 import "../state"
 import "../state/edits"
 import facts "../state/facts"
@@ -223,4 +224,19 @@ edits_paths :: proc "c" (which: u32, count: ^uint) -> [^]cstring {
 		count^ = uint(len(list))
 	}
 	return raw_data(list) if len(list) > 0 else nil
+}
+
+// edits.rs's `Format::number` (up to two decimals) or, `signed` 1,
+// `Format::signed`, into the caller's buffer.
+@(export, link_name = "negs_edits_number")
+edits_number :: proc "c" (v: f64, decimal: u32, signed: u8, out: [^]u8, cap: uint) -> uint {
+	context = core_context()
+	buf: [512]u8
+	b := strings.builder_from_bytes(buf[:])
+	if signed != 0 {
+		edits.write_signed(&b, v, decimal_rune(decimal))
+	} else {
+		edits.write_number(&b, v, decimal_rune(decimal))
+	}
+	return into(b.buf[:], out, cap)
 }
