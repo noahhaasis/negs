@@ -5,33 +5,33 @@ package batch
 import "core:strconv"
 import "core:strings"
 import facts "../../rules/facts"
-import files "../files"
+import fs "../../platform/fs"
 
 // `batch_name`: the photograph's file name without its extension, a
 // duplicate's number after it (`IMG_0412 (2)` for the title
 // `IMG_0412.CR3 (2)`).
-batch_name :: proc(photo: string, title: string, allocator := context.allocator, style := files.STYLE) -> string {
+batch_name :: proc(photo: string, title: string, allocator := context.allocator, style := fs.HOST) -> string {
 	file := ""
-	if name, ok := files.file_name(photo, style); ok {
-		file = files.display(name, context.temp_allocator)
+	if name, ok := fs.file_name(photo, style); ok {
+		file = fs.display(name, style, context.temp_allocator)
 	}
 	suffix := title[len(file):] if strings.has_prefix(title, file) else ""
 	stem := ""
-	if s, ok := files.file_stem(photo, style); ok {
-		stem = files.display(s, context.temp_allocator)
+	if s, ok := fs.file_stem(photo, style); ok {
+		stem = fs.display(s, style, context.temp_allocator)
 	}
 	return strings.concatenate({stem, suffix}, allocator)
 }
 
 // The `n`th name `numbered` tries for `file_name` (n >= 2):
 // `{stem} {n}.{extension}`, the dot there even without an extension.
-numbered_name :: proc(file_name: string, n: u64, allocator := context.allocator, style := files.STYLE) -> string {
-	stem, _ := files.file_stem(file_name, style)
-	ext, _ := files.extension(file_name, style)
+numbered_name :: proc(file_name: string, n: u64, allocator := context.allocator, style := fs.HOST) -> string {
+	stem, _ := fs.file_stem(file_name, style)
+	ext, _ := fs.extension(file_name, style)
 	buf: [24]u8
 	digits := strconv.write_uint(buf[:], n, 10)
 	return strings.concatenate(
-		{files.display(stem, context.temp_allocator), " ", digits, ".", files.display(ext, context.temp_allocator)},
+		{fs.display(stem, style, context.temp_allocator), " ", digits, ".", fs.display(ext, style, context.temp_allocator)},
 		allocator,
 	)
 }
@@ -43,7 +43,7 @@ numbered :: proc(
 	taken: proc(name: string, data: rawptr) -> bool,
 	data: rawptr,
 	allocator := context.allocator,
-	style := files.STYLE,
+	style := fs.HOST,
 ) -> string {
 	if !taken(file_name, data) {
 		return strings.clone(file_name, allocator)
@@ -61,7 +61,7 @@ numbered :: proc(
 
 // `unique`: the batch's own names made unique among themselves, in order,
 // ignoring case as Windows does (str::to_lowercase).
-unique :: proc(names: []string, allocator := context.allocator, style := files.STYLE) -> []string {
+unique :: proc(names: []string, allocator := context.allocator, style := fs.HOST) -> []string {
 	used := make(map[string]struct{}, len(names), context.temp_allocator)
 	out := make([]string, len(names), allocator)
 	taken :: proc(name: string, data: rawptr) -> bool {

@@ -2,6 +2,7 @@
 package library
 
 import "core:fmt"
+import fs "../platform/fs"
 
 // What deleting `items` does (temporary).
 library_delete_plan :: proc(lib: ^Library, items: []Item) -> Delete_Plan {
@@ -104,7 +105,7 @@ delete_now :: proc(lib: ^Library, plan: Delete_Plan, permanent: bool) -> (Step, 
 			}
 			recorder_touch(&recorder, item.photo)
 			if err := sidecar_write_raw(item.photo, removed); err != 0 {
-				outcome_error(&outcome, fmt.aprintf("“%s” couldn’t be removed: %s", library_name(lib, item), io_error_text(err, ta), allocator = ta))
+				outcome_error(&outcome, fmt.aprintf("“%s” couldn’t be removed: %s", library_name(lib, item), fs.error_text(err, ta), allocator = ta))
 			}
 		}
 		for photo in recorder_photos(&recorder) {

@@ -1,13 +1,13 @@
 #+build darwin, linux
 // core/src/settings/presets: presets.rs's name rules and its tests of the
-// folder (in a scratch folder), and std::path's joins in both styles.
+// folder (in a scratch folder). std::path's joins are tested with the rest
+// of the file layer, in core/tests/platform/fs.
 package presets_tests
 
 import "core:strings"
 import "core:sys/posix"
 import "core:testing"
-import "../../../src/settings/files"
-import "../../../src/settings/paths"
+import fs "../../../src/platform/fs"
 import "../../../src/settings/presets"
 
 @(test)
@@ -64,15 +64,15 @@ scratch :: proc(tag: string) -> string {
 	strings.write_string(&b, "negs-core-presets-")
 	strings.write_string(&b, tag)
 	strings.write_byte(&b, '-')
-	strings.write_u64(&b, u64(files.process_id()))
-	return paths.join(files.temp_dir(), strings.to_string(b), .Posix)
+	strings.write_u64(&b, u64(fs.process_id()))
+	return fs.join(fs.temp_dir(), strings.to_string(b), .Unix)
 }
 
 @(private)
 remove_folder :: proc(folder: string) {
-	names, _ := files.read_dir(folder)
-	for n in names {
-		_ = files.remove_file(paths.join(folder, n, .Posix))
+	entries, _, _ := fs.read_dir(folder)
+	for e in entries {
+		_ = fs.remove_file(fs.join(folder, e.name, .Unix))
 	}
 	posix.rmdir(strings.clone_to_cstring(folder))
 }
@@ -110,11 +110,11 @@ adding_never_replaces_and_renaming_checks_names :: proc(t: ^testing.T) {
 	second, _, ok2 := presets.add(folder, transmute([]u8)string("2"), "portra")
 	testing.expect(t, ok2)
 	testing.expect_value(t, presets.file_name_of(second), "portra 2")
-	_ = files.write_file(paths.join(folder, ".partial.tmp", .Posix), nil)
-	_ = files.write_file(paths.join(folder, "notes.txt", .Posix), nil)
-	hidden := paths.join(folder, "Hidden.json", .Posix)
-	_ = files.write_file(hidden, transmute([]u8)string("{}"))
-	files.hide(hidden)
+	_ = fs.write(fs.join(folder, ".partial.tmp", .Unix), nil)
+	_ = fs.write(fs.join(folder, "notes.txt", .Unix), nil)
+	hidden := fs.join(folder, "Hidden.json", .Unix)
+	_ = fs.write(hidden, transmute([]u8)string("{}"))
+	fs.hide(hidden)
 	listed, _, _ := presets.list(folder)
 	testing.expect(t, same(names_of(listed), {"Portra", "portra 2"}))
 	_, clash, renamed := presets.rename(folder, second, "PORTRA")
@@ -145,8 +145,8 @@ the_users_order_is_remembered :: proc(t: ^testing.T) {
 	testing.expect(t, same(names_of(listed), {"Zeta", "Alpha", "Mid"}))
 	_, ok := presets.set_order(folder, {listed[2], listed[0], listed[1]})
 	testing.expect(t, ok)
-	_ = files.write_file(paths.join(folder, "Copied B.json", .Posix), transmute([]u8)string("x"))
-	_ = files.write_file(paths.join(folder, "Copied A.json", .Posix), transmute([]u8)string("x"))
+	_ = fs.write(fs.join(folder, "Copied B.json", .Unix), transmute([]u8)string("x"))
+	_ = fs.write(fs.join(folder, "Copied A.json", .Unix), transmute([]u8)string("x"))
 	listed, _, _ = presets.list(folder)
 	testing.expect(t, same(names_of(listed), {"Mid", "Zeta", "Alpha", "Copied A", "Copied B"}))
 	_, _, ok = presets.rename(folder, listed[1], "Omega")
@@ -156,7 +156,7 @@ the_users_order_is_remembered :: proc(t: ^testing.T) {
 	_, _, ok = presets.add(folder, transmute([]u8)string("n"), "Newest")
 	listed, _, _ = presets.list(folder)
 	testing.expect(t, same(names_of(listed), {"Omega", "Alpha", "Copied A", "Copied B", "Newest"}))
-	order, _ := files.read_file(paths.join(folder, ".order.json", .Posix))
+	order, _ := fs.read(fs.join(folder, ".order.json", .Unix))
 	testing.expect(t, strings.has_prefix(string(order), "{\n  \"order\": [\n    \"Omega.json\",\n"))
 }
 
@@ -167,7 +167,7 @@ files_changed_on_disk_are_left_alone :: proc(t: ^testing.T) {
 	remove_folder(folder)
 	defer remove_folder(folder)
 	preset, _, _ := presets.add(folder, transmute([]u8)string("original"), "Gold")
-	_ = files.write_file(preset.path, transmute([]u8)string("edited elsewhere"))
+	_ = fs.write(preset.path, transmute([]u8)string("edited elsewhere"))
 	err, ok := presets.delete_preset(folder, preset)
 	testing.expect(t, !ok && strings.contains(err, "changed on disk"))
 	_, _, ok = presets.read(preset)
@@ -177,37 +177,4 @@ files_changed_on_disk_are_left_alone :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	listed, _, _ = presets.list(folder)
 	testing.expect_value(t, len(listed), 0)
-}
-
-@(test)
-paths_join_as_pathbuf_push :: proc(t: ^testing.T) {
-	context.allocator = context.temp_allocator
-	Case :: struct {
-		base, name, want: string,
-		style:            paths.Style,
-	}
-	cases := []Case {
-		{`C:\Users\Noah\AppData\Roaming`, "Negs", `C:\Users\Noah\AppData\Roaming\Negs`, .Windows},
-		{`C:\Negs\`, "Presets", `C:\Negs\Presets`, .Windows},
-		{"", "Negs", "Negs", .Windows},
-		{"C:", "x", "C:x", .Windows},
-		{`C:\a`, `D:\b`, `D:\b`, .Windows},
-		{`\\server\share`, "x", `\\server\share\x`, .Windows},
-		{`\\?\C:\a`, "b", `\\?\C:\a\b`, .Windows},
-		{"/tmp", "negs", "/tmp/negs", .Posix},
-		{"/tmp/", "negs", "/tmp/negs", .Posix},
-		{"/tmp", "/etc", "/etc", .Posix},
-	}
-	for c in cases {
-		testing.expectf(t, paths.join(c.base, c.name, c.style) == c.want, "%q + %q", c.base, c.name)
-	}
-	testing.expect(t, paths.is_absolute(`C:\photos\DSC_1.NEF`, .Windows))
-	testing.expect(t, !paths.is_absolute(`\photos\DSC_1.NEF`, .Windows))
-	testing.expect(t, !paths.is_absolute("C:photos", .Windows))
-	testing.expect(t, paths.is_absolute(`\\server\share\a`, .Windows))
-	testing.expect(t, !paths.is_absolute("relative.png", .Posix))
-	testing.expect_value(t, paths.with_extension(`C:\Negs\.order.json`, "tmp", .Windows), `C:\Negs\.order.tmp`)
-	testing.expect_value(t, paths.with_extension("/a/settings.json", "tmp", .Posix), "/a/settings.tmp")
-	stem, _ := paths.file_stem(`C:\Negs\Presets\Portra.v2.json`, .Windows)
-	testing.expect_value(t, stem, "Portra.v2")
 }

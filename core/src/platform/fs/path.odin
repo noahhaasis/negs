@@ -1,22 +1,21 @@
-// std::path's rules for the few things presets.rs and session.rs ask of a
-// path: its file name and stem, its parent, a name joined on, the extension
-// changed, whether it is absolute. Both platforms' rules are here, chosen
-// by `Style` (`HOST` for the one the core runs on), so the Windows rules
-// are tested on the Mac too: Windows has prefixes (`C:`, `\\server\share`,
-// `\\?\...`) and takes `/` as well as `\` as a separator (only `\` after a
-// verbatim `\\?\` prefix); POSIX has neither. A line-for-line port of
-// std's Components (library/std/src/path.rs, sys/path/windows_prefix.rs,
-// Rust 1.93).
-package paths
+// std::path's rules: a path's components, file name, stem and extension,
+// parent, a path joined on, the extension changed, whether it is absolute.
+// Both platforms' rules are here, chosen by `Style` (`HOST` for the one the
+// core runs on), so the Windows rules are tested on the Mac too: Windows has
+// prefixes (`C:`, `\\server\share`, `\\?\...`, `\\.\...`) and takes `/` as
+// well as `\` as a separator (only `\` after a verbatim `\\?\` prefix); Unix
+// has neither. A line-for-line port of std's Components
+// (library/std/src/path.rs, sys/path/windows_prefix.rs, Rust 1.93).
+package platform_fs
 
 import "core:strings"
 
 Style :: enum u8 {
-	Posix,
+	Unix,
 	Windows,
 }
 
-HOST :: Style.Windows when ODIN_OS == .Windows else Style.Posix
+HOST :: Style.Windows when ODIN_OS == .Windows else Style.Unix
 
 // The separator `push` adds.
 main_separator :: proc "contextless" (style: Style) -> u8 {
@@ -85,7 +84,7 @@ drive_letter :: proc "contextless" (path: string) -> bool {
 }
 
 // parse_prefix: Windows' prefix of `path`, if any.
-parse_prefix :: proc "contextless" (path: string, style: Style) -> Prefix {
+parse_prefix :: proc "contextless" (path: string, style := HOST) -> Prefix {
 	if style != .Windows {
 		return {}
 	}
@@ -180,7 +179,7 @@ Components :: struct {
 	front, back:       State,
 }
 
-components :: proc "contextless" (path: string, style: Style) -> Components {
+components :: proc "contextless" (path: string, style := HOST) -> Components {
 	p := parse_prefix(path, style)
 	rest := path[p.len:]
 	return Components {
@@ -390,19 +389,20 @@ next_back :: proc "contextless" (c: ^Components) -> (Component, bool) {
 
 // MARK: Path's methods
 
-has_root :: proc "contextless" (path: string, style: Style) -> bool {
+has_root :: proc "contextless" (path: string, style := HOST) -> bool {
 	c := components(path, style)
 	return c_has_root(&c)
 }
 
-is_absolute :: proc "contextless" (path: string, style: Style) -> bool {
+is_absolute :: proc "contextless" (path: string, style := HOST) -> bool {
 	if style == .Windows {
 		return has_root(path, style) && parse_prefix(path, style).kind != .None
 	}
 	return has_root(path, style)
 }
 
-file_name :: proc "contextless" (path: string, style: Style) -> (string, bool) {
+// `Path::file_name`: a slice of `path`.
+file_name :: proc "contextless" (path: string, style := HOST) -> (string, bool) {
 	c := components(path, style)
 	comp, ok := next_back(&c)
 	if ok && comp.kind == .Normal {
@@ -411,7 +411,8 @@ file_name :: proc "contextless" (path: string, style: Style) -> (string, bool) {
 	return "", false
 }
 
-parent :: proc "contextless" (path: string, style: Style) -> (string, bool) {
+// `Path::parent`: a slice of `path`.
+parent :: proc "contextless" (path: string, style := HOST) -> (string, bool) {
 	c := components(path, style)
 	comp, ok := next_back(&c)
 	if !ok {
@@ -441,7 +442,8 @@ split_at_dot :: proc "contextless" (file: string) -> (before: string, has_before
 	return "", false, file, true
 }
 
-file_stem :: proc "contextless" (path: string, style: Style) -> (string, bool) {
+// `Path::file_stem`: a slice of `path`.
+file_stem :: proc "contextless" (path: string, style := HOST) -> (string, bool) {
 	name, ok := file_name(path, style)
 	if !ok {
 		return "", false
@@ -450,7 +452,8 @@ file_stem :: proc "contextless" (path: string, style: Style) -> (string, bool) {
 	return before if has_before else after, true
 }
 
-extension :: proc "contextless" (path: string, style: Style) -> (string, bool) {
+// `Path::extension`: a slice of `path`.
+extension :: proc "contextless" (path: string, style := HOST) -> (string, bool) {
 	name, ok := file_name(path, style)
 	if !ok {
 		return "", false
@@ -462,8 +465,10 @@ extension :: proc "contextless" (path: string, style: Style) -> (string, bool) {
 	return "", false
 }
 
-// `path.with_extension(ext)`: unchanged when it has no file name.
-with_extension :: proc(path: string, ext: string, style: Style, allocator := context.allocator) -> string {
+// `PathBuf::set_extension` on a copy: cut right after the file stem, then
+// `.ext` unless `ext` is empty; unchanged without a file name.
+@(private)
+set_extension :: proc(path: string, ext: string, style: Style, allocator := context.allocator) -> string {
 	stem, ok := file_stem(path, style)
 	if !ok {
 		return strings.clone(path, allocator)
@@ -479,8 +484,18 @@ with_extension :: proc(path: string, ext: string, style: Style, allocator := con
 	return strings.to_string(b)
 }
 
+// `Path::with_extension`: the path up to its old extension's length from
+// the end (all of it without one), then set_extension.
+with_extension :: proc(path: string, ext: string, style := HOST, allocator := context.allocator) -> string {
+	base := path
+	if old, has := extension(path, style); has {
+		base = path[:len(path) - len(old)]
+	}
+	return set_extension(base, ext, style, allocator)
+}
+
 // `PathBuf::from(base).join(name)` (PathBuf::push).
-join :: proc(base: string, name: string, style: Style, allocator := context.allocator) -> string {
+join :: proc(base: string, name: string, style := HOST, allocator := context.allocator) -> string {
 	need_sep := len(base) > 0 && !is_sep(style, base[len(base) - 1])
 	c := components(base, style)
 	// `C:` alone takes no separator.

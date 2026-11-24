@@ -8,8 +8,7 @@ package session
 
 import "core:math"
 import "core:strings"
-import "../files"
-import "../paths"
+import fs "../../platform/fs"
 import "../../rules/crop"
 import "../../state"
 import "../../value"
@@ -136,7 +135,7 @@ validate :: proc(s: Editor_Session) -> bool {
 	_, is_object := s.state.params.(value.Object)
 	return(
 		s.schema == SCHEMA &&
-		paths.is_absolute(s.source, paths.HOST) &&
+		fs.is_absolute(s.source) &&
 		finite &&
 		c.rect.x >= 0 &&
 		c.rect.y >= 0 &&
@@ -168,7 +167,7 @@ Load_Result :: enum u8 {
 
 // `SessionStore::load`.
 load :: proc(file: string) -> (Load_Result, []u8) {
-	st, code := files.stat(file)
+	st, code := fs.stat(file)
 	if code != 0 {
 		return .None, nil
 	}
@@ -176,9 +175,9 @@ load :: proc(file: string) -> (Load_Result, []u8) {
 		return .Error, transmute([]u8)string("The previous editing session is too large to restore.")
 	}
 	data: []u8
-	data, code = files.read_file(file, context.allocator)
+	data, code = fs.read(file, allocator = context.allocator)
 	if code != 0 {
-		return .Error, transmute([]u8)files.error_text(code, context.allocator)
+		return .Error, transmute([]u8)fs.error_text(code, context.allocator)
 	}
 	s, ok := parse_session(data)
 	if !ok {
@@ -188,8 +187,7 @@ load :: proc(file: string) -> (Load_Result, []u8) {
 	if !validate(s) {
 		return .Error, transmute([]u8)string(INVALID_SESSION)
 	}
-	source, sc := files.stat(s.source)
-	if sc != 0 || !source.is_file {
+	if !fs.is_file(s.source) {
 		return .Error, transmute([]u8)string("The previous photograph is unavailable. Open a photograph to continue.")
 	}
 	return .Session, session_text(s)
@@ -213,7 +211,7 @@ save :: proc(file: string, text: []u8) -> (Save_Result, string) {
 	if !validate(s) {
 		return .Error, INVALID_SESSION
 	}
-	if e, fine := files.write_atomic(file, session_text(s), context.allocator); !fine {
+	if e, fine := fs.write_atomic(file, session_text(s), context.allocator); !fine {
 		return .Error, e
 	}
 	return .Saved, ""

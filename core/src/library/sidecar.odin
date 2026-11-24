@@ -5,6 +5,7 @@ package library
 import "core:fmt"
 import "core:slice"
 import "core:strings"
+import fs "../platform/fs"
 
 // The schema this version reads and writes.
 SCHEMA :: 1
@@ -185,12 +186,12 @@ sidecar_from_bytes :: proc(bytes: []u8) -> (Sidecar, Maybe(Problem)) {
 // The sidecar's bytes (temporary), or false if there's none.
 sidecar_read_bytes :: proc(photo: string) -> (bytes: []u8, found: bool, problem: Maybe(Problem)) {
 	ta := context.temp_allocator
-	data, err := fs_read(sidecar_path(photo, ta), MAXIMUM_SIZE + 1, ta)
+	data, err := fs.read(sidecar_path(photo, ta), MAXIMUM_SIZE + 1, ta)
 	if err != 0 {
-		if io_not_found(err) {
+		if fs.is_not_found(err) {
 			return nil, false, nil
 		}
-		return nil, false, unreadable(io_error_text(err, ta))
+		return nil, false, unreadable(fs.error_text(err, ta))
 	}
 	return data, true, nil
 }
@@ -223,29 +224,29 @@ sidecar_read :: proc(photo: string) -> (Sidecar, bool, Maybe(Problem)) {
 
 // Writes `bytes` as the sidecar through a hidden temporary file and a
 // rename, or removes the sidecar (`remove`). The bytes are written exactly.
-sidecar_write_bytes :: proc(photo: string, bytes: []u8, remove: bool) -> Io_Error {
+sidecar_write_bytes :: proc(photo: string, bytes: []u8, remove: bool) -> fs.Error {
 	ta := context.temp_allocator
 	file := sidecar_path(photo, ta)
 	if remove {
-		err := fs_remove(file)
-		if err != 0 && io_not_found(err) {
+		err := fs.remove_file(file)
+		if err != 0 && fs.is_not_found(err) {
 			return 0
 		}
 		return err
 	}
 	temporary := temporary_path(photo, ta)
-	err := fs_write(temporary, bytes)
+	err := fs.write(temporary, bytes)
 	if err == 0 {
-		err = fs_rename(temporary, file)
+		err = fs.rename(temporary, file)
 	}
 	if err != 0 {
-		fs_remove(temporary)
+		fs.remove_file(temporary)
 	}
 	return err
 }
 
 // Writes the file's JSON (nil removes it), as `SidecarStore` does.
-sidecar_write_raw :: proc(photo: string, raw: Json) -> Io_Error {
+sidecar_write_raw :: proc(photo: string, raw: Json) -> fs.Error {
 	if raw == nil {
 		return sidecar_write_bytes(photo, nil, true)
 	}
@@ -511,9 +512,9 @@ defaults_table_path :: proc(data: string, version: i64, allocator := context.tem
 
 defaults_table_load :: proc(data: string, version: i64, allocator := context.allocator) -> (^Defaults_Table, string) {
 	ta := context.temp_allocator
-	bytes, err := fs_read(defaults_table_path(data, version), max(int), ta)
+	bytes, err := fs.read(defaults_table_path(data, version), max(int), ta)
 	if err != 0 {
-		return nil, fmt.aprintf("The defaults table v%d can’t be read: %s", version, io_error_text(err, ta), allocator = ta)
+		return nil, fmt.aprintf("The defaults table v%d can’t be read: %s", version, fs.error_text(err, ta), allocator = ta)
 	}
 	json, parse_err := json_parse(bytes, ta)
 	if parse_err != nil {

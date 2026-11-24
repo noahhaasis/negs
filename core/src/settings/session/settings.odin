@@ -4,21 +4,20 @@ package session
 
 import "core:slice"
 import "core:strings"
-import "../files"
-import "../paths"
+import fs "../../platform/fs"
 import "../../value"
 
 // `NEGS_PROFILE_DIR`, or in test builds (`test`) a scratch folder, so no
 // test can ever write the real profile.
 profile_override :: proc(test: bool) -> (string, bool) {
-	if dir, set := files.env("NEGS_PROFILE_DIR", context.allocator); set {
+	if dir, set := fs.env("NEGS_PROFILE_DIR", context.allocator); set {
 		return dir, true
 	}
 	if test {
 		b := strings.builder_make(0, 40, context.temp_allocator)
 		strings.write_string(&b, "negs-test-profile-")
-		strings.write_u64(&b, u64(files.process_id()))
-		return paths.join(files.temp_dir(context.temp_allocator), strings.to_string(b), paths.HOST, context.allocator), true
+		strings.write_u64(&b, u64(fs.process_id()))
+		return fs.join(fs.temp_dir(context.temp_allocator), strings.to_string(b), allocator = context.allocator), true
 	}
 	return "", false
 }
@@ -28,17 +27,17 @@ settings_dir :: proc(test: bool) -> string {
 	if dir, ok := profile_override(test); ok {
 		return dir
 	}
-	base, _ := files.env("APPDATA", context.temp_allocator)
-	return paths.join(base, "Negs", paths.HOST, context.allocator)
+	base, _ := fs.env("APPDATA", context.temp_allocator)
+	return fs.join(base, "Negs", allocator = context.allocator)
 }
 
 // `%LOCALAPPDATA%\Negs`.
 cache_dir :: proc(test: bool) -> string {
 	if dir, ok := profile_override(test); ok {
-		return paths.join(dir, "Cache", paths.HOST, context.allocator)
+		return fs.join(dir, "Cache", allocator = context.allocator)
 	}
-	base, _ := files.env("LOCALAPPDATA", context.temp_allocator)
-	return paths.join(base, "Negs", paths.HOST, context.allocator)
+	base, _ := fs.env("LOCALAPPDATA", context.temp_allocator)
+	return fs.join(base, "Negs", allocator = context.allocator)
 }
 
 Place :: enum u32 {
@@ -58,13 +57,13 @@ place :: proc(which: Place, test: bool) -> string {
 	case .Cache_Dir:
 		return cache_dir(test)
 	case .Presets:
-		return paths.join(settings_dir(test), "Presets", paths.HOST, context.allocator)
+		return fs.join(settings_dir(test), "Presets", allocator = context.allocator)
 	case .Settings_File:
-		return paths.join(settings_dir(test), "settings.json", paths.HOST, context.allocator)
+		return fs.join(settings_dir(test), "settings.json", allocator = context.allocator)
 	case .Session_File:
-		return paths.join(settings_dir(test), "session.json", paths.HOST, context.allocator)
+		return fs.join(settings_dir(test), "session.json", allocator = context.allocator)
 	case .Catalog_File:
-		return paths.join(cache_dir(test), "catalog.json", paths.HOST, context.allocator)
+		return fs.join(cache_dir(test), "catalog.json", allocator = context.allocator)
 	}
 	return ""
 }
@@ -73,7 +72,7 @@ place :: proc(which: Place, test: bool) -> string {
 
 // `Preferences::load` of `file`: false (the defaults) unless it reads.
 load_preferences :: proc(file: string) -> (Preferences, bool) {
-	data, code := files.read_file(file, context.allocator)
+	data, code := fs.read(file, allocator = context.allocator)
 	if code != 0 {
 		return {}, false
 	}
@@ -94,7 +93,7 @@ save_preferences :: proc(file: string, text: []u8) -> Prefs_Save {
 	if !ok {
 		return .Unreadable
 	}
-	if _, fine := files.write_atomic(file, preferences_text(prefs)); !fine {
+	if _, fine := fs.write_atomic(file, preferences_text(prefs), context.temp_allocator); !fine {
 		return .Failed
 	}
 	return .Saved
@@ -153,12 +152,14 @@ tab :: proc(inspector_tab: string, chosen: bool) -> Tab {
 // `CatalogCache::key`: the helper's path, its modification time in
 // nanoseconds since 1970 and the data folder; none when the helper can't
 // be read or is dated before 1970.
-catalog_key :: proc(helper, data: string) -> (string, bool) {
-	st, code := files.stat(helper)
-	if code != 0 || st.seconds < 0 {
+catalog_key :: proc(helper, data: string) -> (key: string, ok: bool) {
+	st, code := fs.stat(helper)
+	if code != 0 {
 		return "", false
 	}
-	nanos := u128(st.seconds) * 1_000_000_000 + u128(st.nanos)
+	modified := st.modified.? or_return
+	since := fs.since_epoch(modified) or_return
+	nanos := fs.as_nanos(since)
 	digits: [48]u8
 	n := len(digits)
 	for {
@@ -169,14 +170,14 @@ catalog_key :: proc(helper, data: string) -> (string, bool) {
 			break
 		}
 	}
-	return strings.concatenate({helper, "|", string(digits[n:]), "|", data}, context.allocator), true
+	return strings.concatenate({fs.display(helper, allocator = context.temp_allocator), "|", string(digits[n:]), "|", fs.display(data, allocator = context.temp_allocator)}, context.allocator), true
 }
 
 // `CatalogCache::load`: the cached catalog when its key is this helper's
 // and data folder's and it speaks protocol 1.
 catalog_load :: proc(file, helper, data: string) -> (catalog_value: value.Value, ok: bool) {
 	key := catalog_key(helper, data) or_return
-	text, code := files.read_file(file, context.allocator)
+	text, code := fs.read(file, allocator = context.allocator)
 	if code != 0 {
 		return nil, false
 	}
@@ -214,5 +215,5 @@ catalog_save :: proc(file: string, catalog: value.Value, helper, data: string) {
 	append(&o, value.Field{"catalog", catalog}, value.Field{"key", key})
 	b := strings.builder_make(0, 4096, context.allocator)
 	value.write_compact(&b, o)
-	_, _ = files.write_atomic(file, b.buf[:])
+	_, _ = fs.write_atomic(file, b.buf[:], context.temp_allocator)
 }

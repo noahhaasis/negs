@@ -5,14 +5,17 @@ package match_cache
 import "core:strings"
 import "../../library"
 import "../../value"
-import files "../files"
+import fs "../../platform/fs"
 
 // The file's size and modification time in seconds (`as_secs_f64`); none
 // if it can't be read or is from before 1970.
 stamp :: proc(path: string) -> (size: u64, modified: f64, ok: bool) {
-	st := files.stat(path) or_return
-	t := st.modified.? or_return
-	return st.size, files.secs_f64(t), true
+	st, err := fs.stat(path)
+	if err != 0 {
+		return 0, 0, false
+	}
+	t := fs.since_epoch(st.modified.? or_return) or_return
+	return st.size, fs.secs_f64(t), true
 }
 
 // The text a solve is named by, before its hash:
@@ -23,7 +26,7 @@ key_text :: proc(file: string, film, paper: string, params: value.Value, engine:
 	size, modified := stamp(file) or_return
 	b := strings.builder_make(0, 256, allocator)
 	strings.write_string(&b, "1|")
-	strings.write_string(&b, files.display(file, context.temp_allocator))
+	strings.write_string(&b, fs.display(file, allocator = context.temp_allocator))
 	strings.write_byte(&b, '|')
 	value.write_u64(&b, size)
 	strings.write_byte(&b, '|')
@@ -64,12 +67,12 @@ engine_stamp :: proc(version: string, helper: string, data: string, allocator :=
 	b := strings.builder_make(0, 128, allocator)
 	strings.write_string(&b, version)
 	strings.write_byte(&b, '|')
-	strings.write_string(&b, files.display(helper, context.temp_allocator))
+	strings.write_string(&b, fs.display(helper, allocator = context.temp_allocator))
 	strings.write_byte(&b, '|')
 	value.write_u64(&b, size)
 	strings.write_byte(&b, '|')
 	value.write_display(&b, modified)
 	strings.write_byte(&b, '|')
-	strings.write_string(&b, files.display(data, context.temp_allocator))
+	strings.write_string(&b, fs.display(data, allocator = context.temp_allocator))
 	return strings.to_string(b)
 }
