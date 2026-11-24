@@ -36,7 +36,7 @@ function english() {
   for (const m of sources.matchAll(/\btr\(\s*[\w.>\s()]*?\?\s*"([^"]+)"\s*:\s*"([^"]+)"/g)) add(m[1], m[2]);
   add("Original", "Loading Original"); // updateOriginal's badge
   for (const m of sources.matchAll(/fold\("[^"]+", "([^"]+)"/g)) { add(m[1], `${m[1].toLowerCase()}s`); }
-  for (const m of sources.matchAll(/return stockGroups\(\w+\(\), \[([^\]]+)\]/g)) {
+  for (const m of sources.matchAll(/return stockGroups\((?:\w+|\(all \? \w+ : \w+\))\(\), \[([^\]]+)\]/g)) {
     for (const title of m[1].matchAll(/"([^"]+)"/g)) add(title[1]);
   }
   for (const m of sources.matchAll(/what [=:] "([^"]+)"/g)) strings.add(m[1]);
