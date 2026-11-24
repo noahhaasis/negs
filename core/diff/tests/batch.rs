@@ -163,7 +163,11 @@ fn matched() {
         if r.chance(3)
             && let Some(m) = s.brightness_match.as_mut()
         {
-            m.ev = Some(if r.chance(4) { r.edge() } else { r.between(-3.0, 3.0) });
+            m.ev = Some(match r.below(4) {
+                0 => r.edge(),
+                1 => [0.0, 0.25, 1.0, -0.5][r.index(4)],
+                _ => r.between(-3.0, 3.0),
+            });
         }
         if r.chance(4) {
             let exposure = match r.below(5) {
@@ -178,6 +182,8 @@ fn matched() {
         let ev = match r.below(6) {
             0 => r.edge(),
             1 => s.brightness_match.as_ref().and_then(|m| m.ev).unwrap_or(0.0) + r.between(-0.06, 0.06),
+            // The 0.05 EV threshold itself.
+            2 => s.brightness_match.as_ref().and_then(|m| m.ev).unwrap_or(0.0) + [0.05, -0.05][r.index(2)],
             _ => r.between(-4.0, 4.0),
         };
         let limited = r.bool();

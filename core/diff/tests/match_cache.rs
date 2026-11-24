@@ -131,17 +131,17 @@ fn lru_sequences() {
     let leaks = Leaks::start();
     let dir = scratch("lru");
     let mut t = Tally::default();
-    // Each sequence is up to 40 steps on the clock: a twentieth of the cases.
+    // Each sequence is up to 120 steps on the clock: a twentieth of the cases.
     let n = (cases() / 20).max(100);
     let mut now;
     for seed in first_seed()..first_seed() + n {
         let r = &mut Random(seed);
-        let limit = 1 + r.index(12);
+        let limit = if r.bool() { 1 + r.index(12) } else { [9, 10, 19, 20, 29, 30][r.index(6)] };
         let (of, cf) = (dir.join(format!("{seed}/o/BrightnessMatches.json")), dir.join(format!("{seed}/c/BrightnessMatches.json")));
         let mut o = Arc::new(oracle::MatchCache::new(of.clone(), limit));
         let mut c = core::MatchCache::new(cf.clone(), limit);
-        let keys: Vec<String> = (0..1 + r.index(20)).map(|i| if r.chance(6) { string(r) } else { format!("k{i}") }).collect();
-        for _ in 0..r.index(40) {
+        let keys: Vec<String> = (0..1 + r.index(if limit > 12 { 45 } else { 20 })).map(|i| if r.chance(6) { string(r) } else { format!("k{i}") }).collect();
+        for _ in 0..r.index(if limit > 12 { 120 } else { 40 }) {
             tick();
             now = core::now();
             let key = keys[r.index(keys.len())].clone();
