@@ -12,7 +12,7 @@ import "core:slice"
 import "core:strings"
 import "../../state"
 import "../../value"
-import files "../files"
+import fs "../../platform/fs"
 import "../serde"
 
 MAX_PIXELS :: 8192 * 8192 * 4
@@ -58,17 +58,20 @@ Read_Error :: enum u8 {
 // so there is no key and no cached frame).
 @(private = "file")
 stamp :: proc(path: string, allocator := context.allocator) -> (text: string, ok: bool) {
-	st := files.stat(path) or_return
-	modified := st.modified.? or_return
-	created := st.created.? or_return
+	st, err := fs.stat(path)
+	if err != 0 {
+		return "", false
+	}
+	modified := fs.since_epoch(st.modified.? or_return) or_return
+	created := fs.since_epoch(st.created.? or_return) or_return
 	b := strings.builder_make(0, len(path) + 64, allocator)
-	strings.write_string(&b, files.display(path, context.temp_allocator))
+	strings.write_string(&b, fs.display(path, allocator = context.temp_allocator))
 	strings.write_byte(&b, '|')
 	value.write_u64(&b, st.size)
 	strings.write_byte(&b, '|')
-	write_u128(&b, files.nanos(modified))
+	write_u128(&b, fs.as_nanos(modified))
 	strings.write_byte(&b, '|')
-	write_u128(&b, files.nanos(created))
+	write_u128(&b, fs.as_nanos(created))
 	return strings.to_string(b), true
 }
 
@@ -88,21 +91,29 @@ write_u128 :: proc(b: ^strings.Builder, v: u128) {
 	strings.write_bytes(b, buf[i:])
 }
 
-// Every file under `dir`, folders followed (links neither), stamped.
+// Every file under `dir`, folders followed (links neither), stamped; false
+// at the first error (`?` on read_dir, on an entry, on its file_type).
 @(private = "file")
 data_stamps :: proc(dir: string, out: ^[dynamic]string) -> bool {
-	entries := files.read_dir(dir, context.temp_allocator) or_return
+	entries, err, stopped := fs.read_dir(dir, allocator = context.temp_allocator)
+	if err != 0 {
+		return false
+	}
 	for e in entries {
+		if !e.kind_ok {
+			return false
+		}
 		switch e.kind {
 		case .Dir:
-			data_stamps(files.join(dir, e.name, context.temp_allocator), out) or_return
+			data_stamps(fs.join(dir, e.name, allocator = context.temp_allocator), out) or_return
 		case .File:
-			s := stamp(files.join(dir, e.name, context.temp_allocator), context.temp_allocator) or_return
+			s := stamp(fs.join(dir, e.name, allocator = context.temp_allocator), context.temp_allocator) or_return
 			append(out, s)
 		case .Other:
 		}
 	}
-	return true
+	// The entry that failed comes after the ones listed.
+	return stopped == 0
 }
 
 // `key` with `rendered` already the JSON value of `state.rendered()`
@@ -286,14 +297,14 @@ Loaded :: struct {
 
 // `read`: the frame saved for `key`, checked as the Rust checks it.
 read :: proc(file: string, key: string, allocator := context.allocator) -> (out: Loaded, err: Read_Error) {
-	st, ok := files.stat(file)
-	if !ok {
+	st, serr := fs.stat(file)
+	if serr != 0 {
 		return {}, .Io
 	}
 	if st.size > MAX_PIXELS + MAX_HEADER {
 		return {}, .Size
 	}
-	bytes, ioerr := files.read(file, allocator)
+	bytes, ioerr := fs.read(file, allocator = allocator)
 	if ioerr != 0 {
 		return {}, .Io
 	}
@@ -332,19 +343,19 @@ read :: proc(file: string, key: string, allocator := context.allocator) -> (out:
 
 // `write`: the header and the pixels into `{stem}.tmp`, moved over the
 // file; the staging file removed whatever happened after the folder.
-write :: proc(file: string, key: string, f: Frame, display_space: string, pixels: []u8) -> files.Error {
+write :: proc(file: string, key: string, f: Frame, display_space: string, pixels: []u8) -> fs.Error {
 	b := strings.builder_make(0, 512, context.temp_allocator)
 	write_header(&b, key, f, display_space, checksum(pixels))
-	if folder, ok := files.parent(file); ok {
-		if err := files.create_dir_all(folder); err != 0 {
+	if folder, ok := fs.parent(file); ok {
+		if err := fs.create_dir_all(folder); err != 0 {
 			return err
 		}
 	}
-	staging := files.with_extension(file, "tmp", context.temp_allocator)
-	err := files.write(staging, b.buf[:], pixels)
+	staging := fs.with_extension(file, "tmp", allocator = context.temp_allocator)
+	err := fs.write(staging, b.buf[:], pixels)
 	if err == 0 {
-		err = files.replace(staging, file)
+		err = fs.replace_file(staging, file)
 	}
-	files.remove(staging)
+	fs.remove_file(staging)
 	return err
 }

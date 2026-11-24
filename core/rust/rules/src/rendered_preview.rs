@@ -154,7 +154,11 @@ pub fn write(file: &Path, key: &str, frame: &Frame) -> Result<(), String> {
     };
     match code {
         0 => Ok(()),
+        // std's own words for the errors it makes itself: a NUL in the
+        // path, and create_dir_all reaching a root it can't make.
+        -1 if cfg!(windows) => Err("strings passed to WinAPI cannot contain NULs".into()),
         -1 => Err("file name contained an unexpected NUL byte".into()),
+        -2 => Err("failed to create whole tree".into()),
         n => Err(std::io::Error::from_raw_os_error(n).to_string()),
     }
 }

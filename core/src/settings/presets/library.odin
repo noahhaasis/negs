@@ -12,8 +12,7 @@ package presets
 import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
-import "../files"
-import "../paths"
+import fs "../../platform/fs"
 import "../../value"
 
 // A preset file as listed: its path as found, size and modification time,
@@ -32,13 +31,13 @@ ORDER_FILE :: ".order.json"
 
 // `PresetFile::name`: the file's stem.
 file_name_of :: proc(f: Preset_File) -> string {
-	stem, _ := paths.file_stem(f.path, paths.HOST)
+	stem, _ := fs.file_stem(f.path)
 	return stem
 }
 
 @(private)
 join :: proc(folder, name: string) -> string {
-	return paths.join(folder, name, paths.HOST, context.temp_allocator)
+	return fs.join(folder, name, allocator = context.temp_allocator)
 }
 
 @(private)
@@ -65,25 +64,51 @@ in_use_error :: proc(name: string) -> string {
 }
 
 @(private)
-ERROR_SHARING_VIOLATION :: files.Code(32)
+ERROR_SHARING_VIOLATION :: fs.Error(32)
 @(private)
-ERROR_LOCK_VIOLATION :: files.Code(33)
+ERROR_LOCK_VIOLATION :: fs.Error(33)
 @(private)
-ERROR_FILE_EXISTS :: files.Code(80)
+ERROR_FILE_EXISTS :: fs.Error(80)
 @(private)
-ERROR_ALREADY_EXISTS :: files.Code(183)
+ERROR_ALREADY_EXISTS :: fs.Error(183)
 
 // The Win32 codes of presets.rs's `in_use` and `exists`. On macOS the
-// codes are the stand-ins' (see files.move_code), which never report the
+// codes are the stand-ins' (see `move_no_replace`), which never report the
 // first two.
 @(private)
-in_use :: proc "contextless" (code: files.Code) -> bool {
+in_use :: proc "contextless" (code: fs.Error) -> bool {
 	return code == ERROR_SHARING_VIOLATION || code == ERROR_LOCK_VIOLATION
 }
 
 @(private)
-exists :: proc "contextless" (code: files.Code) -> bool {
+exists :: proc "contextless" (code: fs.Error) -> bool {
 	return code == ERROR_ALREADY_EXISTS || code == ERROR_FILE_EXISTS
+}
+
+// MoveFileExW without replacing (`fs.move_no_replace`): its Win32 code and
+// the windows crate's `message()`. On macOS the code is the stand-in's
+// mapping of the errno (core/diff/state-oracle's `from_errno`): EEXIST is
+// ERROR_ALREADY_EXISTS (183), ENOENT ERROR_FILE_NOT_FOUND (2), EACCES and
+// EPERM ERROR_ACCESS_DENIED (5), others 0x10000 + errno.
+@(private)
+move_no_replace :: proc(from, to: string) -> (fs.Error, string) {
+	e := fs.move_no_replace(from, to)
+	if e == 0 {
+		return 0, ""
+	}
+	message := fs.win32_error_message(e, context.temp_allocator)
+	when ODIN_OS != .Windows {
+		switch e {
+		case 17:
+			e = 183
+		case 2:
+		case 1, 13:
+			e = 5
+		case:
+			e += 0x1_0000
+		}
+	}
+	return e, message
 }
 
 // presets.rs's `file_error`. `raw_os_error` is the errno on macOS, which
@@ -91,27 +116,27 @@ exists :: proc "contextless" (code: files.Code) -> bool {
 // The Rust compares the raw code with the Win32 ones on every platform,
 // and so does this.
 @(private)
-file_error :: proc(code: files.Code, path, what: string) -> string {
-	stem, _ := paths.file_stem(path, paths.HOST)
+file_error :: proc(code: fs.Error, path, what: string) -> string {
+	stem, _ := fs.file_stem(path)
 	if in_use(code) {
 		return in_use_error(stem)
 	}
-	return cat(what, " “", stem, "”: ", files.error_text(code), ".")
+	return cat(what, " “", stem, "”: ", fs.error_text(code, context.temp_allocator), ".")
 }
 
 // A file's bytes, within the size limit.
 read_file :: proc(path: string) -> (data: []u8, err: string, ok: bool) {
-	st, code := files.stat(path)
+	st, code := fs.stat(path)
 	if code != 0 {
 		return nil, file_error(code, path, "Couldn’t read"), false
 	}
-	if st.is_dir {
+	if st.kind == .Dir {
 		return nil, "It’s a folder.", false
 	}
 	if st.size > MAX_FILE_SIZE {
 		return nil, "The file is too large to be a preset.", false
 	}
-	data, code = files.read_file(path)
+	data, code = fs.read(path, allocator = context.temp_allocator)
 	if code != 0 {
 		return nil, file_error(code, path, "Couldn’t read"), false
 	}
@@ -120,15 +145,17 @@ read_file :: proc(path: string) -> (data: []u8, err: string, ok: bool) {
 
 // A regular file's size and modification time, read now.
 file_at :: proc(path: string) -> (f: Preset_File, err: string, ok: bool) {
-	st, code := files.stat(path)
+	st, code := fs.stat(path)
 	if code != 0 {
 		return {}, file_error(code, path, "Couldn’t read"), false
 	}
-	if !st.is_file {
-		name, _ := paths.file_name(path, paths.HOST)
+	if st.kind != .File {
+		name, _ := fs.file_name(path)
 		return {}, cat("“", name, "” isn’t a file."), false
 	}
-	return Preset_File{strings.clone(path, context.temp_allocator), st.size, st.seconds, st.nanos}, "", true
+	// `modified().unwrap_or(UNIX_EPOCH)`.
+	t := st.modified.? or_else fs.System_Time{}
+	return Preset_File{strings.clone(path, context.temp_allocator), st.size, t.secs, t.nanos}, "", true
 }
 
 @(private)
@@ -140,30 +167,30 @@ Keyed :: struct {
 // The presets in the user's order. Hidden files (a leading period or the
 // hidden attribute) and files other than `.json` aren't presets.
 list :: proc(folder: string) -> (out: []Preset_File, err: string, ok: bool) {
-	names, code := files.read_dir(folder)
+	entries, code, _ := fs.read_dir(folder, allocator = context.temp_allocator)
 	if code != 0 {
-		if files.is_not_found(code) {
+		if fs.is_not_found(code) {
 			return nil, "", true
 		}
-		return nil, cat("Couldn’t list the presets: ", files.error_text(code), "."), false
+		return nil, cat("Couldn’t list the presets: ", fs.error_text(code, context.temp_allocator), "."), false
 	}
-	found := make([dynamic]Keyed, 0, len(names), context.temp_allocator)
-	for name in names {
-		// `file_name()?.to_str()?`: names that aren't UTF-8 are skipped.
-		if !utf8.valid_string(name) {
+	found := make([dynamic]Keyed, 0, len(entries), context.temp_allocator)
+	for entry in entries {
+		// `file_name()?.to_str()?`: names that aren't Unicode are skipped.
+		if !entry.unicode {
 			continue
 		}
-		path := join(folder, name)
-		file_name, has_name := paths.file_name(path, paths.HOST)
+		path := join(folder, entry.name)
+		file_name, has_name := fs.file_name(path)
 		if !has_name {
 			continue
 		}
-		ext, has_ext := paths.extension(path, paths.HOST)
+		ext, has_ext := fs.extension(path)
 		json := has_ext && strings.equal_fold(ext, "json") && len(ext) == 4
 		if strings.has_prefix(file_name, ".") || !json {
 			continue
 		}
-		st, sc := files.stat(path)
+		st, sc := fs.stat(path)
 		if sc != 0 || st.hidden {
 			continue
 		}
@@ -204,7 +231,7 @@ list :: proc(folder: string) -> (out: []Preset_File, err: string, ok: bool) {
 // Preset names in the user's order; none if the file is missing or
 // unreadable.
 read_order :: proc(folder: string) -> []string {
-	data, code := files.read_file(join(folder, ORDER_FILE))
+	data, code := fs.read(join(folder, ORDER_FILE), allocator = context.temp_allocator)
 	if code != 0 {
 		return nil
 	}
@@ -245,11 +272,11 @@ order_text :: proc(names: []string) -> []u8 {
 
 write_order :: proc(folder: string, names: []string) -> (err: string, ok: bool) {
 	path := join(folder, ORDER_FILE)
-	if e, fine := files.write_atomic(path, order_text(names)); !fine {
+	if e, fine := fs.write_atomic(path, order_text(names), context.temp_allocator); !fine {
 		return cat("Couldn’t save the order of the presets: ", e), false
 	}
 	// Kept out of Explorer's way, as on the Mac.
-	files.hide(path)
+	fs.hide(path)
 	return "", true
 }
 
@@ -278,9 +305,10 @@ counter: u64
 @(private)
 unique_id :: proc() -> string {
 	b := strings.builder_make(0, 48, context.temp_allocator)
-	strings.write_u64(&b, u64(files.process_id()), 16)
+	strings.write_u64(&b, u64(fs.process_id()), 16)
 	strings.write_byte(&b, '-')
-	nanos := files.now_nanos()
+	t := fs.now()
+	nanos := i128(t.secs) * 1_000_000_000 + i128(t.nanos)
 	strings.write_u64(&b, u64(nanos) if nanos > 0 else 0, 16)
 	strings.write_byte(&b, '-')
 	strings.write_u64(&b, counter, 16)
@@ -293,13 +321,13 @@ add :: proc(folder: string, data: []u8, name: string) -> (f: Preset_File, err: s
 	if p, bad := problem(name); bad {
 		return {}, p, false
 	}
-	if code := files.create_dir_all(folder); code != 0 {
-		return {}, cat("Couldn’t create the Presets folder: ", files.error_text(code), "."), false
+	if code := fs.create_dir_all(folder); code != 0 {
+		return {}, cat("Couldn’t create the Presets folder: ", fs.error_text(code, context.temp_allocator), "."), false
 	}
 	temporary := join(folder, cat(".", unique_id(), ".tmp"))
-	if code := files.write_new_synced(temporary, data); code != 0 {
-		_ = files.remove_file(temporary)
-		return {}, cat("Couldn’t save the preset: ", files.error_text(code), "."), false
+	if code := fs.write_new_synced(temporary, data); code != 0 {
+		_ = fs.remove_file(temporary)
+		return {}, cat("Couldn’t save the preset: ", fs.error_text(code, context.temp_allocator), "."), false
 	}
 	listed, list_err, listed_ok := list(folder)
 	if !listed_ok {
@@ -313,7 +341,7 @@ add :: proc(folder: string, data: []u8, name: string) -> (f: Preset_File, err: s
 		candidate := unique(name, taken)
 		path := join(folder, cat(candidate, ".json"))
 		// Never replaces: a file created meanwhile fails it.
-		code, message := files.move_no_replace(temporary, path)
+		code, message := move_no_replace(temporary, path)
 		if code == 0 {
 			now, now_err, now_ok := list(folder)
 			if !now_ok {
@@ -337,10 +365,10 @@ add :: proc(folder: string, data: []u8, name: string) -> (f: Preset_File, err: s
 			taken[key(candidate)] = true
 			continue
 		}
-		_ = files.remove_file(temporary)
+		_ = fs.remove_file(temporary)
 		return {}, cat("Couldn’t save the preset: ", message, "."), false
 	}
-	_ = files.remove_file(temporary)
+	_ = fs.remove_file(temporary)
 	return {}, "Couldn’t find a free name for the preset.", false
 }
 
@@ -368,7 +396,7 @@ rename :: proc(folder: string, preset: Preset_File, name: string) -> (f: Preset_
 			}
 		}
 	}
-	if code, message := files.move_no_replace(preset.path, path); code != 0 {
+	if code, message := move_no_replace(preset.path, path); code != 0 {
 		if exists(code) {
 			return {}, cat("A preset named “", name, "” already exists."), false
 		}
@@ -396,7 +424,7 @@ delete_preset :: proc(folder: string, preset: Preset_File) -> (err: string, ok: 
 	if e, fine := verify(preset); !fine {
 		return e, false
 	}
-	if code := files.remove_file(preset.path); code != 0 {
+	if code := fs.remove_file(preset.path); code != 0 {
 		return file_error(code, preset.path, "Couldn’t delete"), false
 	}
 	own_key := key(file_name_of(preset))

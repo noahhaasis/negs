@@ -9,6 +9,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import lib "../../src/library"
+import fs "../../src/platform/fs"
 
 REPO :: #directory + "/../../.."
 
@@ -174,7 +175,7 @@ FIXTURES :: [7]string{"edited.negs", "minimal.negs", "newer-defaults.negs", "new
 
 @(private)
 read :: proc(path: string) -> []u8 {
-	bytes, err := lib.fs_read(path, max(int), context.temp_allocator)
+	bytes, err := fs.read(path, max(int), context.temp_allocator)
 	if err != 0 {
 		return nil
 	}
@@ -225,14 +226,14 @@ test_bin :: proc(b: ^Test_Bin) -> lib.Bin {
 			b.count += 1
 			os.make_directory(b.folder)
 			landed := fmt.aprintf("%s/%d-%s", b.folder, b.count, lib.file_name(file), allocator = context.temp_allocator)
-			if err := lib.fs_rename(file, landed); err != 0 {
-				return "", lib.io_error_text(err, context.temp_allocator), false
+			if err := fs.rename(file, landed); err != 0 {
+				return "", fs.error_text(err, context.temp_allocator), false
 			}
 			return landed, "", true
 		},
 		put_back = proc(user: rawptr, trashed, original: string) -> (string, bool) {
-			if err := lib.fs_rename(trashed, original); err != 0 {
-				return lib.io_error_text(err, context.temp_allocator), false
+			if err := fs.rename(trashed, original); err != 0 {
+				return fs.error_text(err, context.temp_allocator), false
 			}
 			return "", true
 		},
@@ -260,7 +261,7 @@ rating_and_undo_leave_the_files_as_they_were :: proc(t: ^testing.T) {
 	photos := strings.concatenate({dir, "/photos"}, ta)
 	os.make_directory(photos)
 	for name in ([]string{"b.jpg", "a10.png", "a2.png", "notes.txt"}) {
-		lib.fs_write(strings.concatenate({photos, "/", name}, ta), transmute([]u8)string("x"))
+		fs.write(strings.concatenate({photos, "/", name}, ta), transmute([]u8)string("x"))
 	}
 	bin := Test_Bin{folder = strings.concatenate({dir, "/bin"}, ta)}
 	l, err := lib.library_new(photos, lib.Config{data = REPO + "/data", app = "test", bin = test_bin(&bin), pairing = true, sidecars = true, has_id_seed = true, id_seed = 7})

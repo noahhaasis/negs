@@ -5,6 +5,7 @@ package library
 import "base:runtime"
 import "core:fmt"
 import "core:strings"
+import fs "../platform/fs"
 
 // Keeps each sidecar's bytes before an action first touches it
 // (temporary).
@@ -114,11 +115,11 @@ write_in :: proc(lib: ^Library, photo: string, patch: ^Patch) -> (string, bool) 
 	if p, bad := applied_problem.?; bad {
 		return problem_message(p, file_name(photo), ta), false
 	}
-	if json_equal(next, raw) && (raw != nil) == fs_exists(sidecar_path(photo, ta)) {
+	if json_equal(next, raw) && (raw != nil) == fs.exists(sidecar_path(photo, ta)) {
 		return "", true
 	}
 	if err := sidecar_write_raw(photo, next); err != 0 {
-		return io_error_text(err, ta), false
+		return fs.error_text(err, ta), false
 	}
 	return "", true
 }

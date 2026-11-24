@@ -6,7 +6,7 @@ package negs_core
 import "base:runtime"
 import "core:strings"
 import "../caches/batch"
-import files "../caches/files"
+import fs "../platform/fs"
 import "../state"
 import "../value"
 
@@ -36,14 +36,14 @@ Batch_Counts_C :: struct {
 }
 
 @(private = "file")
-style_of :: proc "contextless" (style: u32) -> files.Style {
+style_of :: proc "contextless" (style: u32) -> fs.Style {
 	switch style {
 	case 1:
 		return .Unix
 	case 2:
 		return .Windows
 	}
-	return files.STYLE
+	return fs.HOST
 }
 
 @(private = "file")
@@ -66,19 +66,19 @@ caches_path :: proc "c" (op, style: u32, path: [^]u8, path_len: uint, arg: [^]u8
 	ok := true
 	switch op {
 	case 0:
-		result, ok = files.file_name(p, s)
+		result, ok = fs.file_name(p, s)
 	case 1:
-		result, ok = files.file_stem(p, s)
+		result, ok = fs.file_stem(p, s)
 	case 2:
-		result, ok = files.extension(p, s)
+		result, ok = fs.extension(p, s)
 	case 3:
-		result, ok = files.parent(p, s)
+		result, ok = fs.parent(p, s)
 	case 4:
-		result = files.with_extension(p, a, context.temp_allocator, s)
+		result = fs.with_extension(p, a, s, context.temp_allocator)
 	case 5:
-		result = files.join(p, a, context.temp_allocator, s)
+		result = fs.join(p, a, s, context.temp_allocator)
 	case 6:
-		result = files.display(p, context.temp_allocator)
+		result = fs.display(p, s, context.temp_allocator)
 	case:
 		return 0
 	}
@@ -91,7 +91,7 @@ caches_path :: proc "c" (op, style: u32, path: [^]u8, path_len: uint, arg: [^]u8
 
 @(export, link_name = "negs_caches_secs_f64")
 caches_secs_f64 :: proc "c" (secs: u64, nanos: u32) -> f64 {
-	return files.secs_f64({secs, nanos})
+	return fs.secs_f64(fs.Duration{secs, nanos})
 }
 
 // MARK: Kinds
@@ -397,8 +397,8 @@ batch_journal_rewrite :: proc "c" (text: [^]u8, n: uint, out: ^Buf) -> u8 {
 }
 
 @(private = "file")
-error_buf :: proc(out: ^Buf, err: files.Error) {
-	store_buf(out, text_buf(files.error_text(err, context.temp_allocator)))
+error_buf :: proc(out: ^Buf, err: fs.Error) {
+	store_buf(out, text_buf(fs.error_text(err, context.temp_allocator)))
 }
 
 @(export, link_name = "negs_batch_journal_write")

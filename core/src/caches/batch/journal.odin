@@ -5,7 +5,7 @@ package batch
 
 import "../../state"
 import "../../value"
-import files "../files"
+import fs "../../platform/fs"
 
 JOURNAL_SCHEMA :: 1
 
@@ -81,28 +81,28 @@ remaining :: proc "contextless" (j: Journal) -> u64 {
 // `Journal::write`: the folder made, `serde_json::to_vec` into
 // `{stem}.json.tmp`, then that moved over `path` (windows/src/platform.rs's
 // replace_file). A failed step leaves the staging file, as in Rust.
-journal_write :: proc(j: Journal, path: string) -> files.Error {
+journal_write :: proc(j: Journal, path: string) -> fs.Error {
 	text := journal_to_string(j, context.temp_allocator)
 	return write_staged(path, "json.tmp", transmute([]u8)text)
 }
 
 // The steps of `Journal::write` for bytes already made.
-write_staged :: proc(path: string, staging_ext: string, bytes: []u8) -> files.Error {
-	if folder, ok := files.parent(path); ok {
-		if err := files.create_dir_all(folder); err != 0 {
+write_staged :: proc(path: string, staging_ext: string, bytes: []u8) -> fs.Error {
+	if folder, ok := fs.parent(path); ok {
+		if err := fs.create_dir_all(folder); err != 0 {
 			return err
 		}
 	}
-	staging := files.with_extension(path, staging_ext, context.temp_allocator)
-	if err := files.write(staging, bytes); err != 0 {
+	staging := fs.with_extension(path, staging_ext, allocator = context.temp_allocator)
+	if err := fs.write(staging, bytes); err != 0 {
 		return err
 	}
-	return files.replace(staging, path)
+	return fs.replace_file(staging, path)
 }
 
 // `Journal::read`: the file's journal if it reads as one of this schema.
 journal_read :: proc(path: string, allocator := context.allocator) -> (Journal, bool) {
-	bytes, err := files.read(path, context.temp_allocator)
+	bytes, err := fs.read(path, allocator = context.temp_allocator)
 	if err != 0 {
 		return {}, false
 	}
@@ -119,7 +119,7 @@ journal_read :: proc(path: string, allocator := context.allocator) -> (Journal, 
 
 // `Journal::remove`: errors ignored.
 journal_remove :: proc(path: string) {
-	files.remove(path)
+	fs.remove_file(path)
 }
 
 // `Journal::new`: this schema. Takes the strings and items as they are.

@@ -15,6 +15,7 @@ import "base:runtime"
 import "core:os"
 import "core:strings"
 import "core:time"
+import fs "../platform/fs"
 
 // Where deleted photographs go: the platform's bin, given by the host.
 // Strings returned are temporary.
@@ -46,8 +47,8 @@ bin_remove :: proc(b: Bin, file: string) -> (string, bool) {
 	if b.remove != nil {
 		return b.remove(b.user, file)
 	}
-	if err := fs_remove(file); err != 0 {
-		return io_error_text(err, context.temp_allocator), false
+	if err := fs.remove_file(file); err != 0 {
+		return fs.error_text(err, context.temp_allocator), false
 	}
 	return "", true
 }
@@ -254,7 +255,9 @@ random_seed :: proc() -> u64 {
 
 // Whether sidecars can be written in `folder`.
 can_write :: proc(folder: string) -> bool {
-	return fs_writable_dir(folder)
+	// `!metadata.permissions().readonly()`, false when it can't be read.
+	st, err := fs.stat(folder)
+	return err == 0 && !st.readonly
 }
 
 // The library of `folder`, listed and its sidecars read; or why not

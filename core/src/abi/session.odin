@@ -8,7 +8,7 @@ package negs_core
 
 import "base:runtime"
 import "core:strings"
-import "../settings/files"
+import fs "../platform/fs"
 import "../settings/session"
 import "../value"
 
@@ -34,7 +34,7 @@ settings_write_atomic :: proc "c" (path: [^]u8, path_len: uint, data: [^]u8, dat
 	context = core_context()
 	arena: runtime.Arena
 	context.temp_allocator = runtime.arena_allocator(call_begin(&arena))
-	err, ok := files.write_atomic(host_string(path, path_len), host_bytes(data, data_len))
+	err, ok := fs.write_atomic(host_string(path, path_len), host_bytes(data, data_len), context.temp_allocator)
 	if !ok {
 		store_text(error, err)
 		return 0

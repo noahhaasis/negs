@@ -4,7 +4,7 @@ package batch
 
 import "core:fmt"
 import "core:strings"
-import files "../files"
+import fs "../../platform/fs"
 
 // A run's photographs by how they went, and whether it runs.
 Run :: struct {
@@ -87,10 +87,10 @@ outcome_words :: proc(r: Run, allocator := context.allocator) -> (words: string,
 }
 
 // The status once it ends; `destination` is the batch's folder.
-finished_words :: proc(r: Run, destination: string, allocator := context.allocator, style := files.STYLE) -> string {
+finished_words :: proc(r: Run, destination: string, allocator := context.allocator, style := fs.HOST) -> string {
 	folder := ""
-	if name, ok := files.file_name(destination, style); ok {
-		folder = files.display(name, context.temp_allocator)
+	if name, ok := fs.file_name(destination, style); ok {
+		folder = fs.display(name, style, context.temp_allocator)
 	}
 	b := strings.builder_make(0, 96, context.temp_allocator)
 	if r.done == 1 {

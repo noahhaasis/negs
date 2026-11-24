@@ -16,7 +16,7 @@ package match_cache
 import "core:slice"
 import "core:strings"
 import "../../value"
-import files "../files"
+import fs "../../platform/fs"
 import "../serde"
 
 LIMIT :: 2000
@@ -65,7 +65,7 @@ load :: proc(c: ^Cache) {
 		return
 	}
 	c.loaded = true
-	bytes, err := files.read(c.file, context.temp_allocator)
+	bytes, err := fs.read(c.file, allocator = context.temp_allocator)
 	if err != 0 {
 		return
 	}
@@ -161,14 +161,14 @@ flush_bytes :: proc(c: ^Cache, allocator := context.allocator) -> (bytes: []u8, 
 // The unlocked half: the folder made (errors ignored), `{stem}.tmp`
 // written and moved over the file, the staging file removed.
 write_file :: proc(file: string, bytes: []u8) {
-	if folder, ok := files.parent(file); ok {
-		files.create_dir_all(folder)
+	if folder, ok := fs.parent(file); ok {
+		fs.create_dir_all(folder)
 	}
-	staging := files.with_extension(file, "tmp", context.temp_allocator)
-	if files.write(staging, bytes) == 0 {
-		files.replace(staging, file)
+	staging := fs.with_extension(file, "tmp", allocator = context.temp_allocator)
+	if fs.write(staging, bytes) == 0 {
+		fs.replace_file(staging, file)
 	}
-	files.remove(staging)
+	fs.remove_file(staging)
 }
 
 // `#[cfg(test)] count`: the entries, read first if need be.

@@ -6,6 +6,7 @@ package library
 
 import "core:fmt"
 import "core:strings"
+import fs "../platform/fs"
 
 Companion :: struct {
 	file:    string,
@@ -218,12 +219,12 @@ delete_plan_files_of :: proc(p: Delete_Plan, photo: string) -> []string {
 	out := make([dynamic]string, 0, 4, ta)
 	append(&out, photo)
 	sidecar := sidecar_path(photo, ta)
-	if fs_exists(sidecar) {
+	if fs.exists(sidecar) {
 		append(&out, sidecar)
 	}
 	if picture, ok := delete_plan_companion(p, photo); ok {
 		for file in ([]string{picture, sidecar_path(picture, ta)}) {
-			if fs_exists(file) {
+			if fs.exists(file) {
 				append(&out, file)
 			}
 		}

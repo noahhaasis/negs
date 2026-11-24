@@ -1,6 +1,6 @@
-// Phase 4c's own tests (core/src/caches): std::path's rules on both
-// platforms, the batch's names and words, the journal, the match cache and
-// the rendered preview's file. core/diff/tests/{batch,match_cache,
+// Phase 4c's own tests (core/src/caches): the batch's names and words, the
+// journal, the match cache and the rendered preview's file (std::path's
+// rules are core/tests/platform/fs's). core/diff/tests/{batch,match_cache,
 // rendered_preview}.rs hold them to the frozen Rust. Run by `build.py test`.
 package caches_tests
 
@@ -9,102 +9,11 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "../../src/caches/batch"
-import files "../../src/caches/files"
+import fs "../../src/platform/fs"
 import mc "../../src/caches/match_cache"
 import "../../src/caches/preview"
 import "../../src/state"
 import "../../src/value"
-
-@(test)
-unix_paths_as_std :: proc(t: ^testing.T) {
-	U :: files.Style.Unix
-	name :: proc(p: string) -> string {
-		n, ok := files.file_name(p, .Unix)
-		return n if ok else "<none>"
-	}
-	parent :: proc(p: string) -> string {
-		n, ok := files.parent(p, .Unix)
-		return n if ok else "<none>"
-	}
-	testing.expect_value(t, name("a/b.json/"), "b.json")
-	testing.expect_value(t, name("a/."), "a")
-	testing.expect_value(t, name(".."), "<none>")
-	testing.expect_value(t, name("/"), "<none>")
-	testing.expect_value(t, name("./"), "<none>")
-	testing.expect_value(t, name(""), "<none>")
-	testing.expect_value(t, name("C:\\p\\IMG.CR3"), "C:\\p\\IMG.CR3")
-	testing.expect_value(t, parent("a/b"), "a")
-	testing.expect_value(t, parent("a/b//"), "a")
-	testing.expect_value(t, parent("a"), "")
-	testing.expect_value(t, parent("/a"), "/")
-	testing.expect_value(t, parent("/"), "<none>")
-	testing.expect_value(t, parent("./a"), ".")
-	testing.expect_value(t, parent("."), "")
-	stem, _ := files.file_stem(".hidden", U)
-	_, has_ext := files.extension(".hidden", U)
-	testing.expect_value(t, stem, ".hidden")
-	testing.expect(t, !has_ext)
-	ext, has := files.extension("a.", U)
-	testing.expect(t, has && ext == "")
-	stem, _ = files.file_stem("..a", U)
-	testing.expect_value(t, stem, ".")
-	w := files.with_extension("c/rendered-preview.cache", "tmp", context.allocator, U)
-	defer delete(w)
-	testing.expect_value(t, w, "c/rendered-preview.tmp")
-	w2 := files.with_extension("s/active-export.json", "json.tmp", context.allocator, U)
-	defer delete(w2)
-	testing.expect_value(t, w2, "s/active-export.json.tmp")
-	j := files.join("d/", "x", context.allocator, U)
-	defer delete(j)
-	testing.expect_value(t, j, "d/x")
-}
-
-@(test)
-windows_paths_as_std :: proc(t: ^testing.T) {
-	W :: files.Style.Windows
-	name :: proc(p: string) -> string {
-		n, ok := files.file_name(p, .Windows)
-		return n if ok else "<none>"
-	}
-	parent :: proc(p: string) -> string {
-		n, ok := files.parent(p, .Windows)
-		return n if ok else "<none>"
-	}
-	testing.expect_value(t, name("C:\\p\\IMG.CR3"), "IMG.CR3")
-	testing.expect_value(t, name("C:/a/b/"), "b")
-	testing.expect_value(t, name("C:"), "<none>")
-	testing.expect_value(t, name("\\\\server\\share\\a.txt"), "a.txt")
-	testing.expect_value(t, name("\\\\server\\share"), "<none>")
-	testing.expect_value(t, name("\\\\?\\C:\\x\\y.z"), "y.z")
-	testing.expect_value(t, name("\\\\?\\C:\\x/y"), "x/y")
-	testing.expect_value(t, parent("C:\\a"), "C:\\")
-	testing.expect_value(t, parent("C:\\"), "<none>")
-	testing.expect_value(t, parent("C:a"), "C:")
-	testing.expect_value(t, parent("\\\\server\\share\\a.txt"), "\\\\server\\share\\")
-	kind, n := files.parse_prefix("\\\\?\\UNC\\srv\\sh\\x")
-	testing.expect_value(t, kind, files.Prefix_Kind.Verbatim_UNC)
-	testing.expect_value(t, n, 14)
-	kind, n = files.parse_prefix("//./COM1")
-	testing.expect_value(t, kind, files.Prefix_Kind.Device_NS)
-	testing.expect_value(t, n, 8)
-	stem, _ := files.file_stem("C:\\p\\IMG.CR3", W)
-	testing.expect_value(t, stem, "IMG")
-	for c in ([][3]string{{"C:", "a", "C:a"}, {"C:\\d", "a", "C:\\d\\a"}, {"C:\\d\\", "a", "C:\\d\\a"}, {"C:/d/", "*", "C:/d/*"}}) {
-		j := files.join(c[0], c[1], context.allocator, W)
-		defer delete(j)
-		testing.expect_value(t, j, c[2])
-	}
-	b := batch.batch_name("C:\\p\\IMG.CR3", "IMG.CR3 (2)", context.allocator, W)
-	defer delete(b)
-	testing.expect_value(t, b, "IMG (2)")
-}
-
-@(test)
-lossy_text_as_from_utf8_lossy :: proc(t: ^testing.T) {
-	d := files.display("a\xe2\x82Ab\xffc\xed\xa0\x80\xf0\x9f\x98\x80", context.allocator)
-	defer delete(d)
-	testing.expect_value(t, d, "a\uFFFDAb\uFFFDc\uFFFD\uFFFD\uFFFD😀")
-}
 
 @(test)
 names_and_words :: proc(t: ^testing.T) {
@@ -132,6 +41,9 @@ names_and_words :: proc(t: ^testing.T) {
 	b := batch.batch_name("/p/IMG.CR3", "IMG.CR3 (2)", context.allocator, .Unix)
 	defer delete(b)
 	testing.expect_value(t, b, "IMG (2)")
+	bw := batch.batch_name("C:\\p\\IMG.CR3", "IMG.CR3 (2)", context.allocator, .Windows)
+	defer delete(bw)
+	testing.expect_value(t, bw, "IMG (2)")
 	testing.expect_value(t, batch.naming_from_key("custom"), batch.Naming.Custom)
 	testing.expect_value(t, batch.existing_from_key("?"), batch.Existing.Number)
 
@@ -194,7 +106,7 @@ journal_round_trips :: proc(t: ^testing.T) {
 	}
 	j := batch.journal_new(strings.clone(dir), batch.options_clone(batch.DEFAULT_OPTIONS), items)
 	defer batch.journal_destroy(j)
-	testing.expect_value(t, batch.journal_write(j, path), files.Error(0))
+	testing.expect_value(t, batch.journal_write(j, path), fs.Error(0))
 	back, ok := batch.journal_read(path)
 	defer batch.journal_destroy(back)
 	testing.expect(t, ok)
@@ -258,7 +170,7 @@ preview_frame_round_trips :: proc(t: ^testing.T) {
 	defer delete(file)
 	pixels := []u8{1, 2, 3, 255, 30, 40, 50, 255}
 	f := preview.Frame{2, 1, 4000, 2000, 2000, 1000, 8000, 4000, 1, 1}
-	testing.expect_value(t, preview.write(file, "settings", f, "Rec. 2020", pixels), files.Error(0))
+	testing.expect_value(t, preview.write(file, "settings", f, "Rec. 2020", pixels), fs.Error(0))
 	got, err := preview.read(file, "settings")
 	testing.expect_value(t, err, preview.Read_Error.None)
 	testing.expect_value(t, got.frame, f)

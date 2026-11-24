@@ -326,8 +326,9 @@ pub fn journal_write(path: &Path, json: &[u8]) -> Result<(), String> {
         let _ = take_buf(error);
         return Ok(());
     }
-    // The core says "{words} (os error {n})"; std's words for n are the
-    // platform's own (FormatMessageW's on Windows, which the core lacks).
+    // The core says "{words} (os error {n})" in std's words (strerror_r's,
+    // or FormatMessageW's on Windows); rebuilt from n all the same, so the
+    // text is std's whatever the core's build.
     let message = string(error);
     let code = message.rsplit_once(" (os error ").and_then(|(_, n)| n.strip_suffix(')')?.parse::<i32>().ok());
     Err(code.map_or(message, |n| std::io::Error::from_raw_os_error(n).to_string()))
