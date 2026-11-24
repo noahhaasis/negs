@@ -92,7 +92,7 @@ pub fn lists(stock: &Stock, shown: bool) -> bool {
     shown || !stock.negs_built
 }
 /// Settings › Show Negs-built films' hint, as on the Mac and Windows.
-pub const NEGS_BUILT_HINT: &str = "Films Negs prepared itself from Fujifilm’s and Kodak’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC and 400VC; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it.";
+pub const NEGS_BUILT_HINT: &str = "Films Negs prepared itself from Fujifilm’s and Kodak’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC, 400VC and EXR 100T; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it.";
 /// Every film (or paper), Negs-built ones too; the menus and grids list
 /// those `lists` allows.
 pub fn stocks(paper: bool) -> Vec<&'static Stock> {
@@ -231,13 +231,13 @@ mod tests {
         let films = super::stocks(false);
         let papers = super::stocks(true);
         // 23, plus the 24 colour and 5 B&W films ported from Fotufilm, and
-        // the 20 Negs-built films and 4 Eterna-CP prints (catalog
+        // the 21 Negs-built films and 4 Eterna-CP prints (catalog
         // `negs_built`), listed only with Settings › Show Negs-built films.
-        assert_eq!(films.len(), 72);
+        assert_eq!(films.len(), 73);
         assert_eq!(papers.len(), 14);
         let listed = |stocks: &[&super::Stock], shown| stocks.iter().filter(|s| super::lists(s, shown)).count();
         assert_eq!((listed(&films, false), listed(&papers, false)), (52, 10));
-        assert_eq!((listed(&films, true), listed(&papers, true)), (72, 14));
+        assert_eq!((listed(&films, true), listed(&papers, true)), (73, 14));
         assert!(
             films
                 .iter()

@@ -186,6 +186,14 @@ def house_windows(negs_data):
     return out
 
 
+# D6 gate: the shipped windows' range (c_uv, sigma_uv, c_ir, sigma_ir)
+WINDOW_RANGE = ((391, 456), (9, 50), (567, 670), (22, 70))
+
+
+def window_in_shipped_range(params):
+    return bool(all(lo <= p <= hi for p, (lo, hi) in zip(params, WINDOW_RANGE)))
+
+
 def fit_window(log_sensitivity, illuminant, corpus_dir, lut_path, negs_data=None, prior_weight=PRIOR_WEIGHT):
     """tools/fotufilm_port/fit_window.py's fit, with its paths passed in, the film's own
     reference illuminant (that script maps T to CIE A), and the weak prior toward the

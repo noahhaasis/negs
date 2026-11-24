@@ -121,7 +121,13 @@ def main():
         rep.update({"normalisation": norm, "rezero_step9": float(zero9), "check5_raw_midgray": raw.tolist(),
                     "check5_pass": bool(np.all(np.abs(raw - 1) <= 5e-4))})
         if "window" not in report:
-            report["window"] = pl.fit_window(ls, ill, args.corpus, lut_path)
+            # recipe "window_prior_weight" (with "window_prior_reason"): a stronger pull toward the
+            # median, the D8 check 10 remedy when the fit leaves the shipped range
+            pw = recipe.get("window_prior_weight", pl.PRIOR_WEIGHT)
+            if pw != pl.PRIOR_WEIGHT and not recipe.get("window_prior_reason"):
+                raise SystemExit("window_prior_weight needs a window_prior_reason")
+            report["window"] = pl.fit_window(ls, ill, args.corpus, lut_path, prior_weight=pw)
+            report["window"]["check10_pass"] = pl.window_in_shipped_range(report["window"]["params"])
         window = report["window"]["params"]
         dd = p8.data.dye_density
         stage9 = pl.negs_profile(recipe, ls, dd, model, window, recipe.get("metadata", {}))
@@ -152,6 +158,9 @@ def main():
     passing = [v for v in report["variants"] if report["variants"][v]["check8_target_print_pass"]]
     if not passing:
         raise SystemExit("no variant passes the filter range on the target print: stop and report (D8)")
+    if not report["window"]["check10_pass"]:
+        print("D8 check 10: window", np.round(report["window"]["params"], 1), "outside the shipped range",
+              pl.WINDOW_RANGE, "- raise window_prior_weight (with a reason) and rebuild")
     best = min(passing, key=lambda v: report["variants"][v]["ramp_final"]["mean_neutrality_error"])
     report["chosen_variant"] = best
     (out / f"{args.stock}.json").write_text((out / f"{best}_stage10.json").read_text())

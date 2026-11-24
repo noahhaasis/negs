@@ -296,3 +296,10 @@ rms_granularity = [4.0, 4.0, 4.0]
 rms_granularity = [4.5, 4.5, 4.5]
 [kodak_portra_400vc]
 rms_granularity = [4.5, 4.5, 4.5]
+# --- Negs only, not upstream: Kodak EXR 100T 5248/7248 prepared from Kodak's
+# technical data H-1-7248, March 1999 (tools/film_profiles,
+# data/profile-sources/kodak-cine). The sheet's diffuse RMS granularity is
+# "less than 5"; the bound is taken as the figure, through the Fujifilm cine
+# rule above ([3.5, 5.5, 7.0] x RMS / 3.5), rounded to 0.1.
+[kodak_exr_100t]
+rms_granularity = [5.0, 7.9, 10.0]

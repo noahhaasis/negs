@@ -79,7 +79,7 @@ lists_negs_built :: proc "contextless" (s: Stock, shown: bool) -> bool {
 	return shown || !s.negs_built
 }
 
-NEGS_BUILT_HINT :: "Films Negs prepared itself from Fujifilm’s and Kodak’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC and 400VC; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it."
+NEGS_BUILT_HINT :: "Films Negs prepared itself from Fujifilm’s and Kodak’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC, 400VC and EXR 100T; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it."
 
 // Settings › Fotufilm films: which of the films ported from Fotufilm the
 // lists show. An edit or preset with a hidden film keeps it.

@@ -1,0 +1,94 @@
+{
+  "about": "Per-stock build recipe for tools/film_profiles/build.py, as data/profile-sources/kodak-e190/recipe.json; see README.md. Source: EASTMAN EXR 100T Color Negative Film 5248/7248, KODAK Publication No. H-1-7248, March 1999. Charts are vector polylines on tick-marked or gridded frames, drawn as E-190 (extract_pdf.py options ticks, polyline, grid_width, frame_any_re); the characteristic chart carries log lux-seconds on its top edge and camera stops on its bottom edge, and only the top scale is used (tick_edges, tick_straddle).",
+  "stocks": {
+    "kodak_exr_100t": {
+      "type": "negative",
+      "support": "film",
+      "stage": "filming",
+      "use": "cine",
+      "antihalation": "strong",
+      "channel_model": "color",
+      "target_print": "kodak_2383",
+      "densitometer": "status_M",
+      "log_sensitivity_density_over_min": 0.4,
+      "reference_illuminant": "T",
+      "viewing_illuminant": "D50",
+      "dye_density_cmy_donor": "generic_a",
+      "dye_density_reconstruct_model": "dmid_dmin",
+      "data_trustability": 0.3,
+      "stock": "kodak_exr_100t",
+      "name": "Kodak EXR 100T",
+      "iso": 100,
+      "product_35mm": "5248",
+      "rms_granularity_brochure": "less than 5",
+      "char_axis": "log10H",
+      "window_prior_weight": 0.003,
+      "window_prior_reason": "at the default 0.002 the fit put c_uv at 389.1 nm, under the shipped windows' range (391-456; D8 check 10); 0.003 is the smallest of 0.003/0.004/0.006/0.01 that passes, giving [394.4, 21.5, 610.4, 59.2] at a corpus loss 2 % above the unconstrained fit (0.0215 against 0.0211; no window 0.0276).",
+      "datasheet_heading": "EASTMAN EXR 100T Color Negative Film 5248/7248 (H-1-7248, March 1999): Characteristic Curves (tungsten 1/50 s, ECN-2, Status M), Spectral-Sensitivity Curves (effective exposure 0.013 s, 0.40 above D-min, Status M), Spectral-Dye-Density Curves (midscale neutral and D-min, ECN-2)",
+      "data_owner": "Eastman Kodak Company",
+      "notes": [
+        "The characteristic chart has two exposure scales: log lux-seconds on top (ticks 3-bar.0 to 1.0, labelled at both frame edges) and camera stops below. They disagree by 9 % (one drawn stop is 0.276 log10 H on the top scale, not 0.301). The curves are read on the top scale, the sensitometric one, which gives a green mid-scale gamma of about 0.59; the stop scale would give about 0.54."
+      ]
+    }
+  },
+  "extraction": {
+    "kodak_exr_100t": {
+      "info": "Eastman EXR 100T 5248/7248, KODAK Publication No. H-1-7248, March 1999, PDF page 3",
+      "source": {
+        "file": "5248.pdf",
+        "sha256": "4735518c66d406e508928715f932a626b9f1e23647d45fd84f8c3cd4133291fc",
+        "document": "EASTMAN EXR 100T Color Negative Film 5248/7248, Technical Data / Color Negative Film, KODAK Publication No. H-1-7248",
+        "edition": "March 1999 (©Eastman Kodak Company, 1999; Minor Revision 3-99)"
+      },
+      "panels": {
+        "characteristic": {
+          "page": 2,
+          "frame": [86.62, 68.48, 271.12, 234.27],
+          "frame_any_re": true,
+          "ticks": true,
+          "tick_edges": ["y0", "x0"],
+          "tick_straddle": true,
+          "grid_width": 0.432,
+          "axes": {
+            "x": {"pdf": "x", "gridlines": [-2.0, -1.0, 0.0], "frame": [-3.0, 1.0]},
+            "y": {"pdf": "y", "gridlines": [2.0, 1.0], "frame": [3.0, 0.0]}
+          },
+          "curves": {
+            "density_curve_b": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "y_mid", "index": 0, "of": 3}},
+            "density_curve_g": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "y_mid", "index": 1, "of": 3}},
+            "density_curve_r": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "y_mid", "index": 2, "of": 3}}
+          }
+        },
+        "sensitivity": {
+          "page": 2,
+          "frame": [362.66, 57.81, 563.18, 209.28],
+          "grid_width": 0.432,
+          "axes": {
+            "x": {"pdf": "x", "gridlines": [300, 350, 400, 450, 500, 550, 600, 650, 700], "frame": [250, 750]},
+            "y": {"pdf": "y", "gridlines": [1.0, 0.0, -1.0], "frame": [2.0, -2.0]}
+          },
+          "curves": {
+            "log_sensitivity_b": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "x_mid", "index": 0, "of": 3}},
+            "log_sensitivity_g": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "x_mid", "index": 1, "of": 3}},
+            "log_sensitivity_r": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "x_mid", "index": 2, "of": 3}}
+          }
+        },
+        "spectral_density": {
+          "page": 2,
+          "frame": [86.78, 280.58, 271.12, 464.92],
+          "frame_any_re": true,
+          "ticks": true,
+          "grid_width": 0.432,
+          "axes": {
+            "x": {"pdf": "x", "gridlines": [350, 450, 550, 650], "frame": [250, 750]},
+            "y": {"pdf": "y", "gridlines": [2.0, 1.5, 1.0, 0.5], "frame": [2.5, 0.0]}
+          },
+          "curves": {
+            "dye_density_mid": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "y_mid", "index": 0, "of": 2}},
+            "dye_density_min": {"color": "any", "dashed": false, "width": 0.72, "polyline": true, "select": {"sort": "y_mid", "index": 1, "of": 2}}
+          }
+        }
+      }
+    }
+  }
+}

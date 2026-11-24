@@ -238,3 +238,21 @@ generic dye spectra from spektrafilm by Andrea Volpato; measurement data
   Print Grain Index). Existing sections unchanged.
 - borders/35mm/: edge-print strips for the 3 new films,
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: one Kodak motion-picture negative from Kodak's technical data
+H-1-7248 (CC BY-SA 4.0; method and generic dye spectra from spektrafilm by
+Andrea Volpato; measurement data (c) Eastman Kodak Company):
+
+- profiles/: kodak_exr_100t (EASTMAN EXR 100T 5248/7248), built by
+  tools/film_profiles as the 2026-11-14 entry from H-1-7248, March 1999,
+  through kodak_2383, with reference illuminant T as the tungsten Eternas.
+  Document, page, SHA-256 and every choice in the profile's datasource and
+  in profile-sources/kodak-cine/. No existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for kodak_exr_100t on
+  every colour paper and Eterna-CP print, from solve_neutral_filters.
+  Existing entries unchanged.
+- presets/grain.toml: a kodak_exr_100t section in a Negs-only block at the
+  end (the sheet's "less than 5" through the Fujifilm cine rule). Existing
+  sections unchanged.
+- borders/35mm/: edge-print strips for kodak_exr_100t,
+  crates/spektrafilm-io/src/film35.rs.

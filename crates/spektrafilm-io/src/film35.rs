@@ -213,6 +213,11 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ),
     ("kodak_ektachrome_100", Kind::Slide, EdgePrint::Still(&["KODAK E100"])),
     ("kodak_ektar_100", Kind::Negative, EdgePrint::Still(&["KODAK EKTAR 100"])),
+    (
+        "kodak_exr_100t",
+        Kind::Negative,
+        EdgePrint::Cine { product: "5248", keykode: None },
+    ),
     ("kodak_gold_200", Kind::Negative, EdgePrint::Still(&["KODAK GB 200"])),
     ("kodak_kodachrome_200", Kind::Slide, EdgePrint::Still(&["KODAK KL"])),
     ("kodak_kodachrome_25", Kind::Slide, EdgePrint::Still(&["KODAK KM"])),
