@@ -163,7 +163,12 @@ pub const PREP_EXPOSURE: &str = "prep.exposure_ev";
 /// What a brightness match depends on: everything that changes how bright
 /// the developed photograph is, except the user's own brightness edits.
 pub fn match_inputs(state: &EditState) -> Value {
-    let h = Handle::expect(state);
+    // Only the params, film and paper count: a state holding a number the
+    // core can't read (a NaN in its crop, border, roll or match) asks
+    // without the rest, rather than panic where state.rs didn't.
+    let h = Handle::of(state).unwrap_or_else(|| {
+        Handle::expect(&EditState { params: state.params.clone(), film: state.film.clone(), paper: state.paper.clone(), ..Default::default() })
+    });
     json::read(&take_buf(unsafe { sys::negs_state_match_inputs(h.0) }))
 }
 
@@ -171,8 +176,25 @@ impl EditState {
     /// The state without presentation-only settings, to decide whether an
     /// edit needs a new render (see windows/src/state.rs).
     pub fn rendered(&self) -> EditState {
-        let h = Handle::expect(self);
+        let Some(h) = Handle::of(self) else { return self.rendered_here() };
         Handle(unsafe { sys::negs_state_rendered(h.0) }).state()
+    }
+
+    /// `rendered` for a state the core can't read (a NaN in a typed
+    /// number): state.rs's own few lines, so it never panics where state.rs
+    /// didn't.
+    fn rendered_here(&self) -> EditState {
+        let mut state = self.clone();
+        state.border = BorderSettings::default();
+        state.crop = CropSettings::default();
+        state.brightness_match = None;
+        if size_mode(&self.params) == SizeMode::LongestSide && self.crop.cropped() {
+            state.crop.rect.width = self.crop.rect.width;
+            state.crop.rect.height = self.crop.rect.height;
+        }
+        json::set(&mut state.params, "io.rotate_cw", Value::Null);
+        json::set(&mut state.params, FLIP, Value::Null);
+        state
     }
 
     pub fn value(&self, path: &str) -> &Value {
@@ -1320,6 +1342,20 @@ mod tests {
         assert_eq!(ColorFilter::help(None), "No filter in front of the lens.");
         assert_eq!(FilterLink::from_key("opposite").title(), "Opposite ways");
         assert_eq!(FilterLink::Together.shifts(FilterLink::MAGENTA, 10.0, 0.0, 45.0), (5.0, 50.0));
+    }
+
+    /// A NaN in a typed number reaches neither JSON nor the core: the
+    /// wrapper answers as state.rs did instead of panicking.
+    #[test]
+    fn states_holding_a_nan_still_render_and_match() {
+        let mut state = EditState { params: json!({"io": {"rotate_cw": 1, "photo_long_side_px": 4000}, "prep": {"shadows": 3}}), ..Default::default() };
+        state.crop.angle = f64::NAN;
+        state.crop.rect = crate::crop::Rect::new(0.1, 0.1, 0.5, f64::NAN);
+        let rendered = state.rendered();
+        assert_eq!(rendered.params, json!({"io": {"rotate_cw": null, "photo_long_side_px": 4000, "flip": null}, "prep": {"shadows": 3}}));
+        assert_eq!(rendered.crop.angle, 0.0);
+        let clean = EditState { params: state.params.clone(), ..Default::default() };
+        assert!(json::same(&match_inputs(&state), &match_inputs(&clean)));
     }
 
     #[test]
