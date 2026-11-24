@@ -80,11 +80,16 @@ def metadata(recipe, extraction, report, stock, created, packet="data/profile-so
         f"{recipe['viewing_illuminant']}; target print {recipe['target_print']}; "
         f"log_sensitivity_density_over_min {recipe['log_sensitivity_density_over_min']} as printed; spectra "
         "left empty (null) outside the published wavelength range; characteristic curves "
-        + ("converted from stops (log10 H = 0.30103 x stops); use 'cine' and antihalation 'strong' as the "
+        + ("in log10 H as printed (the chart's log lux-seconds scale); use 'cine' and antihalation 'strong' as "
+           "the Vision3 and Eterna profiles." if recipe["use"] == "cine" and recipe.get("char_axis") == "log10H" else
+           "converted from stops (log10 H = 0.30103 x stops); use 'cine' and antihalation 'strong' as the "
            "Vision3 and Eterna profiles." if recipe["use"] == "cine" else
            f"in log10 H as printed; use '{recipe['use']}' and antihalation '{recipe['antihalation']}' as "
            f"{precedent}."),
     ]
+    if recipe.get("window_prior_weight") is not None:
+        lines.append(f"Window prior weight {recipe['window_prior_weight']} instead of 0.002: "
+                     f"{recipe['window_prior_reason']}")
     lines += [f"Note: {n}" for n in recipe.get("notes", [])]
     c = v[variant]
     if not c["check6_pass"]:

@@ -1910,6 +1910,39 @@
       }
     },
     {
+      "id": "kodak_exr_100t",
+      "name": "Kodak EXR 100T",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          5.0,
+          7.9,
+          10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
+    },
+    {
       "id": "kodak_verita_200d",
       "name": "Kodak Verita 200D",
       "paper": false,
