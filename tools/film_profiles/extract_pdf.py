@@ -47,6 +47,10 @@ Options for Kodak's technical data sheets (E-190), also opt-in:
   * panel "frame_any_re": true also finds the frame as a rectangle inside a longer path
     (E-190's Portra 160VC page draws its frame and two label overbars as one path);
   * panel "grid_width": take gridlines and ticks only from strokes of this width (to 0.005 pt);
+  * panel "tick_edges": ["y0", "x0", ...] takes ticks only from these frame edges (PDF top,
+    bottom "y1", left, right "x1"), where a chart carries a second scale on the opposite edge
+    (Kodak cine sheets: log lux-seconds on top, camera stops below; the ticks left out are
+    never taken as gridlines); "tick_straddle": true also accepts ticks drawn across the edge;
   * curve "polyline": true accepts curves drawn as runs of line segments only (no Beziers).
     It needs "width", so gridlines are never taken for curves, and a run needs at least
     "min_items" segments (default 10).
@@ -144,23 +148,32 @@ def find_frame(drawings, rect, tol=3.0, kinds=("s", "fs"), quads=False, any_re=F
     return best[1]
 
 
-def is_tick(a, b, frame, tol=0.6, lo=2.0, hi=12.0):
+def is_tick(a, b, frame, tol=0.6, lo=2.0, hi=12.0, edges=None, straddle=False):
     """'x' or 'y' (the PDF coordinate the tick marks) for a short segment with one end on a
-    frame edge running inward and perpendicular to it, else None."""
+    frame edge running inward and perpendicular to it, else None. edges limits the frame
+    edges ("y0", "y1", "x0", "x1": PDF top, bottom, left, right on an unrotated page) whose
+    ticks count; straddle also accepts a tick drawn across its edge (one end each side)."""
+    def on(e, name, p, q, inward):
+        if edges is not None and name not in edges:
+            return False
+        if abs(p - e) <= tol and (q - p) * inward > 0:
+            return True
+        return straddle and min(p, q) < e - tol and max(p, q) > e + tol
     if abs(a.x - b.x) < 0.02 and lo <= abs(a.y - b.y) <= hi and frame.x0 < a.x < frame.x1:
-        for e, inward in ((frame.y0, 1), (frame.y1, -1)):
+        for e, name, inward in ((frame.y0, "y0", 1), (frame.y1, "y1", -1)):
             for p, q in ((a, b), (b, a)):
-                if abs(p.y - e) <= tol and (q.y - p.y) * inward > 0:
+                if on(e, name, p.y, q.y, inward):
                     return "x"
     if abs(a.y - b.y) < 0.02 and lo <= abs(a.x - b.x) <= hi and frame.y0 < a.y < frame.y1:
-        for e, inward in ((frame.x0, 1), (frame.x1, -1)):
+        for e, name, inward in ((frame.x0, "x0", 1), (frame.x1, "x1", -1)):
             for p, q in ((a, b), (b, a)):
-                if abs(p.x - e) <= tol and (q.x - p.x) * inward > 0:
+                if on(e, name, p.x, q.x, inward):
                     return "y"
     return None
 
 
-def gridlines(drawings, frame, min_frac=0.3, crossing=False, ticks=False, width=None):
+def gridlines(drawings, frame, min_frac=0.3, crossing=False, ticks=False, width=None, tick_edges=None,
+              tick_straddle=False):
     """Axis-parallel stroked line segments inside the frame: {'x': [...], 'y': [...]}
     holding the constant coordinate of each (deduplicated to 0.05 pt). With crossing,
     a segment may run past the frame; its part inside must still be min_frac long. With
@@ -177,10 +190,12 @@ def gridlines(drawings, frame, min_frac=0.3, crossing=False, ticks=False, width=
                 continue
             a, b = it[1], it[2]
             if ticks:
-                k = is_tick(a, b, frame)
+                k = is_tick(a, b, frame, edges=tick_edges, straddle=tick_straddle)
                 if k is not None:
                     found[k].append((a.x + b.x) / 2 if k == "x" else (a.y + b.y) / 2)
                     continue
+                if tick_edges is not None and is_tick(a, b, frame, straddle=True) is not None:
+                    continue  # a tick on an edge left out (a second scale), never a gridline
             inside = all(frame.x0 - 0.6 <= p.x <= frame.x1 + 0.6 and frame.y0 - 0.6 <= p.y <= frame.y1 + 0.6 for p in (a, b))
             if crossing and not inside:
                 if abs(a.x - b.x) < 0.02 and frame.x0 < a.x < frame.x1:
@@ -359,7 +374,8 @@ def extract_panel(page, drawings, panel):
     frame = find_frame(drawings, panel["frame"], kinds=("f", "fs") if fill else ("s", "fs"), quads=fill,
                        any_re=panel.get("frame_any_re", False))
     grid = gridlines(drawings, frame, crossing=panel.get("grid_crossing", False), ticks=panel.get("ticks", False),
-                     width=panel.get("grid_width"))
+                     width=panel.get("grid_width"), tick_edges=panel.get("tick_edges"),
+                     tick_straddle=panel.get("tick_straddle", False))
     for ign in panel.get("grid_ignore", []):  # a stray line drawn next to a gridline
         if not ign.get("reason"):
             raise ValueError("grid_ignore needs a reason")

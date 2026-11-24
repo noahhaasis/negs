@@ -137,7 +137,7 @@ struct Stock: Identifiable, Sendable {
 /// thumbnail with one keeps it.
 enum NegsBuiltFilms {
     static let key = "showNegsBuiltFilms"
-    static let hint = "Films Negs prepared itself from Fujifilm’s and Kodak’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC and 400VC; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it."
+    static let hint = "Films Negs prepared itself from Fujifilm’s and Kodak’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC, 400VC and EXR 100T; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it."
 
     static func lists(_ stock: Stock, shown: Bool) -> Bool { shown || !stock.negsBuilt }
 }

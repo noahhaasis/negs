@@ -1095,6 +1095,23 @@
    ]
   },
   {
+   "stock": "kodak_exr_100t",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
    "stock": "kodak_gold_200",
    "use": "still",
    "antihalation": "weak",
