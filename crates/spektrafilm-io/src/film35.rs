@@ -220,8 +220,6 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("kodak_kodachrome_64", Kind::Slide, EdgePrint::Still(&["KODAK KR"])),
     ("kodak_kodacolor_100", Kind::Negative, EdgePrint::Still(&["KODAK KODACOLOR 100"])),
     ("kodak_portra_160", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 160"])),
-    ("kodak_portra_160nc", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 160NC"])),
-    ("kodak_portra_160vc", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 160VC"])),
     ("kodak_portra_400", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 400"])),
     ("kodak_portra_400nc", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 400NC"])),
     ("kodak_portra_400vc", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 400VC"])),

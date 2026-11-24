@@ -1,17 +1,21 @@
 # Kodak E-190 source record — 24 November 2026
 
-Four Kodak still colour negatives, the first-generation Portra NC and VC films, prepared for Negs from **KODAK PROFESSIONAL PORTRA Films, technical data E-190, November 1998** (Minor Revision 11-98; `e190.pdf`, SHA-256 `fa3e715bc7057e70a755a25b5535abf47a50ce868fe86e8b7c7732d51113cc23`): **Portra 160NC**, **160VC**, **400NC** and **400VC**. The procedure is [docs/adding-film-stocks.md](../../../docs/adding-film-stocks.md); the tools are in [tools/film_profiles](../../../tools/film_profiles).
+Four Kodak still colour negatives, the first-generation Portra NC and VC films, prepared for Negs from **KODAK PROFESSIONAL PORTRA Films, technical data E-190, November 1998** (Minor Revision 11-98; `e190.pdf`, SHA-256 `fa3e715bc7057e70a755a25b5535abf47a50ce868fe86e8b7c7732d51113cc23`): **Portra 160NC**, **160VC**, **400NC** and **400VC**; the two 400s ship (see below). The procedure is [docs/adding-film-stocks.md](../../../docs/adding-film-stocks.md); the tools are in [tools/film_profiles](../../../tools/film_profiles).
 
 | Stock | PDF page | Alignment chosen | Grey ramp through Portra Endura | Profile |
 |---|---|---|---|---|
-| Portra 160NC | 8 | mid | 0.044 | `kodak_portra_160nc` |
-| Portra 160VC | 9 | green | 0.053 | `kodak_portra_160vc` |
+| Portra 160NC | 8 | mid | 0.044 | not shipped (below) |
+| Portra 160VC | 9 | green | 0.053 | not shipped (below) |
 | Portra 400NC | 10 | green | 0.046 | `kodak_portra_400nc` |
 | Portra 400VC | 11 | green | 0.055 | `kodak_portra_400vc` |
 
 For comparison on the same ramp (`calibration/ramps_portra_endura/`): Gold 200 0.035, Portra 400 0.048, Portra 800 0.081, Ultramax 400 0.098, Ektar 100 0.100, Portra 160 0.194.
 
 These are the 1998 emulsions, not the shipped Portra 160 and 400 (spektrafilm, from the 2010s data sheets). The NC and VC sheets of each speed print the same spectral-sensitivity chart (the traces agree to 0.0001 log units), so each pair shares its sensitivity and adaptation window; their characteristic curves and dye spectra differ.
+
+## Why only the 400s ship (24 November 2026)
+
+All four pass every check, but in Negs each 160 renders almost exactly like the 400 of its line: ColorChecker through Portra Endura, neutral filters solved per film, mean ΔE00 0.4 (NC) and 0.5 (VC), worst 2.0, at −1, 0 and +1 EV. Kodak matched the speeds for printing, and E-190 prints one sensitivity chart per speed for both lines. Shipping both speeds would add two tiles that look like their neighbours; the remaining difference is grain (PGI 30/33 against 41/43), which the grain control covers. For scale, NC against VC is 1.7 and the shipped Portra 160 against Portra 400 is 1.6. The 160s' curves, traces and build reports stay here; finalizing them is all it takes to ship them.
 
 ## What is here
 
@@ -34,10 +38,10 @@ An independent vector trace of E-190's May 2003 edition (Toni-Chan/spektrafilm, 
 
 ## Recorded exceptions and choices
 
-- **Grain.** E-190 gives no RMS granularity, only a Print Grain Index (4x6 from 135: 160NC 30, 160VC 33, 400NC 41, 400VC 43), which Kodak says cannot be converted. The grain presets copy the shipped Portra of the same speed (3.5 and 4.5); NC and VC differ by less than one just-noticeable step (4 PGI).
+- **Grain.** E-190 gives no RMS granularity, only a Print Grain Index (4x6 from 135: 160NC 30, 160VC 33, 400NC 41, 400VC 43), which Kodak says cannot be converted. The grain presets copy the shipped Portra 400 (4.5); NC and VC differ by less than one just-noticeable step (4 PGI).
 - **Dye reconstruction.** 400NC and 400VC reproduce D-mid within 0.038 and 0.034 D (worst at 405 nm, the chart's blue edge), over 0.03 D; weighted per Portra Endura channel within 0.005 and 0.006 D, under the approved 0.01 D. The 160s pass outright (0.023, 0.022 D).
 - **Antihalation** strong and **target print** Portra Endura, as the shipped Portras.
-- **Edge prints** KODAK PORTRA 160NC and so on, by analogy with the shipped Portras; not checked against scans.
+- **Edge prints** KODAK PORTRA 400NC and 400VC, by analogy with the shipped Portras; not checked against scans.
 
 ## Rebuild
 
