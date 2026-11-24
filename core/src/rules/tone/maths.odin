@@ -47,8 +47,12 @@ clamp :: #force_inline proc "contextless" (x, lo, hi: f64) -> f64 {
 	return v
 }
 
-// f64::powi as compiler-rt's __powidf2 does it.
+// f64::powi as LLVM lowers it: compiler-rt's __powidf2 (by squaring), but
+// on Windows (MSVC has no __powidf2) the CRT's pow(a, f64(b)).
 powi :: proc "contextless" (a: f64, b: i32) -> f64 {
+	when ODIN_OS == .Windows {
+		return libc.pow(a, f64(b))
+	}
 	recip := b < 0
 	x, n := a, b
 	r := 1.0

@@ -1,6 +1,7 @@
 // f64's methods as Rust has them: round half away from zero, floor, trunc,
 // log10 (libm), min/max that pass over a NaN (libm's fmin/fmax), clamp,
-// powi (compiler-rt's __powidf2, which Rust's powi calls), and `as` casts.
+// powi (what LLVM makes of Rust's powi: compiler-rt's __powidf2, or pow on
+// Windows), and `as` casts.
 package state
 
 import "core:c/libc"
@@ -24,8 +25,13 @@ clamp_f64 :: proc "contextless" (x, low, high: f64) -> f64 {
 	return x
 }
 
-// f64::powi: compiler-rt's __powidf2, by squaring.
+// f64::powi as LLVM lowers it: compiler-rt's __powidf2 (by squaring), but
+// on Windows (MSVC has no __powidf2) the CRT's pow(a, f64(n)). They differ
+// once the power isn't exact (10^301 by a few ULPs).
 powi :: proc "contextless" (a: f64, n: i32) -> f64 {
+	when ODIN_OS == .Windows {
+		return libc.pow(a, f64(n))
+	}
 	a := a
 	b := n
 	recip := b < 0
