@@ -1458,6 +1458,189 @@ const char *negs_state_constant(uint32_t which);
 /* Phase 4c: batch, match cache, rendered preview                       */
 /* ------------------------------------------------------------------ */
 
+/* std::path's rules, as the batch and the caches use them. `style`: 0 this
+ * platform's, 1 Unix, 2 Windows. `op`: 0 file_name, 1 file_stem,
+ * 2 extension, 3 parent (0 for None), 4 with_extension(path, arg),
+ * 5 join(path, arg), 6 display() (String::from_utf8_lossy). */
+uint8_t negs_caches_path(uint32_t op, uint32_t style, const uint8_t *path, size_t path_len, const uint8_t *arg,
+                         size_t arg_len, negs_buf_t *out);
+/* Duration::as_secs_f64. */
+double negs_caches_secs_f64(uint64_t secs, uint32_t nanos);
+
+/* Batch export (windows/src/batch.rs). Kinds by table: 0 Naming's keys,
+ * 1 its titles, 2 Existing's keys, 3 its titles, 4 Status's keys,
+ * 5 OutputFormat's keys, 6 Edge's keys, 7 ExportEngine's keys,
+ * 8 OutputFormat's extensions; each in its ALL order. Static; NULL past
+ * them. negs_batch_from_key: the index of `key` in table 0, 2, 5, 6 or 7,
+ * else the default (0; ExportEngine::from_key: Fast unless "reference"). */
+const char *negs_batch_key(uint32_t table, uint32_t index);
+uint32_t negs_batch_from_key(uint32_t table, const uint8_t *key, size_t len);
+
+/* SaveSettings. */
+typedef struct negs_batch_save_t {
+    uint32_t bit_depth;
+    uint64_t color_space;
+    uint32_t jpeg_quality;
+} negs_batch_save_t;
+
+/* Options::default() as serde_json writes it. */
+negs_buf_t negs_batch_options_default(void);
+/* Options::save() for these choices. */
+void negs_batch_options_save(const uint8_t *format, size_t len, uint32_t bit_depth, uint64_t color_space,
+                             uint32_t jpeg_quality, negs_batch_save_t *out);
+/* Options::file_name: `naming` a Naming index, `format` the format's key. */
+negs_buf_t negs_batch_file_name(uint32_t naming, const uint8_t *custom, size_t custom_len, const uint8_t *name,
+                                size_t name_len, const uint8_t *film, size_t film_len, const uint8_t *format,
+                                size_t format_len);
+/* batch_name(photo, title), by this platform's path rules. */
+negs_buf_t negs_batch_name(const uint8_t *photo, size_t photo_len, const uint8_t *title, size_t title_len);
+/* numbered's `n`th candidate, "{stem} {n}.{ext}": the host asks for
+ * n = 2, 3, ... until one isn't taken. */
+negs_buf_t negs_batch_numbered_name(const uint8_t *file_name, size_t len, uint64_t n);
+/* unique(names) as a JSON array of strings. `names` is borrowed. */
+uint8_t negs_batch_unique(const negs_str_t *names, size_t count, negs_buf_t *out);
+/* matched's exposure: `exposure` the JSON at params.exposure.exposure
+ * (null when absent), `old` the state's match (has_old 0 for none), `ev`
+ * the new one. 1 and the new total's JSON when it moved by 0.05 EV or
+ * more; 0 when nothing changes. */
+uint8_t negs_batch_matched_exposure(const uint8_t *exposure, size_t len, uint8_t has_old, double old, double ev,
+                                    negs_buf_t *total);
+/* matched(state, ev, limited, inputs) on a state's JSON: 1 and the
+ * matched state's JSON, 0 for None (or a state serde wouldn't read). */
+uint8_t negs_batch_matched(const uint8_t *state, size_t len, double ev, uint8_t limited, const uint8_t *inputs,
+                           size_t inputs_len, negs_buf_t *out);
+
+/* A batch's photographs by status (Status indices), borrowed. */
+typedef struct negs_batch_run_t {
+    const uint8_t *statuses;
+    size_t count;
+    uint8_t running;
+    uint8_t cancelled;
+} negs_batch_run_t;
+
+/* Run's counts: total, the waiting, finished(), exported(), failures,
+ * skipped(), fraction(), rule_parts() and needs_attention(). */
+typedef struct negs_batch_counts_t {
+    uint64_t total;
+    uint64_t remaining;
+    uint64_t finished;
+    uint64_t exported;
+    uint64_t failed;
+    uint64_t skipped;
+    double fraction;
+    double exported_part;
+    double other_part;
+    uint8_t needs_attention;
+} negs_batch_counts_t;
+
+void negs_batch_run_counts(const negs_batch_run_t *run, negs_batch_counts_t *out);
+/* Run::title, ::outcome_words (1 and `failed` when it has the second
+ * part), ::finished_words (with the destination folder), ::progress_words
+ * (with the Lightroom key, has_lightroom 0 for None). */
+negs_buf_t negs_batch_run_title(const negs_batch_run_t *run);
+uint8_t negs_batch_run_outcome(const negs_batch_run_t *run, negs_buf_t *words, negs_buf_t *failed);
+negs_buf_t negs_batch_run_finished(const negs_batch_run_t *run, const uint8_t *destination, size_t len);
+negs_buf_t negs_batch_run_progress(const negs_batch_run_t *run, const uint8_t *lightroom, size_t len,
+                                   uint8_t has_lightroom);
+/* lightroom_title(key). Static. */
+const char *negs_batch_lightroom_title(const uint8_t *key, size_t len);
+/* exporting(finished, total, lightroom): `lightroom` the title. */
+negs_buf_t negs_batch_exporting(uint64_t finished, uint64_t total, const uint8_t *lightroom, size_t len,
+                                uint8_t has_lightroom);
+/* message(count, engine, ExportSize { edge, pixels }, save, preview_space):
+ * engine an ExportEngine index, edge an Edge index. */
+negs_buf_t negs_batch_message(uint64_t count, uint32_t engine, uint32_t edge, uint32_t pixels,
+                              const negs_batch_save_t *save, const uint8_t *preview_space, size_t len);
+
+/* The journal (active-export.json). negs_batch_journal_rewrite: the
+ * journal serde would read from `text`, as serde_json writes it (0 when it
+ * isn't one). negs_batch_journal_write: Journal::write of the journal in
+ * `json`: staged beside `path` and moved over it; 0 written, 1 failed
+ * (`error` says why), 2 `json` isn't a journal the core reads (a NaN in
+ * it: write the host's bytes with negs_batch_journal_write_bytes, which
+ * stages them the same way). negs_batch_journal_read: Journal::read, as
+ * JSON (0 for None). */
+uint8_t negs_batch_journal_rewrite(const uint8_t *text, size_t len, negs_buf_t *out);
+uint8_t negs_batch_journal_write(const uint8_t *path, size_t path_len, const uint8_t *json, size_t len,
+                                 negs_buf_t *error);
+uint8_t negs_batch_journal_write_bytes(const uint8_t *path, size_t path_len, const uint8_t *bytes, size_t len,
+                                       negs_buf_t *error);
+uint8_t negs_batch_journal_read(const uint8_t *path, size_t len, negs_buf_t *out);
+void negs_batch_journal_remove(const uint8_t *path, size_t len);
+
+/* The brightness-match cache (windows/src/match_cache.rs).
+ * negs_match_key: key(file, film, paper, params, engine), 64 hex digits
+ * (0 when the file can't be stamped). negs_match_engine_stamp:
+ * engine_stamp(version, helper, data). */
+uint8_t negs_match_key(const uint8_t *file, size_t file_len, const uint8_t *film, size_t film_len,
+                       const uint8_t *paper, size_t paper_len, const uint8_t *params, size_t params_len,
+                       const uint8_t *engine, size_t engine_len, negs_buf_t *out);
+negs_buf_t negs_match_engine_stamp(const uint8_t *version, size_t version_len, const uint8_t *helper,
+                                   size_t helper_len, const uint8_t *data, size_t data_len);
+/* MatchCache's LIMIT. */
+uint64_t negs_match_cache_limit(void);
+
+/* One MatchCache: entries loaded from `file` on first use, the least
+ * recently used dropped past `limit`. The caller owns it until
+ * negs_match_cache_free and locks it: one thread at a time. `now` is the
+ * host's clock, seconds since 1970. */
+typedef struct negs_match_cache_t negs_match_cache_t;
+
+negs_match_cache_t *negs_match_cache_new(const uint8_t *file, size_t len, uint64_t limit);
+void negs_match_cache_free(negs_match_cache_t *cache);
+/* solved(key): 1 with `ev` and `limited`, touching the entry; 0 when it
+ * has none. */
+uint8_t negs_match_cache_solved(negs_match_cache_t *cache, const uint8_t *key, size_t len, double now, double *ev,
+                                uint8_t *limited);
+/* store(key, ev, limited): 1 when the host should schedule a write (none
+ * was scheduled). */
+uint8_t negs_match_cache_store(negs_match_cache_t *cache, const uint8_t *key, size_t len, double ev, uint8_t limited,
+                               double now);
+/* flush's locked half: 1 and the entries file's bytes when dirty (marking
+ * it clean); 0 when there's nothing to write. negs_match_cache_write: the
+ * unlocked half, staged and moved over `file`; failures ignored. */
+uint8_t negs_match_cache_flush_bytes(negs_match_cache_t *cache, negs_buf_t *out);
+void negs_match_cache_write(const uint8_t *file, size_t file_len, const uint8_t *bytes, size_t len);
+uint64_t negs_match_cache_count(negs_match_cache_t *cache);
+
+/* The rendered preview (windows/src/rendered_preview.rs). */
+#define NEGS_PREVIEW_RENDERED 1u
+
+/* Frame without its pixels. */
+typedef struct negs_preview_frame_t {
+    uint32_t width;
+    uint32_t height;
+    double photo_width;
+    double photo_height;
+    double source_width;
+    double source_height;
+    double working_width;
+    double working_height;
+    uint8_t raw;
+    uint8_t lens_correction_supported;
+} negs_preview_frame_t;
+
+/* key(source, helper, data, state): `state` an EditState's JSON, or with
+ * NEGS_PREVIEW_RENDERED the JSON of its rendered() value already. 0 when a
+ * file can't be stamped (no birth time either) or the state isn't one. */
+uint8_t negs_preview_key(const uint8_t *source, size_t source_len, const uint8_t *helper, size_t helper_len,
+                         const uint8_t *data, size_t data_len, const uint8_t *state, size_t state_len, uint32_t flags,
+                         negs_buf_t *out);
+/* checksum: DefaultHasher (SipHash-1-3, zero keys) over the bytes as
+ * `[u8]::hash` feeds them. */
+uint64_t negs_preview_checksum(const uint8_t *bytes, size_t len);
+/* read(file, key): 0 with the frame, its display space and the whole file
+ * (the pixels from `pixels_offset`); else why: 1 io, 2 size, 3 header,
+ * 4 header not serde's, 5 not this key or size, 6 photograph size,
+ * 7 pixels. */
+uint8_t negs_preview_read(const uint8_t *file, size_t file_len, const uint8_t *key, size_t key_len,
+                          negs_preview_frame_t *frame, negs_buf_t *display_space, negs_buf_t *file_bytes,
+                          size_t *pixels_offset);
+/* write(file, key, frame): 0, or the OS error (-1 a NUL in the path). */
+int32_t negs_preview_write(const uint8_t *file, size_t file_len, const uint8_t *key, size_t key_len,
+                           const negs_preview_frame_t *frame, const uint8_t *display_space, size_t display_len,
+                           const uint8_t *pixels, size_t len);
+
 #ifdef __cplusplus
 }
 #endif
