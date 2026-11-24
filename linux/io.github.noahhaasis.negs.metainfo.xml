@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.19.0" date="2026-11-24">
+      <description>
+        <p>Fujifilm Reala Ace, Kodak Portra 400NC and 400VC, and four Fujifilm Eterna-CP print films, prepared from datasheets. Linux gains Settings › Show Negs-built films, with the 17 Fujifilm films from 0.18.0 too.</p>
+      </description>
+    </release>
     <release version="0.18.0" date="2026-11-21">
       <description>
         <p>LibRaw fallback opens Nikon HE and HE★ and other RAW files rawler can't read. On Windows: the Mac's interface, themes, film and paper tray, folder library, strip and grid, Compare, batch export and Open in Lightroom. Plus 17 Fujifilm films from datasheets behind Settings › Show Negs-built films on Mac, Windows and Web.</p>

@@ -43,6 +43,9 @@ pub struct Preferences {
     /// Changing the film leaves the paper as it is, rather than switching to
     /// the film's own paper.
     pub keep_paper: bool,
+    /// Settings › Show Negs-built films (the Mac's `showNegsBuiltFilms`), off
+    /// until chosen.
+    pub show_negs_built_films: bool,
     pub tab_chosen: bool,
     pub fresh_edits: bool,
     pub match_new_photos: bool,
@@ -84,6 +87,7 @@ impl Default for Preferences {
             last_save_folder: None,
             previews: true,
             keep_paper: false,
+            show_negs_built_films: false,
             tab_chosen: false,
             fresh_edits: true,
             match_new_photos: true,
@@ -276,6 +280,22 @@ impl Editor {
             }
         ));
         group.add(&keep_paper);
+        let negs_built = adw::SwitchRow::builder()
+            .title("Show Negs-built films")
+            .subtitle(crate::catalog::NEGS_BUILT_HINT)
+            .active(self.preferences.borrow().show_negs_built_films)
+            .build();
+        negs_built.set_tooltip_text(Some("List the films and print films Negs prepared itself from datasheets. Off, photos already using one keep it."));
+        negs_built.connect_active_notify(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |r| {
+                ui.preferences.borrow_mut().show_negs_built_films = r.is_active();
+                crate::stock_browser::refresh_favorites(&ui);
+                crate::stock_browser::pump(&ui);
+            }
+        ));
+        group.add(&negs_built);
         let fresh = adw::ComboRow::builder()
             .title("New photographs")
             .subtitle("Film, paper, Image Size and output colour stay either way")

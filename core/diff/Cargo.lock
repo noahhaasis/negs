@@ -922,11 +922,11 @@ version = "0.0.0"
 
 [[package]]
 name = "negs-library"
-version = "0.18.0"
+version = "0.19.0"
 
 [[package]]
 name = "negs-marks"
-version = "0.18.0"
+version = "0.19.0"
 
 [[package]]
 name = "negs-media-oracle"
@@ -1408,7 +1408,7 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -1424,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "byteorder",
  "half",
