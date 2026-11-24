@@ -184,7 +184,7 @@ preview_key :: proc "c" (
 	} else {
 		s, err := state.parse(host_bytes(state_json, state_len), context.temp_allocator)
 		if err != .None {
-			return 0
+			return 2
 		}
 		text, ok = preview.key(src, hlp, dat, s, context.temp_allocator)
 	}

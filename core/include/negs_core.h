@@ -1622,7 +1622,8 @@ typedef struct negs_preview_frame_t {
 
 /* key(source, helper, data, state): `state` an EditState's JSON, or with
  * NEGS_PREVIEW_RENDERED the JSON of its rendered() value already. 0 when a
- * file can't be stamped (no birth time either) or the state isn't one. */
+ * file can't be stamped (no birth time either), 2 when the core doesn't
+ * read the state (a NaN serde wrote as null: send its rendered() value). */
 uint8_t negs_preview_key(const uint8_t *source, size_t source_len, const uint8_t *helper, size_t helper_len,
                          const uint8_t *data, size_t data_len, const uint8_t *state, size_t state_len, uint32_t flags,
                          negs_buf_t *out);
