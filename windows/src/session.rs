@@ -2,474 +2,52 @@
 //! files in `%APPDATA%\Negs`; the catalog cache lives in `%LOCALAPPDATA%\Negs`.
 //! `NEGS_PROFILE_DIR` moves all three, for tests and benchmarks.
 //! Mirrors `Session.swift` and the macOS app's UserDefaults keys.
+//!
+//! On the shared core: `negs_core_rules::session` (core/src/settings/session)
+//! reads and writes the files. EditorSession and Preferences are its
+//! generic structs with this app's EditState and LibraryPreferences; the
+//! Rust original is frozen in core/diff/oracle/session.rs.
 
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail, ensure};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use anyhow::Result;
 
-use crate::crop::MAX_ANGLE;
+#[cfg(test)]
 use crate::state::EditState;
 
-pub fn settings_dir() -> PathBuf {
-    if let Some(dir) = profile_override() {
-        return dir;
-    }
-    PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("Negs")
-}
-
-pub fn cache_dir() -> PathBuf {
-    if let Some(dir) = profile_override() {
-        return dir.join("Cache");
-    }
-    PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join("Negs")
-}
-
-/// `NEGS_PROFILE_DIR`, or in test builds a scratch folder, so no test can ever
-/// write the real profile in `%APPDATA%` (one did, through a run without the
-/// variable set).
-fn profile_override() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("NEGS_PROFILE_DIR") {
-        return Some(PathBuf::from(dir));
-    }
-    if cfg!(test) {
-        return Some(std::env::temp_dir().join(format!("negs-test-profile-{}", std::process::id())));
-    }
-    None
-}
-
-/// Writes `data` to a sibling temporary file and renames it over `path`, so a
-/// crash never leaves half a file.
-pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let staging = path.with_extension("tmp");
-    std::fs::write(&staging, data)?;
-    crate::platform::replace_file(&staging, path)
-}
+#[allow(unused_imports)]
+pub use negs_core_rules::session::{CatalogCache, DEFAULT_FAVORITE_FILMS, SCOPE_HEIGHTS, cache_dir, same_path, settings_dir, write_atomic};
 
 /// Small, versioned editing state. Pixels, caches and undo history are not saved.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditorSession {
-    pub schema: u32,
-    /// The photograph's path. There is no bookmark on Windows.
-    pub source: PathBuf,
-    pub state: EditState,
-    #[serde(default = "yes")]
-    pub inspector_visible: bool,
-    #[serde(default = "yes")]
-    pub fit_image: bool,
-    /// The photograph's sidecar keeps its edits, and `state` is only what
-    /// was on screen. Sessions from before the library lack it: their state
-    /// is the photograph's edits, which go to a sidecar without any.
-    #[serde(default)]
-    pub library: bool,
-}
+pub type EditorSession = negs_core_rules::session::EditorSession<crate::state::EditState>;
 
-fn yes() -> bool {
-    true
-}
+/// Preferences, like the macOS app's UserDefaults: one JSON object in
+/// `settings.json`, read once at launch and written when a value changes.
+pub type Preferences = negs_core_rules::session::Preferences<crate::model::LibraryPreferences>;
 
-impl EditorSession {
-    /// 2: the DIR gammas and halation baseline are null unless set, and a set
-    /// value beats the film's preset. Schema 1 stored values for them that the
-    /// engine ignored and nothing could set, so `migrate` drops them.
-    pub const SCHEMA: u32 = 2;
-
-    pub fn migrate(&mut self) {
-        if self.schema != 1 {
-            return;
-        }
-        for path in crate::state::DIR_HALATION_STOCK_PATHS {
-            crate::json::set(&mut self.state.params, path, serde_json::Value::Null);
-        }
-        self.schema = Self::SCHEMA;
-    }
-
-    pub fn validate(&self) -> Result<()> {
-        let crop = &self.state.crop;
-        let values = [crop.rect.x, crop.rect.y, crop.rect.width, crop.rect.height, crop.custom.width, crop.custom.height, crop.angle];
-        let rotation = self.state.value("io.rotate_cw").as_f64().unwrap_or(-1.0);
-        let ok = self.schema == Self::SCHEMA
-            && self.source.is_absolute()
-            && values.iter().all(|v| v.is_finite())
-            && crop.rect.x >= 0.0
-            && crop.rect.y >= 0.0
-            && crop.rect.width > 0.0
-            && crop.rect.height > 0.0
-            && crop.rect.max_x() <= 1.000001
-            && crop.rect.max_y() <= 1.000001
-            && crop.angle.abs() <= MAX_ANGLE
-            && crop.custom.width > 0.0
-            && crop.custom.height > 0.0
-            && self.state.params.is_object()
-            && (0.0..=3.0).contains(&rotation)
-            && rotation.round() == rotation;
-        ensure!(ok, "The previous editing session could not be restored.");
-        Ok(())
-    }
-}
-
+/// The session file, `session.json` in the settings folder by default.
 pub struct SessionStore {
-    pub file: PathBuf,
+    pub file: std::path::PathBuf,
 }
 
 impl Default for SessionStore {
     fn default() -> Self {
-        Self { file: settings_dir().join("session.json") }
+        Self { file: negs_core_rules::session::SessionStore::default().file }
     }
 }
 
 impl SessionStore {
+    fn store(&self) -> negs_core_rules::session::SessionStore {
+        negs_core_rules::session::SessionStore { file: self.file.clone() }
+    }
+
     pub fn load(&self) -> Result<Option<EditorSession>> {
-        let Ok(metadata) = std::fs::metadata(&self.file) else { return Ok(None) };
-        if metadata.len() > 1_048_576 {
-            bail!("The previous editing session is too large to restore.");
-        }
-        let data = std::fs::read(&self.file)?;
-        let mut session: EditorSession =
-            serde_json::from_slice(&data).context("The previous editing session could not be restored.")?;
-        session.migrate();
-        session.validate()?;
-        if !session.source.is_file() {
-            bail!("The previous photograph is unavailable. Open a photograph to continue.");
-        }
-        Ok(Some(session))
+        self.store().load()
     }
 
     pub fn save(&self, session: &EditorSession) -> Result<()> {
-        session.validate()?;
-        write_atomic(&self.file, &serde_json::to_vec(session)?)
-    }
-}
-
-/// Preferences, like the macOS app's UserDefaults: one JSON object in
-/// `settings.json`, read once at launch and written when a value changes.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct Preferences {
-    pub recent_files: Vec<PathBuf>,
-    pub filmstrip_visible: bool,
-    /// The grid's row height (its Size).
-    pub grid_size: f64,
-    /// Comma-separated titles of the expanded groups.
-    pub expanded_adjustments: String,
-    pub inspector_tab: String,
-    /// A tab was clicked. Before Prep every settings file saved "Lab" as the
-    /// default, so without this a "Lab" opens on Prep, as on the Mac.
-    pub inspector_tab_chosen: bool,
-    /// What the adjustments column shows: "Adjustments" or "Presets".
-    pub inspector_pane: String,
-    pub export_engine: String,
-    pub output_format: String,
-    pub export_edge: String,
-    pub export_edge_pixels: u32,
-    /// The colour space chosen for saves, as colour names it.
-    pub color_space: String,
-    pub png_bit_depth: u32,
-    pub tiff_bit_depth: u32,
-    pub jpeg_quality: u32,
-    pub last_save_folder: Option<PathBuf>,
-    /// `WINDOWPLACEMENT` of the editor: show command and normal rectangle in
-    /// workspace coordinates.
-    pub window: Option<[i32; 5]>,
-    /// The normal rectangle's size in pixels and the DPI it was saved at:
-    /// at the same DPI the window reopens at exactly that size (the DIPs in
-    /// `window` round a pixel off at 125 % and 150 %).
-    pub window_pixels: Option<[i32; 3]>,
-    /// The adjustments column's width, in DIPs.
-    pub inspector_width: f64,
-    pub check_for_updates: bool,
-    /// The last Image Size Longest side chosen, offered when switching to it
-    /// again. Never switches the mode by itself.
-    pub image_size_long_side: Option<u32>,
-    /// Settings › Film, paper and preset previews (the Mac's `previews`).
-    /// Old settings files lack it: on.
-    pub previews: bool,
-    /// The paper lock on "printed on", once Settings › Keep paper when changing film (the Mac's `keep_paper`).
-    /// Old settings files lack it: off, the paper follows the film.
-    #[serde(rename = "keep_paper")]
-    pub keep_paper: bool,
-    /// The tone graph's channel: "rgb", "r", "g" or "b".
-    pub tone_graph_channel: String,
-    /// Start fresh (true, the default) or keep the previous photograph's
-    /// edits (false, as earlier versions did), for a photograph opened
-    /// without a library. No longer in Settings: in a library the Mac's New
-    /// photographs film and paper decide. Kept so old settings files parse.
-    #[serde(rename = "freshEditsForNewPhotos")]
-    pub fresh_edits: bool,
-    /// Settings › Match new photographs to camera brightness: whether a new
-    /// photograph starts with Prep › Match camera brightness on.
-    #[serde(rename = "autoPlaceNewImages")]
-    pub match_new_photos: bool,
-    /// Settings › Limit preview to 12 MP. A preference, not an edit, so Undo
-    /// and Reset Adjustments leave it. None until set: a session from before
-    /// it was a preference then lends its own value.
-    pub limit_preview: Option<bool>,
-    /// Settings › Use less memory for export: grain channels one at a time.
-    /// Only exports read it; previews always develop the channels together.
-    pub low_memory_export: bool,
-    /// Where Lightroom and Lightroom Classic were last found (ticket 48), so
-    /// the menus are right before detection runs after launch.
-    pub lightroom_cloud: Option<PathBuf>,
-    pub lightroom_classic: Option<PathBuf>,
-    /// View › Show All Controls (once the Lab's Advanced controls). Off, the
-    /// Lab shows each module's basics and anything changed from its default.
-    pub lab_all_controls: bool,
-    /// The modules (by title) and sections ("section:Print") whose "N more"
-    /// was clicked, comma-separated (`InspectorReveal`).
-    pub more_adjustments: String,
-    /// The scope above the tabs: "Histogram" or "Waveform".
-    pub scope_mode: String,
-    /// The scope's height in DIPs, dragged with the handle below it.
-    pub scope_height: f64,
-    /// Starred stock ids, in the order starred. Ids the catalog no longer has
-    /// are kept, in case it brings them back.
-    pub favorite_films: Vec<String>,
-    pub favorite_papers: Vec<String>,
-    /// Settings › Custom viewer background (the Mac's key). Off, the canvas
-    /// follows the light or dark theme.
-    #[serde(rename = "viewerBackgroundCustom")]
-    pub viewer_background_custom: bool,
-    /// The custom colour behind the photograph, "#rrggbb" in sRGB.
-    #[serde(rename = "viewerBackgroundColor")]
-    pub viewer_background: String,
-    /// Settings › Look › Viewer › Sheet, as the Mac stores it ("theme",
-    /// "grey22", …). Old settings files lack it: the sheet nearest the
-    /// custom background when that was on, else the theme's own.
-    pub viewer_sheet: String,
-    /// View › Theme, as the macOS app stores it ("darkroom", "plain", …).
-    /// Old settings files lack it: Darkroom. Empty for a new user until
-    /// launch picks Plain or Plain dark, as Windows is (`ui::theme`).
-    #[serde(default = "darkroom")]
-    pub app_theme: String,
-    /// The library's: its filter, Copy Edits…'s groups, Advance After
-    /// Rating, New photographs' film and paper, under the Mac's keys.
-    #[serde(flatten)]
-    pub library: crate::model::LibraryPreferences,
-    /// Settings › Fotufilm films, as the Mac stores it: "all",
-    /// "datasheets" or "off".
-    pub fotufilm_films: String,
-    /// Settings › Show Negs-built films (the Mac's `showNegsBuiltFilms`), off
-    /// by default.
-    pub show_negs_built_films: bool,
-    /// Enlarger › Shifts move, as the Mac stores it: "separate",
-    /// "together" or "opposite".
-    pub filter_shift_link: String,
-    /// Original ⌄, as the Mac stores them: "hold", "split" or
-    /// "sideBySide"; "raw" or "cameraJPEG".
-    pub original_mode: String,
-    pub original_reference: String,
-    /// The Settings tab last shown (the Mac's `settingsTab`).
-    pub settings_tab: String,
-    /// The batch dialog's File Name, its Custom text and If a File Exists,
-    /// under the Mac's keys (`batch::Naming`, `batch::Existing`).
-    pub batch_naming: String,
-    pub batch_custom_name: String,
-    pub batch_existing: String,
-}
-
-fn darkroom() -> String {
-    "darkroom".into()
-}
-
-/// Starred for new users, as on the web and the Mac; once they change the
-/// list, theirs is kept, even when empty.
-pub const DEFAULT_FAVORITE_FILMS: [&str; 4] = ["kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200"];
-
-/// The scope's heights in DIPs; it starts at the smallest, leaving the room
-/// to the controls.
-pub const SCOPE_HEIGHTS: (f64, f64) = (88.0, 420.0);
-
-impl Default for Preferences {
-    fn default() -> Self {
-        Self {
-            recent_files: vec![],
-            filmstrip_visible: true,
-            grid_size: crate::sheet_rules::GRID_DEFAULT,
-            expanded_adjustments: "Enlarger".into(),
-            inspector_tab: "Prep".into(),
-            inspector_tab_chosen: false,
-            inspector_pane: "Adjustments".into(),
-            export_engine: "fast".into(),
-            output_format: "png".into(),
-            export_edge: "full".into(),
-            export_edge_pixels: 2048,
-            color_space: "sRGB".into(),
-            png_bit_depth: 8,
-            tiff_bit_depth: 16,
-            jpeg_quality: 95,
-            last_save_folder: None,
-            window: None,
-            window_pixels: None,
-            // The Mac's column starts at its narrowest (`EditorWindowController`).
-            inspector_width: 340.0,
-            check_for_updates: true,
-            image_size_long_side: None,
-            previews: true,
-            keep_paper: false,
-            tone_graph_channel: "rgb".into(),
-            fresh_edits: true,
-            match_new_photos: true,
-            limit_preview: None,
-            low_memory_export: false,
-            lightroom_cloud: None,
-            lightroom_classic: None,
-            lab_all_controls: false,
-            more_adjustments: String::new(),
-            scope_mode: "Histogram".into(),
-            scope_height: SCOPE_HEIGHTS.0,
-            favorite_films: DEFAULT_FAVORITE_FILMS.iter().map(|s| s.to_string()).collect(),
-            favorite_papers: vec![],
-            viewer_background_custom: false,
-            // A neutral dark grey, near the dark theme's.
-            viewer_background: "#242424".into(),
-            viewer_sheet: String::new(),
-            app_theme: String::new(),
-            library: Default::default(),
-            fotufilm_films: "all".into(),
-            show_negs_built_films: false,
-            filter_shift_link: "separate".into(),
-            original_mode: "hold".into(),
-            original_reference: "raw".into(),
-            batch_naming: "nameFilm".into(),
-            batch_custom_name: "{name}_{film}".into(),
-            batch_existing: "number".into(),
-            settings_tab: "Photographs".into(),
-        }
-    }
-}
-
-impl Preferences {
-    /// The colour behind the photograph when Custom viewer background is on
-    /// and its colour reads.
-    pub fn custom_viewer_background(&self) -> Option<[u8; 3]> {
-        self.viewer_background_custom.then(|| crate::border::BorderColor::from_hex(&self.viewer_background)).flatten().map(|c| c.0)
-    }
-
-    fn path() -> PathBuf {
-        settings_dir().join("settings.json")
-    }
-
-    pub fn load() -> Self {
-        std::fs::read(Self::path()).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default()
-    }
-
-    pub fn save(&self) {
-        if let Ok(data) = serde_json::to_vec_pretty(self) {
-            let _ = write_atomic(&Self::path(), &data);
-        }
-    }
-
-    #[cfg(test)]
-    pub fn expanded(&self, title: &str) -> bool {
-        self.expanded_adjustments.split(',').any(|t| t == title)
-    }
-
-    pub fn set_expanded(&mut self, title: &str, open: bool) {
-        let mut titles: Vec<&str> = self.expanded_adjustments.split(',').filter(|t| !t.is_empty() && *t != title).collect();
-        if open {
-            titles.push(title);
-        }
-        self.expanded_adjustments = titles.join(",");
-    }
-
-    /// Shows or folds back `key`'s extra controls; kept sorted, as on the Mac.
-    pub fn set_revealed(&mut self, key: &str, shown: bool) {
-        let mut keys: Vec<&str> = self.more_adjustments.split(',').filter(|t| !t.is_empty() && *t != key).collect();
-        if shown {
-            keys.push(key);
-        }
-        keys.sort_unstable();
-        self.more_adjustments = keys.join(",");
-    }
-
-    /// The tab the inspector shows. Post became Output; settings files from
-    /// before Prep that never chose a tab open on Prep.
-    pub fn tab(&self) -> &str {
-        match self.inspector_tab.as_str() {
-            "Post" | "Output" => "Output",
-            "Lab" if self.inspector_tab_chosen => "Lab",
-            _ => "Prep",
-        }
-    }
-
-    pub fn choose_tab(&mut self, tab: &str) {
-        self.inspector_tab = tab.into();
-        self.inspector_tab_chosen = true;
-    }
-
-    pub fn limits_preview(&self) -> bool {
-        self.limit_preview.unwrap_or(false)
-    }
-
-    pub fn favorites(&self, paper: bool) -> &[String] {
-        if paper { &self.favorite_papers } else { &self.favorite_films }
-    }
-
-    pub fn is_favorite(&self, id: &str, paper: bool) -> bool {
-        self.favorites(paper).iter().any(|f| f == id)
-    }
-
-    /// Stars `id` (last among the favourites) or unstars it.
-    pub fn toggle_favorite(&mut self, id: &str, paper: bool) {
-        let ids = if paper { &mut self.favorite_papers } else { &mut self.favorite_films };
-        match ids.iter().position(|f| f == id) {
-            Some(index) => {
-                ids.remove(index);
-            }
-            None => ids.push(id.to_string()),
-        }
-    }
-
-    /// Adds a photograph to the top of Recent (at most 10, no duplicates).
-    pub fn note_recent(&mut self, path: &Path) {
-        self.recent_files.retain(|p| !same_path(p, path));
-        self.recent_files.insert(0, path.to_path_buf());
-        self.recent_files.truncate(10);
-    }
-
-    /// The folder of the last save or export, if it still exists.
-    pub fn save_folder(&self) -> Option<&Path> {
-        self.last_save_folder.as_deref().filter(|p| p.is_dir())
-    }
-}
-
-/// Paths compare case-insensitively on Windows.
-pub fn same_path(a: &Path, b: &Path) -> bool {
-    a.as_os_str().to_string_lossy().to_lowercase() == b.as_os_str().to_string_lossy().to_lowercase()
-}
-
-/// The helper's last catalog, keyed by the helper binary and data folder, so a
-/// launch can show the stocks before the helper answers. The helper's own
-/// answer always replaces it.
-pub struct CatalogCache;
-
-impl CatalogCache {
-    fn path() -> PathBuf {
-        cache_dir().join("catalog.json")
-    }
-
-    fn key(helper: &Path, data: &Path) -> Option<String> {
-        let modified = std::fs::metadata(helper).ok()?.modified().ok()?;
-        let since = modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
-        Some(format!("{}|{since}|{}", helper.display(), data.display()))
-    }
-
-    pub fn load(helper: &Path, data: &Path) -> Option<Value> {
-        let key = Self::key(helper, data)?;
-        let entry: Value = serde_json::from_slice(&std::fs::read(Self::path()).ok()?).ok()?;
-        (entry["key"] == Value::from(key) && entry["catalog"]["protocol"].as_f64() == Some(1.0)).then(|| entry["catalog"].clone())
-    }
-
-    pub fn save(catalog: &Value, helper: &Path, data: &Path) {
-        if let Some(key) = Self::key(helper, data) {
-            let entry = serde_json::json!({"key": key, "catalog": catalog});
-            let _ = write_atomic(&Self::path(), entry.to_string().as_bytes());
-        }
+        self.store().save(session)
     }
 }
 
