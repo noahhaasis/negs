@@ -322,8 +322,15 @@ pub fn journal_write(path: &Path, json: &[u8]) -> Result<(), String> {
         error = empty();
         result = unsafe { sys::negs_batch_journal_write_bytes(p.as_ptr(), p.len(), json.as_ptr(), json.len(), &mut error) };
     }
+    if result == 0 {
+        let _ = take_buf(error);
+        return Ok(());
+    }
+    // The core says "{words} (os error {n})"; std's words for n are the
+    // platform's own (FormatMessageW's on Windows, which the core lacks).
     let message = string(error);
-    if result == 0 { Ok(()) } else { Err(message) }
+    let code = message.rsplit_once(" (os error ").and_then(|(_, n)| n.strip_suffix(')')?.parse::<i32>().ok());
+    Err(code.map_or(message, |n| std::io::Error::from_raw_os_error(n).to_string()))
 }
 
 /// `Journal::read`'s journal as serde_json writes it, None when there's
