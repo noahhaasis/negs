@@ -108,7 +108,10 @@ pub fn hint(unparsed: &str) -> String {
 }
 
 fn key_hint(action: &dyn Action, window: &Window) -> Option<String> {
-    let binding = window.highest_precedence_binding_for_action(action)?;
+    // As the app's own context has it: with the menu open, the focused
+    // context adds MenuBar, which the shortcuts leave out.
+    let context = gpui::KeyContext::parse("NegsApp").ok()?;
+    let binding = window.highest_precedence_binding_for_action_in_context(action, context)?;
     let keys = binding.keystrokes();
     (keys.len() == 1).then(|| hint(&keys[0].unparse()))
 }

@@ -780,11 +780,16 @@ impl NegsApp {
 
     /// Errors and notices as dialogs, and the taskbar's progress (Windows).
     fn windows_chrome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // The bench drives itself: nothing may wait for a button.
+        // Errors in a dialog as the Windows app's; elsewhere the status bar's
+        // banner shows them. The bench drives itself: nothing may wait for a
+        // button.
         if self.bench.is_none() {
-            if let Some(error) = self.model.error.take() {
-                win::show_error(window, cx, &error, true);
+            if cfg!(target_os = "windows") {
+                if let Some(error) = self.model.error.take() {
+                    win::show_error(window, cx, &error, true);
+                }
             }
+            // A notice (presets imported) has nowhere else to show.
             if let Some((message, explanation)) = self.model.notice.take() {
                 win::show_message(window, cx, &message, &explanation, None, false);
             }
