@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.20.0" date="2026-11-25">
+      <description>
+        <p>Kodak EXR 100T 5248, Agfa Portrait XPS 160 and Konica Minolta Professional 160, prepared from the manufacturers' datasheets behind Settings › Show Negs-built films.</p>
+      </description>
+    </release>
     <release version="0.19.0" date="2026-11-24">
       <description>
         <p>Fujifilm Reala Ace, Kodak Portra 400NC and 400VC, and four Fujifilm Eterna-CP print films, prepared from datasheets. Linux gains Settings › Show Negs-built films, with the 17 Fujifilm films from 0.18.0 too.</p>
