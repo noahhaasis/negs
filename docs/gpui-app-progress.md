@@ -107,7 +107,7 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
   - icon on the taskbar;
   - `WM_QUERYENDSESSION` → 1, and `WM_ENDSESSION` writing `session.json` and the window's place;
   - a second launch (exit 0) opening its photograph in the first window.
-- **Screenshots, every theme, both apps:** `C:\Users\Noah\.negs\scratch\gpui-p6\themes\<theme>-{gpui,win32}.png` on the PC, copied to the Mac scratchpad (see the Phase 6 report).
+- **Screenshots, every theme, both apps** (12, `<theme>-{gpui,win32}.png`), taken on the PC and kept in the session's Mac scratchpad (`…/scratchpad/pc/themes/`); the PC's scratch copies were removed with the worktree.
 
 ---
 
