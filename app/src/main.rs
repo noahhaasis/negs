@@ -11,6 +11,9 @@
 mod bench;
 mod canvas;
 mod color_display;
+mod compare_view;
+mod crop_view;
+mod facts;
 mod grid;
 mod host_gpui;
 mod inspector;
@@ -19,6 +22,8 @@ mod marks_gpui;
 mod marks_raster;
 mod motion;
 mod presets;
+mod print;
+mod sheet;
 mod status;
 mod strip;
 mod theme_gpui;
@@ -34,9 +39,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext, Application, Context, FocusHandle, Focusable, IntoElement, KeyBinding,
+    AnyElement, App, AppContext, Application, Context, FocusHandle, Focusable, IntoElement, KeyBinding,
     KeyDownEvent, Menu, MenuItem, MouseButton, MouseMoveEvent, MouseUpEvent, PathPromptOptions,
-    Point, SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div,
+    Pixels, Point, SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div,
     prelude::*, px, size,
 };
 use negs_app::host;
@@ -92,6 +97,26 @@ actions!(
         ShowPresets,
         ToggleGrid,
         ToggleFilmstrip,
+        ToggleCrop,
+        RotatePhoto,
+        FlipPhoto,
+        ToggleImageOnly,
+        ToggleCompare,
+        ZoomActual,
+        SheetTheme,
+        SheetDarkroom,
+        SheetBlack,
+        SheetCharcoal,
+        SheetGrey22,
+        SheetMiddleGrey,
+        SheetLightGrey,
+        SheetPaper,
+        ThemeDarkroom,
+        ThemeContactSheet,
+        ThemeLightTable,
+        ThemeDaylight,
+        ThemePlain,
+        ThemePlainDark,
         QuitApp,
     ]
 );
@@ -148,6 +173,13 @@ pub struct NegsApp {
     pub strip: StripState,
     pub grid: GridState,
     pub sprites: MarkSprites,
+    /// The camera's facts, for the caption.
+    pub facts: facts::Facts,
+    /// The crop panel's fields, and the angle slider's track.
+    pub crop_panel: crop_view::CropPanel,
+    pub crop_panel_track: (f32, f32),
+    /// Compare's pictures, frames and words.
+    pub compare: compare_view::CompareView,
     /// The library's context or filter menu, when open.
     pub menu: Option<MenuState>,
     /// `NEGS_FRAME_BENCH`: the app driving itself and timing its frames.
@@ -287,6 +319,10 @@ impl NegsApp {
             strip: StripState::default(),
             grid: GridState::default(),
             sprites: MarkSprites::default(),
+            facts: facts::Facts::default(),
+            crop_panel: crop_view::CropPanel::new(cx),
+            crop_panel_track: (0.0, 1.0),
+            compare: compare_view::CompareView::default(),
             menu: None,
             bench: bench::Bench::from_env(),
             startup,
@@ -336,6 +372,14 @@ impl NegsApp {
             self.canvas.invalidate_images();
             self.inspector.close_popovers();
             self.inspector.editing_slider = None;
+        }
+        // Cropping and closing the photograph end Image Only and upside down.
+        if self.model.cropping() || self.model.source.is_none() {
+            self.canvas.image_only = false;
+            self.canvas.upside_down = false;
+        }
+        if !self.model.cropping() {
+            self.canvas.crop_drag = None;
         }
         // Keep Original loaded whenever Before/After or Split mode is active.
         if (self.canvas.before_after || self.canvas.split_mode)
@@ -391,6 +435,14 @@ impl NegsApp {
         (name, summary.rating, summary.flag)
     }
 
+    /// View › Viewer Sheet: the sheet behind the photograph, remembered.
+    pub fn choose_sheet(&mut self, sheet: sheet::ViewerSheet, cx: &mut Context<Self>) {
+        self.model.prefs.viewer_sheet = sheet.key().into();
+        self.model.prefs.save();
+        self.model.dirty |= negs_app::model::dirty::CANVAS;
+        cx.notify();
+    }
+
     pub fn set_theme(&mut self, name: ThemeName, cx: &mut Context<Self>) {
         self.theme = GpuiTheme::from_name(name);
         self.model.prefs.app_theme = name.key().to_string();
@@ -440,7 +492,15 @@ impl NegsApp {
     }
 
     pub fn toggle_zoom_fit(&mut self, cx: &mut Context<Self>) {
-        if self.model.source.is_none() {
+        if self.model.source.is_none() || self.model.cropping() {
+            return;
+        }
+        if self.model.comparison().is_some() {
+            // Both photographs.
+            let fit = !self.model.fit_image;
+            self.model.zoom(fit);
+            self.after_model_update(cx);
+            cx.notify();
             return;
         }
         if self.canvas.fit {
@@ -543,6 +603,11 @@ impl NegsApp {
             return;
         }
         self.shut_down = true;
+        // The tray's trial put back, and the edits written before the session.
+        self.model.end_tray(true);
+        if let Err(error) = self.model.library_save_now() {
+            eprintln!("{error}");
+        }
         if let Some(session) = self.model.session() {
             let _ = SessionStore::default().save(&session);
         }
@@ -566,6 +631,27 @@ impl NegsApp {
         cx.notify();
     }
 
+    /// The button came up: a crop drag, the angle slider, a press on the
+    /// print's words that wandered off.
+    fn end_crop_drags(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        canvas::crop_drag_end(self, cx);
+        let p = negs_app::crop::Point { x: f32::from(position.x) as f64, y: f32::from(position.y) as f64 };
+        if compare_view::mouse_up(self, p) {
+            self.after_model_update(cx);
+            cx.notify();
+        }
+        if self.crop_panel.slider.take().is_some() {
+            if let Some(s) = self.model.crop_session.as_mut() {
+                s.end_straightening();
+            }
+            self.model.crop_changed();
+            cx.notify();
+        }
+        if self.canvas.pressed.take().is_some() {
+            cx.notify();
+        }
+    }
+
     /// A rating or flag key: the photograph, or the grid's selection.
     fn library_key(&mut self, key: LibraryKey, cx: &mut Context<Self>) {
         self.model.library_key(key);
@@ -585,6 +671,41 @@ impl NegsApp {
         if self.menu.is_some() && key == "escape" {
             self.close_menu();
             cx.notify();
+            return true;
+        }
+        let plain = !m.platform && !m.control && !m.alt && !m.shift;
+        // Comparing: Esc, ← →, S.
+        if plain && compare_view::key(self, key) {
+            self.after_model_update(cx);
+            cx.notify();
+            return true;
+        }
+        // Cropping: Return applies, Esc cancels.
+        if self.model.cropping() {
+            if let Some(apply) = crop_view::key(key, false).filter(|_| plain) {
+                self.model.end_crop(apply);
+                self.after_model_update(cx);
+                cx.notify();
+                return true;
+            }
+        }
+        if key == "escape" && plain {
+            if self.model.cancel_negative_pick() {
+            } else if self.canvas.image_only {
+                self.canvas.image_only = false;
+            } else {
+                return false;
+            }
+            self.after_model_update(cx);
+            cx.notify();
+            return true;
+        }
+        // Hold T: the photograph upside down, to judge its balance.
+        if key == "t" && plain && !self.grid.covers() {
+            if !event.is_held && self.model.image.is_some() && !self.model.cropping() && !self.canvas.upside_down {
+                self.canvas.upside_down = true;
+                cx.notify();
+            }
             return true;
         }
         if grid::key_down(self, event) {
@@ -617,7 +738,7 @@ impl NegsApp {
 impl gpui::Render for NegsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Update native window title when photo changes.
-        let win_title = match self.model.source.as_deref().and_then(Path::file_name) {
+        let win_title = match self.model.compare_title().map(Into::into).or_else(|| self.model.source.as_deref().and_then(Path::file_name).map(|n| n.to_os_string())) {
             Some(name) => format!("{} — Negs", name.to_string_lossy()),
             None => "Negs".to_string(),
         };
@@ -637,6 +758,7 @@ impl gpui::Render for NegsApp {
         // kept, so the strip under it stays laid out for the fold).
         let covered = self.grid.covers();
         self.canvas.hide_photo = self.grid.flight.as_ref().is_some_and(|f| f.canvas_flyer.is_some());
+        compare_view::sync(self);
         let canvas_el = if covered {
             div().flex_1().w_full().min_h_0().bg(self.theme.canvas).into_any_element()
         } else {
@@ -644,14 +766,25 @@ impl gpui::Render for NegsApp {
         };
         let tray_el = render_tray(self, window, cx);
         let strip_el = strip::render_strip(self, window, cx);
+        let image_only = self.canvas.image_only && !covered;
         let inspector_el = if covered && self.model.inspector_visible {
             Some(div().w(px(inspector::INSPECTOR_WIDTH)).h_full().flex_shrink_0().bg(self.theme.panel).into_any_element())
+        } else if self.model.cropping() {
+            crop_view::render_panel(self, window, cx)
+        } else if image_only {
+            None
         } else {
             render_inspector_column(self, window, cx)
         };
+        let strip_el = if image_only { None } else { strip_el };
+        // Comparing: "Editing ③ the left one" over the panel.
+        let inspector_el = match (inspector_el, compare_view::note_words(self)) {
+            (Some(panel), Some(words)) if !covered => Some(compare_note(self, words, panel, cx)),
+            (panel, _) => panel,
+        };
         let menu_el = library_menu::render_menu(self, window, cx);
         self.stamp_startup("inspector_shown");
-        let show_status = self.model.tray_shown().is_none();
+        let show_status = self.model.tray_shown().is_none() && !image_only;
         let status_el = show_status.then(|| render_status_bar(self, cx).into_any_element());
         let theme_menu = render_theme_menu(self, cx);
         if let Some(bench) = self.bench.as_mut() {
@@ -678,27 +811,112 @@ impl gpui::Render for NegsApp {
                     cx.stop_propagation();
                 }
             }))
+            .on_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, _window, cx| {
+                if event.keystroke.key == "t" && this.canvas.upside_down {
+                    this.canvas.upside_down = false;
+                    cx.notify();
+                }
+            }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if this.inspector.has_active_drag() {
                     handle_root_mouse_move(this, event, window, cx);
                 }
+                if canvas::crop_drag_move(this, event.position, cx) {
+                    return;
+                }
+                if event.pressed_button == Some(MouseButton::Left) {
+                    let p = negs_app::crop::Point { x: f32::from(event.position.x) as f64, y: f32::from(event.position.y) as f64 };
+                    if compare_view::mouse_drag(this, p) {
+                        this.after_model_update(cx);
+                        cx.notify();
+                        return;
+                    }
+                }
+                if let Some((l, w)) = this.crop_panel.slider
+                    && event.pressed_button == Some(MouseButton::Left)
+                {
+                    if let Some(s) = this.model.crop_session.as_mut() {
+                        s.straighten(crop_view::slider_angle(f32::from(event.position.x), l, w));
+                    }
+                    this.model.crop_changed();
+                    cx.notify();
+                }
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, window, cx| {
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
                     if this.inspector.has_active_drag() {
                         handle_root_mouse_up(this, window, cx);
                     }
+                    this.end_crop_drags(event.position, cx);
                 }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, window, cx| {
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
                     if this.inspector.has_active_drag() {
                         handle_root_mouse_up(this, window, cx);
                     }
+                    this.end_crop_drags(event.position, cx);
                 }),
             )
+            .on_action(cx.listener(|this, _: &ToggleCrop, _window, cx| {
+                if this.model.cropping() {
+                    this.model.end_crop(true);
+                } else {
+                    this.model.begin_crop();
+                }
+                this.after_model_update(cx);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &RotatePhoto, _window, cx| {
+                // As on the Mac: rotating starts cropping, where the turn is kept or undone.
+                if this.model.image.is_some() {
+                    if !this.model.cropping() {
+                        this.model.begin_crop();
+                    }
+                    this.model.rotate();
+                    this.after_model_update(cx);
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FlipPhoto, _window, cx| {
+                if this.model.image.is_some() {
+                    this.model.flip();
+                    this.after_model_update(cx);
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SheetTheme, _window, cx| this.choose_sheet(sheet::ViewerSheet::Theme, cx)))
+            .on_action(cx.listener(|this, _: &SheetDarkroom, _window, cx| this.choose_sheet(sheet::ViewerSheet::Darkroom, cx)))
+            .on_action(cx.listener(|this, _: &SheetBlack, _window, cx| this.choose_sheet(sheet::ViewerSheet::Black, cx)))
+            .on_action(cx.listener(|this, _: &SheetCharcoal, _window, cx| this.choose_sheet(sheet::ViewerSheet::Charcoal, cx)))
+            .on_action(cx.listener(|this, _: &SheetGrey22, _window, cx| this.choose_sheet(sheet::ViewerSheet::Grey22, cx)))
+            .on_action(cx.listener(|this, _: &SheetMiddleGrey, _window, cx| this.choose_sheet(sheet::ViewerSheet::MiddleGrey, cx)))
+            .on_action(cx.listener(|this, _: &SheetLightGrey, _window, cx| this.choose_sheet(sheet::ViewerSheet::LightGrey, cx)))
+            .on_action(cx.listener(|this, _: &SheetPaper, _window, cx| this.choose_sheet(sheet::ViewerSheet::Paper, cx)))
+            .on_action(cx.listener(|this, _: &ThemeDarkroom, _window, cx| this.set_theme(ThemeName::Darkroom, cx)))
+            .on_action(cx.listener(|this, _: &ThemeContactSheet, _window, cx| this.set_theme(ThemeName::ContactSheet, cx)))
+            .on_action(cx.listener(|this, _: &ThemeLightTable, _window, cx| this.set_theme(ThemeName::LightTable, cx)))
+            .on_action(cx.listener(|this, _: &ThemeDaylight, _window, cx| this.set_theme(ThemeName::Daylight, cx)))
+            .on_action(cx.listener(|this, _: &ThemePlain, _window, cx| this.set_theme(ThemeName::Plain, cx)))
+            .on_action(cx.listener(|this, _: &ThemePlainDark, _window, cx| this.set_theme(ThemeName::PlainDark, cx)))
+            .on_action(cx.listener(|this, _: &ToggleCompare, _window, cx| {
+                compare_view::toggle(this);
+                this.after_model_update(cx);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &ZoomActual, _window, cx| {
+                if this.model.source.is_some() && !this.model.cropping() {
+                    this.model.zoom(false);
+                    this.after_model_update(cx);
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleImageOnly, _window, cx| {
+                this.canvas.image_only = !this.canvas.image_only && this.model.source.is_some() && !this.model.cropping();
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &OpenPhoto, window, cx| {
                 this.prompt_open_photo(window, cx);
             }))
@@ -729,7 +947,7 @@ impl gpui::Render for NegsApp {
                 if this.grid.covers() {
                     grid::set_size(this, this.model.prefs.grid_size + negs_app::sheet_rules::GRID_SIZE_STEP);
                     cx.notify();
-                } else if this.model.source.is_some() {
+                } else if this.model.source.is_some() && !this.model.cropping() {
                     this.canvas.zoom_by(1.25);
                     cx.notify();
                 }
@@ -738,15 +956,15 @@ impl gpui::Render for NegsApp {
                 if this.grid.covers() {
                     grid::set_size(this, this.model.prefs.grid_size - negs_app::sheet_rules::GRID_SIZE_STEP);
                     cx.notify();
-                } else if this.model.source.is_some() {
+                } else if this.model.source.is_some() && !this.model.cropping() {
                     this.canvas.zoom_by(0.8);
                     cx.notify();
                 }
             }))
             .on_action(cx.listener(|this, _: &ZoomFit, _window, cx| {
-                if this.model.source.is_some() {
-                    this.canvas.reset_fit();
-                    this.model.fit_image = true;
+                if this.model.source.is_some() && !this.model.cropping() {
+                    this.model.zoom(true);
+                    this.after_model_update(cx);
                     cx.notify();
                 }
             }))
@@ -833,6 +1051,69 @@ impl gpui::Render for NegsApp {
     }
 }
 
+/// The panel under Compare's note (`CompareEditingNote`): "Editing ③ the
+/// left one", or against the original, "The original can't be edited." and
+/// Edit 3.
+fn compare_note(app: &NegsApp, (original, number, place): (bool, String, String), panel: AnyElement, cx: &mut Context<NegsApp>) -> AnyElement {
+    let theme = &app.theme;
+    let note = div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .h(px(36.0))
+        .px(px(22.0))
+        .bg(theme.panel)
+        .border_b_1()
+        .border_color(theme.line)
+        .when(original, |d| {
+            d.child(div().font_family(theme.serif_family.clone()).italic().text_size(px(14.0)).text_color(theme.label).child("The original can\u{2019}t be edited."))
+                .child(
+                    div()
+                        .id("compare-edit")
+                        .cursor_pointer()
+                        .text_size(px(12.0))
+                        .text_color(theme.label)
+                        .hover(|s| s.text_color(theme.paper))
+                        .on_click(cx.listener(|this, _, _w, cx| {
+                            if let Some(first) = this.model.comparison().map(|c| !c.active_first) {
+                                this.model.activate_compared(first);
+                            }
+                            this.after_model_update(cx);
+                            cx.notify();
+                        }))
+                        .child(format!("Edit {number}")),
+                )
+        })
+        .when(!original, |d| {
+            d.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().text_size(px(12.0)).text_color(theme.dim).child("Editing"))
+                    .child(
+                        div()
+                            .min_w(px(28.0))
+                            .h(px(24.0))
+                            .px(px(6.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(12.0))
+                            .border_2()
+                            .border_color(theme.accent)
+                            .font_family(theme.serif_family.clone())
+                            .font_weight(gpui::FontWeight(600.0))
+                            .text_size(px(14.0))
+                            .text_color(theme.paper)
+                            .child(number),
+                    )
+                    .child(div().font_family(theme.serif_family.clone()).italic().text_size(px(14.0)).text_color(theme.label).child(place)),
+            )
+        });
+    div().flex().flex_col().h_full().flex_shrink_0().child(note).child(div().flex_1().min_h_0().child(panel)).into_any_element()
+}
+
 fn bind_shortcuts(cx: &mut App) {
     let modifier = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
     let non_text = Some("NegsApp && !TextInput");
@@ -858,7 +1139,11 @@ fn bind_shortcuts(cx: &mut App) {
         KeyBinding::new("p", FlagPick, non_text),
         KeyBinding::new("x", FlagReject, non_text),
         KeyBinding::new("u", FlagUnflag, non_text),
-        KeyBinding::new("t", CycleTheme, non_text),
+        KeyBinding::new(&format!("{modifier}-k"), ToggleCrop, None),
+        KeyBinding::new(&format!("{modifier}-r"), RotatePhoto, None),
+        KeyBinding::new("f", ToggleImageOnly, non_text),
+        KeyBinding::new("c", ToggleCompare, non_text),
+        KeyBinding::new(&format!("{modifier}-1"), ZoomActual, None),
         KeyBinding::new("i", ToggleInspector, non_text),
         KeyBinding::new("g", ToggleGrid, non_text),
         KeyBinding::new("f6", ToggleFilmstrip, None),
@@ -898,19 +1183,49 @@ fn install_menus(cx: &mut App) {
                 MenuItem::action("Zoom In", ZoomIn),
                 MenuItem::action("Zoom Out", ZoomOut),
                 MenuItem::action("Zoom to Fit", ZoomFit),
+                MenuItem::action("Actual Size", ZoomActual),
                 MenuItem::separator(),
                 MenuItem::action("Adjustments", ShowAdjustments),
                 MenuItem::action("Presets", ShowPresets),
                 MenuItem::action("Toggle Inspector", ToggleInspector),
                 MenuItem::action("Grid", ToggleGrid),
                 MenuItem::action("Filmstrip", ToggleFilmstrip),
+                MenuItem::action("Compare", ToggleCompare),
+                MenuItem::action("Image Only", ToggleImageOnly),
                 MenuItem::separator(),
-                MenuItem::action("Cycle Theme", CycleTheme),
+                MenuItem::submenu(Menu {
+                    name: "Theme".into(),
+                    items: vec![
+                        MenuItem::action("Darkroom", ThemeDarkroom),
+                        MenuItem::action("Contact Sheet", ThemeContactSheet),
+                        MenuItem::action("Light Table", ThemeLightTable),
+                        MenuItem::action("Daylight", ThemeDaylight),
+                        MenuItem::action("Plain", ThemePlain),
+                        MenuItem::action("Plain Dark", ThemePlainDark),
+                    ],
+                }),
+                MenuItem::submenu(Menu {
+                    name: "Viewer Sheet".into(),
+                    items: vec![
+                        MenuItem::action("Theme’s Own", SheetTheme),
+                        MenuItem::action("Darkroom", SheetDarkroom),
+                        MenuItem::action("Black", SheetBlack),
+                        MenuItem::action("Charcoal", SheetCharcoal),
+                        MenuItem::action("22% Grey", SheetGrey22),
+                        MenuItem::action("Middle Grey", SheetMiddleGrey),
+                        MenuItem::action("Light Grey", SheetLightGrey),
+                        MenuItem::action("Paper", SheetPaper),
+                    ],
+                }),
             ],
         },
         Menu {
             name: "Photo".into(),
             items: vec![
+                MenuItem::action("Crop", ToggleCrop),
+                MenuItem::action("Rotate", RotatePhoto),
+                MenuItem::action("Flip Left to Right", FlipPhoto),
+                MenuItem::separator(),
                 MenuItem::action("Pick", FlagPick),
                 MenuItem::action("Reject", FlagReject),
                 MenuItem::action("Unflagged", FlagUnflag),

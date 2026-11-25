@@ -1,10 +1,11 @@
 # Runs the GPUI app's NEGS_FRAME_BENCH in Noah's console session (start it
 # with schtasks /it; see docs/gpui-app-handoff-p5.md), capturing the window
 # whenever the app writes <name>.ready.
-#   pc_bench.ps1 -Root <scratch dir with photos\> -Exe <worktree>\app\target\release\Negs.exe
+#   pc_bench.ps1 -Root <scratch dir with photos\> -Exe <worktree>\app\target\release\Negs.exe [-Tour print]
+# -Tour print walks the photograph view for pictures instead (NEGS_BENCH_TOUR).
 # Writes <Root>\bench-pc.json, <Root>\shots\*.png, <Root>\run.log, and
 # <Root>\finished.txt last. The profile is <Root>\profile.
-param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe)
+param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe, [string]$Tour = '')
 $ErrorActionPreference = 'Continue'
 $root = $Root
 $shots = Join-Path $root 'shots'
@@ -40,6 +41,7 @@ $psi.EnvironmentVariables['NEGS_ALLOW_MULTIPLE'] = '1'
 $psi.EnvironmentVariables['SPEKTRAFILM_ROOT'] = 'C:\Users\Noah\Projects\negs'
 $psi.EnvironmentVariables['NEGS_FRAME_BENCH'] = (Join-Path $root 'bench-pc.json')
 $psi.EnvironmentVariables['NEGS_BENCH_SHOTS'] = $shots
+if ($Tour) { $psi.EnvironmentVariables['NEGS_BENCH_TOUR'] = $Tour }
 $proc = [System.Diagnostics.Process]::Start($psi)
 $errTask = $proc.StandardError.ReadToEndAsync()
 "started pid $($proc.Id)" | Out-File -Append $log

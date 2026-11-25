@@ -14,6 +14,11 @@
 //! intervals' and the render passes' median, p95, p99 and max (ms) and the
 //! frames over 1.5 refresh intervals of 60 Hz.
 //!
+//! `NEGS_BENCH_TOUR=print` instead walks the photograph view for its
+//! pictures (no timings): the print on its sheet in three themes, a black
+//! border on a black sheet (the light table), cropping and straightening,
+//! Image Only and upside down.
+//!
 //! `NEGS_BENCH_SHOTS=<dir>`: at named moments (the strip, the grid with
 //! its marks and selection, filtered, halfway through an opening and a
 //! fold held still, other themes) it writes `<dir>/<name>.ready` and holds
@@ -54,6 +59,21 @@ enum Step {
     Filtered(bool),
     Theme(ThemeName),
     GridFling(f64),
+    /// Until the open photograph is developed and nothing's updating.
+    WaitDeveloped,
+    /// The viewer sheet, by its stored key ("" for the theme's own).
+    Sheet(&'static str),
+    /// A black border, or none.
+    BlackBorder(bool),
+    /// Begin cropping, or end it (applying or not).
+    Crop(Option<bool>),
+    Straighten(f64),
+    ImageOnly(bool),
+    UpsideDown(bool),
+    /// Compares the first two photographs (or the open one with its
+    /// original), side by side or as a slider; None leaves.
+    Compare(Option<(bool, negs_app::compare::Layout)>),
+    ZoomActual(bool),
     Write,
 }
 
@@ -86,6 +106,26 @@ impl Bench {
             let _ = std::fs::create_dir_all(dir);
         }
         use Step::*;
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "print") {
+            let mut steps = vec![WaitLoaded, WaitDeveloped, Hold(600), Shot("print-darkroom")];
+            steps.extend([Theme(ThemeName::LightTable), Hold(400), Shot("print-light-table"), Theme(ThemeName::PlainDark), Hold(400), Shot("print-plain-dark")]);
+            steps.extend([Theme(ThemeName::Darkroom), Sheet("black"), BlackBorder(true), WaitDeveloped, Hold(600), Shot("print-black-border-on-black")]);
+            steps.extend([BlackBorder(false), Sheet(""), WaitDeveloped, Crop(None), Hold(800), Shot("crop"), Straighten(4.5), Hold(800), Shot("crop-straighten"), Crop(Some(false)), WaitDeveloped]);
+            steps.extend([ImageOnly(true), Hold(500), Shot("image-only"), ImageOnly(false), UpsideDown(true), Hold(500), Shot("upside-down"), UpsideDown(false), Hold(200)]);
+            use negs_app::compare::Layout;
+            steps.extend([Compare(Some((false, Layout::SideBySide))), Hold(2500), Shot("compare-side-by-side"), Compare(None), Compare(Some((false, Layout::Slider))), Hold(1500), Shot("compare-slider")]);
+            steps.extend([ZoomActual(true), Hold(1500), Shot("compare-slider-100"), ZoomActual(false), Compare(None), Compare(Some((true, Layout::SideBySide))), Hold(3000), Shot("compare-original"), Compare(None), Hold(300)]);
+            // Crop and Compare in the other two themes the gate asks for.
+            for (theme, crop, compare) in [(ThemeName::LightTable, "crop-light-table", "compare-light-table"), (ThemeName::PlainDark, "crop-plain-dark", "compare-plain-dark")] {
+                steps.extend([Theme(theme), Hold(300), Crop(None), Straighten(4.5), Hold(800), Shot(crop), Crop(Some(false)), WaitDeveloped]);
+                steps.extend([Compare(Some((false, Layout::SideBySide))), Hold(2500), Shot(compare), Compare(None), Hold(300)]);
+            }
+            steps.extend([Theme(ThemeName::Darkroom), Hold(300), Write]);
+            if shots.is_none() {
+                steps.retain(|s| !matches!(s, Shot(_)));
+            }
+            return Some(Bench::with_steps(out, shots, steps));
+        }
         let mut steps = vec![WaitLoaded, WaitThumbs(150.0), Mark, Hold(400), Shot("strip"), StripFling(4.0), CentreStrip, Hold(300)];
         // A first opening to warm the grid's thumbnails, then settle.
         steps.extend([OpenGrid(None), WaitFlight, WaitThumbs(150.0), CloseGrid(None), WaitFlight, Hold(500)]);
@@ -100,8 +140,12 @@ impl Bench {
         if shots.is_none() {
             steps.retain(|s| !matches!(s, Shot(_)));
         }
+        Some(Bench::with_steps(out, shots, steps))
+    }
+
+    fn with_steps(out: PathBuf, shots: Option<PathBuf>, steps: Vec<Step>) -> Bench {
         let now = Instant::now();
-        Some(Bench {
+        Bench {
             out,
             shots,
             steps,
@@ -118,7 +162,7 @@ impl Bench {
             notes: vec![],
             theme_before: None,
             origin: 0.0,
-        })
+        }
     }
 
     /// A render pass starts: its interval from the last one, if measured.
@@ -306,6 +350,73 @@ impl Bench {
                     self.next();
                 }
             }
+            Step::WaitDeveloped => {
+                if (app.model.image.is_some() && app.model.badge().is_none() && in_step > Duration::from_millis(300)) || app.model.render_failed || in_step > Duration::from_secs(60) {
+                    self.next();
+                }
+            }
+            Step::Sheet(key) => {
+                app.model.prefs.viewer_sheet = key.to_string();
+                app.model.dirty |= dirty::CANVAS;
+                self.next();
+            }
+            Step::BlackBorder(on) => {
+                app.model.set_border(
+                    |b| {
+                        b.enabled = on;
+                        b.style = negs_app::border::BorderStyle::Solid;
+                        b.color = negs_app::border::BorderColor::BLACK;
+                    },
+                    "Border",
+                );
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::Crop(end) => {
+                match end {
+                    None => app.model.begin_crop(),
+                    Some(apply) => app.model.end_crop(apply),
+                }
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::Straighten(angle) => {
+                if let Some(s) = app.model.crop_session.as_mut() {
+                    s.begin_straightening();
+                    s.straighten(angle);
+                    s.end_straightening();
+                }
+                app.model.crop_changed();
+                self.next();
+            }
+            Step::ImageOnly(on) => {
+                app.canvas.image_only = on;
+                self.next();
+            }
+            Step::UpsideDown(on) => {
+                app.canvas.upside_down = on;
+                self.next();
+            }
+            Step::Compare(how) => {
+                match how {
+                    None => crate::compare_view::leave(app),
+                    Some((true, layout)) => app.model.compare_with_original(layout),
+                    Some((false, layout)) => {
+                        let items = app.model.shown_items();
+                        if let (Some(a), Some(b)) = (items.first(), items.get(1)) {
+                            app.model.compare(a.clone(), b.clone(), negs_app::compare::Origin::Photo);
+                            app.model.set_compare_layout(layout);
+                        }
+                    }
+                }
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::ZoomActual(on) => {
+                app.model.zoom(!on);
+                app.after_model_update(cx);
+                self.next();
+            }
             Step::Write => self.write(app, cx),
         }
     }
@@ -334,7 +445,7 @@ impl Bench {
         let report = serde_json::json!({
             "os": std::env::consts::OS,
             "photographs": app.strip.cells.len(),
-            "window": [app.grid.viewport(), app.strip.visible_width()],
+            "grid_viewport_and_strip_width": [app.grid.viewport(), app.strip.visible_width()],
             "scale": f64::from(app.canvas.scale_factor),
             "thumbs": {"read": app.thumbs.stats.read, "developed": app.thumbs.stats.developed, "filed": app.thumbs.stats.filed, "dropped_stale": app.thumbs.stats.dropped_stale},
             "mark_sprites_made": app.sprites.made,

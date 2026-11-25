@@ -19,6 +19,39 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 
 ---
 
+## 2026-11-25 — Phase 5a: Print on its Sheet, Crop, Negative pick, Compare, Image Only (`PENDING`)
+
+### What landed
+- Branch `gpui-p5a-compare-crop-negative` (`b8dfecf3` … `505a9c19`, 7 commits) merged `--no-ff` into local `main`. Changes are under `app/` only (no `crates/`, `vendor/`, `web/`, `windows/`, or any `Cargo.toml`/`Cargo.lock`). Not pushed.
+- `app/src/sheet.rs`: the eight viewer sheets (Theme's own, Darkroom, Black, Charcoal, 22% Grey, Middle Grey, Light Grey, Paper), their inks, and the Light Table edge and glow (`light_table`), ported from `windows/src/ui/sheet.rs`. **View › Viewer Sheet** and a "Viewer sheet" section in the title bar's theme popover set `prefs.viewer_sheet`.
+- `app/src/print.rs`: the print's geometry and words (caption, film/paper label with carets and the paper lock, trim marks, the pencil or highlighter "open" mark), shaped through one `Painter`.
+- `app/src/canvas.rs`: the photograph is drawn as a print on its sheet (centred print band, Light Table shadow, the black-border edge on dark sheets), with the badge above. Clicking the film or paper name opens the stock tray, the lock keeps the paper, a trim mark dragged inwards starts cropping, and a click on the photograph picks the film base while the negative pick is armed. Dropped files and folders open (2 px accent outline while dragging). The empty state shows "Open a photograph", the drop hint and up to five recent files.
+- `app/src/crop_view.rs`: crop and straighten. The whole photograph shows unrotated and fitted. Outside the crop is shaded; the overlay has an outline, corner brackets, a thirds grid while dragging and a 9×9 grid while straightening. You can drag the handles, move the crop one axis at a time, and use the straighten dial (7 px per degree, snaps to 0 below 0.4°, double-click resets) or the arrow keys. The crop panel replaces the inspector: aspect list with Custom fields, Orientation, Straighten slider + reset, Flip, Size, Reset Crop, Cancel/Done. Return/Esc apply or cancel unless a field has focus. The turned photograph is resampled bilinearly off the UI thread and cached; replaced textures are dropped.
+- `app/src/compare_view.rs`: Compare with another photograph or the original, side by side (or stacked in a tall window) and as a slider. Numbered rings, captions that name what differs, ← → stepping the right-hand photo, S toggles layout, Swap, Fit/100% linked on both sides, Esc leaves (and folds back to the grid if Compare started there). Each side's picture is resampled off-thread at the frame's physical size (and up to 3,072 px for 100%) through the ICC/P3 path. Library menu → "Compare …" (C) and the title bar's Compare pill.
+- Image Only (F), the photograph upside down while T is held, View › Actual Size (⌘/Ctrl-1), Photo › Crop (⌘/Ctrl-K), Rotate (⌘/Ctrl-R), Flip. **T no longer cycles themes**: themes moved to View › Theme, because hold-T is the Mac/Windows binding.
+- Quitting writes the library's edits (`library_save_now`) before saving the session, and puts back a stock-tray trial.
+- `app/src/bench.rs`: `NEGS_BENCH_TOUR=print` walks the print view (sheets, black border on black, crop, straighten, Image Only, upside down, Compare in each layout, 100%) and captures each step. `pc_bench.ps1 -Tour print` runs it on the PC. The JSON's `window` field is now `grid_viewport_and_strip_width`.
+
+### Decisions
+- **Ported, not shared:** the Windows app's pure layout code (sheets, print geometry, crop hit-testing, compare frames) is copied into `app/`, not moved into `negs-app`. `windows/src/ui` is retired in Phase 6, so moving it now would mean editing `windows/` for nothing. Until then the code exists in both places.
+- **Compare pictures are made per side, off the UI thread**, at the frame's physical size, instead of letting the GPU scale one large texture (that aliases fine detail such as grain). While a new size is being made, the previous picture is stretched in its place. The Windows app's "made ahead" step (preparing the likely next comparison) is left out until stepping is measurably slow.
+- **The crop's rotation preview is bilinear** (it's a working view, like the Mac's); the export cuts its pixels in `spektrafilm-io::crop` as before.
+- **Zoom is disabled while cropping** (fit only, as on the Mac). In Compare, Z/Fit/100% apply to both photographs.
+
+### Deferred (and why)
+- **Tooltips** (crop panel, empty state): GPUI 0.2.2 has no tooltip element. To be added with the Phase 6 accessibility pass.
+- **The drop highlight** is an accent outline; the photo doesn't step aside and there's no "drop to open" line. That's cosmetic; Phase 7 macOS polish.
+- **Stock menu when tray tiles are off**: needs the Settings toggle (5b).
+
+### Verification Gate
+- **Unit tests (`app/`): 78 passed, 0 failed on macOS and on the PC** (20 new: crop handles/dial/ratio parsing/size words, compare frames/actual-size/knob, viewer sheets and inks, print geometry, canvas zoom). 0 warnings in `negs-gpui`. `windows/` still builds on the PC (`wt.cmd … build`).
+- **Print tour** (`NEGS_BENCH_TOUR=print`, real windows, scratch profiles; Mac 64 cloned Z 6 NEFs, PC 67 NEFs copied from `Downloads\102ND750` + `Downloads\raws`). 16 shots on each machine: the print in Darkroom, Light Table and Plain dark, black border on the black sheet, crop and straighten (all three themes), Image Only, upside down, Compare side by side (all three themes), slider, slider at 100%, and against the original. Mac: `/private/tmp/claude-501/-Users-noahhaasis-Projects-negs/3d47e6be-b5c8-4129-bdd3-5e7c7e85cdc3/scratchpad/mac/shots/*.png`; PC: `/private/tmp/claude-501/-Users-noahhaasis-Projects-negs/3d47e6be-b5c8-4129-bdd3-5e7c7e85cdc3/scratchpad/pc/shots/*.png`.
+- Checked in the shots: colour-managed pictures on both (PC: Dell P3424WEB ICC); the crop shade turns white to grey with detail kept; Compare underlines only what differs ("differ in shutter and aperture"); the Light Table glow and the black-border edge on black.
+- **Known, same as the references:** while straightening in a short window, the turned photo's corner can cover the caption. `crop_place` fits the unturned photo exactly as `windows/` and the Mac's `CropEditor.place` do.
+- Sidecar round-trip, export byte-identity and the Phase 4 bench re-run are part of the 5b gate (after Export lands).
+
+---
+
 ## 2026-11-25 — Phase 4: Library, Filmstrip, Contact-Sheet Grid & SheetFlight (`9c1020ed`)
 
 ### What landed

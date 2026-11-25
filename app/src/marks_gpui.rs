@@ -359,3 +359,27 @@ pub fn paint_box(window: &mut Window, kind: BoxInk, frame: Bounds<Pixels>, name:
     }
 }
 
+
+/// A pencil ring round `rect` (`negs_marks::ring`), turned `tilt` degrees
+/// about its centre (upright in Plain), `RING_LINE_WIDTH` wide.
+pub fn paint_ring(window: &mut Window, rect: Bounds<Pixels>, radii: negs_marks::Radii, tilt: f64, plain: bool, color: Hsla) {
+    let (w, h) = (f32::from(rect.size.width) as f64, f32::from(rect.size.height) as f64);
+    let path = negs_marks::ring(negs_marks::Rect::new(0.0, 0.0, w, h), radii, plain);
+    let (s, c) = negs_marks::ring_tilt(tilt, plain).to_radians().sin_cos();
+    let turn = |p: negs_marks::Pt| {
+        let (dx, dy) = (p.x - w / 2.0, p.y - h / 2.0);
+        negs_marks::Pt { x: w / 2.0 + dx * c - dy * s, y: h / 2.0 + dx * s + dy * c }
+    };
+    let turned = negs_marks::Path(
+        path.0
+            .into_iter()
+            .map(|seg| match seg {
+                negs_marks::Seg::Move(p) => negs_marks::Seg::Move(turn(p)),
+                negs_marks::Seg::Line(p) => negs_marks::Seg::Line(turn(p)),
+                negs_marks::Seg::Cubic(a, b, p) => negs_marks::Seg::Cubic(turn(a), turn(b), turn(p)),
+                negs_marks::Seg::Close => negs_marks::Seg::Close,
+            })
+            .collect(),
+    );
+    paint_marks_path(window, &turned, rect.origin, Some(negs_marks::RING_LINE_WIDTH as f32), color);
+}
