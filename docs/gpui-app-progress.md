@@ -14,7 +14,7 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 3 | Inspector, Presets & Stock Tray | **Done** | `87cb390d` | Custom darkroom widgets (`InkSlider`, `TextInput`, `Scopes`, `ToneGraph`, `ColorFilterDiscs`), full 26-kind `InspectorView` Prep/Lab/Output UI, Presets sidebar, and Film/Paper Stock Preview Tray (`TileImageCache`). Mac & PC live verified. |
 | 4 | Library, Filmstrip, Grid & Flight | **Done** (Smoothness Proof reviewed 2026-11-25) | `9c1020ed` | Colour-managed background thumbnails, virtualized filmstrip + contact-sheet grid with hand-drawn marks (cached sprites), library menus, `SheetFlight` Photo↔Grid flight, `NEGS_FRAME_BENCH`. PC 60.0–60.8 fps, 0 dropped frames. |
 | 5 | Compare, Crop, Negative, Export, Batch & Settings | **Done** (5a + 5b) | 5a `200def15`, 5b `7720b5ca` | Print on its sheet, crop, negative pick, Compare; export card → native dialog, batch, Settings window, full menus (in-window menu bar + caption buttons off the Mac), Lightroom. Exports byte-identical to `windows/` and SwiftUI. |
-| 6 | Windows Cutover & Packaging | **Parity merged; cutover awaiting Go** | `5bc98c59` | ABBA vs Win32 `Negs.exe` (GPUI ahead on grid, strip, tabs, RAM; behind on startup and size), Windows parity (menu keys/ticks, TaskDialog errors, taskbar, WinSparkle, end-session, single instance, tooltips), packaging plan prepared, not applied. |
+| 6 | Windows Cutover & Packaging | **Parity merged; cutover deferred** (look first) | `5bc98c59` | ABBA vs Win32 `Negs.exe` (GPUI ahead on grid, strip, tabs, RAM; behind on startup and size), Windows parity (menu keys/ticks, TaskDialog errors, taskbar, WinSparkle, end-session, single instance, tooltips), packaging plan prepared, not applied. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
 
 ---
@@ -42,6 +42,11 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
   - inspector rows (`Kind::help`, Match brightness's), and a slider's ↺ ("Reset to 0");
   - title bar Photo/Grid/Compare/Open/Save;
   - pane words, Export, the crop panel, and the presets' Import.
+
+### Noah's answers (2026-11-25)
+- Updates: **WinSparkle**.
+- Accessibility (no UIA in GPUI 0.2.2): **Go anyway**; say so in the release notes, follow up on GPUI accessibility later.
+- Cutover (packaging plan): **deferred**. The GPUI UI still looks very different from `windows/`/SwiftUI; that comes first.
 
 ### Decisions
 - **Updates: WinSparkle** (already `windows/`'s, §20.6), not MSIX: it keeps the Inno installer, the per-user install without admin, and the existing appcast/EdDSA scheme shared with Sparkle on the Mac. MSIX would need a signing certificate in the Store/trusted chain, a package identity rework, and new file-association plumbing. *Asked of Noah in the Go/No-Go.*
