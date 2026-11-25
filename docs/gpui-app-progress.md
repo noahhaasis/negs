@@ -13,13 +13,13 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 2 | GPUI Shell + Color-Managed Canvas | **Done** | `bd8c7662` | Standalone `app/` workspace on `gpui 0.2.2`; embedded Newsreader + 6 themes; fused linear-light exact-fit Lanczos-3 + per-display ICC/P3 pipeline; vector `negs-marks`; Mac & PC live verified. |
 | 3 | Inspector, Presets & Stock Tray | **Done** | `87cb390d` | Custom darkroom widgets (`InkSlider`, `TextInput`, `Scopes`, `ToneGraph`, `ColorFilterDiscs`), full 26-kind `InspectorView` Prep/Lab/Output UI, Presets sidebar, and Film/Paper Stock Preview Tray (`TileImageCache`). Mac & PC live verified. |
 | 4 | Library, Filmstrip, Grid & Flight | **Done** (Smoothness Proof reviewed 2026-11-25) | `9c1020ed` | Colour-managed background thumbnails, virtualized filmstrip + contact-sheet grid with hand-drawn marks (cached sprites), library menus, `SheetFlight` Photo↔Grid flight, `NEGS_FRAME_BENCH`. PC 60.0–60.8 fps, 0 dropped frames. |
-| 5 | Compare, Crop, Negative, Export, Batch & Settings | **Ready** ([handoff](gpui-app-handoff-p5.md)) | — | Full feature parity with `windows/` and `macos/`. |
+| 5 | Compare, Crop, Negative, Export, Batch & Settings | **5a done**, 5b in progress | 5a `200def15` | Full feature parity with `windows/` and `macos/`. |
 | 6 | Windows Cutover & Packaging | Pending | — | ABBA perf/screenshot report vs Win32 `Negs.exe`, Go/No-Go gate, installer + CI cutover. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
 
 ---
 
-## 2026-11-25 — Phase 5a: Print on its Sheet, Crop, Negative pick, Compare, Image Only (`PENDING`)
+## 2026-11-25 — Phase 5a: Print on its Sheet, Crop, Negative pick, Compare, Image Only (`200def15`)
 
 ### What landed
 - Branch `gpui-p5a-compare-crop-negative` (`b8dfecf3` … `505a9c19`, 7 commits) merged `--no-ff` into local `main`. Changes are under `app/` only (no `crates/`, `vendor/`, `web/`, `windows/`, or any `Cargo.toml`/`Cargo.lock`). Not pushed.
