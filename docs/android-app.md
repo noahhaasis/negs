@@ -9,7 +9,8 @@ one-photo workflow: open a photo, develop it, export it. Branch
 ```
 Compose UI (android/app/src/main/java/dev/negs/app)
   Editor.kt       the edit, the render pump, previews, export, brightness
-                  match, LUT export, favourites (web/app.js)
+                  match, LUT export, favourites, presets (web/app.js)
+  Presets.kt      preset names, the presets folder, web preset links
   Controls.kt     the inspector's controls (web/controls.js)
   Crop.kt         crop geometry and the crop session (web/crop.js)
   Border.kt       border settings and layout (web/border.js)
@@ -80,13 +81,40 @@ The emulator must be 35.x or newer for the API 35 image (31.2 boot-looped).
   pending match.
 - Export LUT… (⋮ menu): a 33³ `.cube` through the system's save dialog.
 - Favourites: web's defaults, star or long-press a tile, kept in prefs.
+- Presets: Import… (several files; one refused with the engine's reason),
+  tiles with the photo developed through each, tap to apply (film, paper,
+  Lab; Prep kept, so the brightness match re-solves), New preset named
+  after the film (clashes refused case-insensitively, keyboard Done saves),
+  Rename, Move earlier/later, Delete, Share… (the file plus a web link; the
+  link decodes with web/presets.js), a web link shared to Negs, a preset
+  file shared to Negs ("name 2" on a clash), applying with no photo open,
+  Save as file… (byte-identical to the imported file).
+
+## Presets
+
+As desktop's library (docs/presets-design.md), not the web's one-at-a-time
+import: one `<name>.json` per preset in `files/presets/`, with desktop's
+`.order.json`, name rules and name keys, so files move between the apps
+unchanged. The engine's `preset_import` / `preset_export` read and write
+them; the tiles are the helper's `thumbnail` with `preset`, keyed on what a
+preset keeps (`preset_kept` in the catalog).
+
+Incoming: preset files opened with or shared to Negs are added to the
+presets, and so is a web `#preset=` link shared as text. Tapping a
+getnegs.com link doesn't open the app: that needs App Links (an
+`assetlinks.json` on the site). Share… sends the file with the link as
+text; Save as file… writes a copy through the system's save dialog.
+
+Desktop sorts by dragging; here the tile menu has Move earlier/later.
 
 Not testable here: real phone GPUs (Mali/Adreno drivers, speed), memory
 behaviour on a real 4–8 GB phone. Needs one device or Firebase Test Lab.
 
 ## Not done yet
 
-- Presets import/export, help texts, Chinese strings.
+- Help texts, Chinese strings.
+- Presets: drag to sort; negative scans' preset rules (the app has no
+  negative scan).
 - The crop isn't kept per photo (the web app doesn't either); no flip.
 - Thumbnails run at the interactive slot; a settled `preview_long_side` in
   the helper would keep the preview's resample identical to the web's.

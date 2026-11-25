@@ -88,7 +88,7 @@ object Inspector {
     private val sections = Controls.PREP + Controls.LAB + Controls.OUTPUT
 
     fun tabs(editor: Editor): List<String> {
-        val order = listOf("Prep", "Stock") + (Controls.LAB + Controls.OUTPUT).map { it.tab }
+        val order = listOf("Prep", "Stock", "Presets") + (Controls.LAB + Controls.OUTPUT).map { it.tab }
         return order.distinct().filter { tab ->
             // Scan's sections are all advanced: it shows with them, or once changed.
             tab != "Scan" || editor.advanced || sections.filter { it.tab == "Scan" }.any { s -> s.groups.any { g -> g.controls.any { modified(editor, it) } } }
@@ -100,6 +100,10 @@ object Inspector {
         val catalog = editor.catalog
         if (catalog == null) {
             Box(modifier)
+            return
+        }
+        if (tab == "Presets") {
+            PresetsPane(editor, modifier)
             return
         }
         val open = remember { mutableStateMapOf<String, Boolean>() }

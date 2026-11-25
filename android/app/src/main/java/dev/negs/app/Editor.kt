@@ -23,6 +23,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -88,6 +90,8 @@ class Editor(app: Application) : AndroidViewModel(app) {
     private val dirty = Channel<Unit>(Channel.CONFLATED)
     private var lastKey: String? = null
     private var dimensions: Pair<Int, Int>? = null
+    /** The engine has started and the catalog is read. */
+    private val started = kotlinx.coroutines.CompletableDeferred<Unit>()
 
     init {
         viewModelScope.launch {
@@ -102,6 +106,8 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 edit = Edit("", "kodak_portra_endura", loaded.defaults)
                 chooseFilm("kodak_portra_400")
                 status = ""
+                started.complete(Unit)
+                launch { reloadPresets() }
             } catch (e: Exception) {
                 Log.e(Engine.TAG, "startup failed", e)
                 startupError = e.message ?: e.toString()
@@ -269,6 +275,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 cropSession = null
                 lastKey = null
                 thumbnails.clear()
+                presetThumbnails.clear()
                 // The exposure above the last photograph's match carries
                 // over; the match is solved anew (macOS EditorModel.open).
                 val offset = (get("prep.exposure_ev").number() ?: 0.0) - (match?.ev ?: 0.0)
@@ -482,6 +489,10 @@ class Editor(app: Application) : AndroidViewModel(app) {
 
     fun dismissMessage() {
         message = null
+    }
+
+    fun notify(text: String, error: Boolean = true) {
+        message = Message(text, error)
     }
 
     /**
@@ -824,6 +835,333 @@ class Editor(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString(if (stock.paper) "favoritePapers" else "favoriteFilms", next.joinToString(",")).apply()
     }
 
+    // ---- Presets -------------------------------------------------------------------
+
+    /*
+     * The presets in the app's folder (macOS Presets pane, docs/presets-design.md):
+     * Python spektrafilm GUI-state files, in desktop's format and the web's
+     * links. Applying one sets the film, paper and Lab settings; Prep, the
+     * crop, rotation, border and Post stay (presets::KEPT).
+     */
+    private val presetLibrary by lazy { PresetLibrary(File(context.filesDir, "presets")) }
+    /** One change to the folder at a time. */
+    private val presetLock = Mutex()
+    var presets by mutableStateOf<List<PresetFile>>(emptyList()); private set
+    /** What the engine made of each file, as listed. */
+    val presetStatus = mutableStateMapOf<PresetFile, PresetStatus>()
+    /** The name key of the preset applied or saved last: its tile is ringed. */
+    var appliedPreset by mutableStateOf<String?>(null); private set
+    /** Counts requests to show the Presets tab (a preset arrived from another app). */
+    var presetsShown by mutableStateOf(0); private set
+
+    val canChangePresets get() = catalog != null && cropSession == null && !exporting
+
+    /** Lists the folder again and asks the engine about files it hasn't read. */
+    private suspend fun reloadPresets() {
+        val listed = try {
+            withContext(Dispatchers.IO) { presetLibrary.list() }
+        } catch (e: Exception) {
+            message = Message("Couldn’t list the presets: ${e.message}", error = true)
+            emptyList()
+        }
+        presets = listed
+        (presetStatus.keys - listed.toSet()).forEach { presetStatus.remove(it) }
+        val paths = listed.map { it.file.path }.toSet()
+        (presetThumbnails.keys - paths).forEach { presetThumbnails.remove(it) }
+        for (preset in listed) {
+            if (presetStatus[preset] != null) continue
+            presetStatus[preset] = try {
+                val text = withContext(Dispatchers.IO) { PresetLibrary.text(presetLibrary.read(preset)) }
+                validate(text)
+            } catch (e: Exception) {
+                PresetStatus.Invalid(e.message ?: e.toString())
+            }
+        }
+    }
+
+    /** What the engine reads in preset [text]; throws if it can't be used here. */
+    private suspend fun validate(text: String): PresetStatus.Valid {
+        val r = engine.call("preset_import", buildJsonObject { put("text", text) }, urgent = false)
+        val film = r["film"].text() ?: throw PresetError("The engine didn’t read a film.")
+        val paper = r["paper"].text() ?: throw PresetError("The engine didn’t read a paper.")
+        if (catalog?.stock(film) == null || catalog?.stock(paper) == null) {
+            throw PresetError("This version of Negs doesn’t have the preset’s film or paper.")
+        }
+        return PresetStatus.Valid(film, paper, r["params"].at("io.scan_film").bool() == true, text)
+    }
+
+    /**
+     * The film, paper and Lab settings of [preset] (macOS EditorModel.applyPreset).
+     * The engine keeps what a preset doesn't carry from the params it's
+     * given; asked again if they changed while it answered.
+     */
+    fun applyPreset(preset: PresetFile) {
+        if (!canChangePresets) return
+        val status = presetStatus[preset] as? PresetStatus.Valid ?: return
+        viewModelScope.launch {
+            try {
+                repeat(3) {
+                    val snapshot = edit
+                    val r = engine.call("preset_import", buildJsonObject {
+                        put("text", status.text)
+                        put("params", snapshot.params)
+                    })
+                    if (edit != snapshot) return@repeat
+                    val film = r["film"].text()!!
+                    val paper = r["paper"].text()!!
+                    if (catalog?.stock(film) == null || catalog?.stock(paper) == null) {
+                        throw PresetError("This version of Negs doesn’t have the preset’s film or paper.")
+                    }
+                    edit = Edit(film, paper, r["params"] as JsonObject)
+                    changed()
+                    appliedPreset = PresetName.key(preset.name)
+                    message = Message("Applied “${preset.name}”")
+                    return@launch
+                }
+            } catch (e: Exception) {
+                message = Message("Couldn’t apply “${preset.name}”: ${e.message}", error = true)
+                reloadPresets()
+            }
+        }
+    }
+
+    /** The name a new preset starts with: the film's, made unique. */
+    fun suggestedPresetName(): String =
+        PresetName.unique(PresetName.from(catalog?.stock(edit.film)?.name ?: edit.film), presets.map { PresetName.key(it.name) }.toSet())
+
+    /** Why [name] can't name a new preset (or [renaming] renamed), or null. */
+    fun presetNameProblem(name: String, renaming: PresetFile? = null): String? =
+        PresetName.problem(name) ?: name.takeIf { n ->
+            presets.any { it != renaming && PresetName.key(it.name) == PresetName.key(n) }
+        }?.let { "A preset named “$it” already exists." }
+
+    /** Saves the film, paper and Lab settings as a new preset named [name]. */
+    fun newPreset(name: String) {
+        if (!canChangePresets) return
+        val snapshot = edit
+        viewModelScope.launch {
+            try {
+                val r = engine.call("preset_export", buildJsonObject {
+                    put("film", snapshot.film)
+                    put("paper", snapshot.paper)
+                    put("params", snapshot.params)
+                })
+                val text = r["text"].text()!!
+                val file = presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.add(text.toByteArray(), name) } }
+                // The edit's settings are this preset's: it's the one ringed.
+                appliedPreset = PresetName.key(file.name)
+                reloadPresets()
+                message = Message("Saved “${file.name}”")
+            } catch (e: Exception) {
+                message = Message("Couldn’t save the preset: ${e.message}", error = true)
+            }
+        }
+    }
+
+    fun renamePreset(preset: PresetFile, name: String) {
+        viewModelScope.launch {
+            try {
+                val renamed = presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.rename(preset, name) } }
+                // The same file: what's known about it moves with it.
+                presetStatus.remove(preset)?.let { presetStatus[renamed] = it }
+                presetThumbnails.remove(preset.file.path)?.let { presetThumbnails[renamed.file.path] = it }
+                if (appliedPreset == PresetName.key(preset.name)) appliedPreset = PresetName.key(renamed.name)
+            } catch (e: Exception) {
+                message = Message("Couldn’t rename “${preset.name}”: ${e.message}", error = true)
+            }
+            reloadPresets()
+        }
+    }
+
+    fun deletePreset(preset: PresetFile) {
+        viewModelScope.launch {
+            try {
+                presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.delete(preset) } }
+                if (appliedPreset == PresetName.key(preset.name)) appliedPreset = null
+                message = Message("Deleted “${preset.name}”")
+            } catch (e: Exception) {
+                message = Message("Couldn’t delete “${preset.name}”: ${e.message}", error = true)
+            }
+            reloadPresets()
+        }
+    }
+
+    /** Moves [preset] [by] places in the list, and remembers the order. */
+    fun movePreset(preset: PresetFile, by: Int) {
+        val list = presets.toMutableList()
+        val from = list.indexOf(preset)
+        if (from < 0) return
+        val to = (from + by).coerceIn(0, list.lastIndex)
+        if (to == from) return
+        list.add(to, list.removeAt(from))
+        presets = list
+        viewModelScope.launch {
+            try {
+                presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.setOrder(list) } }
+            } catch (e: Exception) {
+                message = Message("Couldn’t save the order: ${e.message}", error = true)
+                reloadPresets()
+            }
+        }
+    }
+
+    /**
+     * Copies each file the engine reads into the presets, under its own
+     * name ("name 2"… if taken), and says which it refused.
+     */
+    fun importPresets(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        presetsShown++
+        viewModelScope.launch {
+            started.await()
+            val failures = mutableListOf<String>()
+            val added = mutableListOf<String>()
+            for (uri in uris) {
+                val fileName = withContext(Dispatchers.IO) { runCatching { displayName(uri) }.getOrNull() } ?: "Preset.json"
+                try {
+                    val data = withContext(Dispatchers.IO) { readLimited(uri) }
+                    validate(PresetLibrary.text(data))
+                    val file = presetLock.withLock {
+                        withContext(Dispatchers.IO) { presetLibrary.add(data, PresetName.from(PresetName.stem(fileName))) }
+                    }
+                    added += file.name
+                } catch (e: Exception) {
+                    failures += "$fileName: ${e.message}"
+                }
+            }
+            reloadPresets()
+            message = when {
+                failures.isEmpty() -> Message(if (added.size == 1) "Added “${added[0]}” to the presets" else "Added ${added.size} presets")
+                added.isEmpty() -> Message((if (failures.size == 1) "Couldn’t import " else "No presets were imported. ") + failures.joinToString("\n"), error = true)
+                else -> Message("Added ${added.size} presets. Not imported: " + failures.joinToString("\n"), error = true)
+            }
+        }
+    }
+
+    /** A preset link shared to Negs (web/presets.js links); false if [text] has none. */
+    fun importPresetLink(text: String): Boolean {
+        val value = PresetLink.find(text) ?: return false
+        presetsShown++
+        viewModelScope.launch {
+            started.await()
+            try {
+                val (name, preset) = PresetLink.decode(value)
+                validate(preset)
+                val file = presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.add(preset.toByteArray(), name) } }
+                reloadPresets()
+                message = Message("Added “${file.name}” to the presets")
+            } catch (e: Exception) {
+                message = Message("Couldn’t add the preset: ${e.message}", error = true)
+            }
+        }
+        return true
+    }
+
+    /** A file's bytes, if it's small enough to be a preset. */
+    private fun readLimited(uri: Uri): ByteArray {
+        context.contentResolver.openInputStream(uri)!!.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(1 shl 16)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                out.write(buffer, 0, n)
+                if (out.size() > PresetLibrary.MAX_FILE_BYTES) throw PresetError("The file is too large to be a preset.")
+            }
+            return out.toByteArray()
+        }
+    }
+
+    /**
+     * Shares [preset] as its file, with a link that opens it in the web app,
+     * through [launch] (the activity's startActivity).
+     */
+    fun sharePreset(preset: PresetFile, launch: (Intent) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val (file, link) = withContext(Dispatchers.IO) {
+                    val data = presetLibrary.read(preset)
+                    val dir = File(context.cacheDir, "shared").apply { deleteRecursively(); mkdirs() }
+                    val file = File(dir, "${preset.name}.json").apply { writeBytes(data) }
+                    file to PresetLink.encode(preset.name, PresetLibrary.text(data))
+                }
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, preset.name)
+                    if (link != null) putExtra(Intent.EXTRA_TEXT, link)
+                    clipData = android.content.ClipData.newRawUri(preset.name, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                launch(Intent.createChooser(send, "Share “${preset.name}”"))
+            } catch (e: Exception) {
+                message = Message("Couldn’t share “${preset.name}”: ${e.message}", error = true)
+                reloadPresets()
+            }
+        }
+    }
+
+    /** Writes [preset]'s file to [uri] (Save as file…). */
+    fun savePresetFile(preset: PresetFile, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val data = presetLibrary.read(preset)
+                    context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(data) }
+                }
+                message = Message("Saved “${preset.name}.json”")
+            } catch (e: Exception) {
+                message = Message("Couldn’t save “${preset.name}”: ${e.message}", error = true)
+            }
+        }
+    }
+
+    /** Preset previews by file path, for the key they were made for. */
+    val presetThumbnails = mutableStateMapOf<String, Pair<String, Bitmap>>()
+    private val presetThumbnailJobs = mutableMapOf<String, Job>()
+
+    /** What a preset's tile shows: the photograph, its crop, what the preset keeps, and the preset. */
+    fun presetTileKey(preset: PresetFile): String? {
+        val photo = photo ?: return null
+        val status = presetStatus[preset] as? PresetStatus.Valid ?: return null
+        val kept = catalog?.presetKept.orEmpty().map { edit.params.at(it) }
+        return listOf(photo.generation, crop.rect, crop.angle, kept, status.text.length, status.text.hashCode()).toString()
+    }
+
+    /** Asks for [preset]'s preview: the photograph developed through it, behind the photograph's own renders. */
+    fun wantPresetThumbnail(preset: PresetFile, longSide: Int) {
+        val photo = photo ?: return
+        val status = presetStatus[preset] as? PresetStatus.Valid ?: return
+        val key = presetTileKey(preset) ?: return
+        val path = preset.file.path
+        if (presetThumbnails[path]?.first == key || presetThumbnailJobs[path]?.isActive == true) return
+        val base = edit
+        val cut = crop
+        presetThumbnailJobs[path] = viewModelScope.launch {
+            val file = File(context.cacheDir, "thumbnails/preset-${Integer.toHexString(path.hashCode())}.rgba").apply { parentFile?.mkdirs() }
+            try {
+                val result = engine.call("thumbnail", buildJsonObject {
+                    put("input", photo.file.path)
+                    put("source_generation", photo.generation)
+                    put("film", base.film)
+                    put("paper", base.paper)
+                    put("params", base.params)
+                    put("preset", status.text)
+                    put("long_side", longSide.coerceIn(16, 1024))
+                    put("preview_path", file.path)
+                    if (!cut.isFull) put("crop", cut.json())
+                }, urgent = false)
+                val w = result["width"].number()!!.toInt()
+                val h = result["height"].number()!!.toInt()
+                val bitmap = withContext(Dispatchers.IO) { readRgba(file, w, h) }
+                if (photo.generation == this@Editor.photo?.generation) presetThumbnails[path] = key to bitmap
+            } catch (e: Exception) {
+                Log.w(Engine.TAG, "preset thumbnail ${preset.name}: ${e.message}")
+            }
+        }
+    }
+
     // ---- Memory -------------------------------------------------------------
 
     /**
@@ -844,7 +1182,10 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 // Running low (before Android 14) or out of sight: the
                 // engine's caches go; the tiles' bitmaps are small and stay,
                 // unless memory is short while the editor is in use.
-                if (level < ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) thumbnails.clear()
+                if (level < ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+                    thumbnails.clear()
+                    presetThumbnails.clear()
+                }
                 // The border's texture loads again when it shows.
                 borderTexture = null
                 engine.call("release_thumbnails", urgent = false)

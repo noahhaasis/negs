@@ -29,7 +29,13 @@ data class ColorFilterGlass(val key: String, val name: String, val glass: String
  * The engine's catalog: the stocks, the default params every edit starts
  * from, and the glasses for black-and-white film.
  */
-class Catalog(val stocks: List<Stock>, val defaults: JsonObject, val colorFilters: List<ColorFilterGlass>) {
+class Catalog(
+    val stocks: List<Stock>,
+    val defaults: JsonObject,
+    val colorFilters: List<ColorFilterGlass>,
+    /** What a preset leaves as it is (presets::KEPT): a preset's tile changes only with these. */
+    val presetKept: List<String> = emptyList(),
+) {
     fun stock(id: String) = stocks.firstOrNull { it.id == id }
     val films get() = stocks.filter { !it.paper }
     val papers get() = stocks.filter { it.paper }
@@ -96,7 +102,8 @@ class Catalog(val stocks: List<Stock>, val defaults: JsonObject, val colorFilter
                     colour = 0xFF000000 or (f["colour"].text()?.removePrefix("#")?.toLongOrNull(16) ?: 0x808080),
                 )
             }
-            return Catalog(stocks, result["defaults"]!!.jsonObject, filters)
+            val kept = (result["preset_kept"] as? JsonArray).orEmpty().mapNotNull { it.text() }
+            return Catalog(stocks, result["defaults"]!!.jsonObject, filters, kept)
         }
     }
 }
