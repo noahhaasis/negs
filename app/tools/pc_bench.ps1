@@ -3,10 +3,11 @@
 # whenever the app writes <name>.ready.
 #   pc_bench.ps1 -Root <scratch dir with photos\> -Exe <worktree>\app\target\release\Negs.exe [-Tour print]
 # -Tour print walks the photograph view for pictures instead (NEGS_BENCH_TOUR);
-# -Tour export -ExportDir <dir> also exports the open photograph there.
+# -Tour export -ExportDir <dir> also exports the open photograph there;
+# -Tour sidecar -Side pc is the PC's stage of the sidecar round trip.
 # Writes <Root>\bench-pc.json, <Root>\shots\*.png, <Root>\run.log, and
 # <Root>\finished.txt last. The profile is <Root>\profile.
-param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe, [string]$Tour = '', [string]$ExportDir = '')
+param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe, [string]$Tour = '', [string]$ExportDir = '', [string]$Side = '')
 $ErrorActionPreference = 'Continue'
 $root = $Root
 $shots = Join-Path $root 'shots'
@@ -43,6 +44,7 @@ $psi.EnvironmentVariables['SPEKTRAFILM_ROOT'] = 'C:\Users\Noah\Projects\negs'
 $psi.EnvironmentVariables['NEGS_FRAME_BENCH'] = (Join-Path $root 'bench-pc.json')
 $psi.EnvironmentVariables['NEGS_BENCH_SHOTS'] = $shots
 if ($Tour) { $psi.EnvironmentVariables['NEGS_BENCH_TOUR'] = $Tour }
+if ($Side) { $psi.EnvironmentVariables['NEGS_BENCH_SIDE'] = $Side }
 if ($ExportDir) { $psi.EnvironmentVariables['NEGS_BENCH_EXPORT_DIR'] = $ExportDir }
 $proc = [System.Diagnostics.Process]::Start($psi)
 $errTask = $proc.StandardError.ReadToEndAsync()

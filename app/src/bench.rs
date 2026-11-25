@@ -83,6 +83,16 @@ enum Step {
     /// Exports the open photograph with the remembered choices into
     /// `NEGS_BENCH_EXPORT_DIR` under its default name, and waits for it.
     ExportHere,
+    /// Opens the `n`th photograph shown.
+    OpenItem(usize),
+    /// A number parameter of the open photograph.
+    Num(&'static str, f64),
+    /// Crops the open photograph square and applies it.
+    CropSquare,
+    /// Rates or flags the open photograph.
+    Key(LibraryKey),
+    /// Notes what the first `n` photographs carry: marks, exposure, crop.
+    Report(usize),
     Write,
 }
 
@@ -116,6 +126,20 @@ impl Bench {
             let _ = std::fs::create_dir_all(dir);
         }
         use Step::*;
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "sidecar") {
+            // The sidecar round trip (`NEGS_BENCH_SIDE`): mac1 edits, crops
+            // and rates; pc reads that, then edits two others; mac2 reads.
+            const EV: &str = "camera.exposure_compensation_ev";
+            let side = std::env::var("NEGS_BENCH_SIDE").unwrap_or_default();
+            let mut steps = vec![WaitLoaded, WaitDeveloped, Report(6)];
+            match side.as_str() {
+                "mac1" => steps.extend([OpenItem(0), WaitDeveloped, Num(EV, 0.7), CropSquare, OpenItem(1), WaitDeveloped, Key(LibraryKey::Rate(3)), OpenItem(2), WaitDeveloped, Key(LibraryKey::Pick)]),
+                "pc" => steps.extend([OpenItem(3), WaitDeveloped, Key(LibraryKey::Rate(5)), OpenItem(4), WaitDeveloped, Num(EV, -0.3), Key(LibraryKey::Reject)]),
+                _ => {}
+            }
+            steps.extend([SaveLibrary, OpenItem(0), WaitDeveloped, Report(6), OpenItem(4), WaitDeveloped, Report(6), Write]);
+            return Some(Bench::with_steps(out, shots, steps));
+        }
         if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "export") {
             // The export card, single and batch, then a real export of the
             // open photograph with grain and glare off (pixel compares).
@@ -479,6 +503,49 @@ impl Bench {
                     }
                     self.next();
                 }
+            }
+            Step::OpenItem(n) => {
+                if let Some(item) = app.model.shown_items().get(n).cloned() {
+                    app.model.open_item(item);
+                    app.after_model_update(cx);
+                }
+                self.next();
+            }
+            Step::Num(path, v) => {
+                app.model.set(path, serde_json::json!(v));
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::CropSquare => {
+                app.model.begin_crop();
+                if let Some(session) = app.model.crop_session.as_mut() {
+                    session.choose(negs_app::crop::CropAspect::Square);
+                }
+                app.model.crop_changed();
+                app.model.end_crop(true);
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::Key(key) => {
+                app.model.library_key(key);
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::Report(n) => {
+                let open = app.model.library_item();
+                let items = app.model.shown_items();
+                for item in items.iter().take(n) {
+                    let name = item.photo.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                    let Some(library) = app.model.shelf.library.as_ref() else { break };
+                    let summary = library.summary(item);
+                    let mut line = format!("{name}: rating {} flag {:?} edited {}", summary.rating, summary.flag, summary.edited);
+                    if open.as_ref() == Some(item) {
+                        let c = app.model.state.crop;
+                        line += &format!(" (open: ev {} crop {:.3},{:.3} {:.3}×{:.3})", app.model.value("camera.exposure_compensation_ev"), c.rect.x, c.rect.y, c.rect.width, c.rect.height);
+                    }
+                    self.notes.push(line);
+                }
+                self.next();
             }
             Step::Write => self.write(app, cx),
         }
