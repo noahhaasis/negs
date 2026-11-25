@@ -16,7 +16,9 @@ name = "Negs"
 path = "src/main.rs"
 
 [dependencies]
-gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+# GPUI's own Windows manifest (windows-manifest) lacks longPathAware and the
+# supported-OS entry: app/build.rs embeds negs.manifest instead.
+gpui = { version = "0.2.2", default-features = false, features = ["runtime_shaders", "font-kit", "wayland", "x11"] }
 negs-app = { path = "../crates/negs-app" }
 negs-marks = { path = "../crates/negs-marks" }
 negs-library = { path = "../crates/negs-library" }

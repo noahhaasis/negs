@@ -1,7 +1,7 @@
-//! On Windows: the icon (resource 1, which GPUI's window class loads) and
-//! the version resource, as `windows/build.rs` makes them. GPUI's own
-//! `windows-manifest` feature embeds the manifest (per-monitor DPI v2,
-//! common controls 6). Without the Windows SDK's rc.exe both are left out.
+//! On Windows: the manifest (common controls 6, per-monitor DPI v2, long
+//! paths), the icon (resource 1, which GPUI's window class loads) and the
+//! version resource, as `windows/build.rs` makes them. Without the Windows
+//! SDK's rc.exe the linker embeds the manifest and the icon is left out.
 
 use std::path::{Path, PathBuf};
 
@@ -22,9 +22,13 @@ fn main() {
     }
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let png = dir.join("../assets/negs-icon.png");
+    let manifest = dir.join("negs.manifest");
     println!("cargo:rerun-if-changed={}", png.display());
+    println!("cargo:rerun-if-changed={}", manifest.display());
     let Some(rc) = rc_exe() else {
         println!("cargo:warning=rc.exe not found: Negs.exe has no icon or version resource");
+        println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}", manifest.display());
         return;
     };
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
@@ -44,6 +48,7 @@ fn main() {
         &script,
         format!(
             r#"1 ICON "{icon}"
+1 24 "{manifest}"
 1 VERSIONINFO
 FILEVERSION {numbers}
 PRODUCTVERSION {numbers}
@@ -69,6 +74,7 @@ BEGIN
 END
 "#,
             icon = icon.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"),
+            manifest = manifest.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"),
         ),
     )
     .unwrap();
@@ -76,4 +82,5 @@ END
     let status = std::process::Command::new(rc).arg("/nologo").arg("/fo").arg(&res).arg(&script).status().expect("rc.exe");
     assert!(status.success(), "rc.exe failed");
     println!("cargo:rustc-link-arg-bins={}", res.display());
+    println!("cargo:rustc-link-arg-bins=/MANIFEST:NO");
 }
