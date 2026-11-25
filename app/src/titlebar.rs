@@ -205,9 +205,9 @@ pub fn render_titlebar(
                 )
                 .child(
                     pill_button("tb-save", "Save", false, !can_save, theme).on_click(cx.listener(
-                        |this, _, window, cx| {
+                        |this, _, _window, cx| {
                             if this.model.can_save() {
-                                this.prompt_save_preview(window, cx);
+                                crate::export_card::open(this, false, cx);
                             }
                         },
                     )),

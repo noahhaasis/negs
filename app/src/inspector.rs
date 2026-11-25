@@ -1162,8 +1162,8 @@ fn render_output_foot(
                     theme.dim
                 })
                 .when(can_export, |el| {
-                    el.cursor_pointer().on_click(cx.listener(|this, _, window, cx| {
-                        this.prompt_save_preview(window, cx);
+                    el.cursor_pointer().on_click(cx.listener(|this, _, _window, cx| {
+                        crate::export_card::open(this, true, cx);
                     }))
                 })
                 .child("Export…"),
