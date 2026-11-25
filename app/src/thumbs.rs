@@ -118,7 +118,8 @@ pub fn flush_drops(window: &mut Window) -> usize {
     count
 }
 
-/// How many dropped images are waiting (tests and the bench).
+/// How many dropped images are waiting.
+#[cfg(test)]
 pub fn pending_drops() -> usize {
     drops().lock().unwrap_or_else(|e| e.into_inner()).len()
 }
