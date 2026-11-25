@@ -352,6 +352,10 @@ impl NegsApp {
         // Back from another app: the folder as it left it, and Lightroom
         // installed meanwhile or photos added there (`WM_ACTIVATEAPP`).
         cx.observe_window_activation(window, |this, window, cx| {
+            // A profile chosen in the system's settings meanwhile.
+            if window.is_window_active() {
+                this.recheck_display_profile(window, cx);
+            }
             if window.is_window_active() && this.model.first_render_shown {
                 this.model.library_refresh();
                 if this.model.lightroom_detected() {
@@ -406,8 +410,18 @@ impl NegsApp {
         self.startup.stamp(name);
     }
 
-    /// Re-queries the window's active display ICC profile and invalidates cached textures on change.
+    /// The canvas asks on every paint: only a move to another display reads
+    /// the profile again (reading and building its transform took most of
+    /// each frame).
     pub fn refresh_display_profile(&mut self, window: &Window, cx: &App) {
+        let key = window.display(cx).map(|d| u64::from(u32::from(d.id()))).unwrap_or(0);
+        if key != self.canvas.display_profile.display_key {
+            self.recheck_display_profile(window, cx);
+        }
+    }
+
+    /// Re-queries the window's active display ICC profile and invalidates cached textures on change.
+    pub fn recheck_display_profile(&mut self, window: &Window, cx: &App) {
         let next = active_display_profile(window, cx);
         let changed = next.display_key != self.canvas.display_profile.display_key
             || next.label != self.canvas.display_profile.label;
