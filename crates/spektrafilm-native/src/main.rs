@@ -242,6 +242,9 @@ enum Command {
     /// Frees the GPU's kept film sides (ticket 41): the editor closed or
     /// memory is short. Safe at any time; the next render just misses.
     ReleaseFilmCache,
+    /// Reports process identity and resident memory watermarks (for benchmarks
+    /// and Android Test Lab diagnostics).
+    ProcessStats,
     /// The tone graph's curve: `count` greys through film → print → scan
     /// (`spektrafilm_core::tone_curve`). Image-independent.
     ToneCurve {
@@ -1056,6 +1059,7 @@ impl Session {
                 let bytes = self.backend.as_ref().map_or(0, |backend| backend.release_film_cache());
                 Ok(json!({"released_bytes": bytes}))
             }
+            Command::ProcessStats => Ok(process_stats(self.backend.as_deref().map(|b| b.name()))),
             Command::PreviewColourSpace { input } => Ok(json!({ "colour_space": declared_preview_colour_space(&input)? })),
             Command::BrightnessReference { input, reference_path, expected_width, expected_height } => {
                 ensure!(expected_width > 0 && expected_height > 0,
@@ -1499,6 +1503,45 @@ fn working_source<'a>(
         *scaled = Some((dimensions, resample(source, dimensions)));
     }
     &scaled.as_ref().unwrap().1
+}
+
+fn process_stats(backend: Option<&str>) -> Value {
+    let mut vm_hwm_kib: Option<u64> = None;
+    let mut vm_rss_kib: Option<u64> = None;
+    let mut vm_peak_kib: Option<u64> = None;
+    let mut rss_anon_kib: Option<u64> = None;
+    let mut rss_file_kib: Option<u64> = None;
+    let mut rss_shmem_kib: Option<u64> = None;
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        let parse_kib = |line: &str| -> Option<u64> {
+            line.split_whitespace().nth(1)?.parse::<u64>().ok()
+        };
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("VmHWM:") {
+                vm_hwm_kib = parse_kib(&format!("VmHWM: {rest}"));
+            } else if let Some(rest) = line.strip_prefix("VmRSS:") {
+                vm_rss_kib = parse_kib(&format!("VmRSS: {rest}"));
+            } else if let Some(rest) = line.strip_prefix("VmPeak:") {
+                vm_peak_kib = parse_kib(&format!("VmPeak: {rest}"));
+            } else if let Some(rest) = line.strip_prefix("RssAnon:") {
+                rss_anon_kib = parse_kib(&format!("RssAnon: {rest}"));
+            } else if let Some(rest) = line.strip_prefix("RssFile:") {
+                rss_file_kib = parse_kib(&format!("RssFile: {rest}"));
+            } else if let Some(rest) = line.strip_prefix("RssShmem:") {
+                rss_shmem_kib = parse_kib(&format!("RssShmem: {rest}"));
+            }
+        }
+    }
+    json!({
+        "pid": std::process::id(),
+        "backend": backend,
+        "vm_hwm_kib": vm_hwm_kib,
+        "vm_rss_kib": vm_rss_kib,
+        "vm_peak_kib": vm_peak_kib,
+        "rss_anon_kib": rss_anon_kib,
+        "rss_file_kib": rss_file_kib,
+        "rss_shmem_kib": rss_shmem_kib,
+    })
 }
 
 fn main() -> Result<()> {

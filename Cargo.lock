@@ -2309,6 +2309,7 @@ dependencies = [
  "spektrafilm-gpu",
  "spektrafilm-io",
  "spektrafilm-math",
+ "spektrafilm-model",
  "tracing-subscriber",
 ]
 

@@ -20,6 +20,14 @@ val syncSamples by tasks.registering(Sync::class) {
     from(rootProject.file("../web/sample")) { include("DSC_6377.dng") }
     into(layout.buildDirectory.dir("generated/samples/samples"))
 }
+// Optional 60 MP Leica Q3 RAW for Firebase Test Lab instrumentation benchmarks.
+val largeRawPath = providers.gradleProperty("negsLargeRaw").orNull
+val syncLargeRaw by tasks.registering(Sync::class) {
+    if (largeRawPath != null) {
+        from(file(largeRawPath)) { rename { "leica60mp.dng" } }
+    }
+    into(layout.buildDirectory.dir("generated/testSamples/samples"))
+}
 
 android {
     namespace = "dev.negs.app"
@@ -33,6 +41,7 @@ android {
         versionCode = 1
         versionName = "0.20.1"
         ndk { abiFilters += "arm64-v8a" }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -49,18 +58,19 @@ android {
     buildFeatures { compose = true }
     sourceSets["main"].assets.srcDir(engineData)
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/samples"))
+    sourceSets["androidTest"].assets.srcDir(layout.buildDirectory.dir("generated/testSamples"))
     packaging {
         // The engine runs as a program from the native library directory,
         // so it must be unpacked there, not mapped from the APK.
         jniLibs.useLegacyPackaging = true
     }
     androidResources {
-        // PNGs (the borders, most of the data) are compressed already.
-        noCompress += listOf("png")
+        // PNGs (the borders, most of the data) and DNGs are compressed already.
+        noCompress += listOf("png", "dng")
     }
 }
 
-tasks.named("preBuild") { dependsOn(syncEngineData, syncSamples) }
+tasks.named("preBuild") { dependsOn(syncEngineData, syncSamples, syncLargeRaw) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
@@ -77,4 +87,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
