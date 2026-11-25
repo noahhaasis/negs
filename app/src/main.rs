@@ -103,6 +103,20 @@ actions!(
         ToggleImageOnly,
         ToggleCompare,
         ZoomActual,
+        SheetTheme,
+        SheetDarkroom,
+        SheetBlack,
+        SheetCharcoal,
+        SheetGrey22,
+        SheetMiddleGrey,
+        SheetLightGrey,
+        SheetPaper,
+        ThemeDarkroom,
+        ThemeContactSheet,
+        ThemeLightTable,
+        ThemeDaylight,
+        ThemePlain,
+        ThemePlainDark,
         QuitApp,
     ]
 );
@@ -419,6 +433,14 @@ impl NegsApp {
         };
         let summary = library.summary(&item);
         (name, summary.rating, summary.flag)
+    }
+
+    /// View › Viewer Sheet: the sheet behind the photograph, remembered.
+    pub fn choose_sheet(&mut self, sheet: sheet::ViewerSheet, cx: &mut Context<Self>) {
+        self.model.prefs.viewer_sheet = sheet.key().into();
+        self.model.prefs.save();
+        self.model.dirty |= negs_app::model::dirty::CANVAS;
+        cx.notify();
     }
 
     pub fn set_theme(&mut self, name: ThemeName, cx: &mut Context<Self>) {
@@ -852,6 +874,20 @@ impl gpui::Render for NegsApp {
                     cx.notify();
                 }
             }))
+            .on_action(cx.listener(|this, _: &SheetTheme, _window, cx| this.choose_sheet(sheet::ViewerSheet::Theme, cx)))
+            .on_action(cx.listener(|this, _: &SheetDarkroom, _window, cx| this.choose_sheet(sheet::ViewerSheet::Darkroom, cx)))
+            .on_action(cx.listener(|this, _: &SheetBlack, _window, cx| this.choose_sheet(sheet::ViewerSheet::Black, cx)))
+            .on_action(cx.listener(|this, _: &SheetCharcoal, _window, cx| this.choose_sheet(sheet::ViewerSheet::Charcoal, cx)))
+            .on_action(cx.listener(|this, _: &SheetGrey22, _window, cx| this.choose_sheet(sheet::ViewerSheet::Grey22, cx)))
+            .on_action(cx.listener(|this, _: &SheetMiddleGrey, _window, cx| this.choose_sheet(sheet::ViewerSheet::MiddleGrey, cx)))
+            .on_action(cx.listener(|this, _: &SheetLightGrey, _window, cx| this.choose_sheet(sheet::ViewerSheet::LightGrey, cx)))
+            .on_action(cx.listener(|this, _: &SheetPaper, _window, cx| this.choose_sheet(sheet::ViewerSheet::Paper, cx)))
+            .on_action(cx.listener(|this, _: &ThemeDarkroom, _window, cx| this.set_theme(ThemeName::Darkroom, cx)))
+            .on_action(cx.listener(|this, _: &ThemeContactSheet, _window, cx| this.set_theme(ThemeName::ContactSheet, cx)))
+            .on_action(cx.listener(|this, _: &ThemeLightTable, _window, cx| this.set_theme(ThemeName::LightTable, cx)))
+            .on_action(cx.listener(|this, _: &ThemeDaylight, _window, cx| this.set_theme(ThemeName::Daylight, cx)))
+            .on_action(cx.listener(|this, _: &ThemePlain, _window, cx| this.set_theme(ThemeName::Plain, cx)))
+            .on_action(cx.listener(|this, _: &ThemePlainDark, _window, cx| this.set_theme(ThemeName::PlainDark, cx)))
             .on_action(cx.listener(|this, _: &ToggleCompare, _window, cx| {
                 compare_view::toggle(this);
                 this.after_model_update(cx);
@@ -1144,7 +1180,30 @@ fn install_menus(cx: &mut App) {
                 MenuItem::action("Compare", ToggleCompare),
                 MenuItem::action("Image Only", ToggleImageOnly),
                 MenuItem::separator(),
-                MenuItem::action("Cycle Theme", CycleTheme),
+                MenuItem::submenu(Menu {
+                    name: "Theme".into(),
+                    items: vec![
+                        MenuItem::action("Darkroom", ThemeDarkroom),
+                        MenuItem::action("Contact Sheet", ThemeContactSheet),
+                        MenuItem::action("Light Table", ThemeLightTable),
+                        MenuItem::action("Daylight", ThemeDaylight),
+                        MenuItem::action("Plain", ThemePlain),
+                        MenuItem::action("Plain Dark", ThemePlainDark),
+                    ],
+                }),
+                MenuItem::submenu(Menu {
+                    name: "Viewer Sheet".into(),
+                    items: vec![
+                        MenuItem::action("Theme’s Own", SheetTheme),
+                        MenuItem::action("Darkroom", SheetDarkroom),
+                        MenuItem::action("Black", SheetBlack),
+                        MenuItem::action("Charcoal", SheetCharcoal),
+                        MenuItem::action("22% Grey", SheetGrey22),
+                        MenuItem::action("Middle Grey", SheetMiddleGrey),
+                        MenuItem::action("Light Grey", SheetLightGrey),
+                        MenuItem::action("Paper", SheetPaper),
+                    ],
+                }),
             ],
         },
         Menu {

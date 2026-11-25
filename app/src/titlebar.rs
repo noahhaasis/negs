@@ -347,6 +347,35 @@ pub fn render_theme_menu(
                         )
                     })
             }))
+            // The viewer sheet: what the photograph lies on.
+            .child(div().mx(px(10.0)).my(px(4.0)).h(px(1.0)).bg(theme.line))
+            .child(div().px(px(10.0)).pt(px(2.0)).pb(px(4.0)).text_size(px(10.5)).text_color(theme.dim).child("VIEWER SHEET"))
+            .children(crate::sheet::ViewerSheet::ALL.into_iter().map(|sheet| {
+                let selected = sheet == crate::sheet::from_prefs(&app.model.prefs);
+                let swatch = sheet.hex_in(&theme.tokens);
+                div()
+                    .id(SharedString::from(format!("sheet-opt-{}", sheet.key())))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px(px(10.0))
+                    .py(px(5.0))
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.choose_sheet(sheet, cx);
+                        this.theme_menu_open = false;
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().w(px(12.0)).h(px(12.0)).rounded(px(3.0)).bg(hex(swatch)).border_1().border_color(theme.track))
+                            .child(div().text_size(px(12.0)).text_color(if selected { theme.paper } else { theme.label }).child(sheet.title())),
+                    )
+                    .when(selected, |el| el.child(div().w(px(6.0)).h(px(6.0)).rounded(px(3.0)).bg(theme.accent)))
+            }))
             .into_any_element(),
     )
 }
