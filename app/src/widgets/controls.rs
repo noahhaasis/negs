@@ -427,6 +427,8 @@ pub fn render_note_row(row: &RowView, theme: &GpuiTheme) -> impl IntoElement {
     let color = if row.warn { theme.warn } else { theme.dim };
     div()
         .w_full()
+        .min_w_0()
+        .flex_shrink_0()
         .px(px(16.0))
         .py(px(3.0))
         .text_size(px(11.0))

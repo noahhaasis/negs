@@ -615,9 +615,11 @@ pub fn render_tray(
                     .px(px(16.0))
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .font_family(theme.serif_family.clone())
                             .italic()
-                            .text_size(px(14.0))
+                            .text_size(px(13.5))
                             .line_height(px(18.0))
                             .text_center()
                             .text_color(film_label)
