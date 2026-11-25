@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "negs-app"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "icu_normalizer",
@@ -880,11 +880,11 @@ dependencies = [
 
 [[package]]
 name = "negs-library"
-version = "0.20.0"
+version = "0.20.1"
 
 [[package]]
 name = "negs-marks"
-version = "0.20.0"
+version = "0.20.1"
 
 [[package]]
 name = "no_std_io2"
@@ -1337,7 +1337,7 @@ checksum = "3244542535d5de959d90ec55d1b5ff0fd2bb7b1310223907d5f11932847f7b59"
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "byteorder",
  "half",

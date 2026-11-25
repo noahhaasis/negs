@@ -3622,7 +3622,7 @@ dependencies = [
 
 [[package]]
 name = "negs-app"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "icu_normalizer",
@@ -3642,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "negs-gpui"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -3660,11 +3660,11 @@ dependencies = [
 
 [[package]]
 name = "negs-library"
-version = "0.20.0"
+version = "0.20.1"
 
 [[package]]
 name = "negs-marks"
-version = "0.20.0"
+version = "0.20.1"
 
 [[package]]
 name = "new_debug_unreachable"
@@ -5469,7 +5469,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -5485,7 +5485,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "byteorder",
  "half",

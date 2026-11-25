@@ -37,6 +37,38 @@ use crate::{json as js, state};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+type Delivery = Box<dyn FnOnce(&mut App) + Send>;
+
+/// What the readers, helpers and header threads have brought, not yet
+/// taken in on the UI thread.
+static DELIVERIES: Mutex<Vec<Delivery>> = Mutex::new(Vec::new());
+
+/// How long deliveries gather before they're taken in.
+const DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Takes `delivery` in on the UI thread with every other that arrives
+/// within `DELIVERY_WAIT`, and then syncs the strip and grid once. A sync
+/// visits every cell, so one per thumbnail stalled the window for seconds
+/// when a large folder's thumbnails arrived together (issue #24). They're
+/// taken in on a timer, which waits for input and painting: posted tasks
+/// go before both, and while the readers kept up the window took no clicks.
+fn deliver(delivery: impl FnOnce(&mut App) + Send + 'static) {
+    let mut waiting = DELIVERIES.lock().unwrap_or_else(|e| e.into_inner());
+    waiting.push(Box::new(delivery));
+    if waiting.len() == 1 {
+        drop(waiting);
+        post(|_: &mut App| super::after(DELIVERY_WAIT, take_deliveries));
+    }
+}
+
+fn take_deliveries(app: &mut App) {
+    let waiting = std::mem::take(&mut *DELIVERIES.lock().unwrap_or_else(|e| e.into_inner()));
+    for delivery in waiting {
+        delivery(app);
+    }
+    app.model.dirty |= crate::model::dirty::STRIP;
+}
+
 /// A thumbnail's pixels, opaque BGRA.
 pub struct Pixels {
     pub bgra: Vec<u8>,
@@ -73,7 +105,39 @@ pub fn want(model: &Model, item: &Item, unedited: Option<&str>) -> Want {
     let Some(library) = &model.shelf.library else { return none };
     let Some(file) = library.file(item) else { return none };
     let Some(look) = library.look(item).or(unedited) else { return none };
-    Want { item: item.clone(), key: edited_store::thumbnails().key(file, item, look), loose: Store::loose_key(file, item, look) }
+    let engine = edited_store::thumbnails().engine();
+    KEYS.with(|keys| {
+        let mut keys = keys.borrow_mut();
+        if let Some(known) = keys.get(item).filter(|k| k.size == file.size && k.modified == file.modified && k.look == look && k.engine == engine) {
+            return Want { item: item.clone(), key: known.key.clone(), loose: known.loose.clone() };
+        }
+        let want = Want { item: item.clone(), key: edited_store::thumbnails().key(file, item, look), loose: Store::loose_key(file, item, look) };
+        if keys.len() >= KEYS_KEPT {
+            keys.clear();
+        }
+        let known = KnownKeys { size: file.size, modified: file.modified, look: look.to_owned(), engine, key: want.key.clone(), loose: want.loose.clone() };
+        keys.insert(item.clone(), known);
+        want
+    })
+}
+
+/// An item's keys and what they were made from. Every sync asks every
+/// cell's keys, and hashing them anew each time cost a large folder tens
+/// of milliseconds per sync (issue #24).
+struct KnownKeys {
+    size: Option<u64>,
+    modified: Option<std::time::SystemTime>,
+    look: String,
+    engine: Option<String>,
+    key: Option<String>,
+    loose: Option<String>,
+}
+
+/// Enough for a few large folders; past it the keys are made again.
+const KEYS_KEPT: usize = 50_000;
+
+thread_local! {
+    static KEYS: std::cell::RefCell<HashMap<Item, KnownKeys>> = std::cell::RefCell::new(HashMap::new());
 }
 
 /// The unedited look, once a library is open.
@@ -229,10 +293,7 @@ impl Thumbs {
                 let started = std::time::Instant::now();
                 let read: Vec<(PathBuf, f64)> = batch.iter().filter_map(|p| crate::thumbnail::header_ratio(p).map(|r| (p.clone(), r))).collect();
                 crate::trace::event("headers_read", || json!({"count": batch.len(), "known": read.len(), "ms": started.elapsed().as_secs_f64() * 1000.0}));
-                post(move |app: &mut App| {
-                    app.thumbs.header_ratios.extend(read);
-                    app.model.dirty |= crate::model::dirty::STRIP;
-                });
+                deliver(move |app: &mut App| app.thumbs.header_ratios.extend(read));
             }
         });
     }
@@ -452,10 +513,7 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
     let store = edited_store::thumbnails();
     let key = job.key.clone();
     let finish = move |pixels: Option<Arc<Pixels>>, found: bool| {
-        post(move |app: &mut App| {
-            app.thumbs.developed(key, pixels, found);
-            app.model.dirty |= crate::model::dirty::STRIP;
-        });
+        deliver(move |app: &mut App| app.thumbs.developed(key, pixels, found));
     };
     if store.contains(&job.key) {
         return finish(None, true);
@@ -561,10 +619,7 @@ fn start_readers() -> Arc<Queue> {
                     };
                     json!({"name": name, "size": size as usize, "kind": kind, "width": w, "height": h, "ms": started.elapsed().as_secs_f64() * 1000.0})
                 });
-                post(move |app: &mut App| {
-                    app.thumbs.arrived(arrived);
-                    app.model.dirty |= crate::model::dirty::STRIP;
-                });
+                deliver(move |app: &mut App| app.thumbs.arrived(arrived));
             }
         });
     }

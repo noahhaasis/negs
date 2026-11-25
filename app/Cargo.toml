@@ -6,7 +6,7 @@ resolver = "2"
 
 [package]
 name = "negs-gpui"
-version = "0.20.0"
+version = "0.20.1"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
