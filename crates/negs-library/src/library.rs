@@ -252,6 +252,9 @@ pub struct Library {
     sidecars: bool,
     filter: Filter,
     files: Vec<PhotoFile>,
+    /// Where each photograph is in `files`: the strip and grid look up
+    /// every cell's file on each sync, which searching made quadratic.
+    file_index: HashMap<PathBuf, usize>,
     companions: HashMap<PathBuf, PathBuf>,
     /// Each photograph's sidecar as last listed; `None`, it had none.
     sidecar_files: HashMap<PathBuf, Option<Stamp>>,
@@ -285,6 +288,7 @@ impl Library {
             sidecars: config.sidecars,
             filter: Filter::default(),
             files: Vec::new(),
+            file_index: HashMap::new(),
             companions: HashMap::new(),
             sidecar_files: HashMap::new(),
             duplicates: HashMap::new(),
@@ -329,7 +333,7 @@ impl Library {
 
     /// The listing of `item`'s photograph, for its thumbnail's key.
     pub fn file(&self, item: &Item) -> Option<&PhotoFile> {
-        self.files.iter().find(|f| f.path == item.photo)
+        self.file_index.get(&item.photo).map(|&i| &self.files[i])
     }
 
     /// `IMG_0412.CR3`, or `IMG_0412.CR3 (2)` for its first duplicate.
@@ -595,6 +599,7 @@ impl Library {
         };
         self.failed = None;
         self.files = listing.photos;
+        self.file_index = self.files.iter().enumerate().map(|(i, f)| (f.path.clone(), i)).collect();
         self.companions = listing.companions;
         self.read_only = !can_write(&self.folder);
         let present: HashSet<PathBuf> = self.files.iter().map(|f| f.path.clone()).collect();
