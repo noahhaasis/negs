@@ -587,6 +587,7 @@ pub fn render_panel(app: &mut NegsApp, window: &mut Window, cx: &mut Context<Neg
             .child(
                 div()
                     .id("crop-angle")
+                    .tooltip(crate::tooltip::tip("Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.", &theme))
                     .flex_1()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -607,6 +608,7 @@ pub fn render_panel(app: &mut NegsApp, window: &mut Window, cx: &mut Context<Neg
             .child(
                 div()
                     .id("crop-angle-reset")
+                    .tooltip(crate::tooltip::tip("Straighten to 0°", &theme))
                     .w(px(16.0))
                     .font_family(theme.ui_family.clone())
                     .text_size(px(13.0))
@@ -628,6 +630,7 @@ pub fn render_panel(app: &mut NegsApp, window: &mut Window, cx: &mut Context<Neg
     rows = rows.child(section("FLIP", &theme)).child(
         div()
             .id("crop-flip")
+            .tooltip(crate::tooltip::tip("Mirrors the photograph, as a negative photographed from its base side needs. With a half turn it mirrors top to bottom.", &theme))
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -682,6 +685,7 @@ pub fn render_panel(app: &mut NegsApp, window: &mut Window, cx: &mut Context<Neg
         .child(
             div()
                 .id("crop-reset")
+                .tooltip(crate::tooltip::tip("Show the whole, unturned photograph again.", &theme))
                 .text_size(px(12.0))
                 .text_color(if modified { theme.label } else { theme.dim })
                 .when(!modified, |d| d.opacity(negs_app::theme::DISABLED_OPACITY))
@@ -711,6 +715,7 @@ pub fn render_panel(app: &mut NegsApp, window: &mut Window, cx: &mut Context<Neg
                 .child(
                     div()
                         .id("crop-cancel")
+                        .tooltip(crate::tooltip::tip("Discard the crop (Esc)", &theme))
                         .flex_1()
                         .h(px(34.0))
                         .flex()
@@ -734,6 +739,7 @@ pub fn render_panel(app: &mut NegsApp, window: &mut Window, cx: &mut Context<Neg
                 .child(
                     div()
                         .id("crop-done")
+                        .tooltip(crate::tooltip::tip("Apply the crop (Return)", &theme))
                         .flex_grow()
                         .flex_basis(px(180.0))
                         .h(px(34.0))

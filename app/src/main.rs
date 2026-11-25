@@ -39,6 +39,7 @@ mod win;
 mod thumbs;
 mod tile_cache;
 mod titlebar;
+mod tooltip;
 mod tray;
 mod widgets;
 
@@ -972,6 +973,7 @@ impl gpui::Render for NegsApp {
             self.bench = Some(bench);
         }
         thumbs::flush_drops(window);
+        tooltip::set_quiet(self.inspector.active_slider_drag.is_some());
         self.windows_chrome(window, cx);
         if std::mem::take(&mut self.resume_offer) && self.bench.is_none() {
             batch_view::offer_resume(self, window, cx);

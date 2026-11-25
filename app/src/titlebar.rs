@@ -167,7 +167,7 @@ pub fn render_titlebar(
                         .items_center()
                         .gap_1()
                         .child(
-                            pill_button("tb-photo", "Photo", !in_grid && has_photo && !comparing, !has_photo, theme).on_click(cx.listener(
+                            pill_button("tb-photo", "Photo", !in_grid && has_photo && !comparing, !has_photo, theme).tooltip(crate::tooltip::tip(if comparing { "Stop comparing and edit the photograph" } else { "Edit Photograph (E)" }, theme)).on_click(cx.listener(
                                 |this, _, window, cx| {
                                     if this.model.comparison().is_some() {
                                         this.model.leave_compare();
@@ -180,7 +180,7 @@ pub fn render_titlebar(
                             )),
                         )
                         .child(
-                            pill_button("tb-grid", "Grid", in_grid, !can_grid, theme).on_click(cx.listener(
+                            pill_button("tb-grid", "Grid", in_grid, !can_grid, theme).tooltip(crate::tooltip::tip(if comparing { "Stop comparing and show all photographs (G)" } else { "All Photographs (G)" }, theme)).on_click(cx.listener(
                                 |this, _, window, cx| {
                                     if this.model.comparison().is_some() {
                                         this.model.leave_compare();
@@ -195,7 +195,7 @@ pub fn render_titlebar(
                         )
                         // Compare: the two selected, or back out (C).
                         .child(
-                            pill_button("tb-compare", "Compare", comparing, !can_compare, theme).on_click(cx.listener(
+                            pill_button("tb-compare", "Compare", comparing, !can_compare, theme).tooltip(crate::tooltip::tip(if comparing { "Comparing two photographs (C to leave)".to_string() } else { app.model.compare_word().1 }, theme)).on_click(cx.listener(
                                 |this, _, _window, cx| {
                                     if this.model.comparison().is_none() {
                                         crate::compare_view::toggle(this);
@@ -208,13 +208,13 @@ pub fn render_titlebar(
                 )
                 .child(div().w(px(1.0)).h(px(18.0)).bg(theme.line))
                 .child(
-                    pill_button("tb-open", "Open", false, false, theme)
+                    pill_button("tb-open", "Open", false, false, theme).tooltip(crate::tooltip::tip("Open a photograph or folder (Ctrl+O)", theme))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.prompt_open_photo(window, cx);
                         })),
                 )
                 .child(
-                    pill_button("tb-save", "Save", false, !can_save, theme).on_click(cx.listener(
+                    pill_button("tb-save", "Save", false, !can_save, theme).tooltip(crate::tooltip::tip("Save a preview (Ctrl+S)", theme)).on_click(cx.listener(
                         |this, _, _window, cx| {
                             if this.model.can_save() {
                                 crate::export_card::open(this, false, cx);
