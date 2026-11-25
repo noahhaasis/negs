@@ -10,12 +10,40 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 |---|---|---|---|---|
 | 0 | Clean Odin Revert | **Done** | `5ef625e4` | Forward-reverted `core/` & Odin wiring on `main`; preserved `v0.18`–`v0.20`, all film stocks, `8154a6ac`, and `windows/src/inspector_view/`. Mac + PC green. |
 | 1 | Extract Pure-Rust `crates/negs-app` | **Done** | `85281bf8` | Promoted `windows/marks` → `crates/negs-marks`; extracted all 32 non-UI modules + 6 themes + `Model` into standalone `crates/negs-app` behind `Host` & `platform`; `windows/` thin shell green on PC. |
-| 2 | GPUI Shell + Color-Managed Canvas | **In progress** | — | Locking `gpui = "0.2.2"`; creating `app/` workspace with Newsreader fonts, 6 themes, `EngineClient`/`Model`, exact-fit Lanczos + monitor ICC / macOS Display P3 canvas. |
-| 3 | Inspector, Presets & Stock Tray | Pending | — | Custom widgets, `inspector_view`-driven Prep/Lab/Output inspector, Presets sidebar, Film/Paper Stock Preview Tray. |
+| 2 | GPUI Shell + Color-Managed Canvas | **Done** | `bd8c7662` | Standalone `app/` workspace on `gpui 0.2.2`; embedded Newsreader + 6 themes; fused linear-light exact-fit Lanczos-3 + per-display ICC/P3 pipeline; vector `negs-marks`; Mac & PC live verified. |
+| 3 | Inspector, Presets & Stock Tray | **Ready** | — | Awaiting Noah's Phase 2 visual/feel sign-off before parallel 3a (Inspector) + 3b (Presets & Stock Tray). |
 | 4 | Library, Filmstrip, Grid & Flight | Pending | — | `negs-library` + folder watcher, filmstrip with `negs-marks`, contact-sheet grid, 60 fps `SheetFlight` transition. |
 | 5 | Compare, Crop, Negative, Export, Batch & Settings | Pending | — | Full feature parity with `windows/` and `macos/`. |
 | 6 | Windows Cutover & Packaging | Pending | — | ABBA perf/screenshot report vs Win32 `Negs.exe`, Go/No-Go gate, installer + CI cutover. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
+
+---
+
+## 2026-11-25 — Phase 2: GPUI Shell + Color-Managed Photo Canvas (`bd8c7662`)
+
+### What landed
+- Branch `gpui-p2-shell-canvas` (`aa66b592`, `0fb5424f`, `0d76f195`, `5104c083`), merged to local `main` with `--no-ff` at `bd8c7662`.
+- **Zero engine drift:** `Cargo.toml`, `Cargo.lock`, `crates/spektrafilm-*`, `crates/negs-libraw`, `vendor/`, and `web/` remain 100% untouched.
+- **Per-display ICC in `crates/negs-app`:** Added ICC v2 `desc` / v4 `mluc` profile name parsing (`icc::profile_name`), `icc::for_display_id`, `icc::describe_display`, and macOS `CGDisplayCopyColorSpace` + `CGColorSpaceCopyICCData` per-display lookup.
+- **Standalone `app/` workspace (`negs-gpui` / `Negs`):**
+  - Locked `gpui = { version = "0.2.2", features = ["runtime_shaders"] }` (`runtime_shaders` is macOS-only in `gpui 0.2.2` and avoids requiring Xcode's optional MetalToolchain CLI while leaving Windows DX11 untouched).
+  - `theme_gpui.rs`: Embeds `Newsreader-Negs.ttf` & `Newsreader-Negs-Italic.ttf`, maps all 6 `ThemeName` palettes (`Darkroom`, `ContactSheet`, `LightTable`, `Daylight`, `Plain`, `PlainDark`), honors `NEGS_THEME`.
+  - `host_gpui.rs`: Bridges `negs_app::host::Host` (`post`, `after`, atomic `canvas_scale`, `owner_window_handle`) to GPUI's foreground thread.
+  - `color_display.rs`: Fused linear-light exact-fit Lanczos-3 resampling (`exact_fit::coefficients`, multi-threaded via `std::thread::scope`) + unclipped `REC2020_TO_SRGB` + monitor ICC 3×3 matrix & 4096-entry LUT -> BGRA8 `RenderImage`, native-resolution cropped tile path at zoom ≥ 100%, crop/flip/rotate/border support, `window.drop_image` VRAM cleanup, and dynamic display-change refresh (`observe_window_bounds`).
+  - `marks_gpui.rs`: Hand-drawn `negs-marks` stars, pick box, and reject cross via GPUI `PathBuilder` + `window.paint_path`.
+  - `main.rs`, `titlebar.rs`, `canvas.rs`, `status.rs`: Darkroom titlebar, status bar with live ICC label, smooth zoom/pan, Before/After toggle (`\`) & draggable split divider (`Shift+\`), native Open/Save dialogs, drag-and-drop, keyboard shortcuts (`Cmd/Ctrl+O/S/Z/Shift+Z/+/-/0/Q`, `\`, `Shift+\`, `Z`, `0–5`, `P/X/U`, `T`), and `NEGS_STARTUP_REPORT` instrumentation compatible with `shot.ps1` and `startup.ps1`.
+
+### Verification Gate & Baselines
+- **Unit tests:**
+  - macOS: `app/` **8 passed, 0 failed** (BGRA order, Display P3 red desaturation, Rec. 2020 wide-gamut on P3, Lanczos 3px stripe sharpness + flat grey, crop/orientation, 6 themes, env override, canvas scale); `crates/negs-app` ICC tests **4 passed, 0 failed**.
+  - Windows PC: `app/` **8 passed, 0 failed**; `crates/negs-app` ICC tests **4 passed, 0 failed**.
+- **Build & incremental edit speed:**
+  - Mac release binary (`no LTO`): **18 MB** unstripped; 1-line incremental UI release rebuild: **2.11 s** (target `<= 5 s`).
+  - Windows release binary (`no LTO`): **25.2 MB** unstripped (0 errors, 0 warnings).
+- **Live Color Management & Startup Baselines (`docs/card.jpg`, live `spektrafilm-native`):**
+  - **macOS (Retina Display P3):** Detected `display_key=1 label="Display" active_transform=true`; warm `gpu_ready` **227.5 ms**, `first_window_composited` **254.8 ms**, `first_image_on_screen` **1238.9 ms** (fresh develop; `0.25 s` engine render). Note: precompiled Metal shaders (dropping `runtime_shaders` once MetalToolchain is installed) can reduce Mac first-frame further toward the ~182 ms spike baseline.
+  - **Windows PC (`startup.ps1 -Runs 5`, Dell P3424WEB wide-gamut monitor):** Detected `ICC: DELL P3424WEB Color Profile, D6500` (active matrix+LUT transform); **5-run medians:** `gpu_ready` **447.1 ms**, `inspector_shown` **447.2 ms**, `first_window_composited` **466.2 ms** (beats `<= 550 ms` target by 84 ms!), `first_image_on_screen` **1189.9 ms** (fresh develop; `0.18–0.19 s` engine render).
+  - Visually verified side-by-side screenshots on Mac (`Darkroom` P3) and Windows PC (`Darkroom`, `marks`, `Contact sheet`, `Plain`): matched color saturation across Mac P3 & Windows wide-gamut Dell ICC, razor-sharp 1:1 Lanczos film grain, crisp Newsreader typography, and vector `negs-marks` overlay.
 
 ---
 
