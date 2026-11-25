@@ -1,19 +1,22 @@
 //! Negs — cross-platform GPUI desktop application.
 //!
-//! Phase 2: GPUI shell, Newsreader typography, 6 themes, `Host` bridge to
+//! Phase 2 + 3a: GPUI shell, Newsreader typography, 6 themes, `Host` bridge to
 //! `negs_app::model::Model`, exact-fit Lanczos + monitor ICC / macOS Display P3
 //! photo canvas, vector `negs-marks` overlay, native Open/Save dialogs,
-//! drag-and-drop, keyboard shortcuts, and `NEGS_STARTUP_REPORT` instrumentation.
+//! drag-and-drop, keyboard shortcuts, `NEGS_STARTUP_REPORT` instrumentation,
+//! custom darkroom widgets, and the complete Prep / Lab / Output Inspector.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod canvas;
 mod color_display;
 mod host_gpui;
+mod inspector;
 mod marks_gpui;
 mod status;
 mod theme_gpui;
 mod titlebar;
+mod widgets;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,11 +25,11 @@ use std::time::Instant;
 
 use gpui::{
     App, AppContext, Application, Context, FocusHandle, Focusable, IntoElement, KeyBinding, Menu,
-    MenuItem, PathPromptOptions, Point, SharedString, TitlebarOptions, Window, WindowBounds,
-    WindowOptions, actions, div, prelude::*, px, size,
+    MenuItem, MouseButton, MouseMoveEvent, MouseUpEvent, PathPromptOptions, Point, SharedString,
+    TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, size,
 };
 use negs_app::host;
-use negs_app::model::{Edge, ExportSize, LibraryKey, Model, SaveSettings};
+use negs_app::model::{Edge, ExportSize, LibraryKey, Model, Pane, SaveSettings};
 use negs_app::platform;
 use negs_app::session::{Preferences, SessionStore};
 use negs_app::theme::ThemeName;
@@ -35,6 +38,10 @@ use negs_library::Flag;
 use crate::canvas::{CanvasState, render_canvas};
 use crate::color_display::active_display_profile;
 use crate::host_gpui::{GpuiHost, HostChannels};
+use crate::inspector::{
+    InspectorState, build_inspector_view, handle_root_mouse_move, handle_root_mouse_up,
+    render_inspector_column,
+};
 use crate::status::render_status_bar;
 use crate::theme_gpui::{GpuiTheme, initial_theme, next_theme, register_fonts};
 use crate::titlebar::{render_theme_menu, render_titlebar};
@@ -62,6 +69,9 @@ actions!(
         FlagReject,
         FlagUnflag,
         CycleTheme,
+        ToggleInspector,
+        ShowAdjustments,
+        ShowPresets,
         QuitApp,
     ]
 );
@@ -102,13 +112,15 @@ impl StartupReport {
     }
 }
 
-/// Root GPUI view owning the pure-Rust `Model`, canvas state, active theme, and host handle.
+/// Root GPUI view owning the pure-Rust `Model`, canvas state, inspector state,
+/// active theme, and host handle.
 pub struct NegsApp {
     pub model: Model,
     pub host: Arc<GpuiHost>,
     pub theme: GpuiTheme,
     pub theme_menu_open: bool,
     pub canvas: CanvasState,
+    pub inspector: InspectorState,
     pub startup: StartupReport,
     focus_handle: FocusHandle,
     last_zoom_command: u64,
@@ -132,7 +144,9 @@ impl NegsApp {
         cx: &mut Context<Self>,
     ) -> Self {
         let prefs = Preferences::load();
-        let theme_name = initial_theme((!prefs.app_theme.is_empty()).then_some(prefs.app_theme.as_str()));
+        let initial_scope_height = prefs.scope_height;
+        let theme_name =
+            initial_theme((!prefs.app_theme.is_empty()).then_some(prefs.app_theme.as_str()));
         let theme = GpuiTheme::from_name(theme_name);
         let focus_handle = cx.focus_handle();
 
@@ -224,12 +238,14 @@ impl NegsApp {
         })
         .detach();
 
+        let inspector = InspectorState::new(initial_scope_height, cx);
         let mut app = Self {
             model,
             host,
             theme,
             theme_menu_open: false,
             canvas: CanvasState::with_display_profile(display_profile),
+            inspector,
             startup,
             focus_handle,
             last_zoom_command: 0,
@@ -237,7 +253,7 @@ impl NegsApp {
             shut_down: false,
         };
         app.startup.stamp("gpu_ready");
-        app.startup.stamp("inspector_shown");
+        app.after_model_update(cx);
         app
     }
 
@@ -257,7 +273,7 @@ impl NegsApp {
         }
     }
 
-    fn after_model_update(&mut self, _cx: &mut Context<Self>) {
+    pub fn after_model_update(&mut self, _cx: &mut Context<Self>) {
         if self.model.zoom_command != self.last_zoom_command {
             self.last_zoom_command = self.model.zoom_command;
             if self.model.fit_image {
@@ -272,6 +288,8 @@ impl NegsApp {
             self.canvas.split_mode = false;
             self.canvas.reset_fit();
             self.canvas.invalidate_images();
+            self.inspector.close_popovers();
+            self.inspector.editing_slider = None;
         }
         // Keep Original loaded whenever Before/After or Split mode is active.
         if (self.canvas.before_after || self.canvas.split_mode)
@@ -280,6 +298,14 @@ impl NegsApp {
         {
             self.model.hold_original(true);
         }
+
+        // Tell the engine whether Print Curves' tone graph is currently visible.
+        let tone_graph_visible = self.model.inspector_visible
+            && self.model.pane() == Pane::Adjustments
+            && build_inspector_view(&self.model).tone_graph;
+        self.model.show_tone_graph(tone_graph_visible);
+        let _ = self.model.pump_previews();
+
         self.model.dirty = 0;
     }
 
@@ -312,6 +338,20 @@ impl NegsApp {
     pub fn cycle_theme(&mut self, cx: &mut Context<Self>) {
         let next = next_theme(self.theme.name);
         self.set_theme(next, cx);
+    }
+
+    pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
+        self.inspector.close_popovers();
+        self.model.toggle_inspector();
+        self.after_model_update(cx);
+        cx.notify();
+    }
+
+    pub fn toggle_pane(&mut self, pane: Pane, cx: &mut Context<Self>) {
+        self.inspector.close_popovers();
+        self.model.toggle_pane(pane);
+        self.after_model_update(cx);
+        cx.notify();
     }
 
     pub fn toggle_before_after(&mut self, cx: &mut Context<Self>) {
@@ -454,10 +494,38 @@ impl gpui::Render for NegsApp {
         };
         window.set_window_title(&win_title);
 
+        let titlebar_el = render_titlebar(self, window, cx).into_any_element();
+        let canvas_el = render_canvas(self, window, cx).into_any_element();
+        let inspector_el = render_inspector_column(self, window, cx);
+        self.stamp_startup("inspector_shown");
+        let status_el = render_status_bar(self, cx).into_any_element();
+        let theme_menu = render_theme_menu(self, cx);
+
         div()
             .id("negs-app-root")
             .track_focus(&self.focus_handle)
             .key_context("NegsApp")
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if this.inspector.has_active_drag() {
+                    handle_root_mouse_move(this, event, window, cx);
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, window, cx| {
+                    if this.inspector.has_active_drag() {
+                        handle_root_mouse_up(this, window, cx);
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, window, cx| {
+                    if this.inspector.has_active_drag() {
+                        handle_root_mouse_up(this, window, cx);
+                    }
+                }),
+            )
             .on_action(cx.listener(|this, _: &OpenPhoto, window, cx| {
                 this.prompt_open_photo(window, cx);
             }))
@@ -541,6 +609,15 @@ impl gpui::Render for NegsApp {
             .on_action(cx.listener(|this, _: &CycleTheme, _window, cx| {
                 this.cycle_theme(cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleInspector, _window, cx| {
+                this.toggle_inspector(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowAdjustments, _window, cx| {
+                this.toggle_pane(Pane::Adjustments, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowPresets, _window, cx| {
+                this.toggle_pane(Pane::Presets, cx);
+            }))
             .on_action(cx.listener(|this, _: &QuitApp, _window, cx| {
                 this.shutdown_cleanly();
                 cx.quit();
@@ -551,38 +628,59 @@ impl gpui::Render for NegsApp {
             .size_full()
             .bg(self.theme.canvas)
             .text_color(self.theme.paper)
-            .child(render_titlebar(self, window, cx))
-            .child(render_canvas(self, window, cx))
-            .child(render_status_bar(self, cx))
-            .when_some(render_theme_menu(self, cx), |el, menu| el.child(menu))
+            .child(titlebar_el)
+            .child(
+                div()
+                    .flex_1()
+                    .w_full()
+                    .min_h_0()
+                    .flex()
+                    .flex_row()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .child(canvas_el),
+                    )
+                    .when_some(inspector_el, |el, col| el.child(col)),
+            )
+            .child(status_el)
+            .when_some(theme_menu, |el, menu| el.child(menu))
     }
 }
 
 fn bind_shortcuts(cx: &mut App) {
     let modifier = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
+    let non_text = Some("NegsApp && !TextInput");
     cx.bind_keys([
         KeyBinding::new(&format!("{modifier}-o"), OpenPhoto, None),
         KeyBinding::new(&format!("{modifier}-s"), SavePreview, None),
         KeyBinding::new(&format!("{modifier}-z"), UndoAction, None),
         KeyBinding::new(&format!("{modifier}-shift-z"), RedoAction, None),
-        KeyBinding::new("\\", ToggleOriginal, None),
-        KeyBinding::new("shift-\\", ToggleSplit, None),
-        KeyBinding::new("|", ToggleSplit, None),
-        KeyBinding::new("z", ToggleZoomFit, None),
+        KeyBinding::new("\\", ToggleOriginal, non_text),
+        KeyBinding::new("shift-\\", ToggleSplit, non_text),
+        KeyBinding::new("|", ToggleSplit, non_text),
+        KeyBinding::new("z", ToggleZoomFit, non_text),
         KeyBinding::new(&format!("{modifier}-="), ZoomIn, None),
         KeyBinding::new(&format!("{modifier}-+"), ZoomIn, None),
         KeyBinding::new(&format!("{modifier}--"), ZoomOut, None),
         KeyBinding::new(&format!("{modifier}-0"), ZoomFit, None),
-        KeyBinding::new("0", Rate0, None),
-        KeyBinding::new("1", Rate1, None),
-        KeyBinding::new("2", Rate2, None),
-        KeyBinding::new("3", Rate3, None),
-        KeyBinding::new("4", Rate4, None),
-        KeyBinding::new("5", Rate5, None),
-        KeyBinding::new("p", FlagPick, None),
-        KeyBinding::new("x", FlagReject, None),
-        KeyBinding::new("u", FlagUnflag, None),
-        KeyBinding::new("t", CycleTheme, None),
+        KeyBinding::new("0", Rate0, non_text),
+        KeyBinding::new("1", Rate1, non_text),
+        KeyBinding::new("2", Rate2, non_text),
+        KeyBinding::new("3", Rate3, non_text),
+        KeyBinding::new("4", Rate4, non_text),
+        KeyBinding::new("5", Rate5, non_text),
+        KeyBinding::new("p", FlagPick, non_text),
+        KeyBinding::new("x", FlagReject, non_text),
+        KeyBinding::new("u", FlagUnflag, non_text),
+        KeyBinding::new("t", CycleTheme, non_text),
+        KeyBinding::new("i", ToggleInspector, non_text),
+        KeyBinding::new("f7", ShowAdjustments, None),
+        KeyBinding::new("f8", ShowPresets, None),
         KeyBinding::new(&format!("{modifier}-q"), QuitApp, None),
     ]);
 }
@@ -617,6 +715,10 @@ fn install_menus(cx: &mut App) {
                 MenuItem::action("Zoom In", ZoomIn),
                 MenuItem::action("Zoom Out", ZoomOut),
                 MenuItem::action("Zoom to Fit", ZoomFit),
+                MenuItem::separator(),
+                MenuItem::action("Adjustments", ShowAdjustments),
+                MenuItem::action("Presets", ShowPresets),
+                MenuItem::action("Toggle Inspector", ToggleInspector),
                 MenuItem::separator(),
                 MenuItem::action("Cycle Theme", CycleTheme),
             ],

@@ -1,5 +1,5 @@
 //! Custom darkroom titlebar in Newsreader + UI typography with file actions,
-//! Before/After & Split controls, zoom indicator, and 6-theme switcher.
+//! Before/After & Split controls, zoom indicator, Inspector toggle, and 6-theme switcher.
 
 use gpui::{Context, InteractiveElement, IntoElement, SharedString, Styled, Window, div, prelude::*, px};
 use negs_app::theme::ThemeName;
@@ -139,7 +139,7 @@ pub fn render_titlebar(
                     )
                 }),
         )
-        // Right: Open, Save, Original, Split, Zoom, Theme switcher
+        // Right: Open, Save, Original, Split, Zoom, Theme switcher, Inspector toggle
         .child(
             div()
                 .flex()
@@ -204,6 +204,18 @@ pub fn render_titlebar(
                         this.theme_menu_open = !this.theme_menu_open;
                         cx.notify();
                     })),
+                )
+                .child(
+                    pill_button(
+                        "tb-inspector",
+                        "Inspector",
+                        app.model.inspector_visible,
+                        false,
+                        theme,
+                    )
+                    .on_click(cx.listener(|this, _, _window, cx| {
+                        this.toggle_inspector(cx);
+                    })),
                 ),
         )
 }
@@ -225,7 +237,7 @@ pub fn render_theme_menu(
             .id("theme-dropdown")
             .absolute()
             .top(px(TITLEBAR_HEIGHT + 4.0))
-            .right(px(14.0))
+            .right(px(96.0))
             .w(px(210.0))
             .py(px(4.0))
             .rounded(px(6.0))
