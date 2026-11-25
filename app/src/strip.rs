@@ -26,7 +26,7 @@ use gpui::{
 };
 use negs_app::model::{Model, dirty, is_photo};
 use negs_app::sheet_rules::{self as rules, StripLayout, ThumbSize};
-use negs_library::{Flag, Item, Summary};
+use negs_library::{Flag, Item, Selection, Summary};
 
 use crate::NegsApp;
 use crate::marks_gpui::{BoxInk, paint_box, paint_cross, paint_dot, paint_pencil, paint_star};
@@ -366,20 +366,25 @@ pub fn open_neighbour(app: &mut NegsApp, step: isize) {
 /// selection, Shift selects up to it, and a plain click selects it and, in
 /// the strip, opens it.
 pub fn click(model: &mut Model, item: &Item, modifiers: &Modifiers, open: bool) {
-    let toggle = if cfg!(target_os = "macos") { modifiers.platform } else { modifiers.control };
     let order = model.shown_items();
-    let selection = &mut model.shelf.selection;
-    if toggle {
-        selection.toggle(item, Some(&order));
-    } else if modifiers.shift {
-        selection.extend_to(item, &order);
-    } else {
-        selection.select(item);
-        if open {
-            model.open_item(item.clone());
-        }
+    if click_selection(&mut model.shelf.selection, item, modifiers, &order) && open {
+        model.open_item(item.clone());
     }
     model.dirty |= dirty::STRIP | dirty::CHROME;
+}
+
+/// A click's change to the selection; true for a plain click (it opens).
+pub fn click_selection(selection: &mut Selection, item: &Item, modifiers: &Modifiers, order: &[Item]) -> bool {
+    let toggle = if cfg!(target_os = "macos") { modifiers.platform } else { modifiers.control };
+    if toggle {
+        selection.toggle(item, Some(order));
+    } else if modifiers.shift {
+        selection.extend_to(item, order);
+    } else {
+        selection.select(item);
+        return true;
+    }
+    false
 }
 
 // MARK: Painting
@@ -717,6 +722,26 @@ pub fn index_at(strip: &StripState, at: Point<Pixels>) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clicks_select_open_toggle_and_extend() {
+        let items: Vec<Item> = (0..5).map(|i| Item::photo(format!("/roll/DSC_{i:04}.NEF"))).collect();
+        let mut selection = Selection::default();
+        let plain = Modifiers::default();
+        let toggle = if cfg!(target_os = "macos") { Modifiers { platform: true, ..Default::default() } } else { Modifiers { control: true, ..Default::default() } };
+        let shift = Modifiers { shift: true, ..Default::default() };
+        assert!(click_selection(&mut selection, &items[1], &plain, &items), "a plain click opens");
+        assert!(!click_selection(&mut selection, &items[3], &toggle, &items), "a toggle doesn't");
+        assert_eq!(selection.selected().len(), 2);
+        assert_eq!(selection.current(), Some(&items[1]));
+        click_selection(&mut selection, &items[3], &toggle, &items);
+        assert_eq!(selection.selected().len(), 1, "toggled off again");
+        assert!(!click_selection(&mut selection, &items[4], &shift, &items));
+        // The toggle moved the anchor to 3, as in Finder and Explorer.
+        assert_eq!(selection.selected(), &std::collections::HashSet::from([items[1].clone(), items[3].clone(), items[4].clone()]));
+        click_selection(&mut selection, &items[0], &plain, &items);
+        assert_eq!(selection.selected().len(), 1);
+    }
 
     #[test]
     fn natural_order_matches_explorer_and_finder() {

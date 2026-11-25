@@ -35,7 +35,7 @@ use gpui::{
 };
 use negs_app::model::dirty;
 use negs_app::sheet_rules::{self as rules, Part, Rect, SheetLayout, ThumbSize};
-use negs_library::{Filter, Flag, Item};
+use negs_library::{Filter, Flag, Item, Selection};
 
 use crate::NegsApp;
 use crate::marks_gpui::{BoxInk, paint_pencil};
@@ -705,32 +705,56 @@ pub fn key_down(app: &mut NegsApp, event: &KeyDownEvent) -> bool {
             app.model.dirty |= dirty::STRIP | dirty::CHROME;
             return true;
         }
-        "left" => current.map(|c| c.saturating_sub(1)),
-        "right" => current.map(|c| (c + 1).min(order.len().saturating_sub(1))),
-        "up" => current.and_then(|c| app.grid.layout.vertical(c, -1)),
-        "down" => current.and_then(|c| app.grid.layout.vertical(c, 1)),
-        "home" => Some(0),
-        "end" => order.len().checked_sub(1),
         "pageup" | "pagedown" => {
             let page = app.grid.viewport();
             scroll_by(app, if keystroke.key == "pageup" { -page } else { page });
             return true;
         }
-        _ => return false,
+        key => match moved(key, current, order.len(), &app.grid.layout) {
+            Some(target) => target,
+            None => return false,
+        },
     };
-    if let Some(index) = target.filter(|&i| i < order.len()) {
-        let item = &order[index];
-        if m.shift {
-            app.model.shelf.selection.extend_to(item, &order);
-        } else {
-            app.model.shelf.selection.select(item);
-        }
+    if let Some(index) = target {
+        move_selection(&mut app.model.shelf.selection, &order[index], &order, m.shift);
         app.model.dirty |= dirty::STRIP | dirty::CHROME;
         if index < app.grid.layout.frames.len() {
             reveal(app, index);
         }
     }
     true
+}
+
+/// Where an arrow, Home or End takes the current photograph among `count`
+/// shown (`None`: not such a key; `Some(None)`: nowhere to go).
+fn moved(key: &str, current: Option<usize>, count: usize, layout: &SheetLayout) -> Option<Option<usize>> {
+    let target = match key {
+        "left" => current.map(|c| c.saturating_sub(1)),
+        "right" => current.map(|c| (c + 1).min(count.saturating_sub(1))),
+        "up" => current.and_then(|c| layout.vertical(c, -1)),
+        "down" => current.and_then(|c| layout.vertical(c, 1)),
+        "home" => (count > 0).then_some(0),
+        "end" => count.checked_sub(1),
+        _ => return None,
+    };
+    Some(target.filter(|&i| i < count))
+}
+
+/// An arrow's move: the photograph alone, or with Shift the range to it.
+fn move_selection(selection: &mut Selection, item: &Item, order: &[Item], shift: bool) {
+    if shift {
+        selection.extend_to(item, order);
+    } else {
+        selection.select(item);
+    }
+}
+
+/// The rubber band from `start` to `now` (sheet space): what was selected
+/// when it began, and every photograph it touches.
+fn band_select(selection: &mut Selection, layout: &SheetLayout, cells: &[Cell], start: (f64, f64), now: (f64, f64), base: &HashSet<Item>) {
+    let band = Rect::spanning(start, now);
+    let items: Vec<Item> = layout.indices_in(&band).into_iter().filter_map(|i| cells.get(i)).map(|c| c.want.item.clone()).collect();
+    selection.band(&items, base);
 }
 
 // MARK: Painting
@@ -1167,9 +1191,7 @@ fn mouse_move(app: &mut NegsApp, event: &MouseMoveEvent, _window: &mut Window, c
     }
     let Some((start, _, base)) = grid.dragging.take() else { return };
     let now = (x, y - TOP - rules::SENTENCE + grid.scroll);
-    let band = Rect::spanning(start, now);
-    let items: Vec<Item> = grid.layout.indices_in(&band).into_iter().filter_map(|i| grid.cells.get(i)).map(|c| c.want.item.clone()).collect();
-    app.model.shelf.selection.band(&items, &base);
+    band_select(&mut app.model.shelf.selection, &grid.layout, &grid.cells, start, now, &base);
     app.model.dirty |= dirty::STRIP | dirty::CHROME;
     app.grid.dragging = Some((start, now, base));
     cx.notify();
@@ -1227,6 +1249,71 @@ mod tests {
             Flyer { index: 1, thumb, from: Rect::new(226.0, 706.0, 210.0, 140.0), to: Rect::new(286.0, 112.0, 264.0, 176.0), opacity: (rules::STRIP_DIM as f32, 1.0), delay: 32.0 },
         ];
         Flight { opening, started: Instant::now(), band, reach, flyers, canvas_flyer: None, cells, end: if opening { 32.0 + DURATION + 20.0 } else { DURATION }, frozen: None }
+    }
+
+    fn roll(n: usize) -> (Vec<Item>, Vec<Cell>) {
+        let items: Vec<Item> = (0..n).map(|i| Item::photo(format!("/roll/DSC_{i:04}.NEF"))).collect();
+        let cells = items
+            .iter()
+            .map(|item| Cell { want: Want { item: item.clone(), key: None, loose: None }, name: String::new(), summary: Default::default(), open: false, selected: false, pair: false })
+            .collect();
+        (items, cells)
+    }
+
+    #[test]
+    fn arrows_home_and_end_walk_the_sheet() {
+        // Ten 3:2 frames, four to a row at this width.
+        let layout = SheetLayout::new(&[1.5; 10], 4.0 * 264.0 + 3.0 * 24.0 + 2.0 * rules::GRID_SIDE, 176.0);
+        let per_row = layout.vertical(0, 1).expect("a second row");
+        assert!(per_row > 1);
+        assert_eq!(moved("right", Some(0), 10, &layout), Some(Some(1)));
+        assert_eq!(moved("right", Some(9), 10, &layout), Some(Some(9)), "stops at the last");
+        assert_eq!(moved("left", Some(0), 10, &layout), Some(Some(0)), "stops at the first");
+        assert_eq!(moved("down", Some(1), 10, &layout), Some(Some(1 + per_row)));
+        assert_eq!(moved("up", Some(1 + per_row), 10, &layout), Some(Some(1)));
+        assert_eq!(moved("up", Some(1), 10, &layout), Some(None), "nothing above the first row");
+        assert_eq!(moved("home", Some(5), 10, &layout), Some(Some(0)));
+        assert_eq!(moved("end", None, 10, &layout), Some(Some(9)));
+        assert_eq!(moved("end", None, 0, &layout), Some(None), "an empty sheet");
+        assert_eq!(moved("right", None, 10, &layout), Some(None), "nothing current");
+        assert_eq!(moved("x", Some(0), 10, &layout), None, "not a move: the app's binding");
+    }
+
+    #[test]
+    fn shift_arrows_grow_a_range_from_the_anchor() {
+        let (items, _) = roll(6);
+        let mut selection = Selection::default();
+        move_selection(&mut selection, &items[2], &items, false);
+        move_selection(&mut selection, &items[3], &items, true);
+        move_selection(&mut selection, &items[4], &items, true);
+        assert_eq!(selection.selected().len(), 3);
+        assert_eq!(selection.current(), Some(&items[2]), "Shift moves the range, not the current one");
+        move_selection(&mut selection, &items[1], &items, true);
+        assert_eq!(selection.selected(), &HashSet::from([items[1].clone(), items[2].clone()]), "back past the anchor: the range turns");
+        move_selection(&mut selection, &items[5], &items, false);
+        assert_eq!(selection.selected(), &HashSet::from([items[5].clone()]));
+    }
+
+    #[test]
+    fn the_rubber_band_adds_what_it_touches_to_what_was_selected() {
+        let (items, cells) = roll(8);
+        let layout = SheetLayout::new(&[1.5; 8], 4.0 * 264.0 + 3.0 * 24.0 + 2.0 * rules::GRID_SIDE, 176.0);
+        let mut selection = Selection::default();
+        selection.select(&items[7]);
+        let base = selection.selected().clone();
+        // Across the first row's first two frames, from left of the sheet.
+        let a = &layout.frames[0];
+        let b = &layout.frames[1];
+        let start = (a.x - 4.0, a.y - 4.0);
+        band_select(&mut selection, &layout, &cells, start, (b.x + 2.0, b.y + 2.0), &base);
+        assert_eq!(selection.selected(), &HashSet::from([items[0].clone(), items[1].clone(), items[7].clone()]));
+        // Dragged back: only what it touches now.
+        band_select(&mut selection, &layout, &cells, start, (a.x + 2.0, a.y + 2.0), &base);
+        assert_eq!(selection.selected(), &HashSet::from([items[0].clone(), items[7].clone()]));
+        assert_eq!(selection.current(), Some(&items[7]), "the current one stays");
+        // Between the rows' frames: nothing but the base.
+        band_select(&mut selection, &layout, &cells, start, (a.x - 1.0, a.y - 1.0), &base);
+        assert_eq!(selection.selected(), &base);
     }
 
     #[test]
