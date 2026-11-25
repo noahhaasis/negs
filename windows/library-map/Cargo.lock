@@ -757,11 +757,11 @@ dependencies = [
 
 [[package]]
 name = "negs-library"
-version = "0.20.0"
+version = "0.20.1"
 
 [[package]]
 name = "negs-windows-library-map"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "image",
  "negs-library",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "negs-windows-stub"
-version = "0.20.0"
+version = "0.20.1"
 
 [[package]]
 name = "no_std_io2"
@@ -1211,7 +1211,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "byteorder",
  "half",

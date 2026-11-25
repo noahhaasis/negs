@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.20.1" date="2026-11-25">
+      <description>
+        <p>A bugfix release for Windows: large folders no longer make the app sluggish.</p>
+      </description>
+    </release>
     <release version="0.20.0" date="2026-11-25">
       <description>
         <p>Kodak EXR 100T 5248, Agfa Portrait XPS 160 and Konica Minolta Professional 160, prepared from the manufacturers' datasheets behind Settings › Show Negs-built films.</p>
