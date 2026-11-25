@@ -273,14 +273,17 @@ fn resolve_prepared(
     target_w: u32,
     target_h: u32,
     visible_region: Option<SourceRegion>,
+    force_exact_fit: bool,
     profile: &DisplayColorProfile,
 ) -> Option<PreparedImage> {
     let cm = profile.transform.as_deref();
     let (oriented_w, oriented_h) =
         oriented_cropped_dimensions(picture.width, picture.height, orientation, crop);
 
-    // Downscale / exact-fit path when zoom < 0.999 and image is larger than target.
-    let use_zoomed_tile = zoom >= 0.999 || (oriented_w <= target_w && oriented_h <= target_h);
+    // Downscale / exact-fit path when zoom < 0.999 and image is larger than target,
+    // or when enlarging a tried stock's stand-in tile (`force_exact_fit`).
+    let use_zoomed_tile =
+        !force_exact_fit && (zoom >= 0.999 || (oriented_w <= target_w && oriented_h <= target_h));
 
     if use_zoomed_tile {
         let region = visible_region.unwrap_or(SourceRegion {
@@ -457,6 +460,8 @@ pub fn render_canvas(
                     developed_pic,
                     original_pic,
                     is_developed_frame,
+                    is_trial_stand_in,
+                    trial_photo_dims,
                     orientation,
                     crop,
                     border,
@@ -473,22 +478,43 @@ pub fn render_canvas(
                     this.canvas.flush_drops(window);
                     this.stamp_startup("first_window_composited");
 
-                    let is_dev = this.model.image.is_some();
-                    let primary = this
-                        .model
-                        .image
-                        .clone()
-                        .or_else(|| this.model.placeholder.clone())
-                        .or_else(|| this.model.stand_in.clone());
-                    let original = this.model.original.clone();
                     let orientation = this.model.state.orientation();
                     let crop = this.model.state.crop;
                     let border = Some(this.model.state.border);
                     let film = this.model.state.film.clone();
+
+                    let (primary, is_dev, is_trial, photo_dims) =
+                        if let Some(trial) = this.model.shown_trial() {
+                            let ps = this.model.photo_size();
+                            let dims = if ps.width > 0.0 && ps.height > 0.0 {
+                                let (ow, oh) = oriented_cropped_dimensions(
+                                    ps.width.round() as u32,
+                                    ps.height.round() as u32,
+                                    orientation,
+                                    &crop,
+                                );
+                                (ow as f64, oh as f64)
+                            } else {
+                                (0.0, 0.0)
+                            };
+                            (Some(trial.picture.clone()), false, true, dims)
+                        } else {
+                            let is_dev = this.model.image.is_some();
+                            let primary = this
+                                .model
+                                .image
+                                .clone()
+                                .or_else(|| this.model.placeholder.clone())
+                                .or_else(|| this.model.stand_in.clone());
+                            (primary, is_dev, false, (0.0, 0.0))
+                        };
+                    let original = this.model.original.clone();
                     (
                         primary,
                         original,
                         is_dev,
+                        is_trial,
+                        photo_dims,
                         orientation,
                         crop,
                         border,
@@ -507,12 +533,30 @@ pub fn render_canvas(
                     return;
                 };
 
-                let (oriented_w, oriented_h) = oriented_cropped_dimensions(
-                    primary_pic.width,
-                    primary_pic.height,
-                    orientation,
-                    &crop,
-                );
+                // Stock trial stand-ins are already cropped by the engine (only unturned),
+                // and scale to the photograph's oriented cropped size until full-res finishes.
+                let primary_crop = if is_trial_stand_in {
+                    CropSettings::default()
+                } else {
+                    crop
+                };
+                let (oriented_w, oriented_h) = if is_trial_stand_in {
+                    let (tw, th) = oriented_cropped_dimensions(
+                        primary_pic.width,
+                        primary_pic.height,
+                        orientation,
+                        &primary_crop,
+                    );
+                    let (sw, sh) = negs_app::tray_rules::stand_in_size((tw, th), trial_photo_dims);
+                    ((sw.round() as u32).max(1), (sh.round() as u32).max(1))
+                } else {
+                    oriented_cropped_dimensions(
+                        primary_pic.width,
+                        primary_pic.height,
+                        orientation,
+                        &crop,
+                    )
+                };
                 let active_border = border.and_then(|b| {
                     b.shown(oriented_w, oriented_h)
                         .filter(|s| matches!(s.style, BorderStyle::Solid | BorderStyle::Keyline))
@@ -607,13 +651,14 @@ pub fn render_canvas(
                             &mut this.canvas.pending_drops,
                             &primary_pic,
                             orientation,
-                            &crop,
+                            &primary_crop,
                             active_border,
                             &film,
                             effective_zoom,
                             target_w,
                             target_h,
                             visible_region,
+                            is_trial_stand_in,
                             &profile,
                         )
                     } else {
@@ -634,6 +679,7 @@ pub fn render_canvas(
                                 target_w,
                                 target_h,
                                 visible_region,
+                                false,
                                 &profile,
                             )
                         })
