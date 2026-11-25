@@ -33,6 +33,10 @@ struct Params {
     density_max: vec4<f32>,            // this sub-layer's absolute maximum
     n_particles_per_pixel: vec4<f32>,  // 0 = noise-free (RMS granularity 0)
     grain_uniformity: vec4<f32>,
+    tile_width: u32,
+    tile_origin_x: u32,
+    tile_origin_y: u32,
+    full_width: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -305,6 +309,9 @@ fn main(
     // 65535-workgroup limit (256-thread groups reach it at ~16.7 MP).
     let idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     if idx >= params.n_pixels { return; }
+    let lx = idx % params.tile_width;
+    let ly = idx / params.tile_width;
+    let gidx = (ly + params.tile_origin_y) * params.full_width + (lx + params.tile_origin_x);
     let base = idx * 3u;
     let sign = select(1.0, -1.0, params.positive != 0u);
 
@@ -331,7 +338,7 @@ fn main(
                 seed_ch = 0u;
             }
             let layer_seed = seed_ch + params.layer * 10u + params.base_seed;
-            var rng = Rng(splitmix32(layer_seed) ^ splitmix32(idx), (splitmix32(idx ^ 0x9e3779b9u) << 1u) | 1u);
+            var rng = Rng(splitmix32(layer_seed) ^ splitmix32(gidx), (splitmix32(gidx ^ 0x9e3779b9u) << 1u) | 1u);
             let n_seeds = sample_poisson(lambda, &rng);
             let developed = sample_binomial(n_seeds, p, &rng);
             value = developed * od_particle * saturation;

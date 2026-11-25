@@ -419,6 +419,186 @@ pub fn apply_linear(
     Ok(())
 }
 
+/// Whole-frame Prep state for seamless tiled rendering: holds the precomputed
+/// whole-frame guided-filter coefficients `(mean_a, mean_b)` on the `(w/4)×(h/4)`
+/// grid so each tile produces bit-identical output to `prepare_input_from`.
+pub struct TiledPrep {
+    params: PrepParams,
+    input_color_space: String,
+    input_cctf_decoding: bool,
+    autoexposure_ev: f64,
+    exposure_compensation_ev: f32,
+    base: guided::GuidedBase,
+    s: Settings,
+    lut: [f32; 1024],
+    affine: (f32, f32),
+    contrast: f32,
+    to709: [[f64; 3]; 3],
+    from709: [[f64; 3]; 3],
+    same_space: bool,
+}
+
+impl TiledPrep {
+    /// Build whole-frame Prep state for a `(full_w, full_h)` image without
+    /// materializing the full f32 RGB frame. `fill_band(y0, height)` returns
+    /// an upright `full_w × height` RGB `ImageBuf` for rows `y0..y0+height`.
+    pub fn build<E: std::fmt::Display>(
+        full_w: u32,
+        full_h: u32,
+        runtime: &crate::params::RuntimeParams,
+        autoexposure_ev: f64,
+        mut fill_band: impl FnMut(u32, u32) -> Result<ImageBuf, E>,
+    ) -> Result<Self, String> {
+        let params = runtime.prep;
+        params.validate()?;
+        let (w, h) = (full_w as usize, full_h as usize);
+        let (lw, lh, xs, ys) = guided::GuidedBase::grid(w, h);
+        let space = RgbColourspace::input(&runtime.io.input_color_space);
+        let to709 = icc_rgb_to_rgb(space, &SRGB);
+        let from709 = icc_rgb_to_rgb(&SRGB, space);
+        let same_space = space.name == SRGB.name;
+        let cctf = space.cctf;
+        let decode = runtime.io.input_cctf_decoding && cctf != spektrafilm_math::colorspace::Cctf::Linear;
+        let ae_scale = (autoexposure_ev != 0.0).then(|| from_f64(autoexposure_ev.exp2()));
+        let exp_comp = from_f32((runtime.camera.exposure_compensation_ev as f64).exp2() as f32);
+        let prep_gain = (params.exposure_ev != 0.0).then(|| from_f64((params.exposure_ev as f64).exp2()));
+
+        let luma_of = |p: &[spektrafilm_math::precision::Scalar]| -> Result<f32, String> {
+            let mut rgb = [0.0f64; 3];
+            for c in 0..3 {
+                let mut v = if decode { from_f64(cctf.decode(to_f64(p[c]))) } else { p[c] };
+                if let Some(s) = ae_scale {
+                    v *= s;
+                }
+                v *= exp_comp;
+                if let Some(g) = prep_gain {
+                    v *= g;
+                }
+                if !v.is_finite() {
+                    return Err("Prep exposure produced a non-finite result".to_owned());
+                }
+                rgb[c] = to_f64(v);
+            }
+            let rgb = if same_space { rgb } else { mat3_vec_f64(&to709, rgb) };
+            Ok(luma(rgb.map(|v| encode709(v as f32))))
+        };
+
+        // Process in horizontal strips of `lh` rows so only a small band of
+        // source rows is live at once (matching `guided::resize` bit for bit).
+        const STRIP_SMALL_ROWS: usize = 32;
+        let mut small = vec![0.0_f32; lw * lh];
+        let mut sy0 = 0;
+        while sy0 < lh {
+            let sy1 = (sy0 + STRIP_SMALL_ROWS).min(lh);
+            let src_y0 = ys[sy0].lo;
+            let src_y1 = ys[sy1 - 1].hi + 1;
+            let band = fill_band(src_y0 as u32, (src_y1 - src_y0) as u32)
+                .map_err(|e| e.to_string())?;
+            let bw = band.width as usize;
+            let band_luma: Vec<f32> = band
+                .data
+                .par_chunks_exact(3)
+                .map(luma_of)
+                .collect::<Result<_, _>>()?;
+            drop(band);
+            small[sy0 * lw..sy1 * lw]
+                .par_chunks_mut(lw)
+                .zip(&ys[sy0..sy1])
+                .for_each(|(out_row, &y_axis)| {
+                    let y_rel = guided::Axis {
+                        lo: y_axis.lo - src_y0,
+                        hi: y_axis.hi - src_y0,
+                        t: y_axis.t,
+                    };
+                    for (out, &x_axis) in out_row.iter_mut().zip(&xs) {
+                        *out = guided::bilinear(&band_luma, bw, x_axis, y_rel);
+                    }
+                });
+            sy0 = sy1;
+        }
+
+        let base = guided::GuidedBase::from_small(&small, w, h)?;
+        let s = Settings::from(&params);
+        let lut = tone_lut(s.highlights, s.shadows);
+        let affine = affine(s.lift, s.gain);
+        let contrast = 1.5f32.powf(s.contrast / 100.);
+        Ok(Self {
+            params,
+            input_color_space: runtime.io.input_color_space.clone(),
+            input_cctf_decoding: runtime.io.input_cctf_decoding,
+            autoexposure_ev,
+            exposure_compensation_ev: runtime.camera.exposure_compensation_ev,
+            base,
+            s,
+            lut,
+            affine,
+            contrast,
+            to709,
+            from709,
+            same_space,
+        })
+    }
+
+    /// Apply input CCTF decoding, camera/auto exposure, and Prep in place on
+    /// a tile whose top-left pixel is at `(origin_x, origin_y)` in the full
+    /// photograph. Matches `stages::filming::prepare_input_from` bit for bit.
+    pub fn apply_tile(&self, tile: &mut ImageBuf, origin_x: u32, origin_y: u32) -> Result<(), String> {
+        let tw = tile.width as usize;
+        let space = RgbColourspace::input(&self.input_color_space);
+        let cctf = space.cctf;
+        let decode = self.input_cctf_decoding && cctf != spektrafilm_math::colorspace::Cctf::Linear;
+        let ae_scale = (self.autoexposure_ev != 0.0).then(|| from_f64(self.autoexposure_ev.exp2()));
+        let exp_comp = from_f32((self.exposure_compensation_ev as f64).exp2() as f32);
+        let prep_gain = (self.params.exposure_ev != 0.0).then(|| from_f64((self.params.exposure_ev as f64).exp2()));
+        let ox = origin_x as usize;
+        let oy = origin_y as usize;
+        let finite = tile
+            .data
+            .par_chunks_exact_mut(tw * 3)
+            .enumerate()
+            .try_fold(
+                || true,
+                |mut finite, (ly, row)| {
+                    let gy = oy + ly;
+                    for (lx, p) in row.chunks_exact_mut(3).enumerate() {
+                        let mut rgb = [0.0f64; 3];
+                        for c in 0..3 {
+                            let mut v = if decode { from_f64(cctf.decode(to_f64(p[c]))) } else { p[c] };
+                            if let Some(s) = ae_scale {
+                                v *= s;
+                            }
+                            v *= exp_comp;
+                            if let Some(g) = prep_gain {
+                                v *= g;
+                            }
+                            if !v.is_finite() {
+                                return Err("Prep exposure produced a non-finite result".to_owned());
+                            }
+                            rgb[c] = to_f64(v);
+                        }
+                        let enc = (if self.same_space { rgb } else { mat3_vec_f64(&self.to709, rgb) })
+                            .map(|v| encode709(v as f32));
+                        let base = self.base.eval(ox + lx, gy, luma(enc));
+                        let out = core(enc, base, self.s, &self.lut, self.affine, self.contrast).map(decode709);
+                        let result = if self.same_space {
+                            out.map(from_f32)
+                        } else {
+                            mat3_vec_f64(&self.from709, out.map(|v| v as f64)).map(from_f64)
+                        };
+                        finite &= result.iter().all(|v| v.is_finite());
+                        p.copy_from_slice(&result);
+                    }
+                    Ok::<bool, String>(finite)
+                },
+            )
+            .try_reduce(|| true, |a, b| Ok(a && b))?;
+        if !finite {
+            return Err("Prep adjustments produced a non-finite result".into());
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,6 +708,77 @@ mod tests {
                     actual[i],
                     expected[i]
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn tiled_prep_is_bit_identical_to_whole_frame_prepare() {
+        let (w, h) = (380u32, 260u32);
+        let mut data = Vec::with_capacity((w * h * 3) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x as f32 / w as f32) * 0.9 + 0.05) * (1.0 + 0.2 * (y as f32 / h as f32));
+                let g = ((y as f32 / h as f32) * 0.8 + 0.1) * (1.0 + 0.1 * ((x ^ y) % 7) as f32 / 7.0);
+                let b = ((x + y) as f32 / (w + h) as f32) * 0.7 + 0.05;
+                data.extend_from_slice(&[from_f32(r), from_f32(g), from_f32(b)]);
+            }
+        }
+        let source = ImageBuf::from_data(w, h, data);
+        let mut runtime = crate::params::RuntimeParams::default();
+        runtime.io.input_cctf_decoding = false;
+        runtime.camera.exposure_compensation_ev = 0.35;
+        runtime.prep = PrepParams {
+            exposure_ev: 0.45,
+            highlights: -65.0,
+            shadows: 40.0,
+            contrast: 25.0,
+            lift: -10.0,
+            gain: 15.0,
+            color_boost: 30.0,
+            saturation: -12.0,
+            midtone_detail: 45.0,
+        };
+        let ae_ev = -0.25;
+        let expected = crate::stages::filming::prepare_input_from(&source, &runtime, ae_ev).unwrap();
+        let tiled = TiledPrep::build(w, h, &runtime, ae_ev, |y0, bh| -> Result<ImageBuf, String> {
+            let start = y0 as usize * w as usize * 3;
+            let end = (y0 + bh) as usize * w as usize * 3;
+            Ok(ImageBuf::from_data(w, bh, source.data[start..end].to_vec()))
+        })
+        .unwrap();
+
+        let (tw, th) = (130u32, 110u32);
+        for ty in (0..h).step_by(97) {
+            for tx in (0..w).step_by(113) {
+                let mut tile_data = vec![from_f32(0.0); (tw * th * 3) as usize];
+                for ly in 0..th {
+                    let gy = (ty + ly).min(h - 1);
+                    for lx in 0..tw {
+                        let gx = (tx + lx).min(w - 1);
+                        let p = source.get(gx, gy);
+                        let i = (ly * tw + lx) as usize * 3;
+                        tile_data[i..i + 3].copy_from_slice(&p);
+                    }
+                }
+                let mut tile = ImageBuf::from_data(tw, th, tile_data);
+                tiled.apply_tile(&mut tile, tx, ty).unwrap();
+                for ly in 0..th {
+                    let gy = (ty + ly).min(h - 1);
+                    for lx in 0..tw {
+                        let gx = (tx + lx).min(w - 1);
+                        let got = tile.get(lx, ly);
+                        let want = expected.get(gx, gy);
+                        for c in 0..3 {
+                            assert!(
+                                (got[c] - want[c]).abs() <= 3e-6 * want[c].abs().max(1.0),
+                                "tile ({tx},{ty}) at ({lx},{ly}) ch {c}: {} != {}",
+                                got[c],
+                                want[c]
+                            );
+                        }
+                    }
+                }
             }
         }
     }

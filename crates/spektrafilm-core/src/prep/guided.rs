@@ -103,12 +103,12 @@ fn box_mean(
 }
 
 #[derive(Clone, Copy)]
-struct Axis {
-    lo: usize,
-    hi: usize,
-    t: f32,
+pub(super) struct Axis {
+    pub(super) lo: usize,
+    pub(super) hi: usize,
+    pub(super) t: f32,
 }
-fn axis(src: usize, dst: usize) -> Vec<Axis> {
+pub(super) fn axis(src: usize, dst: usize) -> Vec<Axis> {
     // ResizeParams 0x1063cee78 emits scale=1/dst and offset=.5/dst;
     // normalized linear sampling evaluates u*src-.5, not u*(src-1).
     let scale = 1.0 / dst as f32;
@@ -125,7 +125,7 @@ fn axis(src: usize, dst: usize) -> Vec<Axis> {
         })
         .collect()
 }
-fn bilinear(src: &[f32], w: usize, x: Axis, y: Axis) -> f32 {
+pub(super) fn bilinear(src: &[f32], w: usize, x: Axis, y: Axis) -> f32 {
     let a = src[y.lo * w + x.lo];
     let b = src[y.lo * w + x.hi];
     let c = src[y.hi * w + x.lo];
@@ -133,6 +133,82 @@ fn bilinear(src: &[f32], w: usize, x: Axis, y: Axis) -> f32 {
     let top = a + (b - a) * x.t;
     let bottom = c + (d - c) * x.t;
     top + (bottom - top) * y.t
+}
+
+/// Precomputed whole-frame guided-filter coefficients `(mean_a, mean_b)` on
+/// the subsampled `(lw, lh)` grid, so Prep can be applied seamlessly tile by
+/// tile without materializing a full-frame f32 image.
+pub struct GuidedBase {
+    w: usize,
+    h: usize,
+    lw: usize,
+    lh: usize,
+    mean_a: Vec<f32>,
+    mean_b: Vec<f32>,
+    xs: Vec<Axis>,
+    ys: Vec<Axis>,
+}
+
+impl GuidedBase {
+    /// Subsampled grid `(lw, lh)` and the source `(x, y)` bilinear axes that
+    /// sample the full `(w, h)` luminance frame into it.
+    pub(super) fn grid(w: usize, h: usize) -> (usize, usize, Vec<Axis>, Vec<Axis>) {
+        let (lw, lh, _) = schedule(w, h);
+        (lw, lh, axis(w, lw), axis(h, lh))
+    }
+
+    /// Build the guided-filter coefficients from the already-subsampled
+    /// `(lw, lh)` luminance field (matches `base_luma` bit for bit).
+    pub(super) fn from_small(small: &[f32], w: usize, h: usize) -> Result<Self, String> {
+        let (lw, lh, radius) = schedule(w, h);
+        if lw.checked_mul(lh) != Some(small.len()) {
+            return Err("Invalid RAW guided-base subsampled dimensions".into());
+        }
+        small.par_chunks(16384).try_for_each(|block| {
+            if block.iter().any(|v| !v.is_finite() || !(*v * *v).is_finite()) {
+                return Err("Non-finite RAW guided-base input".to_owned());
+            }
+            Ok(())
+        })?;
+        let square: Vec<f32> = small.par_iter().map(|&v| v * v).collect();
+        let (b, a) = rayon::join(
+            || box_mean(small, lw, lh, radius, None),
+            || box_mean(&square, lw, lh, radius, None),
+        );
+        let (mut b, mut a) = (b?, a?);
+        drop(square);
+        a.par_chunks_mut(16384).zip(b.par_chunks_mut(16384)).for_each(|(aa, bb)| {
+            for (a, b) in aa.iter_mut().zip(bb) {
+                let variance = (*a - *b * *b).max(0.0);
+                *a = variance / (variance + 0.01).max(0.0001);
+                *b = *b - *a * *b;
+            }
+        });
+        let (mean_a, mean_b) = rayon::join(
+            || box_mean(&a, lw, lh, radius, None),
+            || box_mean(&b, lw, lh, radius, None),
+        );
+        let (mean_a, mean_b) = (mean_a?, mean_b?);
+        let xs = if (lw, lh) == (w, h) { Vec::new() } else { axis(lw, w) };
+        let ys = if (lw, lh) == (w, h) { Vec::new() } else { axis(lh, h) };
+        Ok(Self { w, h, lw, lh, mean_a, mean_b, xs, ys })
+    }
+
+    /// Evaluate the guided base at full-frame pixel `(x, y)` (clamped to
+    /// frame bounds for padded tiles).
+    #[inline]
+    pub(super) fn eval(&self, x: usize, y: usize, luma: f32) -> f32 {
+        let x = x.min(self.w - 1);
+        let y = y.min(self.h - 1);
+        if (self.lw, self.lh) == (self.w, self.h) {
+            let idx = y * self.w + x;
+            self.mean_a[idx] * luma + self.mean_b[idx]
+        } else {
+            let a = bilinear(&self.mean_a, self.lw, self.xs[x], self.ys[y]);
+            let b = bilinear(&self.mean_b, self.lw, self.xs[x], self.ys[y]);
+            a * luma + b
+        }
+    }
 }
 fn resize(
     src: &[f32],

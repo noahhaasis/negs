@@ -194,6 +194,13 @@ pub struct Pipeline {
     /// The backend slot and the caller's frame name for keeping the film
     /// side; see [`Self::with_film_cache`].
     film_cache: Option<(u32, u64)>,
+    /// Tile geometry when rendering a sub-rectangle of a larger full-resolution
+    /// photograph: `(full_width, full_height, origin_x, origin_y)`.
+    tile: Option<(u32, u32, u32, u32)>,
+    /// True when the caller already applied `input_cctf_decoding`,
+    /// `autoexposure_ev`, `camera.exposure_compensation_ev`, and `prep`
+    /// (e.g. via [`crate::prep::TiledPrep`]).
+    prep_applied: bool,
 }
 
 impl Pipeline {
@@ -328,6 +335,22 @@ impl Pipeline {
     /// name here; the backend compares the film stages' inputs itself.
     pub fn with_film_cache(mut self, slot: u32, frame: u64) -> Self {
         self.film_cache = Some((slot, frame));
+        self
+    }
+
+    /// Render a tile at `(origin_x, origin_y)` of a `(full_width, full_height)`
+    /// photograph. Physical pixel scale (`pixel_size_um`, grain, halation,
+    /// couplers, diffusion, chroma denoise) and per-pixel noise coordinates
+    /// follow the full photograph rather than the tile's dimensions.
+    pub fn with_tile(mut self, full_width: u32, full_height: u32, origin_x: u32, origin_y: u32) -> Self {
+        self.tile = Some((full_width, full_height, origin_x, origin_y));
+        self
+    }
+
+    /// Mark input decoding, camera/auto exposure and Prep as already applied
+    /// to the input image (used with [`crate::prep::TiledPrep`]).
+    pub fn with_prep_applied(mut self) -> Self {
+        self.prep_applied = true;
         self
     }
 
@@ -473,6 +496,8 @@ impl Pipeline {
             autoexposure_ev: None,
             prepared_frame: None,
             film_cache: None,
+            tile: None,
+            prep_applied: false,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -667,6 +692,8 @@ impl Pipeline {
             autoexposure_ev: None,
             prepared_frame: None,
             film_cache: None,
+            tile: None,
+            prep_applied: false,
         };
         // The enlarger illuminant with its dichroic filters, and the preflash.
         pipeline.filter_enlarger();
@@ -1315,12 +1342,12 @@ impl Pipeline {
         // Exposure-only Prep is a uniform gain: it joins the exposure scale
         // below (float rounding from the CPU's per-pixel multiply, approved
         // for the GPU path), so the upload keeps its source key.
-        let fold_prep_exposure = film_effects && self.params.prep.is_exposure_only();
-        let prep_active = film_effects && !self.params.prep.is_identity() && !fold_prep_exposure;
+        let fold_prep_exposure = !self.prep_applied && film_effects && self.params.prep.is_exposure_only();
+        let prep_active = !self.prep_applied && film_effects && !self.params.prep.is_identity() && !fold_prep_exposure;
         // Other Prep changes the upload, including through its whole-frame spatial base.
         // A source-image cache key cannot identify these newly prepared pixels;
         // a kept prepared frame has its own, so a Lab edit doesn't upload it again.
-        let mut image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
+        let mut image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active && !self.prep_applied);
         let image = if prep_active {
             let key = crate::prep::PreparedKey::new(image, &self.params, autoexposure_ev);
             let cached = self.prepared_frame.as_ref().and_then(|frame| frame.take(&key));
@@ -1333,7 +1360,7 @@ impl Pipeline {
                 image_key = Some(frame.put(key, prepared.clone(), upload));
             }
             &*prepared
-        } else if self.params.io.input_cctf_decoding {
+        } else if !self.prep_applied && self.params.io.input_cctf_decoding {
             let mut d = image.clone();
             stages::filming::decode_input_cctf(&mut d, &self.params);
             decoded = d;
@@ -1366,7 +1393,7 @@ impl Pipeline {
         // pass at the head of the chain. The auto exposure is metered on the
         // CPU, on the ≤256 px metering frame, by the caller.
         let mut exposure_scale_f64 = 1.0f64;
-        if !prep_active {
+        if !prep_active && !self.prep_applied {
             if autoexposure_ev != 0.0 {
                 exposure_scale_f64 *= autoexposure_ev.exp2();
             }
@@ -1527,10 +1554,11 @@ impl Pipeline {
             }
         }
 
+        let (phys_w, phys_h) = self.tile.map_or((image.width, image.height), |(fw, fh, _, _)| (fw, fh));
         let pix_um = stages::filming::pixel_size_um(
             self.params.camera.film_format_mm,
-            image.width,
-            image.height,
+            phys_w,
+            phys_h,
         );
 
         // print_exposure_factor × print_exposure, with the B&W printing
@@ -1547,8 +1575,8 @@ impl Pipeline {
         let halation = if film_effects && self.params.film_render.halation.active {
             let pix_um = stages::filming::pixel_size_um(
                 self.params.camera.film_format_mm,
-                image.width,
-                image.height,
+                phys_w,
+                phys_h,
             ) as f64;
             let h = &self.params.film_render.halation;
             let px = |um: [f64; 3], scale: f64| um.map(|v| (v * scale / pix_um).max(1e-6) as f32);
@@ -1581,8 +1609,8 @@ impl Pipeline {
         let dir_inputs = (film_effects && self.params.film_render.dir_couplers.active).then(|| {
             let pix_um = stages::filming::pixel_size_um(
                 self.params.camera.film_format_mm,
-                image.width,
-                image.height,
+                phys_w,
+                phys_h,
             );
             let dir = &self.params.film_render.dir_couplers;
             let model = stages::filming::dir_couplers_model(
@@ -1622,7 +1650,7 @@ impl Pipeline {
             spektrafilm_model::grain::gpu_params(
                 &crate::grain::grain_curves(&self.film),
                 &crate::grain::grain_settings(&self.film, &self.params.film_render.grain),
-                stages::filming::grain_pixel_size_um(&self.params, image.width, image.height),
+                stages::filming::grain_pixel_size_um(&self.params, phys_w, phys_h),
                 self.film.is_positive(),
                 self.params.film_render.grain.monochrome,
             )
@@ -1736,6 +1764,7 @@ impl Pipeline {
             image,
             image_key,
             film_cache,
+            tile_origin: self.tile.map(|(fw, _, ox, oy)| (ox, oy, fw)),
             front,
             film_log_exposure: &film_log_exp,
             film_density_curves_normalized: &film_curves_norm,
@@ -1760,7 +1789,7 @@ impl Pipeline {
             glare,
             gamut: self.output_gamut.gpu_params(),
             unsharp,
-            chroma_denoise: stages::scanning::chroma_denoise_params(&self.params, image.width, image.height),
+            chroma_denoise: stages::scanning::chroma_denoise_params(&self.params, phys_w, phys_h),
             camera_lens_blur_px,
             scanner_lens_blur_px,
             highlight_boost,

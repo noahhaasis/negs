@@ -6,6 +6,8 @@
 //! in [`Rendered::missing`]; the page fetches them and renders again.
 #![cfg(target_arch = "wasm32")]
 
+mod export;
+
 use spektrafilm_core::{data_fs, params::RuntimeParams, pipeline::Pipeline, preview, profile};
 use spektrafilm_gpu::{
     ChainOutput, ChainResult, ComputeBackend,
@@ -591,6 +593,28 @@ impl Engine {
         }
     }
 
+    /// The last metered auto-exposure EV for these film/metering settings, if
+    /// already computed by the editing engine, so a full-resolution export
+    /// worker can reuse it without re-metering.
+    #[wasm_bindgen(js_name = autoexposureEv)]
+    pub fn autoexposure_ev(&self, film: &str, params_json: &str) -> Result<Option<f64>, JsError> {
+        let mut params = parse_params(params_json).map_err(js_error)?;
+        let state = self.state.borrow();
+        if let Some(colour) = &state.input_colour {
+            params.io.apply_input_colour(colour);
+        }
+        if !params.camera.auto_exposure {
+            return Ok(Some(0.0));
+        }
+        let metered = metered_key(film, &params);
+        if let Some((key, ev)) = &state.autoexposure {
+            if *key == metered {
+                return Ok(Some(*ev));
+            }
+        }
+        Ok(None)
+    }
+
     /// Drop the loaded photograph and everything made from it. Before a
     /// [`Engine::load`], whose bytes the call copies into the module's memory
     /// first: then they and the decode have the photograph's room too.
@@ -1082,6 +1106,19 @@ pub fn decode_bounded(bytes: &[u8], max_dim: u32, max_pixels: f64, force: bool, 
     } else {
         spektrafilm_io::bounded::Mode::LargeBayer
     });
+    let (image, colour, (full_width, full_height), bounded) = decode_photo_mode(bytes, max_dim, max_pixels, mode, wb)?;
+    let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
+    Ok(Decoded { width: image.width, height: image.height, pixels: image.data, full_width, full_height, colour, bounded })
+}
+
+/// Mobile working-copy decode: uses bounded banded Bayer development for >40 MP
+/// 2×2 RGB Bayer RAWs (cutting 60 MP Leica Q3 open peak from ~1.3 GiB to
+/// ~406 MiB with bit-identical pixels) and the standard path for all other
+/// RAWs (including bilinear X-Trans above 30 MP) and rasters.
+#[wasm_bindgen(js_name = decodeAuto)]
+pub fn decode_auto(bytes: &[u8], max_dim: u32, max_pixels: f64, white_balance: Option<String>) -> Result<Decoded, JsError> {
+    let wb = parse_white_balance(white_balance.as_deref())?;
+    let mode = (max_pixels > 0.0).then_some(spektrafilm_io::bounded::Mode::AutoBayer);
     let (image, colour, (full_width, full_height), bounded) = decode_photo_mode(bytes, max_dim, max_pixels, mode, wb)?;
     let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
     Ok(Decoded { width: image.width, height: image.height, pixels: image.data, full_width, full_height, colour, bounded })

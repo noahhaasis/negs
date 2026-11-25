@@ -106,3 +106,125 @@ fn cap_matches_leica_working_copy() {
     assert_eq!(kept_size(9520, 6336, 0, 12e6), (4246, 2826));
     assert_eq!(kept_size(9520, 6336, 0, 0.0), (9520, 6336));
 }
+
+#[test]
+fn bayer_sensor_tiled_demosaic_matches_full_develop_across_orientations() {
+    for pattern in ["RGGB", "BGGR", "GBRG", "GRBG"] {
+        let mut raw = fixture(64, 52, pattern);
+        let active = Rect::new(Point::new(2, 2), Dim2::new(60, 48));
+        let crop = Rect::new(Point::new(4, 3), Dim2::new(55, 44));
+        raw.active_area = Some(active);
+        raw.crop_area = Some(crop);
+        let wb = RawWhiteBalance::default();
+        let full = crate::develop_decoded(raw.clone(), wb).unwrap();
+        let mut prepared = raw.clone();
+        white_balance::prepare(&mut prepared, wb).unwrap();
+        let black = prepared.blacklevel.as_bayer_array();
+        let white = prepared.whitelevel.as_bayer_array();
+        for orientation in 1..=8 {
+            let expected = full.clone().oriented(orientation);
+            let sensor = BayerSensor {
+                raw: prepared.clone(),
+                active,
+                crop,
+                wb,
+                black,
+                white,
+                orientation,
+                is_xtrans: false,
+            };
+            let (fw, fh) = sensor.full_size();
+            assert_eq!((fw, fh), (expected.width, expected.height));
+            // Tile with arbitrary step sizes including padded edge tiles past fw/fh.
+            let step = 19u32;
+            let mut y = 0;
+            while y < fh {
+                let mut x = 0;
+                while x < fw {
+                    let tile = sensor.demosaic_upright_rect(x, y, step + 5, step + 3).unwrap();
+                    assert_eq!((tile.width, tile.height), (step + 5, step + 3));
+                    for ly in 0..tile.height {
+                        let gy = (y + ly).min(fh - 1);
+                        for lx in 0..tile.width {
+                            let gx = (x + lx).min(fw - 1);
+                            assert_eq!(
+                                tile.get(lx, ly),
+                                expected.get(gx, gy),
+                                "{pattern} orient={orientation} tile=({x},{y}) at ({lx},{ly})->({gx},{gy})"
+                            );
+                        }
+                    }
+                    x += step;
+                }
+                y += step;
+            }
+        }
+    }
+}
+
+#[test]
+fn xtrans_sensor_banded_and_tiled_demosaic_matches_full_develop() {
+    // Authentic Fuji X-Trans 6×6 CFA pattern:
+    // G B G G R G / R G R B G B / G B G G R G / G R G G B G / B G B R G R / G R G G B G
+    const XTRANS: &str = "GBGGRGRGRBGBGBGGRGGRGGBGBGBRGRGRGGBG";
+    let mut raw = fixture(144, 132, XTRANS);
+    let active = Rect::new(Point::new(6, 6), Dim2::new(132, 120));
+    let crop = Rect::new(Point::new(8, 8), Dim2::new(124, 112));
+    raw.active_area = Some(active);
+    raw.crop_area = Some(crop);
+    let wb = RawWhiteBalance::default();
+    let full = crate::develop_decoded(raw.clone(), wb).unwrap();
+
+    // Banded develop for mobile open.
+    let banded = develop_bands_cfa(raw.clone(), wb, (62, 56), 16, true).unwrap();
+    let expected_small = downsample_reference(&full, (62, 56));
+    assert_eq!(banded.data.len(), expected_small.data.len());
+    let max_diff = banded.data.iter().zip(&expected_small.data)
+        .map(|(a, b)| (to_f32(*a) - to_f32(*b)).abs())
+        .fold(0.0f32, f32::max);
+    assert!(max_diff < 1e-4, "X-Trans banded develop diverged from full: max_diff={max_diff}");
+
+    // Tiled demosaic across orientations for mobile full-res export.
+    let mut prepared = raw.clone();
+    white_balance::prepare(&mut prepared, wb).unwrap();
+    let black = prepared.blacklevel.as_bayer_array();
+    let white = prepared.whitelevel.as_bayer_array();
+    for orientation in [1u16, 3, 6, 8] {
+        let expected = full.clone().oriented(orientation);
+        let sensor = BayerSensor {
+            raw: prepared.clone(),
+            active,
+            crop,
+            wb,
+            black,
+            white,
+            orientation,
+            is_xtrans: true,
+        };
+        let (fw, fh) = sensor.full_size();
+        assert_eq!((fw, fh), (expected.width, expected.height));
+        let step = 48u32;
+        let mut worst = 0.0f32;
+        let mut y = 0;
+        while y < fh {
+            let mut x = 0;
+            while x < fw {
+                let tile = sensor.demosaic_upright_rect(x, y, step + 8, step + 6).unwrap();
+                for ly in 0..tile.height {
+                    let gy = (y + ly).min(fh - 1);
+                    for lx in 0..tile.width {
+                        let gx = (x + lx).min(fw - 1);
+                        let got = tile.get(lx, ly);
+                        let want = expected.get(gx, gy);
+                        for c in 0..3 {
+                            worst = worst.max((to_f32(got[c]) - to_f32(want[c])).abs());
+                        }
+                    }
+                }
+                x += step;
+            }
+            y += step;
+        }
+        assert!(worst < 1e-4, "X-Trans tiled demosaic orient={orientation} diverged: worst={worst}");
+    }
+}

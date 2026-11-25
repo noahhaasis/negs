@@ -397,7 +397,8 @@ fn lens_area(raw: &rawler::RawImage) -> Option<LensArea> {
     })
 }
 
-/// Develop an already decoded sensor; shared with the opt-in bounded loader.
+/// Develop an already decoded sensor; shared with the opt-in bounded loader tests.
+#[cfg(test)]
 fn develop_decoded(raw: rawler::RawImage, wb: RawWhiteBalance) -> Result<ImageBuf> {
     develop_decoded_with(raw, wb, XTransDemosaic::default())
 }

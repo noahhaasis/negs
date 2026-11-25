@@ -268,6 +268,12 @@ pub struct FilmChainParams<'a> {
     /// nothing upstream of it changes (ticket 41). `None` neither uses nor
     /// disturbs what is kept.
     pub film_cache: Option<FilmCacheSlot>,
+    /// When rendering a tile of a larger full-resolution photograph:
+    /// `(origin_x, origin_y, full_width)` so per-pixel noise (grain, glare)
+    /// indexes the full photograph's coordinates and matches a single-pass
+    /// render across tile boundaries. `None` indexes the image itself from
+    /// `(0, 0)`.
+    pub tile_origin: Option<(u32, u32, u32)>,
     /// RGB → film-raw front pass (the configured upsampler).
     pub front: FrontPass<'a>,
     pub film_log_exposure: &'a [f64],
