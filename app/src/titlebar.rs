@@ -47,7 +47,7 @@ fn pill_button(
 
 pub fn render_titlebar(
     app: &NegsApp,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<NegsApp>,
 ) -> impl IntoElement {
     let theme = &app.theme;
@@ -62,7 +62,9 @@ pub fn render_titlebar(
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned());
 
-    let stock_badge = if has_photo {
+    // Off the Mac the menus' words take its room: the caption under the
+    // print and the status line name the film and paper already.
+    let stock_badge = if has_photo && cfg!(target_os = "macos") {
         let film = app.model.film_name();
         let paper = app.model.paper_name();
         let scan_only = negs_app::json::boolean(app.model.value("io.scan_film"));
@@ -98,7 +100,7 @@ pub fn render_titlebar(
         .w_full()
         .h(px(TITLEBAR_HEIGHT))
         .pl(px(left_pad))
-        .pr(px(14.0))
+        .pr(px(if cfg!(target_os = "macos") { 14.0 } else { 0.0 }))
         .bg(theme.panel)
         .border_b_1()
         .border_color(theme.line)
@@ -110,17 +112,22 @@ pub fn render_titlebar(
                 .items_center()
                 .gap_3()
                 .min_w_0()
+                .overflow_hidden()
                 .child(
                     div()
                         .font_family(theme.serif_family.clone())
                         .text_size(px(17.0))
                         .text_color(theme.paper)
+                        .when(!cfg!(target_os = "macos"), |d| d.window_control_area(gpui::WindowControlArea::Drag))
                         .child("Negs"),
                 )
+                .children(crate::menu_bar::render_words(app, window, cx))
                 .when_some(photo_name, |el, name| {
-                    el.child(div().text_size(px(12.0)).text_color(theme.dim).child("/"))
+                    let drag = !cfg!(target_os = "macos");
+                    el.child(div().text_size(px(12.0)).text_color(theme.dim).when(drag, |d| d.window_control_area(gpui::WindowControlArea::Drag)).child("/"))
                         .child(
                             div()
+                                .when(drag, |d| d.window_control_area(gpui::WindowControlArea::Drag))
                                 .text_size(px(13.0))
                                 .text_color(theme.paper)
                                 .truncate()
@@ -140,13 +147,16 @@ pub fn render_titlebar(
                             .italic()
                             .text_size(px(12.0))
                             .text_color(theme.label)
-                            .child(badge),
+                            .min_w_0().truncate().child(badge),
                     )
                 }),
         )
+        // Between them, off the Mac: where the window is dragged from.
+        .when(!cfg!(target_os = "macos"), |d| d.child(div().flex_1().min_w(px(16.0)).h_full().window_control_area(gpui::WindowControlArea::Drag)))
         // Right: Open, Save, Original, Split, Zoom, Theme switcher, Inspector toggle
         .child(
             div()
+                .flex_none()
                 .flex()
                 .items_center()
                 .gap_2()
@@ -205,9 +215,9 @@ pub fn render_titlebar(
                 )
                 .child(
                     pill_button("tb-save", "Save", false, !can_save, theme).on_click(cx.listener(
-                        |this, _, window, cx| {
+                        |this, _, _window, cx| {
                             if this.model.can_save() {
-                                this.prompt_save_preview(window, cx);
+                                crate::export_card::open(this, false, cx);
                             }
                         },
                     )),
@@ -273,6 +283,43 @@ pub fn render_titlebar(
                     })),
                 ),
         )
+        .children(caption_buttons(theme, window, false))
+}
+
+/// Minimise, maximise and close, off the Mac, where GPUI's own title bar is
+/// hidden (`appears_transparent`): drawn here, Windows handles them as its
+/// caption buttons (`WindowControlArea`). Settings has only Close.
+pub fn caption_buttons(theme: &GpuiTheme, window: &Window, close_only: bool) -> Option<gpui::AnyElement> {
+    if cfg!(target_os = "macos") {
+        return None;
+    }
+    // Segoe MDL2 Assets' caption glyphs, on Windows 10 and 11.
+    let windows = cfg!(target_os = "windows");
+    let glyph = |mdl2: &'static str, plain: &'static str| if windows { mdl2 } else { plain };
+    let maximised = window.is_maximized();
+    let button = |id: &'static str, area: gpui::WindowControlArea, text: &'static str, close: bool| {
+        div()
+            .id(id)
+            .w(px(46.0))
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(windows, |d| d.font_family("Segoe MDL2 Assets"))
+            .text_size(px(10.0))
+            .text_color(theme.label)
+            .window_control_area(area)
+            .when(close, |d| d.hover(|s| s.bg(hex(0xC42B1C)).text_color(gpui::white())))
+            .when(!close, |d| d.hover(|s| s.bg(theme.subtle_hover)))
+            .child(text)
+    };
+    let mut row = div().flex().flex_none().h_full();
+    if !close_only {
+        row = row
+            .child(button("caption-min", gpui::WindowControlArea::Min, glyph("\u{E921}", "–"), false))
+            .child(button("caption-max", gpui::WindowControlArea::Max, if maximised { glyph("\u{E923}", "❐") } else { glyph("\u{E922}", "□") }, false));
+    }
+    Some(row.child(button("caption-close", gpui::WindowControlArea::Close, glyph("\u{E8BB}", "✕"), true)).into_any_element())
 }
 
 /// Floating dropdown listing all 6 built-in themes with color swatches.

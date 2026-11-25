@@ -38,6 +38,14 @@ pub enum Command {
     FilterFlag(usize),
     FilterEdited,
     FilterUnedited,
+    /// "Export 3 Photographs…": the export card (ticket 48).
+    Export,
+    Lightroom(negs_app::lightroom::Kind),
+    /// The `index`th entry of the film's or paper's stock menu, with the
+    /// tiles off (`stock_entries`); `read_as`: Read as's films.
+    Stock { paper: bool, read_as: bool, index: usize },
+    /// The film menu's Your negative.
+    Negative,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +104,14 @@ pub fn library_entries(app: &NegsApp) -> Vec<Entry> {
     out.push(entry("Paste Edits", Some(&format!("{m}⇧V")), model.can_paste_edits(), false, Command::PasteEdits));
     out.push(entry("Paste from Previous", None, model.can_paste_from_previous(), false, Command::PastePrevious));
     out.push(rule());
+    // Export and each Lightroom installed, between the edits and Duplicate
+    // as on the Mac (`batch::export_items`).
+    let targets = model.export_targets().len();
+    out.push(entry(if targets > 1 { format!("Export {targets} Photographs…") } else { "Export…".into() }, None, model.can_export_any(), false, Command::Export));
+    for kind in model.lightroom_kinds() {
+        out.push(entry(negs_app::lightroom::menu_title(kind, targets), None, model.can_open_in_lightroom(kind), false, Command::Lightroom(kind)));
+    }
+    out.push(rule());
     out.push(entry("Duplicate", Some(&format!("{m}D")), can, false, Command::Duplicate));
     out.push(entry("Reset Edits", None, can, false, Command::ResetEdits));
     out.push(rule());
@@ -106,6 +122,46 @@ pub fn library_entries(app: &NegsApp) -> Vec<Entry> {
     out.push(entry("Delete Rejected Photographs…", None, can && !model.rejected().is_empty(), false, Command::TrashRejected));
     out.push(rule());
     out.push(entry("Advance After Rating", None, library.is_some(), model.prefs.library.advance_after_rating, Command::Advance));
+    out
+}
+
+/// The film or paper menu's entries, with the tiles off (`windows/`'s
+/// `stock_entries`): the favourites, starred, then each group's heading
+/// (None: can't be chosen) and stocks. Read as lists the colour negatives.
+pub fn stock_entries(model: &negs_app::model::Model, paper: bool, read_as: bool) -> Vec<(String, Option<(String, bool)>)> {
+    let (films, papers) = (model.listed_films(), model.listed_papers());
+    let groups = if paper { negs_app::state::paper_groups(&papers) } else { negs_app::state::film_groups(&films, &model.papers()) };
+    let mut entries: Vec<(String, Option<(String, bool)>)> = model.favorite_stocks(paper).iter().map(|s| (format!("★ {}", s.name), Some((s.id.clone(), true)))).collect();
+    for group in groups {
+        entries.push((group.title.into(), None));
+        entries.extend(group.stocks.iter().map(|s| (s.name.clone(), Some((s.id.clone(), false)))));
+    }
+    if read_as {
+        let readable = |id: &str| model.stocks.iter().any(|s| s.id == id && negs_app::negative::readable(s));
+        entries.retain(|(_, e)| e.as_ref().is_none_or(|(id, _)| readable(id)));
+    }
+    entries
+}
+
+/// The stock menu as the library menu's rows: headings dimmed, the chosen
+/// stock ticked, and the film's ends with Your negative.
+pub fn stock_menu(model: &negs_app::model::Model, paper: bool, read_as: bool) -> Vec<Entry> {
+    let current = if paper { &model.state.paper } else { &model.state.film };
+    let mut out: Vec<Entry> = stock_entries(model, paper, read_as)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (label, e))| {
+            let command = Command::Stock { paper, read_as, index };
+            match e {
+                None => entry(label, None, false, false, command),
+                Some((id, favourite)) => entry(label, None, true, &id == current && !favourite, command),
+            }
+        })
+        .collect();
+    if !paper && !read_as {
+        out.push(rule());
+        out.push(entry(negs_app::negative::NAME, None, true, model.is_negative(), Command::Negative));
+    }
     out
 }
 
@@ -146,6 +202,12 @@ impl NegsApp {
         cx.notify();
     }
 
+    /// With the tiles off, the film's or paper's stock menu at `at`.
+    pub fn open_stock_menu(&mut self, paper: bool, read_as: bool, at: Point<Pixels>, cx: &mut Context<Self>) {
+        self.menu = Some(MenuState { at, entries: stock_menu(&self.model, paper, read_as), from: None });
+        cx.notify();
+    }
+
     pub fn open_filter_menu(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         self.menu = Some(MenuState { at, entries: filter_entries(self), from: None });
         cx.notify();
@@ -165,6 +227,20 @@ impl NegsApp {
         let model = &mut self.model;
         match command {
             Command::CompareOffer => {}
+            Command::Export => return crate::export_card::open(self, true, cx),
+            Command::Lightroom(kind) => model.open_in_lightroom(kind),
+            Command::Negative => model.choose_negative(),
+            Command::Stock { paper, read_as, index } => {
+                if let Some(Some((id, _))) = stock_entries(model, paper, read_as).get(index).map(|(_, e)| e.clone()) {
+                    if paper {
+                        model.choose_paper(&id)
+                    } else if read_as {
+                        model.choose_negative_film(&id)
+                    } else {
+                        model.choose_film(&id)
+                    }
+                }
+            }
             Command::Rate(stars) => model.library_key(LibraryKey::Rate(stars)),
             Command::Raise => model.library_key(LibraryKey::Raise),
             Command::Lower => model.library_key(LibraryKey::Lower),
@@ -237,7 +313,8 @@ pub fn render_menu(app: &NegsApp, window: &Window, cx: &mut Context<NegsApp>) ->
     let menu = app.menu.as_ref()?;
     let theme = &app.theme;
     let viewport = window.viewport_size();
-    let height = menu.entries.iter().map(|e| if e.command.is_some() { ROW } else { 9.0 }).sum::<f32>() + 8.0;
+    // A long menu (the stocks) scrolls inside the window.
+    let height = (menu.entries.iter().map(|e| if e.command.is_some() { ROW } else { 9.0 }).sum::<f32>() + 8.0).min(f32::from(viewport.height) - 16.0);
     let x = f32::from(menu.at.x).min(f32::from(viewport.width) - WIDTH - 8.0).max(8.0);
     let y = f32::from(menu.at.y).min(f32::from(viewport.height) - height - 8.0).max(8.0);
     let hover = theme.subtle_hover;
@@ -247,6 +324,8 @@ pub fn render_menu(app: &NegsApp, window: &Window, cx: &mut Context<NegsApp>) ->
         .left(px(x))
         .top(px(y))
         .w(px(WIDTH))
+        .max_h(px(height))
+        .overflow_y_scroll()
         .py(px(4.0))
         .rounded(px(6.0))
         .bg(theme.panel)
@@ -291,4 +370,57 @@ pub fn render_menu(app: &NegsApp, window: &Window, cx: &mut Context<NegsApp>) ->
         list = list.child(row);
     }
     Some(deferred(list).with_priority(10).into_any_element())
+}
+
+#[cfg(test)]
+mod stock_menu_tests {
+    use super::*;
+    use negs_app::session::Preferences;
+    use negs_app::state::Stock;
+
+    fn stock(id: &str, name: &str, paper: bool, bw: bool) -> Stock {
+        Stock {
+            id: id.into(),
+            name: name.into(),
+            paper,
+            positive: false,
+            bw,
+            target: if paper { String::new() } else { "kodak_portra_endura".into() },
+            times: vec![1.0, 2.0],
+            grain: serde_json::Value::Null,
+            fotufilm: false,
+            manufacturer_data: false,
+            negs_built: false,
+            cine_print: false,
+        }
+    }
+
+    fn model() -> negs_app::model::Model {
+        let mut model = negs_app::model::Model::new(Preferences::default());
+        model.stocks = vec![stock("kodak_gold_200", "Kodak Gold 200", false, false), stock("ilford_hp5", "Ilford HP5 Plus", false, true), stock("kodak_portra_endura", "Kodak Portra Endura", true, false)];
+        model.state.film = "kodak_gold_200".into();
+        model
+    }
+
+    #[test]
+    fn the_stock_menu_ticks_the_film_and_ends_with_your_negative() {
+        let model = model();
+        let menu = stock_menu(&model, false, false);
+        let names: Vec<_> = menu.iter().filter(|e| e.enabled).map(|e| e.label.to_string()).collect();
+        assert!(names.contains(&"Kodak Gold 200".to_string()) && names.contains(&"Ilford HP5 Plus".to_string()), "{names:?}");
+        assert!(menu.iter().any(|e| e.checked && e.label.as_ref() == "Kodak Gold 200"));
+        assert_eq!(menu.last().map(|e| e.label.to_string()), Some(negs_app::negative::NAME.to_string()));
+        // Headings can't be chosen.
+        assert!(menu.iter().any(|e| !e.enabled && e.command.is_some()));
+    }
+
+    #[test]
+    fn read_as_lists_only_colour_negatives() {
+        let model = model();
+        let entries = stock_entries(&model, false, true);
+        assert!(entries.iter().all(|(_, e)| e.as_ref().is_none_or(|(id, _)| id != "ilford_hp5")));
+        assert!(entries.iter().any(|(_, e)| e.as_ref().is_some_and(|(id, _)| id == "kodak_gold_200")));
+        let papers = stock_entries(&model, true, false);
+        assert!(papers.iter().any(|(_, e)| e.as_ref().is_some_and(|(id, _)| id == "kodak_portra_endura")));
+    }
 }

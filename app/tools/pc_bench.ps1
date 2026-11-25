@@ -2,10 +2,12 @@
 # with schtasks /it; see docs/gpui-app-handoff-p5.md), capturing the window
 # whenever the app writes <name>.ready.
 #   pc_bench.ps1 -Root <scratch dir with photos\> -Exe <worktree>\app\target\release\Negs.exe [-Tour print]
-# -Tour print walks the photograph view for pictures instead (NEGS_BENCH_TOUR).
+# -Tour print walks the photograph view for pictures instead (NEGS_BENCH_TOUR);
+# -Tour export -ExportDir <dir> also exports the open photograph there;
+# -Tour sidecar -Side pc is the PC's stage of the sidecar round trip.
 # Writes <Root>\bench-pc.json, <Root>\shots\*.png, <Root>\run.log, and
 # <Root>\finished.txt last. The profile is <Root>\profile.
-param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe, [string]$Tour = '')
+param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe, [string]$Tour = '', [string]$ExportDir = '', [string]$Side = '')
 $ErrorActionPreference = 'Continue'
 $root = $Root
 $shots = Join-Path $root 'shots'
@@ -42,6 +44,8 @@ $psi.EnvironmentVariables['SPEKTRAFILM_ROOT'] = 'C:\Users\Noah\Projects\negs'
 $psi.EnvironmentVariables['NEGS_FRAME_BENCH'] = (Join-Path $root 'bench-pc.json')
 $psi.EnvironmentVariables['NEGS_BENCH_SHOTS'] = $shots
 if ($Tour) { $psi.EnvironmentVariables['NEGS_BENCH_TOUR'] = $Tour }
+if ($Side) { $psi.EnvironmentVariables['NEGS_BENCH_SIDE'] = $Side }
+if ($ExportDir) { $psi.EnvironmentVariables['NEGS_BENCH_EXPORT_DIR'] = $ExportDir }
 $proc = [System.Diagnostics.Process]::Start($psi)
 $errTask = $proc.StandardError.ReadToEndAsync()
 "started pid $($proc.Id)" | Out-File -Append $log
@@ -60,10 +64,12 @@ while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
     $name = [IO.Path]::GetFileNameWithoutExtension($r.Name)
     $done = Join-Path $shots ($name + '.done')
     if (Test-Path $done) { continue }
-    [NegsWin]::SetForegroundWindow($h) | Out-Null
+    # settings-*: Settings' own window, in front.
+    $w = $h
+    if ($name -like 'settings-*') { $w = [NegsWin]::GetForegroundWindow() } else { [NegsWin]::SetForegroundWindow($h) | Out-Null }
     Start-Sleep -Milliseconds 250
     $rc = New-Object NegsWin+RECT
-    if ([NegsWin]::DwmGetWindowAttribute($h, 9, [ref]$rc, 16) -ne 0) { [NegsWin]::GetWindowRect($h, [ref]$rc) | Out-Null }
+    if ([NegsWin]::DwmGetWindowAttribute($w, 9, [ref]$rc, 16) -ne 0) { [NegsWin]::GetWindowRect($w, [ref]$rc) | Out-Null }
     $bmp = New-Object System.Drawing.Bitmap ($rc.R - $rc.L), ($rc.B - $rc.T)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen($rc.L, $rc.T, 0, 0, $bmp.Size)

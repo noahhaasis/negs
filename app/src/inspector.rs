@@ -919,8 +919,12 @@ fn render_stock_strip(
                 .border_color(if film_open { theme.accent } else { theme.line })
                 .cursor_pointer()
                 .hover(move |s| s.bg(hover))
-                .on_click(cx.listener(|this, _, _window, cx| {
+                .on_click(cx.listener(|this, event: &gpui::ClickEvent, _window, cx| {
                     this.inspector.close_popovers();
+                    if !this.model.can_open_tray(false) {
+                        this.open_stock_menu(false, false, event.position(), cx);
+                        return;
+                    }
                     this.model.toggle_tray(false);
                     this.after_model_update(cx);
                     cx.notify();
@@ -972,9 +976,13 @@ fn render_stock_strip(
                 .when(!scanning, |el| {
                     el.cursor_pointer()
                         .hover(move |s| s.bg(hover))
-                        .on_click(cx.listener(|this, _, _window, cx| {
+                        .on_click(cx.listener(|this, event: &gpui::ClickEvent, _window, cx| {
                             this.inspector.close_popovers();
-                            this.model.toggle_tray(true);
+                            if !this.model.can_open_tray(true) {
+                        this.open_stock_menu(true, false, event.position(), cx);
+                        return;
+                    }
+                    this.model.toggle_tray(true);
                             this.after_model_update(cx);
                             cx.notify();
                         }))
@@ -1162,8 +1170,8 @@ fn render_output_foot(
                     theme.dim
                 })
                 .when(can_export, |el| {
-                    el.cursor_pointer().on_click(cx.listener(|this, _, window, cx| {
-                        this.prompt_save_preview(window, cx);
+                    el.cursor_pointer().on_click(cx.listener(|this, _, _window, cx| {
+                        crate::export_card::open(this, true, cx);
                     }))
                 })
                 .child("Export…"),

@@ -74,6 +74,31 @@ enum Step {
     /// original), side by side or as a slider; None leaves.
     Compare(Option<(bool, negs_app::compare::Layout)>),
     ZoomActual(bool),
+    /// A parameter switched on or off (grain, glare: off for pixel compares).
+    Param(&'static str, bool),
+    /// The edits written to the photograph's sidecar now.
+    SaveLibrary,
+    /// The export card opened (File › Export: a batch in the grid), or closed.
+    Card(bool),
+    /// Exports the open photograph with the remembered choices into
+    /// `NEGS_BENCH_EXPORT_DIR` under its default name, and waits for it.
+    ExportHere,
+    /// Opens the `n`th photograph shown.
+    OpenItem(usize),
+    /// A number parameter of the open photograph.
+    Num(&'static str, f64),
+    /// Crops the open photograph square and applies it.
+    CropSquare,
+    /// Rates or flags the open photograph.
+    Key(LibraryKey),
+    /// Notes what the first `n` photographs carry: marks, exposure, crop.
+    Report(usize),
+    /// Opens Settings at a page, or closes it.
+    Settings(Option<crate::settings_window::Tab>),
+    /// Opens a menu of the in-window menu bar (by title) and a submenu.
+    MenuBar(Option<(&'static str, Option<usize>)>),
+    /// Tiles off and the film's stock menu open, or tiles back on.
+    StockMenu(bool),
     Write,
 }
 
@@ -93,6 +118,7 @@ pub struct Bench {
     quiet_since: Option<Instant>,
     started: Instant,
     notes: Vec<String>,
+    export_started: Option<Instant>,
     theme_before: Option<ThemeName>,
     /// The strip's scroll as a fling began.
     origin: f64,
@@ -106,6 +132,55 @@ impl Bench {
             let _ = std::fs::create_dir_all(dir);
         }
         use Step::*;
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "hold") {
+            // The window idle for 20 s, for checks from outside (hit tests).
+            return Some(Bench::with_steps(out, shots, vec![WaitLoaded, WaitDeveloped, Hold(20_000), Write]));
+        }
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "settings") {
+            // Settings' four pages, two themes on Look, and (off the Mac)
+            // the in-window menu bar's Photo › Rating open.
+            use crate::settings_window::Tab;
+            let mut steps = vec![WaitLoaded, WaitDeveloped, Hold(400)];
+            for (tab, name) in [(Tab::Photographs, "settings-photographs"), (Tab::Speed, "settings-speed"), (Tab::Upkeep, "settings-upkeep"), (Tab::Look, "settings-look")] {
+                steps.extend([Settings(Some(tab)), Hold(700), Shot(name)]);
+            }
+            steps.extend([Theme(ThemeName::LightTable), Hold(500), Shot("settings-look-light-table"), Theme(ThemeName::PlainDark), Hold(500), Shot("settings-look-plain-dark"), Theme(ThemeName::Darkroom)]);
+            steps.extend([Settings(Some(Tab::Photographs)), Settings(None), Hold(400)]);
+            // With the tiles off, the film's name opens the stock menu.
+            steps.extend([StockMenu(true), Hold(500), Shot("stock-menu-tiles-off"), StockMenu(false)]);
+            if !cfg!(target_os = "macos") {
+                steps.extend([MenuBar(Some(("Photo", Some(2)))), Hold(500), Shot("menu-photo-rating"), MenuBar(Some(("File", None))), Hold(400), Shot("menu-file"), MenuBar(None)]);
+            }
+            steps.push(Write);
+            return Some(Bench::with_steps(out, shots, steps));
+        }
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "sidecar") {
+            // The sidecar round trip (`NEGS_BENCH_SIDE`): mac1 edits, crops
+            // and rates; pc reads that, then edits two others; mac2 reads.
+            const EV: &str = "camera.exposure_compensation_ev";
+            let side = std::env::var("NEGS_BENCH_SIDE").unwrap_or_default();
+            let mut steps = vec![WaitLoaded, WaitDeveloped, Report(6)];
+            match side.as_str() {
+                "mac1" => steps.extend([OpenItem(0), WaitDeveloped, Num(EV, 0.7), CropSquare, OpenItem(1), WaitDeveloped, Key(LibraryKey::Rate(3)), OpenItem(2), WaitDeveloped, Key(LibraryKey::Pick)]),
+                "pc" => steps.extend([OpenItem(3), WaitDeveloped, Key(LibraryKey::Rate(5)), OpenItem(4), WaitDeveloped, Num(EV, -0.3), Key(LibraryKey::Reject)]),
+                _ => {}
+            }
+            steps.extend([SaveLibrary, OpenItem(0), WaitDeveloped, Report(6), OpenItem(4), WaitDeveloped, Report(6), Write]);
+            return Some(Bench::with_steps(out, shots, steps));
+        }
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "export") {
+            // The export card, single and batch, then a real export of the
+            // open photograph with grain and glare off (pixel compares).
+            let mut steps = vec![WaitLoaded, WaitDeveloped, Param("film_render.grain.active", false), Param("print_render.glare.active", false), WaitDeveloped, SaveLibrary, Hold(400)];
+            steps.extend([Card(true), Hold(500), Shot("export-card"), Card(false)]);
+            steps.extend([Theme(ThemeName::LightTable), Card(true), Hold(400), Shot("export-card-light-table"), Card(false), Theme(ThemeName::PlainDark), Card(true), Hold(400), Shot("export-card-plain-dark"), Card(false), Theme(ThemeName::Darkroom)]);
+            steps.extend([OpenGrid(None), WaitFlight, Select, Hold(300), Card(true), Hold(500), Shot("export-card-batch"), Card(false), CloseGrid(None), WaitFlight, Hold(300)]);
+            steps.extend([ExportHere, Hold(300), Write]);
+            if shots.is_none() {
+                steps.retain(|s| !matches!(s, Shot(_)));
+            }
+            return Some(Bench::with_steps(out, shots, steps));
+        }
         if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "print") {
             let mut steps = vec![WaitLoaded, WaitDeveloped, Hold(600), Shot("print-darkroom")];
             steps.extend([Theme(ThemeName::LightTable), Hold(400), Shot("print-light-table"), Theme(ThemeName::PlainDark), Hold(400), Shot("print-plain-dark")]);
@@ -160,6 +235,7 @@ impl Bench {
             quiet_since: None,
             started: now,
             notes: vec![],
+            export_started: None,
             theme_before: None,
             origin: 0.0,
         }
@@ -415,6 +491,123 @@ impl Bench {
             Step::ZoomActual(on) => {
                 app.model.zoom(!on);
                 app.after_model_update(cx);
+                self.next();
+            }
+            Step::Param(path, on) => {
+                app.model.set(path, serde_json::Value::Bool(on));
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::SaveLibrary => {
+                if let Err(error) = app.model.library_save_now() {
+                    self.notes.push(format!("library save: {error}"));
+                }
+                self.next();
+            }
+            Step::Card(open) => {
+                if open {
+                    crate::export_card::open(app, true, cx);
+                } else {
+                    crate::export_card::close(app, cx);
+                }
+                self.next();
+            }
+            Step::ExportHere => {
+                if self.step_frames == 1 {
+                    match std::env::var_os("NEGS_BENCH_EXPORT_DIR") {
+                        Some(dir) => {
+                            let choices = crate::export_card::Choices::from_prefs(&app.model.prefs);
+                            let path = std::path::PathBuf::from(dir).join(app.model.default_name(choices.format));
+                            self.notes.push(format!("export {} with {:?}", path.display(), choices.engine));
+                            self.export_started = Some(Instant::now());
+                            app.model.export(path, choices.engine, choices.size(), choices.settings());
+                            app.after_model_update(cx);
+                        }
+                        None => self.notes.push("ExportHere: NEGS_BENCH_EXPORT_DIR unset".into()),
+                    }
+                } else if (!app.model.exporting && !app.model.saving && in_step > Duration::from_millis(500)) || in_step > Duration::from_secs(600) {
+                    if let Some(started) = self.export_started.take() {
+                        self.notes.push(format!("export ended after {:.1} s: {}", started.elapsed().as_secs_f64(), app.model.status));
+                    }
+                    self.next();
+                }
+            }
+            Step::OpenItem(n) => {
+                if let Some(item) = app.model.shown_items().get(n).cloned() {
+                    app.model.open_item(item);
+                    app.after_model_update(cx);
+                }
+                self.next();
+            }
+            Step::Num(path, v) => {
+                app.model.set(path, serde_json::json!(v));
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::CropSquare => {
+                app.model.begin_crop();
+                if let Some(session) = app.model.crop_session.as_mut() {
+                    session.choose(negs_app::crop::CropAspect::Square);
+                }
+                app.model.crop_changed();
+                app.model.end_crop(true);
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::Key(key) => {
+                app.model.library_key(key);
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::Report(n) => {
+                let open = app.model.library_item();
+                let items = app.model.shown_items();
+                for item in items.iter().take(n) {
+                    let name = item.photo.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                    let Some(library) = app.model.shelf.library.as_ref() else { break };
+                    let summary = library.summary(item);
+                    let mut line = format!("{name}: rating {} flag {:?} edited {}", summary.rating, summary.flag, summary.edited);
+                    if open.as_ref() == Some(item) {
+                        let c = app.model.state.crop;
+                        line += &format!(" (open: ev {} crop {:.3},{:.3} {:.3}×{:.3})", app.model.value("camera.exposure_compensation_ev"), c.rect.x, c.rect.y, c.rect.width, c.rect.height);
+                    }
+                    self.notes.push(line);
+                }
+                self.next();
+            }
+            Step::Settings(tab) => {
+                match tab {
+                    Some(tab) => {
+                        app.model.prefs.settings_tab = tab.title().into();
+                        crate::settings_window::open(app, cx);
+                    }
+                    None => {
+                        if let Some(handle) = app.settings_window.take() {
+                            let _ = handle.update(cx, |_, window, _| window.remove_window());
+                        }
+                    }
+                }
+                cx.notify();
+                self.next();
+            }
+            Step::StockMenu(open) => {
+                if open {
+                    app.model.set_previews(false);
+                    app.open_stock_menu(false, false, gpui::point(gpui::px(320.0), gpui::px(120.0)), cx);
+                } else {
+                    app.close_menu();
+                    app.model.set_previews(true);
+                }
+                app.after_model_update(cx);
+                cx.notify();
+                self.next();
+            }
+            Step::MenuBar(open) => {
+                app.menu_bar = open.and_then(|(title, sub)| {
+                    let menu = cx.get_menus()?.iter().position(|m| m.name.as_ref() == title)?;
+                    Some(crate::menu_bar::Open { menu, sub })
+                });
+                cx.notify();
                 self.next();
             }
             Step::Write => self.write(app, cx),

@@ -28,8 +28,6 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
         Some("Developing…")
     } else if app.model.saving {
         Some("Saving…")
-    } else if app.model.exporting {
-        Some("Exporting…")
     } else {
         None
     };
@@ -96,6 +94,8 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
         .is_some_and(|p| p.wide)
         .then_some("Rec. 2020");
 
+    // An export or a batch speaks first: its words, rule, Show and Cancel.
+    let export_words = crate::batch_view::words(&app.model).map(|w| crate::batch_view::render_words(app, w, cx));
     let error_banner = app.model.error.clone();
     let comparing_none = comparing.is_none();
     let tools = comparing.map(|c| compare_tools(app, c.layout == negs_app::compare::Layout::Slider, cx).into_any_element());
@@ -159,6 +159,7 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
                         .gap_3()
                         .min_w_0()
                         .when(comparing_none, |el| el.child(div().text_color(theme.label).child(stock_text)))
+                        .when_some(export_words, |el, words| el.child(div().text_color(theme.dim).child("·")).child(words))
                         .when(!status_text.is_empty() && !comparing_none, |el| el.child(div().text_color(theme.label).truncate().child(status_text.clone())))
                         .when(!status_text.is_empty() && comparing_none, |el| {
                             el.child(div().text_color(theme.dim).child("·"))

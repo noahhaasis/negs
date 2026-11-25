@@ -10,7 +10,7 @@ set -u
 APP=$1; PHOTOS=$2; SCRATCH=$3; BENCH=$4; SHOTS=$5; LIMIT=$6
 HERE=$(cd "$(dirname "$0")" && pwd)
 WINID=$SCRATCH/winid
-[ -x "$WINID" ] || swiftc -O -o "$WINID" "$HERE/winid.swift" || exit 1
+[ -x "$WINID" ] && [ "$WINID" -nt "$HERE/winid.swift" ] || swiftc -O -o "$WINID" "$HERE/winid.swift" || exit 1
 mkdir -p "$SCRATCH/profile"
 export NEGS_PROFILE_DIR=$SCRATCH/profile NEGS_ALLOW_MULTIPLE=1 SPEKTRAFILM_ROOT=${SPEKTRAFILM_ROOT:-/Users/noahhaasis/Projects/negs}
 [ "$BENCH" != none ] && export NEGS_FRAME_BENCH=$BENCH
@@ -28,7 +28,9 @@ while kill -0 $PID 2>/dev/null; do
       # By PID only: Noah's own Negs.app may be running.
       osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $PID) to true" >/dev/null 2>&1
       sleep 0.3
-      screencapture -x -o -l "$("$WINID" $PID)" "$SHOTS/$n.png"
+      # settings-*: Settings' own window, in front.
+      case $n in settings-*) which=front ;; *) which= ;; esac
+      screencapture -x -o -l "$("$WINID" $PID $which)" "$SHOTS/$n.png"
       touch "$SHOTS/$n.done"
       echo "shot $n"
     done
