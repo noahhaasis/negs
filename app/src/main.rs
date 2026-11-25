@@ -31,6 +31,7 @@ mod sheet;
 mod status;
 mod strip;
 mod theme_gpui;
+mod trace_ui;
 mod thumbs;
 mod tile_cache;
 mod titlebar;
@@ -740,7 +741,7 @@ impl NegsApp {
     }
 
     pub fn toggle_grid(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        grid::toggle(self);
+        grid::toggle(self, window);
         window.focus(&self.focus_handle.clone());
         self.after_model_update(cx);
         cx.notify();
@@ -860,6 +861,7 @@ impl NegsApp {
 
 impl gpui::Render for NegsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let render_started = Instant::now();
         // Update native window title when photo changes.
         let win_title = match self.model.compare_title().map(Into::into).or_else(|| self.model.source.as_deref().and_then(Path::file_name).map(|n| n.to_os_string())) {
             Some(name) => format!("{} — Negs", name.to_string_lossy()),
@@ -919,6 +921,9 @@ impl gpui::Render for NegsApp {
         if let Some(bench) = self.bench.as_mut() {
             bench.frame_end();
         }
+        if trace_ui::on() {
+            trace_ui::record("render", render_started);
+        }
 
         div()
             .id("negs-app-root")
@@ -948,7 +953,10 @@ impl gpui::Render for NegsApp {
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if this.inspector.has_active_drag() {
-                    handle_root_mouse_move(this, event, window, cx);
+                    let moved = Instant::now();
+                    if handle_root_mouse_move(this, event, window, cx) && trace_ui::on() {
+                        trace_ui::record("move", moved);
+                    }
                 }
                 if canvas::crop_drag_move(this, event.position, cx) {
                     return;
