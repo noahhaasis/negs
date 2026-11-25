@@ -1065,7 +1065,7 @@ pub fn render_canvas(
                 if let Some((target, _)) = this.canvas.pressed.take() {
                     let p = negs_app::crop::Point { x: f32::from(event.position.x) as f64, y: f32::from(event.position.y) as f64 };
                     if print::hit(&this.canvas.targets, p) == Some(target) {
-                        act(this, target, cx);
+                        act(this, target, event.position, cx);
                     }
                     cx.notify();
                 }
@@ -1267,22 +1267,24 @@ pub fn crop_drag_end(this: &mut NegsApp, cx: &mut Context<NegsApp>) -> bool {
 }
 
 /// A click on the print's words, a trim mark or a turn arrow.
-pub fn act(this: &mut NegsApp, target: Target, cx: &mut Context<NegsApp>) {
+pub fn act(this: &mut NegsApp, target: Target, at: gpui::Point<Pixels>, cx: &mut Context<NegsApp>) {
     let model = &mut this.model;
     match target {
         Target::Film | Target::Paper => {
             let paper = target == Target::Paper;
             // Its tray, keeping the other's stock; a second click keeps
             // this one and closes it. With the tiles off: the stock menu.
-            // (With the tiles off, Windows offers a menu of stocks: the
-            // GPUI app has none yet; the inspector's pickers choose.)
             if model.can_open_tray(paper) {
                 model.toggle_tray(paper);
+            } else if model.source.is_some() && !model.cropping() {
+                return this.open_stock_menu(paper, false, at, cx);
             }
         }
         Target::ReadAs => {
             if model.can_open_tray(false) {
                 model.toggle_read_as_tray();
+            } else if model.source.is_some() && !model.cropping() {
+                return this.open_stock_menu(false, true, at, cx);
             }
         }
         Target::Lock => {
@@ -1357,7 +1359,7 @@ fn render_compare(app: &mut NegsApp, ink: SheetInk, cx: &mut Context<NegsApp>) -
                 if let Some((target, _)) = this.canvas.pressed.take() {
                     let (x, y) = xy(event.position);
                     if print::hit(&this.compare.targets, negs_app::crop::Point { x, y }) == Some(target) {
-                        act(this, target, cx);
+                        act(this, target, event.position, cx);
                     }
                     cx.notify();
                 }

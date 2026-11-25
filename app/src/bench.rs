@@ -97,6 +97,8 @@ enum Step {
     Settings(Option<crate::settings_window::Tab>),
     /// Opens a menu of the in-window menu bar (by title) and a submenu.
     MenuBar(Option<(&'static str, Option<usize>)>),
+    /// Tiles off and the film's stock menu open, or tiles back on.
+    StockMenu(bool),
     Write,
 }
 
@@ -144,6 +146,8 @@ impl Bench {
             }
             steps.extend([Theme(ThemeName::LightTable), Hold(500), Shot("settings-look-light-table"), Theme(ThemeName::PlainDark), Hold(500), Shot("settings-look-plain-dark"), Theme(ThemeName::Darkroom)]);
             steps.extend([Settings(Some(Tab::Photographs)), Settings(None), Hold(400)]);
+            // With the tiles off, the film's name opens the stock menu.
+            steps.extend([StockMenu(true), Hold(500), Shot("stock-menu-tiles-off"), StockMenu(false)]);
             if !cfg!(target_os = "macos") {
                 steps.extend([MenuBar(Some(("Photo", Some(2)))), Hold(500), Shot("menu-photo-rating"), MenuBar(Some(("File", None))), Hold(400), Shot("menu-file"), MenuBar(None)]);
             }
@@ -583,6 +587,18 @@ impl Bench {
                         }
                     }
                 }
+                cx.notify();
+                self.next();
+            }
+            Step::StockMenu(open) => {
+                if open {
+                    app.model.set_previews(false);
+                    app.open_stock_menu(false, false, gpui::point(gpui::px(320.0), gpui::px(120.0)), cx);
+                } else {
+                    app.close_menu();
+                    app.model.set_previews(true);
+                }
+                app.after_model_update(cx);
                 cx.notify();
                 self.next();
             }
