@@ -425,9 +425,22 @@ impl NegsApp {
         // Logging off or shutting down: the edits and the session saved, nothing asked.
         let weak = cx.entity().downgrade();
         let mut async_cx = cx.to_async();
-        win::on_end_session(window, Box::new(move || {
+        let handed_over = win::watch_main_window(window, Box::new(move || {
             let _ = weak.update(&mut async_cx, |app, _| app.shutdown_cleanly());
         }));
+        // A photograph opened from Explorer while Negs runs (win.rs).
+        if let Some(paths) = handed_over {
+            cx.spawn(async move |this, cx| {
+                while let Ok(path) = paths.recv().await {
+                    let _ = this.update(cx, |app, cx| {
+                        if path.exists() {
+                            app.open_dropped_paths(&[path], cx);
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
         // WinSparkle asks to quit to install an update.
         if let Some(requests) = updates::quit_requests() {
             cx.spawn(async move |this, cx| {
@@ -1692,6 +1705,15 @@ fn cli_photo_arg() -> Option<PathBuf> {
 fn main() {
     let startup = StartupReport::new();
     let cli_path = cli_photo_arg();
+    win::hold_lifetime_mutex();
+    // One Negs: a second hands its photograph to the first and goes.
+    if std::env::var_os("NEGS_ALLOW_MULTIPLE").is_none() {
+        let absolute = cli_path.as_ref().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()));
+        if win::forward_to_running(absolute.as_deref()) {
+            return;
+        }
+    }
+    win::set_app_id();
     let (gpui_host, channels) = GpuiHost::new();
     host::register(gpui_host.clone());
 

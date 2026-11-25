@@ -6,7 +6,12 @@
 //! - errors in a TaskDialog titled "Negs", the exporter's log under
 //!   "See details";
 //! - the edits and the session saved when Windows logs off, shuts down or
-//!   restarts for an update (`WM_ENDSESSION`), where no dialog may ask.
+//!   restarts for an update (`WM_ENDSESSION`), where no dialog may ask;
+//! - one Negs: a photograph opened from Explorer while Negs runs goes to the
+//!   running window (`Local\Negs.SingleInstance`, `WM_COPYDATA`), and
+//!   `Local\Negs.AppLifetime` is held until exit for the installer;
+//! - the taskbar button grouped with the Start menu's shortcut
+//!   (AppUserModelID `dev.negs.app`, as `installer.iss` gives it).
 //!
 //! Off Windows these do nothing, and errors use GPUI's prompt.
 
@@ -37,15 +42,26 @@ pub fn split_error(message: &str) -> (String, String, Option<String>) {
 #[cfg(windows)]
 mod imp {
     use std::cell::RefCell;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::path::{Path, PathBuf};
 
     use gpui::Window;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::{BOOL, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::DataExchange::COPYDATASTRUCT;
+    use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
     use windows::Win32::UI::Controls::*;
-    use windows::Win32::UI::Shell::{DefSubclassProc, ITaskbarList3, SetWindowSubclass, TBPF_INDETERMINATE, TBPF_NOPROGRESS, TBPF_NORMAL, TaskbarList};
-    use windows::Win32::UI::WindowsAndMessaging::{FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO, FlashWindowEx, GetForegroundWindow, WM_ENDSESSION, WM_QUERYENDSESSION};
-    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::UI::Shell::{
+        DefSubclassProc, ITaskbarList3, SetCurrentProcessExplicitAppUserModelID, SetWindowSubclass, TBPF_INDETERMINATE, TBPF_NOPROGRESS, TBPF_NORMAL,
+        TaskbarList,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        AllowSetForegroundWindow, EnumWindows, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO, FlashWindowEx, GetForegroundWindow, GetPropW,
+        GetWindowThreadProcessId, IsIconic, SW_RESTORE, SendMessageW, SetForegroundWindow, SetPropW, ShowWindow, WM_COPYDATA, WM_ENDSESSION,
+        WM_QUERYENDSESSION,
+    };
+    use windows::core::{HSTRING, PCWSTR, w};
 
     use super::Progress;
 
@@ -60,7 +76,14 @@ mod imp {
         static TASKBAR: RefCell<Option<ITaskbarList3>> = const { RefCell::new(None) };
         static SHOWN: RefCell<Progress> = const { RefCell::new(Progress::None) };
         static END_SESSION: RefCell<Option<Box<dyn FnMut()>>> = RefCell::new(None);
+        static OPEN: RefCell<Option<async_channel::Sender<PathBuf>>> = const { RefCell::new(None) };
     }
+
+    /// The windows/ app's tag for "open this photograph", kept so either app
+    /// would read the other's.
+    const COPYDATA_OPEN: usize = 0x4e45_4753; // "NEGS"
+    /// The property marking the main window, which the second Negs looks for.
+    const MAIN: PCWSTR = w!("Negs.MainWindow");
 
     pub fn set_progress(window: &Window, progress: Progress) {
         if SHOWN.with(|s| *s.borrow() == progress) {
@@ -139,6 +162,25 @@ mod imp {
         match msg {
             // Never block logging off.
             WM_QUERYENDSESSION => LRESULT(1),
+            WM_COPYDATA => {
+                let data = unsafe { &*(lparam.0 as *const COPYDATASTRUCT) };
+                if data.dwData != COPYDATA_OPEN {
+                    return unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+                }
+                let text = if data.lpData.is_null() { &[][..] } else { unsafe { std::slice::from_raw_parts(data.lpData as *const u16, data.cbData as usize / 2) } };
+                let path = PathBuf::from(std::ffi::OsString::from_wide(text));
+                unsafe {
+                    if IsIconic(hwnd).as_bool() {
+                        let _ = ShowWindow(hwnd, SW_RESTORE);
+                    }
+                    let _ = SetForegroundWindow(hwnd);
+                }
+                // Opened on the app's own executor, never inside this procedure.
+                if !text.is_empty() {
+                    OPEN.with(|o| o.borrow().as_ref().map(|tx| tx.try_send(path)));
+                }
+                LRESULT(1)
+            }
             WM_ENDSESSION => {
                 if wparam.0 != 0 {
                     // Log off, shutdown or an update restart: save, ask nothing.
@@ -154,12 +196,63 @@ mod imp {
         }
     }
 
-    /// `save` runs when the session ends, before Windows ends the process.
-    pub fn on_end_session(window: &Window, save: Box<dyn FnMut()>) {
-        let Some(hwnd) = hwnd(window) else { return };
+    /// `save` runs when the session ends, before Windows ends the process;
+    /// photographs another Negs hands over arrive on the returned channel.
+    pub fn watch_main_window(window: &Window, save: Box<dyn FnMut()>) -> Option<async_channel::Receiver<PathBuf>> {
+        let hwnd = hwnd(window)?;
         END_SESSION.with(|cb| *cb.borrow_mut() = Some(save));
+        let (tx, rx) = async_channel::unbounded();
+        OPEN.with(|o| *o.borrow_mut() = Some(tx));
         unsafe {
             let _: BOOL = SetWindowSubclass(hwnd, Some(subclass), 1, 0);
+            let _ = SetPropW(hwnd, MAIN, HANDLE(1 as _));
+        }
+        Some(rx)
+    }
+
+    /// Held until the process ends: the installer waits for it.
+    pub fn hold_lifetime_mutex() {
+        unsafe {
+            let _ = CreateMutexW(None, false, w!("Local\\Negs.AppLifetime"));
+        }
+    }
+
+    /// Taskbar grouping and pins as the Start menu's shortcut.
+    pub fn set_app_id() {
+        unsafe {
+            let _ = SetCurrentProcessExplicitAppUserModelID(w!("dev.negs.app"));
+        }
+    }
+
+    unsafe extern "system" fn find_main(hwnd: HWND, found: LPARAM) -> BOOL {
+        if !unsafe { GetPropW(hwnd, MAIN) }.is_invalid() {
+            unsafe { *(found.0 as *mut HWND) = hwnd };
+            return BOOL(0);
+        }
+        BOOL(1)
+    }
+
+    /// Another Negs is running: hand it `path` and bring it forward. False
+    /// when this is the first, or the first has no window yet.
+    pub fn forward_to_running(path: Option<&Path>) -> bool {
+        unsafe {
+            // Never closed: held until exit, as the first Negs's.
+            let _mutex = CreateMutexW(None, true, w!("Local\\Negs.SingleInstance"));
+            if GetLastError() != ERROR_ALREADY_EXISTS {
+                return false;
+            }
+            let mut main = HWND::default();
+            let _ = EnumWindows(Some(find_main), LPARAM(&mut main as *mut HWND as isize));
+            if main.is_invalid() {
+                return false;
+            }
+            let mut pid = 0;
+            GetWindowThreadProcessId(main, Some(&mut pid));
+            let _ = AllowSetForegroundWindow(pid);
+            let text: Vec<u16> = path.map(|p| p.as_os_str().encode_wide().collect()).unwrap_or_default();
+            let data = COPYDATASTRUCT { dwData: COPYDATA_OPEN, cbData: (text.len() * 2) as u32, lpData: text.as_ptr() as *mut _ };
+            SendMessageW(main, WM_COPYDATA, WPARAM(0), LPARAM(&data as *const _ as isize));
+            true
         }
     }
 
@@ -175,7 +268,14 @@ mod imp {
 
     pub fn set_progress(_window: &Window, _progress: Progress) {}
     pub fn flash_if_background(_window: &Window) {}
-    pub fn on_end_session(_window: &Window, _save: Box<dyn FnMut()>) {}
+    pub fn watch_main_window(_window: &Window, _save: Box<dyn FnMut()>) -> Option<async_channel::Receiver<std::path::PathBuf>> {
+        None
+    }
+    pub fn hold_lifetime_mutex() {}
+    pub fn set_app_id() {}
+    pub fn forward_to_running(_path: Option<&std::path::Path>) -> bool {
+        false
+    }
 }
 
 pub use imp::*;
