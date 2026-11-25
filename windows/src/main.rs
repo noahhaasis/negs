@@ -1,44 +1,19 @@
 //! Negs for Windows: Win32 with the common controls, wgpu for the photograph.
+//! Thin UI shell over the pure-Rust `negs-app` shared core.
 //! See docs/windows-app.md.
 
 #![windows_subsystem = "windows"]
 
-mod batch;
-mod border;
-mod brightness;
-mod compare;
-mod crop;
-mod edited_store;
-mod edits;
-mod embedded_preview;
-mod engine;
-mod film_cache_release;
-mod exact_fit;
+pub use negs_app::{
+    batch, border, brightness, compare, crop, edited_store, edits, embedded_preview, engine,
+    exact_fit, film_cache_release, help, histogram, icc, inspector_view, json, lightroom,
+    match_cache, model, negative, photo_facts, picture, platform, presets, previews,
+    rendered_preview, session, sheet_rules, state, thumb_compose, thumbnail, tone_graph,
+    tray_rules,
+};
+
 mod gpu;
-mod help;
-mod histogram;
-mod icc;
-mod inspector_view;
-mod json;
-mod lightroom;
-mod match_cache;
-mod model;
-mod negative;
-mod photo_facts;
-mod picture;
-mod platform;
-mod platform_events;
-mod presets;
-mod previews;
-mod rendered_preview;
-mod session;
-mod sheet_rules;
-mod state;
-mod thumb_compose;
-mod thumbnail;
-mod tone_graph;
 mod trace;
-mod tray_rules;
 mod ui;
 mod updates;
 

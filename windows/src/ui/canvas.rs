@@ -134,7 +134,7 @@ impl View {
         self.exact_size = (tw, th);
         match self.gpu.clone() {
             Some(gpu) => {
-                let Some(source) = picture.texture() else { return };
+                let Some(source) = picture.texture_as::<GpuImage>() else { return };
                 let started = std::time::Instant::now();
                 let image = gpu.lanczos(source, picture.width, picture.height, tw, th);
                 crate::trace::event("exact_fit", || serde_json::json!({"from": [picture.width, picture.height], "to": [tw, th], "ms": started.elapsed().as_secs_f64() * 1000.0}));
@@ -1655,7 +1655,7 @@ impl View {
 fn picture_texture<'a>(picture: &Picture) -> Option<&'a GpuImage> {
     // SAFETY: the scene holds a clone of every picture it draws, and the
     // scene is only replaced between frames, so the texture outlives `draw`.
-    picture.texture().map(|t| unsafe { &*(t as *const GpuImage) })
+    picture.texture_as::<GpuImage>().map(|t| unsafe { &*(t as *const GpuImage) })
 }
 
 fn point(lparam: LPARAM) -> (i32, i32) {

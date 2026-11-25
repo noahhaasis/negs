@@ -33,8 +33,10 @@ rawler = "0.8"
 raw-window-handle = "0.6"
 pollster = "0.4"
 bytemuck = { version = "1.25", features = ["derive"] }
+# The pure-Rust shared app core.
+negs-app = { path = "../crates/negs-app" }
 # The pencil marks' geometry, ported from the macOS app (tested on any OS).
-negs-marks = { path = "marks" }
+negs-marks = { path = "../crates/negs-marks" }
 # The library: .negs sidecars, ratings, flags, per-photograph edits, undo.
 negs-library = { path = "../crates/negs-library" }
 

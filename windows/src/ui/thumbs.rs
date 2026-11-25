@@ -339,7 +339,7 @@ impl Thumbs {
             return;
         }
         if edited_store::thumbnails().engine().is_none() {
-            return edited_store::read_stamp(paths.clone(), |app: &mut App| app.thumbnails_known());
+            return edited_store::read_stamp(paths.clone(), |_model| super::post(|app: &mut App| app.thumbnails_known()));
         }
         if !model.render_idle() || self.held {
             return;

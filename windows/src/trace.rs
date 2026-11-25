@@ -1,106 +1,15 @@
-//! The render timing trace and the render benchmark. Both are off unless
-//! their environment variables are set, and cost one atomic load per event
-//! when off.
-//!
-//! `NEGS_RENDER_TRACE=<file>` appends one JSON object per line: `event`, the
-//! QPC tick `qpc` (the first line, `start`, gives `qpc_frequency`) and the
-//! event's fields. The events:
-//!
-//! - `edit`: an edit made the preview stale (`revision`, `generation`).
-//! - `render_request`: the model asked for a render (`kind` settled or drag,
-//!   `revision`, `generation`, `interactive_scale`).
-//! - `helper_send`, `helper_reply`: any command written to the helper and its
-//!   answer (`request` id, `command`, `ms`), in the engine's worker.
-//! - `render_reply`: a render's answer, before the UI thread sees it
-//!   (`elapsed_ms`, `cached_pipeline`, `pipeline_ms`, `backend`, size).
-//! - `render_finished`: the UI thread took it: `shown`, `held` for its
-//!   brightness match (`kind`), or dropped (neither).
-//! - `held_shown`, `held_dropped`: a held frame was shown once its match was
-//!   in, or dropped (`why`: an edit, another photograph, closing).
-//! - `match_start`, `match_solved`: a camera brightness solve.
-//! - `output_abandoned`: a waiting Save or Export gave up (nothing will
-//!   finish the match).
-//! - `present`: the canvas drew a frame it hadn't drawn before, after the
-//!   Vulkan present or the software blit (`frame`: the render's request id,
-//!   revision, generation and kind; `canvas` vulkan or software).
-//! - `composited`: DWM finished composing after that present (`DwmFlush`).
-//! - `compare_sync`, `compare_paint`, `compare_split_move`: Compare's view
-//!   brought up to date with the model and drawn (`ms`; `pictures_ms`, the
-//!   photographs before the words), and each move of a slider drag.
-//! - `compare_scaled`: a side's picture scaled to its frame again, or
-//!   stretched for one frame while a pan moves it (`panning`).
-//! - `compare_begin` (whether the open photograph is `developed`),
-//!   `compare_open_made` and `compare_picture` (the open photograph's
-//!   picture made from its develop, and a side's bitmap, `ms`), and
-//!   `compare_ahead`: the open one's picture and bitmap made ahead of
-//!   compare (`made_ms`, `ms`).
-//! - `bench_*`: the benchmark's steps, below.
-//!
-//! `NEGS_RENDER_BENCH=<film>,<film>[,…]` drives the app for the trace: once
-//! the photograph passed on the command line is developed, presented and
-//! the preview is idle (no render or brightness match running or due), it
-//! waits `NEGS_RENDER_BENCH_SETTLE_MS` (default 1500), chooses the next film
-//! in the list (as a click on its tile does), and repeats
-//! `NEGS_RENDER_BENCH_STEPS` times (default 10). Then it closes the window.
-//! A step that doesn't settle in `NEGS_RENDER_BENCH_TIMEOUT_S` (default 900)
-//! ends the run with `bench_timeout`, and a render that fails (the preview
-//! idle with no frame to show) ends it with `bench_failed`. While it runs,
-//! error and notice dialogs are skipped and logged as `dialog_skipped`.
-//! `windows/measure_render.ps1` runs it
-//! and `windows/render_trace.py` summarises the trace.
+//! The render timing trace (re-exported from `negs-app`) and the Win32
+//! render benchmark runner (`NEGS_RENDER_BENCH`).
 
 use std::cell::RefCell;
-use std::io::Write;
-use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::json;
 
-use crate::model::{FrameKind, FrameTag};
+use crate::model::FrameKind;
 use crate::ui::{self, App};
 
-static TRACE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
-
-fn file() -> Option<&'static Mutex<std::fs::File>> {
-    TRACE
-        .get_or_init(|| {
-            let path = std::env::var_os("NEGS_RENDER_TRACE")?;
-            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).ok()?;
-            let start = json!({"event": "start", "qpc": crate::platform::qpc(), "qpc_frequency": crate::platform::qpc_frequency(), "pid": std::process::id()});
-            let _ = writeln!(file, "{start}");
-            Some(Mutex::new(file))
-        })
-        .as_ref()
-}
-
-/// Whether `NEGS_RENDER_TRACE` is set.
-pub fn enabled() -> bool {
-    file().is_some()
-}
-
-/// Appends an event when tracing; `fields` (an object) runs only then.
-pub fn event(name: &str, fields: impl FnOnce() -> Value) {
-    let Some(file) = file() else { return };
-    let qpc = crate::platform::qpc();
-    let mut line = fields();
-    if !line.is_object() {
-        line = json!({"value": line});
-    }
-    line["event"] = json!(name);
-    line["qpc"] = json!(qpc);
-    let mut text = line.to_string();
-    text.push('\n');
-    if let Ok(mut file) = file.lock() {
-        let _ = file.write_all(text.as_bytes());
-    }
-}
-
-pub fn frame_json(frame: Option<FrameTag>) -> Value {
-    match frame {
-        Some(f) => json!({"request": f.request, "revision": f.revision, "generation": f.generation, "kind": f.kind.name()}),
-        None => Value::Null,
-    }
-}
+pub use negs_app::trace::{enabled, event, frame_json};
 
 struct Bench {
     films: Vec<String>,
@@ -166,10 +75,8 @@ fn tick(app: &mut App) {
             return None;
         }
         let now = Instant::now();
-        // Nothing will settle: the photograph or the film can't be developed.
         if app.model.render_failed && app.model.render_idle() {
             bench.done = true;
-            // The error is in the last `render_reply` (and `dialog_skipped`).
             event("bench_failed", || json!({"step": bench.step, "film": app.model.state.film}));
             return Some(None);
         }
@@ -202,14 +109,12 @@ fn tick(app: &mut App) {
         Some(Some(film))
     });
     match next {
-        // Waiting, or an edit to make.
         Some(Some(film)) => {
             if !film.is_empty() {
                 app.model.choose_film(&film);
             }
             ui::after(TICK, tick);
         }
-        // Finished: close the window as the user would.
         Some(None) => unsafe {
             use windows::Win32::Foundation::{LPARAM, WPARAM};
             use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
