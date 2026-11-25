@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+# Built by build-engine.sh.
+app/src/main/jniLibs/

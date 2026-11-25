@@ -8,7 +8,7 @@ use crate::{ComputeBackend, Lut3D};
 // Pull in BLAS-src so `cblas_dgemm` is available at link time. The
 // provider crate (Accelerate on macOS, OpenBLAS elsewhere) is selected
 // in this crate's Cargo.toml.
-#[cfg(not(any(target_os = "windows", target_arch = "wasm32")))]
+#[cfg(not(any(target_os = "windows", target_os = "android", target_arch = "wasm32")))]
 #[allow(unused_imports)]
 use blas_src as _;
 
@@ -47,7 +47,7 @@ fn dgemm_blas(
 ) {
     assert_eq!(a.len(), m * k, "dgemm_blas: a.len() != m*k");
     assert_eq!(c.len(), m * n, "dgemm_blas: c.len() != m*n");
-    #[cfg(not(any(target_os = "windows", target_arch = "wasm32")))]
+    #[cfg(not(any(target_os = "windows", target_os = "android", target_arch = "wasm32")))]
     unsafe {
         cblas::dgemm(
             cblas::Layout::RowMajor,
@@ -69,7 +69,7 @@ fn dgemm_blas(
             n as i32,
         );
     }
-    #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
+    #[cfg(any(target_os = "windows", target_os = "android", target_arch = "wasm32"))]
     {
         let _ = ldb;
         c.par_chunks_exact_mut(n).enumerate().for_each(|(row, crow)| {
