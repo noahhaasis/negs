@@ -158,6 +158,8 @@ pub struct CanvasState {
     pub crop_drag: Option<CropDrag>,
     pub crop_hover: Option<CropTarget>,
     pub crop_images: CropImages,
+    /// The pointer's cursor over Compare.
+    pub compare_cursor: CursorStyle,
     /// T held: the photograph upside down.
     pub upside_down: bool,
     /// View › Image Only (F): no strip, status line or panel.
@@ -198,6 +200,7 @@ impl Default for CanvasState {
             crop_drag: None,
             crop_hover: None,
             crop_images: CropImages::default(),
+            compare_cursor: CursorStyle::Arrow,
             upside_down: false,
             image_only: false,
             zoomed: false,
@@ -534,6 +537,10 @@ pub fn render_canvas(
 
     if app.model.source.is_none() {
         return render_empty_state(app, &ink, cx).into_any_element();
+    }
+
+    if app.model.comparison().is_some() {
+        return render_compare(app, ink, cx).into_any_element();
     }
 
     // Current rating & flag for the vector `negs-marks` overlay.
@@ -1260,7 +1267,7 @@ pub fn crop_drag_end(this: &mut NegsApp, cx: &mut Context<NegsApp>) -> bool {
 }
 
 /// A click on the print's words, a trim mark or a turn arrow.
-fn act(this: &mut NegsApp, target: Target, cx: &mut Context<NegsApp>) {
+pub fn act(this: &mut NegsApp, target: Target, cx: &mut Context<NegsApp>) {
     let model = &mut this.model;
     match target {
         Target::Film | Target::Paper => {
@@ -1288,6 +1295,86 @@ fn act(this: &mut NegsApp, target: Target, cx: &mut Context<NegsApp>) {
         Target::TurnRight => model.turn(true),
     }
     this.after_model_update(cx);
+}
+
+/// Compare in the canvas's place (`compare_view.rs`).
+fn render_compare(app: &mut NegsApp, ink: SheetInk, cx: &mut Context<NegsApp>) -> impl IntoElement {
+    let entity = cx.entity().clone();
+    let tokens = app.theme.tokens.clone();
+    let serif = app.theme.serif_family.clone();
+    let plain = tokens.plain;
+    let cursor = app.canvas.compare_cursor;
+    let sheet = hex(ink.sheet);
+    let view = canvas(
+        {
+            let entity = entity.clone();
+            move |bounds, window, cx| {
+                let sf = window.scale_factor();
+                entity.update(cx, |this, _| {
+                    this.canvas.last_canvas_bounds = bounds;
+                    this.canvas.scale_factor = sf;
+                });
+                window.insert_hitbox(bounds, HitboxBehavior::Normal)
+            }
+        },
+        move |bounds: Bounds<Pixels>, hitbox: gpui::Hitbox, window, cx| {
+            window.set_cursor_style(cursor, &hitbox);
+            entity.update(cx, |this, cx| {
+                this.refresh_display_profile(window, cx);
+                this.canvas.flush_drops(window);
+                for image in this.compare.drops.drain(..) {
+                    let _ = window.drop_image(image);
+                }
+            });
+            let mut p = print::Painter { window, cx, serif: serif.clone(), plain };
+            crate::compare_view::paint(&entity, &mut p, rect_of(bounds), &ink, &tokens);
+        },
+    )
+    .size_full();
+    div()
+        .id("compare-canvas")
+        .relative()
+        .flex_1()
+        .w_full()
+        .min_h_0()
+        .bg(sheet)
+        .overflow_hidden()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                let (x, y) = xy(event.position);
+                let p = negs_app::crop::Point { x, y };
+                if let Some(target) = crate::compare_view::mouse_down(this, p, event.click_count) {
+                    this.canvas.pressed = Some((target, (x, y)));
+                }
+                this.after_model_update(cx);
+                cx.notify();
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                if let Some((target, _)) = this.canvas.pressed.take() {
+                    let (x, y) = xy(event.position);
+                    if print::hit(&this.compare.targets, negs_app::crop::Point { x, y }) == Some(target) {
+                        act(this, target, cx);
+                    }
+                    cx.notify();
+                }
+            }),
+        )
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+            let (x, y) = xy(event.position);
+            let p = negs_app::crop::Point { x, y };
+            let cursor = crate::compare_view::cursor(this, p);
+            let hot = print::hit(&this.compare.targets, p);
+            if cursor != this.canvas.compare_cursor || hot != this.compare.hot {
+                this.canvas.compare_cursor = cursor;
+                this.compare.hot = hot;
+                cx.notify();
+            }
+        }))
+        .child(view)
 }
 
 /// The canvas column with nothing open (`SmallStates.swift`): the trim

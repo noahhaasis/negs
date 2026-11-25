@@ -70,6 +70,10 @@ enum Step {
     Straighten(f64),
     ImageOnly(bool),
     UpsideDown(bool),
+    /// Compares the first two photographs (or the open one with its
+    /// original), side by side or as a slider; None leaves.
+    Compare(Option<(bool, negs_app::compare::Layout)>),
+    ZoomActual(bool),
     Write,
 }
 
@@ -107,7 +111,10 @@ impl Bench {
             steps.extend([Theme(ThemeName::LightTable), Hold(400), Shot("print-light-table"), Theme(ThemeName::PlainDark), Hold(400), Shot("print-plain-dark")]);
             steps.extend([Theme(ThemeName::Darkroom), Sheet("black"), BlackBorder(true), WaitDeveloped, Hold(600), Shot("print-black-border-on-black")]);
             steps.extend([BlackBorder(false), Sheet(""), WaitDeveloped, Crop(None), Hold(800), Shot("crop"), Straighten(4.5), Hold(800), Shot("crop-straighten"), Crop(Some(false)), WaitDeveloped]);
-            steps.extend([ImageOnly(true), Hold(500), Shot("image-only"), ImageOnly(false), UpsideDown(true), Hold(500), Shot("upside-down"), UpsideDown(false), Hold(200), Write]);
+            steps.extend([ImageOnly(true), Hold(500), Shot("image-only"), ImageOnly(false), UpsideDown(true), Hold(500), Shot("upside-down"), UpsideDown(false), Hold(200)]);
+            use negs_app::compare::Layout;
+            steps.extend([Compare(Some((false, Layout::SideBySide))), Hold(2500), Shot("compare-side-by-side"), Compare(None), Compare(Some((false, Layout::Slider))), Hold(1500), Shot("compare-slider")]);
+            steps.extend([ZoomActual(true), Hold(1500), Shot("compare-slider-100"), ZoomActual(false), Compare(None), Compare(Some((true, Layout::SideBySide))), Hold(3000), Shot("compare-original"), Compare(None), Hold(300), Write]);
             if shots.is_none() {
                 steps.retain(|s| !matches!(s, Shot(_)));
             }
@@ -382,6 +389,26 @@ impl Bench {
             }
             Step::UpsideDown(on) => {
                 app.canvas.upside_down = on;
+                self.next();
+            }
+            Step::Compare(how) => {
+                match how {
+                    None => crate::compare_view::leave(app),
+                    Some((true, layout)) => app.model.compare_with_original(layout),
+                    Some((false, layout)) => {
+                        let items = app.model.shown_items();
+                        if let (Some(a), Some(b)) = (items.first(), items.get(1)) {
+                            app.model.compare(a.clone(), b.clone(), negs_app::compare::Origin::Photo);
+                            app.model.set_compare_layout(layout);
+                        }
+                    }
+                }
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::ZoomActual(on) => {
+                app.model.zoom(!on);
+                app.after_model_update(cx);
                 self.next();
             }
             Step::Write => self.write(app, cx),

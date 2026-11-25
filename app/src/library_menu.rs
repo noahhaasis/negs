@@ -16,6 +16,9 @@ use crate::NegsApp;
 /// One thing the menus can do.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Command {
+    /// The menu's first item (ticket 46): "Compare 3 and 7", "Compare with
+    /// 3" or "Compare with Original".
+    CompareOffer,
     Rate(i64),
     Raise,
     Lower,
@@ -134,7 +137,11 @@ impl NegsApp {
         if !self.model.shelf.selection.contains(&item) {
             self.model.shelf.selection.select(&item);
         }
-        self.menu = Some(MenuState { at, entries: library_entries(self), from: Some(item) });
+        let offer = self.model.compare_offer(&item, self.grid.shown);
+        let mut entries = vec![entry(offer.title.clone(), Some("C"), offer.enabled, false, Command::CompareOffer), rule()];
+        self.model.offer_compare(offer);
+        entries.extend(library_entries(self));
+        self.menu = Some(MenuState { at, entries, from: Some(item) });
         self.after_model_update(cx);
         cx.notify();
     }
@@ -149,8 +156,15 @@ impl NegsApp {
     }
 
     pub fn run_command(&mut self, command: Command, from: Option<Item>, window: &mut Window, cx: &mut Context<Self>) {
+        if command == Command::CompareOffer {
+            crate::compare_view::take_offer(self);
+            self.after_model_update(cx);
+            cx.notify();
+            return;
+        }
         let model = &mut self.model;
         match command {
+            Command::CompareOffer => {}
             Command::Rate(stars) => model.library_key(LibraryKey::Rate(stars)),
             Command::Raise => model.library_key(LibraryKey::Raise),
             Command::Lower => model.library_key(LibraryKey::Lower),

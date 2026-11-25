@@ -26,10 +26,10 @@ pub const LABEL_BAND: f64 = 68.0;
 
 /// Between the film and the paper on one row, and inside a name.
 const GAP: f64 = 9.0;
-const INNER: f64 = 7.0;
+pub const INNER: f64 = 7.0;
 /// The `⌄` after a name, and the lock before "printed on".
-const CARET: (f64, f64) = (9.0, 8.0);
-const LOCK: (f64, f64) = (10.0, 12.0);
+pub const CARET: (f64, f64) = (9.0, 8.0);
+pub const LOCK: (f64, f64) = (10.0, 12.0);
 const LOCK_SPACING: f64 = 5.0;
 
 /// The trim marks: 18 × 1.5, reaching 26 outside each corner; they take
@@ -389,7 +389,7 @@ pub fn paint_caption(p: &mut Painter, canvas: Rect, print: Rect, portrait: bool,
 
 /// The pencil under a name whose tray is open (`StockName`'s underline);
 /// Light table's highlighter, lifted behind the name's foot.
-fn open_mark(p: &mut Painter, x: f64, foot: f64, width: f64, ink: &SheetInk) {
+pub fn open_mark(p: &mut Painter, x: f64, foot: f64, width: f64, ink: &SheetInk) {
     if ink.highlighter {
         let reach = negs_marks::HIGHLIGHTER_WIDTH / 2.0;
         let color = hex_alpha(negs_app::theme::HIGHLIGHTER_INK, negs_app::theme::HIGHLIGHTER_OPACITY);

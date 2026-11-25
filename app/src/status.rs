@@ -34,7 +34,27 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
         None
     };
 
-    let status_text = if !app.model.status.is_empty() {
+    // Comparing: "Comparing 3 and 7 · differ in shutter and aperture".
+    let comparing = app.model.comparison().cloned();
+    let compare_text = comparing.as_ref().map(|c| {
+        let differences = crate::compare_view::differences(app);
+        let summary = app.model.compare_summary();
+        let mut text = if differences.is_empty() { summary } else { format!("{summary} · differ in {differences}") };
+        if !c.against_original() && app.model.shown_items().len() > 2 {
+            let place = if app.compare.column { "bottom" } else { "right" };
+            text.push_str(&format!("    ← → steps the {place} one"));
+        }
+        text
+    });
+    let status_text = if let Some(text) = compare_text.clone() {
+        text
+    } else if let Some(session) = &app.model.crop_session {
+        let size = match app.model.crop_draft_size() {
+            Some(Ok(size)) => (size.photo.0 as f64, size.photo.1 as f64),
+            _ => (session.shown().width, session.shown().height),
+        };
+        format!("Cropping · {} · {} × {} px", session.aspect.title(), size.0.round() as i64, size.1.round() as i64)
+    } else if !app.model.status.is_empty() {
         app.model.status.clone()
     } else if let Some(size) = has_photo
         .then(|| app.model.photo_size())
@@ -77,6 +97,8 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
         .then_some("Rec. 2020");
 
     let error_banner = app.model.error.clone();
+    let comparing_none = comparing.is_none();
+    let tools = comparing.map(|c| compare_tools(app, c.layout == negs_app::compare::Layout::Slider, cx).into_any_element());
 
     div()
         .flex()
@@ -136,8 +158,9 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
                         .items_center()
                         .gap_3()
                         .min_w_0()
-                        .child(div().text_color(theme.label).child(stock_text))
-                        .when(!status_text.is_empty(), |el| {
+                        .when(comparing_none, |el| el.child(div().text_color(theme.label).child(stock_text)))
+                        .when(!status_text.is_empty() && !comparing_none, |el| el.child(div().text_color(theme.label).truncate().child(status_text.clone())))
+                        .when(!status_text.is_empty() && comparing_none, |el| {
                             el.child(div().text_color(theme.dim).child("·"))
                                 .child(div().text_color(theme.dim).truncate().child(status_text))
                         })
@@ -145,7 +168,8 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
                             el.child(div().text_color(theme.accent).child(act))
                         }),
                 )
-                .child(
+                .when_some(tools, |el, tools| el.child(tools))
+                .when(comparing_none, |el| el.child(
                     div()
                         .flex()
                         .items_center()
@@ -160,6 +184,59 @@ pub fn render_status_bar(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoE
                         .child(div().text_color(theme.dim).child(format!("ICC: {icc_label}")))
                         .child(div().text_color(theme.line).child("|"))
                         .child(div().text_color(theme.label).child(zoom_text)),
-                ),
+                )),
         )
+}
+
+/// Compare's tools (`CompareTools`): Side by side  Slider [S] | Swap |
+/// Fit  100% | Done [Esc].
+fn compare_tools(app: &NegsApp, slider: bool, cx: &mut Context<NegsApp>) -> impl IntoElement {
+    use negs_app::compare::Layout;
+    let theme = &app.theme;
+    let fitting = app.model.fit_image;
+    let (paper, dim, track) = (theme.paper, theme.dim, theme.track);
+    let word = |id: &'static str, text: &'static str, on: bool| {
+        div().id(id).cursor_pointer().text_color(if on { paper } else { dim }).hover(move |s| s.text_color(paper)).child(text)
+    };
+    let cap = |key: &'static str| div().px(px(4.0)).h(px(16.0)).flex().items_center().rounded(px(3.0)).border_1().border_color(track).text_size(px(10.0)).text_color(dim).child(key);
+    let rule = || div().w(px(1.0)).h(px(10.0)).bg(track);
+    div()
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .child(word("cmp-side", "Side by side", !slider).on_click(cx.listener(|this, _, _w, cx| {
+            this.model.set_compare_layout(Layout::SideBySide);
+            this.after_model_update(cx);
+            cx.notify();
+        })))
+        .child(word("cmp-slider", "Slider", slider).on_click(cx.listener(|this, _, _w, cx| {
+            this.model.set_compare_layout(Layout::Slider);
+            this.after_model_update(cx);
+            cx.notify();
+        })))
+        .child(cap("S"))
+        .child(rule())
+        .child(word("cmp-swap", "Swap", false).on_click(cx.listener(|this, _, _w, cx| {
+            this.model.swap_compared();
+            this.after_model_update(cx);
+            cx.notify();
+        })))
+        .child(rule())
+        .child(word("cmp-fit", "Fit", fitting).on_click(cx.listener(|this, _, _w, cx| {
+            this.model.zoom(true);
+            this.after_model_update(cx);
+            cx.notify();
+        })))
+        .child(word("cmp-actual", "100%", !fitting).on_click(cx.listener(|this, _, _w, cx| {
+            this.model.zoom(false);
+            this.after_model_update(cx);
+            cx.notify();
+        })))
+        .child(rule())
+        .child(word("cmp-done", "Done", false).on_click(cx.listener(|this, _, _w, cx| {
+            crate::compare_view::leave(this);
+            this.after_model_update(cx);
+            cx.notify();
+        })))
+        .child(cap("Esc"))
 }

@@ -543,15 +543,22 @@ fn start_flight(app: &mut NegsApp, opening: bool) {
 /// A picture of shape `ratio` fitted inside `canvas` as the canvas fits a
 /// photograph (inside its padding, never past 100 % is ignored: thumbnails
 /// don't know the photograph's size).
+/// Where the canvas draws a photograph of `ratio`: fitted between the
+/// print's caption and label bands (`print::fit_rect`).
 fn fit_rect(canvas: Rect, ratio: Option<f64>) -> Option<Rect> {
-    let ratio = ratio.filter(|r| *r > 0.0)?;
-    let pad = 24.0;
-    let (aw, ah) = ((canvas.w - 2.0 * pad).max(64.0), (canvas.h - 2.0 * pad).max(64.0));
-    if canvas.w <= 1.0 {
-        return None;
+    let r = crate::print::fit_rect(negs_app::crop::Rect::new(canvas.x, canvas.y, canvas.w, canvas.h), ratio)?;
+    Some(Rect::new(r.x, r.y, r.width, r.height))
+}
+
+/// Closes the grid for Compare: at once, without the flight.
+pub fn close_for_compare(app: &mut NegsApp) {
+    if !app.grid.shown {
+        return;
     }
-    let (w, h) = if aw / ah > ratio { (ah * ratio, ah) } else { (aw, aw / ratio) };
-    Some(Rect::new(canvas.x + (canvas.w - w) / 2.0, canvas.y + (canvas.h - h) / 2.0, w, h))
+    app.close_menu();
+    app.model.shelf.in_grid = false;
+    strip::settle(app);
+    finish(app, false);
 }
 
 fn finish(app: &mut NegsApp, opening: bool) {

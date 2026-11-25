@@ -86,6 +86,9 @@ pub fn render_titlebar(
     let left_pad = if cfg!(target_os = "macos") { 78.0 } else { 14.0 };
     let in_grid = app.model.shelf.in_grid;
     let can_grid = app.model.shelf.library.is_some() && has_photo && !app.model.cropping();
+    let comparing = app.model.comparison().is_some();
+    let can_compare = comparing || app.model.compare_word().0;
+    let in_grid = in_grid && !comparing;
 
     div()
         .relative()
@@ -154,9 +157,13 @@ pub fn render_titlebar(
                         .items_center()
                         .gap_1()
                         .child(
-                            pill_button("tb-photo", "Photo", !in_grid && has_photo, !has_photo, theme).on_click(cx.listener(
+                            pill_button("tb-photo", "Photo", !in_grid && has_photo && !comparing, !has_photo, theme).on_click(cx.listener(
                                 |this, _, window, cx| {
-                                    if this.grid.shown && this.model.shelf.in_grid {
+                                    if this.model.comparison().is_some() {
+                                        this.model.leave_compare();
+                                        this.after_model_update(cx);
+                                        cx.notify();
+                                    } else if this.grid.shown && this.model.shelf.in_grid {
                                         this.toggle_grid(window, cx);
                                     }
                                 },
@@ -165,8 +172,25 @@ pub fn render_titlebar(
                         .child(
                             pill_button("tb-grid", "Grid", in_grid, !can_grid, theme).on_click(cx.listener(
                                 |this, _, window, cx| {
-                                    if !this.model.shelf.in_grid {
+                                    if this.model.comparison().is_some() {
+                                        this.model.leave_compare();
+                                        crate::grid::open(this);
+                                        this.after_model_update(cx);
+                                        cx.notify();
+                                    } else if !this.model.shelf.in_grid {
                                         this.toggle_grid(window, cx);
+                                    }
+                                },
+                            )),
+                        )
+                        // Compare: the two selected, or back out (C).
+                        .child(
+                            pill_button("tb-compare", "Compare", comparing, !can_compare, theme).on_click(cx.listener(
+                                |this, _, _window, cx| {
+                                    if this.model.comparison().is_none() {
+                                        crate::compare_view::toggle(this);
+                                        this.after_model_update(cx);
+                                        cx.notify();
                                     }
                                 },
                             )),
