@@ -62,7 +62,9 @@ pub fn render_titlebar(
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned());
 
-    let stock_badge = if has_photo {
+    // Off the Mac the menus' words take its room: the caption under the
+    // print and the status line name the film and paper already.
+    let stock_badge = if has_photo && cfg!(target_os = "macos") {
         let film = app.model.film_name();
         let paper = app.model.paper_name();
         let scan_only = negs_app::json::boolean(app.model.value("io.scan_film"));
@@ -116,6 +118,7 @@ pub fn render_titlebar(
                         .font_family(theme.serif_family.clone())
                         .text_size(px(17.0))
                         .text_color(theme.paper)
+                        .when(!cfg!(target_os = "macos"), |d| d.window_control_area(gpui::WindowControlArea::Drag))
                         .child("Negs"),
                 )
                 .children(crate::menu_bar::render_words(app, window, cx))

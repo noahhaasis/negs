@@ -130,6 +130,10 @@ impl Bench {
             let _ = std::fs::create_dir_all(dir);
         }
         use Step::*;
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "hold") {
+            // The window idle for 20 s, for checks from outside (hit tests).
+            return Some(Bench::with_steps(out, shots, vec![WaitLoaded, WaitDeveloped, Hold(20_000), Write]));
+        }
         if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "settings") {
             // Settings' four pages, two themes on Look, and (off the Mac)
             // the in-window menu bar's Photo › Rating open.
