@@ -1,8 +1,4 @@
-# The Windows app's library glue that has no Win32 in it: the mapping
-# between the editor's state and the sidecar's edits, the library's
-# preferences, keys and undo steps (windows/src/model/library_map.rs), with
-# the editor state it maps (state.rs, crop.rs, border.rs, json.rs) compiled
-# from the app's own sources. Its tests run on any OS:
+# The app's library glue tests (re-exported from `crates/negs-app`):
 #   cargo test --manifest-path windows/library-map/Cargo.toml --target-dir target/library-map
 [package]
 name = "negs-windows-library-map"
@@ -16,20 +12,14 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
-# The included files' own unit tests need the rest of the app; the tests
-# here are in tests/.
 test = false
 doctest = false
 
 [dependencies]
-spektrafilm-io = { path = "../../crates/spektrafilm-io", default-features = false }
+negs-app = { path = "../../crates/negs-app" }
 negs-library = { path = "../../crates/negs-library" }
 serde = { version = "1", features = ["derive"] }
-# Exact float reading: the catalog's defaults must equal the sidecar tables' to the bit.
 serde_json = { version = "1", features = ["float_roundtrip"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
-# state.rs's one Win32 call, stood in for.
-windows = { package = "negs-windows-stub", path = "windows-stub" }
 
 # The engine's rawler, as the app uses it (vendor/README.md).
 [patch.crates-io]

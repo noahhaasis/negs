@@ -1,6 +1,6 @@
-//! The app's strip and grid rules, compiled without Win32 so they are
+//! The app's strip and grid rules, compiled from `crates/negs-app` so they are
 //! tested on any OS. See Cargo.toml.
 #![allow(dead_code)]
 
-#[path = "../../src/sheet_rules.rs"]
+#[path = "../../../crates/negs-app/src/sheet_rules.rs"]
 pub mod sheet_rules;
