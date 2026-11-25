@@ -238,8 +238,11 @@ pub fn render_titlebar(
                     })),
                 )
                 .child(
-                    pill_button("tb-zoom", zoom_label, !app.canvas.fit && has_photo, !has_photo, theme)
+                    pill_button("tb-zoom", zoom_label, !app.canvas.fit && has_photo, !has_photo || app.model.cropping(), theme)
                         .on_click(cx.listener(|this, _, _window, cx| {
+                            if this.model.cropping() {
+                                return;
+                            }
                             this.toggle_zoom_fit(cx);
                         })),
                 )

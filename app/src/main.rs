@@ -492,7 +492,15 @@ impl NegsApp {
     }
 
     pub fn toggle_zoom_fit(&mut self, cx: &mut Context<Self>) {
-        if self.model.source.is_none() {
+        if self.model.source.is_none() || self.model.cropping() {
+            return;
+        }
+        if self.model.comparison().is_some() {
+            // Both photographs.
+            let fit = !self.model.fit_image;
+            self.model.zoom(fit);
+            self.after_model_update(cx);
+            cx.notify();
             return;
         }
         if self.canvas.fit {
@@ -934,7 +942,7 @@ impl gpui::Render for NegsApp {
                 if this.grid.covers() {
                     grid::set_size(this, this.model.prefs.grid_size + negs_app::sheet_rules::GRID_SIZE_STEP);
                     cx.notify();
-                } else if this.model.source.is_some() {
+                } else if this.model.source.is_some() && !this.model.cropping() {
                     this.canvas.zoom_by(1.25);
                     cx.notify();
                 }
@@ -943,13 +951,13 @@ impl gpui::Render for NegsApp {
                 if this.grid.covers() {
                     grid::set_size(this, this.model.prefs.grid_size - negs_app::sheet_rules::GRID_SIZE_STEP);
                     cx.notify();
-                } else if this.model.source.is_some() {
+                } else if this.model.source.is_some() && !this.model.cropping() {
                     this.canvas.zoom_by(0.8);
                     cx.notify();
                 }
             }))
             .on_action(cx.listener(|this, _: &ZoomFit, _window, cx| {
-                if this.model.source.is_some() {
+                if this.model.source.is_some() && !this.model.cropping() {
                     this.model.zoom(true);
                     this.after_model_update(cx);
                     cx.notify();
