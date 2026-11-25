@@ -97,6 +97,8 @@ pub fn render_ink_slider<V: 'static>(
     let row_id = row.id;
     let enabled = row.enabled;
     let changed = row.changed;
+    // "Reset to 0" (the row's own help is its description, `Kind::help`).
+    let reset_help: Option<SharedString> = row.help.clone().map(SharedString::from);
     let label_text: SharedString = row.title.clone().into();
     let value_text = row.value.clone();
 
@@ -275,6 +277,7 @@ pub fn render_ink_slider<V: 'static>(
                             el.child(
                                 div()
                                     .id(SharedString::from(format!("slider-reset-{row_id}")))
+                                    .when_some(reset_help.clone(), |d, help| d.tooltip(crate::tooltip::tip(help, theme)))
                                     .px(px(3.0))
                                     .rounded(px(3.0))
                                     .text_size(px(11.0))

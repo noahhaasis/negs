@@ -427,7 +427,15 @@ pub fn close(app: &mut NegsApp, open_anchor: bool) {
     start_flight(app, false);
 }
 
-pub fn toggle(app: &mut NegsApp) {
+pub fn toggle(app: &mut NegsApp, window: &Window) {
+    // The window's size before the grid has ever drawn: the first open
+    // flies too (its cells are laid out from it).
+    if app.grid.window.0 <= 0.0 {
+        let vp = window.viewport_size();
+        app.grid.window = (f32::from(vp.width) as f64, f32::from(vp.height) as f64);
+        app.grid.scale = window.scale_factor() as f64;
+        relayout(app);
+    }
     let folding = app.grid.flight.as_ref().is_some_and(|f| !f.opening);
     if app.grid.shown && !folding { close(app, true) } else { open(app) }
 }

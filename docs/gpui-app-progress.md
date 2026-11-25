@@ -14,8 +14,100 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 3 | Inspector, Presets & Stock Tray | **Done** | `87cb390d` | Custom darkroom widgets (`InkSlider`, `TextInput`, `Scopes`, `ToneGraph`, `ColorFilterDiscs`), full 26-kind `InspectorView` Prep/Lab/Output UI, Presets sidebar, and Film/Paper Stock Preview Tray (`TileImageCache`). Mac & PC live verified. |
 | 4 | Library, Filmstrip, Grid & Flight | **Done** (Smoothness Proof reviewed 2026-11-25) | `9c1020ed` | Colour-managed background thumbnails, virtualized filmstrip + contact-sheet grid with hand-drawn marks (cached sprites), library menus, `SheetFlight` Photo↔Grid flight, `NEGS_FRAME_BENCH`. PC 60.0–60.8 fps, 0 dropped frames. |
 | 5 | Compare, Crop, Negative, Export, Batch & Settings | **Done** (5a + 5b) | 5a `200def15`, 5b `7720b5ca` | Print on its sheet, crop, negative pick, Compare; export card → native dialog, batch, Settings window, full menus (in-window menu bar + caption buttons off the Mac), Lightroom. Exports byte-identical to `windows/` and SwiftUI. |
-| 6 | Windows Cutover & Packaging | Pending | — | ABBA perf/screenshot report vs Win32 `Negs.exe`, Go/No-Go gate, installer + CI cutover. |
+| 6 | Windows Cutover & Packaging | **Gate ready, awaiting Go** | branch `gpui-p6-windows-cutover` | ABBA vs Win32 `Negs.exe` (GPUI ahead on grid, strip, tabs, RAM; behind on startup and size), Windows parity (menu keys/ticks, TaskDialog errors, taskbar, WinSparkle, end-session, single instance, tooltips), packaging plan prepared, not applied. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
+
+---
+
+## 2026-11-25 — Phase 6: Windows cutover gate (branch `gpui-p6-windows-cutover`)
+
+### What landed
+- Under `app/` and `docs/` only (no `crates/`, `vendor/`, `web/`, `windows/`, root `Cargo.toml`/`Cargo.lock`; `app/Cargo.lock` unchanged). Not pushed.
+- **Speed:** the canvas read the display's ICC profile and rebuilt its transform on every paint: 82% of the main thread in a slider drag (macOS `sample`). Now it does so only when the window changes display or becomes active. PC slider UI went 30 → 51 fps; Mac strip fling 73 → 91–120 fps. The grid's first open now flies too (it had no size before its first frame). `NEGS_TRACE_UI=<file>` times drag steps and renders.
+- **Menu bar from the keyboard** (`menu_bar.rs`, `menu_state.rs`):
+  - Alt alone or F10 focuses it with access keys underlined. Alt+letter opens a menu. ← → ↑ ↓, Return/Space, a letter, Esc work as in Windows menus.
+  - Items are ticked, disabled and titled as `windows/`'s `update_menu` does ("Undo Change Adjustment", "Done Cropping", "Move 3 Photographs to Recycle Bin…").
+  - Photo › Filter ▸, View › Show All Controls, Help › Check for Updates….
+  - The access keys follow `windows/`; the Mac's menus drop them.
+  - Rows are built only for the open menu: asking what's enabled needs the last frame's dispatch tree, and on the first frame GPUI panics (`key_dispatch.rs:383`).
+- **Errors** in a TaskDialog titled "Negs", with the exporter's log under "See details" (`win.rs`). Windows only: elsewhere the status bar's banner stays. **Notices** (presets imported) show on every platform; they showed nowhere before.
+- **Taskbar progress**: indeterminate for one export, counted for a batch. The button flashes when an export ends while Negs is in the background.
+- **WinSparkle** (`updates.rs`), ported from `windows/` and inert unless packaging configures it. Settings › Upkeep then shows Automatically check / Last checked / Check for Updates….
+- **WM_QUERYENDSESSION / WM_ENDSESSION** save the edits, the session and the window's place without asking.
+- **One Negs**: a second launch hands its photograph to the running window (`Local\Negs.SingleInstance`, `WM_COPYDATA`; the main window carries a `Negs.MainWindow` property). `Local\Negs.AppLifetime` is held for the installer, and AppUserModelID is `dev.negs.app`. These were found missing while reading `installer.iss`.
+- **Window placement** is restored if still on a display.
+- **Icon, version resource and manifest** (`app/build.rs`, `app/negs.manifest`). GPUI's `windows-manifest` feature is off: its manifest has no `longPathAware`.
+- **Tooltips** (`tooltip.rs`, themed, quiet during a slider drag) with `windows/`'s help:
+  - inspector rows (`Kind::help`, Match brightness's), and a slider's ↺ ("Reset to 0");
+  - title bar Photo/Grid/Compare/Open/Save;
+  - pane words, Export, the crop panel, and the presets' Import.
+
+### Decisions
+- **Updates: WinSparkle** (already `windows/`'s, §20.6), not MSIX: it keeps the Inno installer, the per-user install without admin, and the existing appcast/EdDSA scheme shared with Sparkle on the Mac. MSIX would need a signing certificate in the Store/trusted chain, a package identity rework, and new file-association plumbing. *Asked of Noah in the Go/No-Go.*
+- Errors become dialogs only on Windows (as `windows/`); the Mac and Linux keep the status bar's banner until 7a/7b decide.
+- A forwarded photograph opens on the app's executor (channel), never inside the window procedure.
+- `runtime_shaders` stays: it only affects the Mac (Windows release builds precompile HLSL with fxc).
+
+### Deferred (and why)
+- **Accessibility:** GPUI 0.2.2 has no UI Automation/MSAA tree. A screen reader finds nothing in the window, where `windows/` has an `IAccessible` tray and named controls. It can't be added from `app/` without a GPUI fork. *Put to Noah as a trade-off.*
+- Tooltips on preset tiles, colour-filter discs, tab counts, the scope grip, Lightroom foot buttons, Compare's Edit and the tray's Done: small controls whose names show already; next pass.
+- "See details" with an exporter log, and the taskbar flash, were not seen live. Errors with a log come only from a failing export. The flash needs Negs in the background as an export ends. The code paths are the same as the counted progress and the TaskDialog that were seen.
+- Startup: GPUI's first window comes at ~475 ms against Win32's ~95 ms. GPUI creates the DX11 device and composition swap chain before its first frame, where `windows/` paints a GDI window first. This is within the plan's 480–600 ms budget; no cheap win found (shaders are precompiled already).
+- Slider-drag UI is 51 fps with p99 34 ms (Win32: 48–51 fps, p99 84 ms). About a third of the 25 canvas updates a second costs a UI frame: likely uploading the new picture texture. Next pass.
+
+### Verification Gate
+- **ABBA on the PC** (`ssh pc`, Console Session 1 via `schtasks /it`):
+  - Conditions:
+    - 3440×1440 display, window 1584×1042 at 40,40;
+    - scratch copies of 67 NEFs, open `DSC_0262.NEF`, Darkroom;
+    - Creative Cloud helpers at 5–10% CPU, 8.7 GB free;
+    - both builds without LTO (`build-main.cmd`'s settings).
+  - Method: GPUI vs shipping `windows\target\release\Negs.exe`. Frames are measured from outside with DXGI Desktop Duplication (probe rows hashed per desktop frame, input by `SendInput`, QPC). 8 alternating runs (GPUI, Win32, Win32, GPUI, …) on `a9d15131`, then 2+2 on the final build (`8d39797b`).
+
+  | | GPUI | Win32 `Negs.exe` |
+  |---|---|---|
+  | Strip fling (wheel −40 / 8 ms) | 55.7 fps, p99 41.8 ms, 1 frame > 25 ms | 45.5–50.1 fps, p99 42–60 ms, 7–13 frames > 25 ms |
+  | Grid open (final build) | SheetFlight 60.0 fps, p99 17.0 ms, 0 > 25 ms; settled 520–535 ms (480 ms flight) | fade 60.0 fps, p99 16.8 ms; settled 166–186 ms |
+  | Grid open (`a9d15131`, 8 runs) | 36–57 fps, one 63–217 ms first frame per run | as above |
+  | Grid scroll | 60.0 fps, p99 16.9–17.1 ms, 0 > 25 ms | 37.5–49.1 fps, p99 33–49 ms |
+  | Grid close | 48–60 fps, p99 16.9–33 ms | 26–60 fps, p99 17–66 ms |
+  | Tab switch Lab / Output / Prep | 33 / 27 / 23 ms | 84 / 34–50 / 34 ms |
+  | Slider drag, UI | 50.7–51.9 fps, p99 34–50 ms | 48–51 fps, p99 83–85 ms |
+  | Slider drag, canvas updates | 24.7–25.6 /s | 22.3–23.3 /s |
+  | Idle | 0 frames | 0 frames |
+  | Peak working set, app | 331–342 MB (private 382–387 MB) | 478–484 MB (private 513–518 MB) |
+  | Engine helper | 652 MB WS, 734 MB private | 652 MB WS, 992 MB private |
+  | Startup, first window / first image (median of 8) | 474 / 1208 ms | 96 / 953 ms |
+  | `Negs.exe` size, no LTO | 30,800,896 B | 21,305,856 B |
+  | `Negs.exe` size, shipping profile (thin LTO, 1 CGU) | 23,927,296 B | 19,001,344 B |
+
+- **`NEGS_FRAME_BENCH` on the PC** (final build, Phase 4 continuity):
+  - strip 60.0 fps, p99 17.1 ms;
+  - grid 60.0 fps, p99 17.1 ms;
+  - flight open 60.6 fps, p99 17.1 ms;
+  - flight fold 60.5 fps, p99 17.2 ms;
+  - 0 frames over 25 ms.
+- **Mac `NEGS_FRAME_BENCH`** (AC power, Docker using 3 cores, load 12):
+  - flights 120 fps (p99 10–12 ms);
+  - grid 120 fps (p99 10.7 ms);
+  - strip 91 fps (p99 15.9 ms);
+  - 0 frames over 25 ms.
+- **Unit tests (`app/`): 98 passed, 0 failed on macOS and on the PC.** 0 warnings in `negs-gpui` (the one warning is `spektrafilm-io`'s `finish_rgb`, as on main).
+- **`windows/` still builds** (shipping profile, `--locked`, on the PC).
+- **Export byte-identity** (`_NHA9786.NEF`, Reference, PNG 8-bit sRGB, full size, grain and glare off):
+  - PC: 28,667,269 B, SHA-256 `F47D7676…1F763` as before.
+  - Mac, with Phase 5's photo and PC sidecar: `3f1d1062…760e8a` as before. A fresh Mac sidecar gives `11d1fe3c…` from both this branch and `main` (5ecf1892), against both engine sets: the Mac's own brightness match, not the branch.
+- **Seen on the PC:**
+  - Alt cues; Alt+P, → View, F10 ↓ File;
+  - ticks, disabled rows, shortcut hints;
+  - "Undo Change Adjustment"; Photo › Filter ▸;
+  - tooltips;
+  - TaskDialog "Negs" ("“folder” has no photographs Negs can open.");
+  - taskbar progress during an export;
+  - icon on the taskbar;
+  - `WM_QUERYENDSESSION` → 1, and `WM_ENDSESSION` writing `session.json` and the window's place;
+  - a second launch (exit 0) opening its photograph in the first window.
+- **Screenshots, every theme, both apps** (12, `<theme>-{gpui,win32}.png`), taken on the PC and kept in the session's Mac scratchpad (`…/scratchpad/pc/themes/`); the PC's scratch copies were removed with the worktree.
 
 ---
 

@@ -765,6 +765,7 @@ fn render_pane_header(
                 .child(
                     div()
                         .id("pane-tab-adjustments")
+                        .tooltip(crate::tooltip::tip("Show the adjustments (F7)", theme))
                         .cursor_pointer()
                         .font_family(theme.serif_family.clone())
                         .text_size(px(14.0))
@@ -781,6 +782,7 @@ fn render_pane_header(
                 .child(
                     div()
                         .id("pane-tab-presets")
+                        .tooltip(crate::tooltip::tip("Show the presets (F8)", theme))
                         .cursor_pointer()
                         .font_family(theme.serif_family.clone())
                         .text_size(px(14.0))
@@ -807,6 +809,7 @@ fn render_pane_header(
                 .child(
                     div()
                         .id("pane-reset-all")
+                        .tooltip(crate::tooltip::tip("Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.", theme))
                         .text_size(px(11.5))
                         .text_color(if can_reset {
                             theme.label
@@ -834,6 +837,7 @@ fn render_pane_header(
                 .child(
                     div()
                         .id("pane-presets-new")
+                        .tooltip(crate::tooltip::tip("Save the film, paper and Lab settings as a preset (Ctrl+Shift+S)", theme))
                         .text_size(px(11.5))
                         .text_color(if can_presets {
                             theme.label
@@ -854,6 +858,7 @@ fn render_pane_header(
                 .child(
                     div()
                         .id("pane-presets-import")
+                        .tooltip(crate::tooltip::tip("Import presets (Ctrl+Shift+O)", theme))
                         .text_size(px(11.5))
                         .text_color(if can_presets {
                             theme.label
@@ -1156,6 +1161,7 @@ fn render_output_foot(
         .child(
             div()
                 .id("inspector-export-btn")
+                .tooltip(crate::tooltip::tip("Export photograph (Ctrl+Shift+E)", theme))
                 .w_full()
                 .py(px(7.0))
                 .rounded(px(4.0))
@@ -1696,7 +1702,21 @@ pub fn render_inspector_column(
             .iter()
             .filter(|r| r.visible)
             .enumerate()
-            .map(|(idx, row)| render_row(app, row, idx == 0, &theme, window, cx))
+            .map(|(idx, row)| {
+                let el = render_row(app, row, idx == 0, &theme, window, cx);
+                // The row's help, as the Windows app's tooltips on its label and
+                // control. `RowView::help` is Match brightness's, or a slider's
+                // reset ("Reset to 0", on its ↺).
+                let help = match row.kind {
+                    Some(Kind::MatchBrightness) => row.help.clone().map(SharedString::from),
+                    Some(kind) => kind.help().map(SharedString::from),
+                    None => None,
+                };
+                match help {
+                    Some(help) if !help.is_empty() => div().id(("row-tip", row.id)).tooltip(crate::tooltip::tip(help, &theme)).child(el).into_any_element(),
+                    _ => el,
+                }
+            })
             .collect();
 
         let scroll_area = div()

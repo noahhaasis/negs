@@ -1159,6 +1159,7 @@ fn render_empty_state(
         .child(
             div()
                 .id("presets-empty-import")
+                .tooltip(crate::tooltip::tip("Import presets (Ctrl+Shift+O)", theme))
                 .mt(px(6.0))
                 .px(px(14.0))
                 .py(px(6.0))
