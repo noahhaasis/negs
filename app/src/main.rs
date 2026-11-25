@@ -603,6 +603,11 @@ impl NegsApp {
             return;
         }
         self.shut_down = true;
+        // The tray's trial put back, and the edits written before the session.
+        self.model.end_tray(true);
+        if let Err(error) = self.model.library_save_now() {
+            eprintln!("{error}");
+        }
         if let Some(session) = self.model.session() {
             let _ = SessionStore::default().save(&session);
         }
