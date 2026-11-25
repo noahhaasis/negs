@@ -1,3 +1,5 @@
+> **Superseded (2026-11-25):** The Odin shared-core experiment was cleanly reverted in favour of the pure-Rust shared core + cross-platform GPUI app. See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-coordinator.md).
+
 # Handoff: coordinating the shared Odin app core (`core/`)
 
 For the coordinator agent running the shared app core port from start to finish, mostly without supervision. Written 2026-11-21 against `main` `a9d64f6`.

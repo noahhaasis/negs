@@ -1,3 +1,5 @@
+> **Superseded (2026-11-25):** The Odin shared-core experiment was cleanly reverted in favour of the pure-Rust shared core + cross-platform GPUI app. See [gpui-app-plan.md](gpui-app-plan.md).
+
 # Shared App Core in Odin: Architecture and Migration Plan
 
 Prepared 2026-11-21 against `main` at `a9d64f6`.

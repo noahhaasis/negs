@@ -263,7 +263,6 @@ pub struct Prefs<'a> {
 impl Prefs<'_> {
     /// Whether a module's or section's "N more" was clicked
     /// (`Preferences::revealed`).
-    #[allow(dead_code)] // The core reads the list itself (negs_facts_revealed).
     pub fn revealed(&self, key: &str) -> bool {
         self.more_adjustments.split(',').any(|t| t == key)
     }

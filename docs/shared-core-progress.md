@@ -1,3 +1,5 @@
+> **Superseded (2026-11-25):** The Odin shared-core experiment was cleanly reverted in favour of the pure-Rust shared core + cross-platform GPUI app. See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-progress.md](gpui-app-progress.md).
+
 # Shared Odin App Core: Progress Log
 
 Newest first. One entry per phase and per merge: what landed (SHA), differential test results, leak/sanitizer status, compile-time and performance measurements, ABI decisions, and anything carried over.

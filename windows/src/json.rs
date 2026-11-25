@@ -85,12 +85,10 @@ pub fn same(a: &Value, b: &Value) -> bool {
 /// their defaults, known fields are restored, removed fields are dropped.
 /// A saved null stays where `nullable` (the catalog's `nullable_paths`, `[*]`
 /// for every element) says it is a value, such as an infinite Langmuir knee.
-#[allow(dead_code)] // state.rs restores on the core now.
 pub fn restoring(defaults: &Value, saved: &Value, nullable: &[String]) -> Value {
     restoring_at(defaults, saved, nullable, "")
 }
 
-#[allow(dead_code)]
 fn restoring_at(defaults: &Value, saved: &Value, nullable: &[String], path: &str) -> Value {
     if saved.is_null() && nullable.iter().any(|p| p == path) {
         return Value::Null;

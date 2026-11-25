@@ -3,10 +3,6 @@
 The Win32 client lives in `windows/`, in its own Cargo workspace. Build with
 `cargo build --release --locked --manifest-path windows/Cargo.toml` and test
 with `cargo test --locked --manifest-path windows/Cargo.toml`.
-The marks, the library and the themes come from the shared Odin core
-(`core/`), which the build compiles: it needs the pinned Odin
-(`python core/install_odin.py`) and MSVC's `lib.exe` (Visual Studio's C++
-tools, found through vswhere).
 Run `windows/target/release/Negs.exe` from the checkout; the helper and exporters
 must already be built in `target/release` (see `windows-agent-handoff.md`).
 

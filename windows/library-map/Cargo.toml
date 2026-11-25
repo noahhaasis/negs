@@ -23,16 +23,11 @@ doctest = false
 
 [dependencies]
 spektrafilm-io = { path = "../../crates/spektrafilm-io", default-features = false }
-# The library as the app has it: the shared Odin core's (core/src/library),
-# with negs-library's API; its photographs are compare.rs's items.
-negs-library = { package = "negs-core-library", path = "../../core/rust/library" }
+negs-library = { path = "../../crates/negs-library" }
 serde = { version = "1", features = ["derive"] }
 # Exact float reading: the catalog's defaults must equal the sidecar tables' to the bit.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-# The shared Odin core's rules, which compare.rs, crop.rs, border.rs and
-# negative.rs re-export (Phase 3).
-negs-core-rules = { path = "../../core/rust/rules" }
 # state.rs's one Win32 call, stood in for.
 windows = { package = "negs-windows-stub", path = "windows-stub" }
 

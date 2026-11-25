@@ -1117,38 +1117,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "negs-core-library"
-version = "0.0.0"
-dependencies = [
- "negs-core-sys",
- "negs-library",
-]
-
-[[package]]
-name = "negs-core-marks"
-version = "0.0.0"
-dependencies = [
- "negs-core-sys",
-]
-
-[[package]]
-name = "negs-core-rules"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "image",
- "negs-core-library",
- "negs-core-sys",
- "serde",
- "serde_json",
- "spektrafilm-io",
-]
-
-[[package]]
-name = "negs-core-sys"
-version = "0.0.0"
-
-[[package]]
 name = "negs-library"
 version = "0.20.0"
 
@@ -1163,10 +1131,8 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "image",
- "negs-core-library",
- "negs-core-marks",
- "negs-core-rules",
- "negs-core-sys",
+ "negs-library",
+ "negs-marks",
  "pollster",
  "raw-window-handle",
  "rawler",
