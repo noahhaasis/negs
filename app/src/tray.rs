@@ -980,14 +980,42 @@ fn render_foot_bar(
             .into_any_element()
     };
 
-    // Center: Hint text.
-    let center = div()
-        .font_family(theme.serif_family.clone())
-        .italic()
-        .text_size(px(12.5))
-        .text_color(theme.dim)
-        .truncate()
-        .child(rules::hint(before_name));
+    // Center: Hint text (render arrow glyphs in ui_family because the subsetted
+    // Newsreader-Negs-Italic font does not include U+2190/U+2192).
+    let hint_text = rules::hint(before_name);
+    let center = if let Some((before_arrows, after_arrows)) = hint_text.split_once("← →") {
+        div()
+            .flex()
+            .items_center()
+            .text_size(px(12.5))
+            .text_color(theme.dim)
+            .child(
+                div()
+                    .font_family(theme.serif_family.clone())
+                    .italic()
+                    .child(before_arrows.to_string()),
+            )
+            .child(
+                div()
+                    .font_family(theme.ui_family.clone())
+                    .text_size(px(11.5))
+                    .child("← →"),
+            )
+            .child(
+                div()
+                    .font_family(theme.serif_family.clone())
+                    .italic()
+                    .child(after_arrows.to_string()),
+            )
+    } else {
+        div()
+            .font_family(theme.serif_family.clone())
+            .italic()
+            .text_size(px(12.5))
+            .text_color(theme.dim)
+            .truncate()
+            .child(hint_text)
+    };
 
     // Right: Film Search box or Paper Lock toggle, plus Done button.
     let mut right = div().flex().items_center().gap(px(12.0)).flex_shrink_0();
