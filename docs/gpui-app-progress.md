@@ -11,11 +11,43 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 0 | Clean Odin Revert | **Done** | `5ef625e4` | Forward-reverted `core/` & Odin wiring on `main`; preserved `v0.18`–`v0.20`, all film stocks, `8154a6ac`, and `windows/src/inspector_view/`. Mac + PC green. |
 | 1 | Extract Pure-Rust `crates/negs-app` | **Done** | `85281bf8` | Promoted `windows/marks` → `crates/negs-marks`; extracted all 32 non-UI modules + 6 themes + `Model` into standalone `crates/negs-app` behind `Host` & `platform`; `windows/` thin shell green on PC. |
 | 2 | GPUI Shell + Color-Managed Canvas | **Done** | `bd8c7662` | Standalone `app/` workspace on `gpui 0.2.2`; embedded Newsreader + 6 themes; fused linear-light exact-fit Lanczos-3 + per-display ICC/P3 pipeline; vector `negs-marks`; Mac & PC live verified. |
-| 3 | Inspector, Presets & Stock Tray | **Ready** | — | Awaiting Noah's Phase 2 visual/feel sign-off before parallel 3a (Inspector) + 3b (Presets & Stock Tray). |
-| 4 | Library, Filmstrip, Grid & Flight | Pending | — | `negs-library` + folder watcher, filmstrip with `negs-marks`, contact-sheet grid, 60 fps `SheetFlight` transition. |
+| 3 | Inspector, Presets & Stock Tray | **Done** | `87cb390d` | Custom darkroom widgets (`InkSlider`, `TextInput`, `Scopes`, `ToneGraph`, `ColorFilterDiscs`), full 26-kind `InspectorView` Prep/Lab/Output UI, Presets sidebar, and Film/Paper Stock Preview Tray (`TileImageCache`). Mac & PC live verified. |
+| 4 | Library, Filmstrip, Grid & Flight | **Ready** | — | `negs-library` + folder watcher, filmstrip with `negs-marks`, contact-sheet grid, 60 fps `SheetFlight` transition. |
 | 5 | Compare, Crop, Negative, Export, Batch & Settings | Pending | — | Full feature parity with `windows/` and `macos/`. |
 | 6 | Windows Cutover & Packaging | Pending | — | ABBA perf/screenshot report vs Win32 `Negs.exe`, Go/No-Go gate, installer + CI cutover. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
+
+---
+
+## 2026-11-25 — Phase 3: Inspector, Presets & Stock Preview Tray (`87cb390d`)
+
+### What landed
+- Branch `gpui-p3` (`cf361fdc`, `dce8ac8c`, `f308a8a5`, `19263a31`), built across parallel Phase 3a (`gpui-p3a-inspector`) and Phase 3b (`gpui-p3b-presets-tray`) subagents and merged `--no-ff` into local `main` at `87cb390d` (8,609 insertions across 14 files under `app/src/`).
+- **Zero engine/core drift:** `crates/`, `vendor/`, `web/`, root `Cargo.toml`/`Cargo.lock`, and `app/Cargo.toml` remain untouched (zero new crates added).
+- **Phase 3a — Custom Darkroom Widgets & `InspectorView` UI:**
+  - `app/src/widgets/text_input.rs`: Reusable GPUI single-line text editor (`.key_context("TextInput")` suppressing single-key photo shortcuts while typing, UTF-8 cursor/selection, clipboard copy/cut/paste, locale `.`/`,` numeric parsing).
+  - `app/src/widgets/slider.rs`: Editorial hairline `InkSlider` with default tick mark, modified dot + `↺` reset button, click-to-type inline numeric edit, double-click reset, and window-level smooth drag (`Track::Drag` → `Track::End` single undo step).
+  - `app/src/widgets/controls.rs`: `SectionHeader`, `GroupHeader` (chevron, Newsreader title, collapsed summary, enable switch, strikethrough when skipped), `Toggle`, `Choice` dropdown popover, `MoreRow`, `NoteRow`/`FooterRow`, `Actions`, `BalancePrint`, `FlatField`, `BorderStyles`, `Color` well + preset/hex popover, `LongestSide`, and `Photograph` readout.
+  - `app/src/widgets/scopes.rs`: Live `Histogram` (overlapping translucent RGB `PathBuilder` fills + luma outline) and `Waveform` (premultiplied RGBA→BGRA8 `RenderImage` cached with `window.drop_image`), plus draggable height grip clamped to `SCOPE_HEIGHTS` (double-click resets).
+  - `app/src/widgets/tone_graph.rs`: Interactive Print Curves graph driven by `negs_app::tone_graph` (`Curve::predicted` live curve during drag, film histogram backdrop, RGB/R/G/B channel pills, horizontal exposure + vertical gamma drag, double-click reset).
+  - `app/src/widgets/color_filter.rs`: Tactile colored glass swatch discs (`None` + `model.color_filters`), stops hint, and color-film warning.
+  - `app/src/inspector.rs`: Collapsible 340 px right column driven directly by `negs_app::inspector_view::InspectorView` (all 26 `schema::Kind` variants), Pane Header (`Adjustments` · `Presets`, total edit count + `Reset`, `New` / `Import…`), pinned Film & Paper stock strip, `Prep` · `Lab` · `Output` tabs with per-tab edit count badges & clickable Tab Edits reset popover, Output export summary + primary Export button, and full `apply_effects` dispatch (including native light-frame file picker and border color popover).
+- **Phase 3b — Presets Sidebar, Film/Paper Stock Preview Tray & Tile Cache:**
+  - `app/src/tile_cache.rs`: Color-managed `previews::Bitmap` (BGRA8 already transformed via display ICC/P3) → GPUI `RenderImage` cache holding strong `Arc<Bitmap>` references with frame-epoch eviction and immediate `window.drop_image` VRAM cleanup.
+  - `app/src/presets.rs`: Two-column Presets sidebar with live thumbnail previews, Newsreader names & film/paper detail lines, grease-pencil accent ring on applied preset, empty state, pointer drag-to-reorder (`model.move_presets`), external `.json` drop import (`model.import_presets`), inline rename validated live against `presets::name::problem` (auto-started on `New`), right-click context menu (`Apply`, `Rename`, `Export…`, `Show Presets Folder`, `Delete`), and visible-range reporting (`model.set_visible_presets`).
+  - `app/src/tray.rs`: 186 px bottom Film & Paper Stock Preview Tray driven by `negs_app::tray_rules` and `Model::tray_*` (`212×118` tiles, `Scan` / `Your negative` card, `Favourites` section + vector star toggle, `"before"` indicator, sideways wheel scroll, 250 ms eased group-index glide, live film search box, paper lock `keep_paper` switch, `Done` button, keyboard `←`/`→`/`Return`/`Esc` single-undo visit semantics, and VRAM cleanup on close).
+  - `app/src/canvas.rs`: Wired `model.shown_trial()` stand-in rendering through `color_display::prepare_exact_fit` for instant canvas feedback when trying a stock in the tray.
+- **Cross-platform polish caught via Windows screenshot inspection:**
+  - Rendered `← →` arrows in the tray foot hint using `theme.ui_family` (the subsetted `Newsreader-Negs-Italic.ttf` lacks arrow glyphs, causing DirectWrite fallback to render wrong glyphs on Windows).
+  - Added `.w_full().min_w_0()` to the `Your negative` tray tile card so its italic caption wraps cleanly inside the 212×118 frame, and `.flex_shrink_0()` on note rows.
+
+### Verification Gate
+- **Unit tests (`app/`):**
+  - **macOS:** **35 passed, 0 failed** (0.07 s, 0 warnings in `negs-gpui`); incremental release rebuild: **5.37 s** (debug test rebuild: **2.17 s**).
+  - **Windows PC (`ssh pc`, worktree `gpui-p3`, cleaned up after gate):** **35 passed, 0 failed** (0.11 s, 0 warnings in `negs-gpui`); incremental release rebuild: **9.08 s** (debug test rebuild: **7.13 s**).
+- **Visual & Interactive Verification (`docs/card.jpg` scratch copy, live `spektrafilm-native`):**
+  - **macOS:** Verified Display P3 color-managed canvas + Inspector + Histogram across `Darkroom`, `Plain`, and `Plain dark` themes.
+  - **Windows PC (Console Session 1, Dell P3424WEB ICC active):** Verified live Exposure (EV) slider drag (`0` → `1.6`, modified dot + `↺` reset + `Prep (1)` / `1 edit` badge + live photo & histogram update), Film & Paper Stock Preview Trays (live color-managed tiles, gold favourite stars, crisp `← →` hint, `{RIGHT}` step to `Kodak Portra 400` with `"before"` badge + live re-develop, `{ESC}` single-visit revert to `Kodak Gold 200`), `Waveform` scope, `Lab` foldout groups, `Output` tab (Image Size + Border + export summary), `{F8}` Presets sidebar, and `Darkroom` / `Plain` / `Plain dark` themes.
 
 ---
 
