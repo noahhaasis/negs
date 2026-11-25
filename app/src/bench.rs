@@ -114,7 +114,13 @@ impl Bench {
             steps.extend([ImageOnly(true), Hold(500), Shot("image-only"), ImageOnly(false), UpsideDown(true), Hold(500), Shot("upside-down"), UpsideDown(false), Hold(200)]);
             use negs_app::compare::Layout;
             steps.extend([Compare(Some((false, Layout::SideBySide))), Hold(2500), Shot("compare-side-by-side"), Compare(None), Compare(Some((false, Layout::Slider))), Hold(1500), Shot("compare-slider")]);
-            steps.extend([ZoomActual(true), Hold(1500), Shot("compare-slider-100"), ZoomActual(false), Compare(None), Compare(Some((true, Layout::SideBySide))), Hold(3000), Shot("compare-original"), Compare(None), Hold(300), Write]);
+            steps.extend([ZoomActual(true), Hold(1500), Shot("compare-slider-100"), ZoomActual(false), Compare(None), Compare(Some((true, Layout::SideBySide))), Hold(3000), Shot("compare-original"), Compare(None), Hold(300)]);
+            // Crop and Compare in the other two themes the gate asks for.
+            for (theme, crop, compare) in [(ThemeName::LightTable, "crop-light-table", "compare-light-table"), (ThemeName::PlainDark, "crop-plain-dark", "compare-plain-dark")] {
+                steps.extend([Theme(theme), Hold(300), Crop(None), Straighten(4.5), Hold(800), Shot(crop), Crop(Some(false)), WaitDeveloped]);
+                steps.extend([Compare(Some((false, Layout::SideBySide))), Hold(2500), Shot(compare), Compare(None), Hold(300)]);
+            }
+            steps.extend([Theme(ThemeName::Darkroom), Hold(300), Write]);
             if shots.is_none() {
                 steps.retain(|s| !matches!(s, Shot(_)));
             }
