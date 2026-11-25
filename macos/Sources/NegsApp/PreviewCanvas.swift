@@ -59,6 +59,7 @@ struct PreviewCanvas: NSViewRepresentable {
 
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
         scale?.view = scroll
+        geometry?.reporter = scroll
         scroll.geometry = geometry
         scroll.doubleClick = doubleClick
         scroll.click = click
@@ -161,8 +162,20 @@ final class CenteringClipView: NSClipView {
     /// The scroll view's size.
     private(set) var viewport = CGSize.zero
     private(set) var zoomed = false
+    /// The canvas on screen: only its reports count. When the develop
+    /// replaces the stand-in, SwiftUI keeps the stand-in's scroll view in
+    /// the window for a few passes, and until a menu opened by a click
+    /// closes. Both reporting, a print a point apart, they took turns until
+    /// AppKit gave up on the window's layout and the app crashed (0.20.1).
+    @ObservationIgnored weak var reporter: ImageScrollView?
 
-    func update(print: CGRect, viewport: CGSize, zoomed: Bool) {
+    func update(from view: ImageScrollView, print: CGRect, viewport: CGSize, zoomed: Bool) {
+        if reporter == nil { reporter = view }
+        guard view === reporter else { return }
+        update(print: print, viewport: viewport, zoomed: zoomed)
+    }
+
+    private func update(print: CGRect, viewport: CGSize, zoomed: Bool) {
         // Whole points: sub-point scroll jitter never reaches SwiftUI.
         let print = print.integral
         if print != self.print { self.print = print }
@@ -259,7 +272,7 @@ final class ImageScrollView: NSScrollView {
         guard let geometry, let documentView, documentView.frame.width > 0 else { return }
         var print = documentView.convert(documentView.bounds, to: self)
         if !isFlipped { print.origin.y = bounds.height - print.maxY }
-        geometry.update(print: print.intersection(CGRect(origin: .zero, size: bounds.size)), viewport: bounds.size, zoomed: zoomedFromFit)
+        geometry.update(from: self, print: print.intersection(CGRect(origin: .zero, size: bounds.size)), viewport: bounds.size, zoomed: zoomedFromFit)
     }
     /// 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
     /// photograph, but never enlarges a small one past 1:1.
