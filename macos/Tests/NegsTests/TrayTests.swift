@@ -129,8 +129,8 @@ import XCTest
     }
 
     private func others(_ model: EditorModel, count: Int) -> [String] {
-        // Negatives, so the paper stays printed.
-        let negatives = model.films.filter { !$0.positive && $0.id != model.film }
+        // Negatives listed in the tray, so the paper stays printed and tiles develop.
+        let negatives = model.listedFilms.filter { !$0.positive && $0.id != model.film }
         return Array(negatives.map(\.id).prefix(count))
     }
 
@@ -274,7 +274,7 @@ import XCTest
         XCTAssertNil(model.trialImage, "The develop replaces it")
 
         // Esc goes back: the tile was of the tried stock, so it goes.
-        model.tryStock(model.films.first { $0.id != target && $0.id != model.film }!.id)
+        model.tryStock(model.listedFilms.first { $0.id != target && $0.id != model.film }!.id)
         model.endTray(keep: false)
         if !model.previewCurrent { XCTAssertNil(model.trialImage) }
         model.previews.filmShown = false
@@ -303,7 +303,7 @@ import XCTest
             (layer.contents as AnyObject?) === image || layer.sublayers?.contains { shows(image, in: $0) } == true
         }
         for paper in [false, true] {
-            let target = try XCTUnwrap(paper ? model.papers.first { $0.id != model.paper }?.id : others(model, count: 1).first)
+            let target = try XCTUnwrap(paper ? model.listedPapers.first { $0.id != model.paper }?.id : others(model, count: 1).first)
             model.openTray(paper: paper)
             if paper { model.previews.paperShown = true } else { model.previews.filmShown = true }
             model.pumpPreviews()
@@ -425,7 +425,7 @@ import XCTest
         defer { model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
         let before = model.state
         let film = try XCTUnwrap(others(model, count: 1).first)
-        let paper = try XCTUnwrap(model.papers.first { $0.id != model.paper }).id
+        let paper = try XCTUnwrap(model.listedPapers.first { $0.id != model.paper }).id
 
         model.openTray(paper: true)
         model.tryStock(film)
