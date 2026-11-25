@@ -84,6 +84,8 @@ pub fn render_titlebar(
     };
 
     let left_pad = if cfg!(target_os = "macos") { 78.0 } else { 14.0 };
+    let in_grid = app.model.shelf.in_grid;
+    let can_grid = app.model.shelf.library.is_some() && has_photo && !app.model.cropping();
 
     div()
         .relative()
@@ -145,6 +147,32 @@ pub fn render_titlebar(
                 .flex()
                 .items_center()
                 .gap_2()
+                // Photo · Grid: the two views of the folder (G).
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            pill_button("tb-photo", "Photo", !in_grid && has_photo, !has_photo, theme).on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    if this.grid.shown && this.model.shelf.in_grid {
+                                        this.toggle_grid(window, cx);
+                                    }
+                                },
+                            )),
+                        )
+                        .child(
+                            pill_button("tb-grid", "Grid", in_grid, !can_grid, theme).on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    if !this.model.shelf.in_grid {
+                                        this.toggle_grid(window, cx);
+                                    }
+                                },
+                            )),
+                        ),
+                )
+                .child(div().w(px(1.0)).h(px(18.0)).bg(theme.line))
                 .child(
                     pill_button("tb-open", "Open", false, false, theme)
                         .on_click(cx.listener(|this, _, window, cx| {

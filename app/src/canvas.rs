@@ -128,6 +128,8 @@ pub struct CanvasState {
     pub last_photo_bounds: Bounds<Pixels>,
     /// Last window scale factor.
     pub scale_factor: f32,
+    /// The photograph isn't drawn: it's flying to or from the grid.
+    pub hide_photo: bool,
     /// Active monitor's color profile.
     pub display_profile: DisplayColorProfile,
     /// Cached exact-fit or zoomed-tile `RenderImage` for the primary (developed/placeholder) image.
@@ -152,6 +154,7 @@ impl Default for CanvasState {
             last_canvas_bounds: Bounds::default(),
             last_photo_bounds: Bounds::default(),
             scale_factor: 1.0,
+            hide_photo: false,
             display_profile: DisplayColorProfile::default(),
             cached_primary: None,
             cached_original: None,
@@ -183,6 +186,12 @@ impl CanvasState {
         for img in self.pending_drops.drain(..) {
             let _ = window.drop_image(img);
         }
+    }
+
+    /// The whole photograph as drawn now (fit, not a zoomed tile), for the
+    /// grid's flight from it.
+    pub fn whole_image(&self) -> Option<Arc<RenderImage>> {
+        self.cached_primary.as_ref().filter(|(_, p)| p.region.is_none()).map(|(_, p)| p.render_image.clone())
     }
 
     /// Resets view to fit-to-canvas with centered pan.
@@ -429,6 +438,7 @@ pub fn render_canvas(
     let has_original = app.model.original.is_some();
     let loading_original = (split_mode || before_after) && !has_original;
     let develop_error = app.model.develop_error.clone();
+    let hide_photo = app.canvas.hide_photo;
 
     let photo_canvas = canvas(
         {
@@ -701,6 +711,9 @@ pub fn render_canvas(
                     }
 
                     let paint_prepared = |window: &mut Window, prep: &PreparedImage| {
+                        if hide_photo {
+                            return;
+                        }
                         let draw_bounds = if let Some(reg) = prep.region {
                             let photo_w_phys = (oriented_w as f64 * effective_zoom) as f32;
                             let photo_h_phys = (oriented_h as f64 * effective_zoom) as f32;

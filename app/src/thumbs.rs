@@ -53,6 +53,8 @@ pub struct Thumb {
     pub height: u32,
     /// From under an older engine: shown, and developed again.
     pub stale: bool,
+    /// Its image is another's (the canvas's): not released when it goes.
+    borrowed: bool,
 }
 
 impl Thumb {
@@ -69,10 +71,26 @@ impl Thumb {
     }
 }
 
+impl Thumb {
+    /// An image made elsewhere (the canvas's), to fly as a thumbnail. Its
+    /// owner releases it: this one doesn't queue it on drop.
+    pub fn wrap(image: Arc<RenderImage>, width: u32, height: u32) -> Thumb {
+        Thumb { image: Some(image), width, height, stale: false, borrowed: true }
+    }
+}
+
+#[cfg(test)]
+impl Thumb {
+    /// A black thumbnail of `w` × `h`.
+    pub fn blank_for_tests(w: u32, h: u32) -> Thumb {
+        Thumb { image: Some(crate::color_display::bgra_to_render_image(vec![0; (w * h * 4) as usize], w, h)), width: w, height: h, stale: false, borrowed: false }
+    }
+}
+
 impl Drop for Thumb {
     fn drop(&mut self) {
-        if let Some(image) = self.image.take() {
-            drops().lock().unwrap_or_else(|e| e.into_inner()).push(image);
+        if let Some(image) = self.image.take().filter(|_| !self.borrowed) {
+            release(image);
         }
     }
 }
@@ -81,6 +99,12 @@ impl Drop for Thumb {
 fn drops() -> &'static Mutex<Vec<Arc<RenderImage>>> {
     static DROPS: OnceLock<Mutex<Vec<Arc<RenderImage>>>> = OnceLock::new();
     DROPS.get_or_init(Mutex::default)
+}
+
+/// Queues an image whose last owner went for `window.drop_image` (the mark
+/// sprites share the queue).
+pub fn release(image: Arc<RenderImage>) {
+    drops().lock().unwrap_or_else(|e| e.into_inner()).push(image);
 }
 
 /// Releases every dropped thumbnail from GPUI's sprite atlas. Called at the
@@ -179,7 +203,7 @@ fn make_thumb(mut bgra: Vec<u8>, width: u32, height: u32, stale: bool, cm: Optio
     }
     manage(&mut bgra, cm);
     let image = bgra_to_render_image(bgra, width, height);
-    Some(Arc::new(Thumb { image: Some(image), width, height, stale }))
+    Some(Arc::new(Thumb { image: Some(image), width, height, stale, borrowed: false }))
 }
 
 // MARK: Arrivals
