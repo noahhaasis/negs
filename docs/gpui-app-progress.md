@@ -14,14 +14,15 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 3 | Inspector, Presets & Stock Tray | **Done** | `87cb390d` | Custom darkroom widgets (`InkSlider`, `TextInput`, `Scopes`, `ToneGraph`, `ColorFilterDiscs`), full 26-kind `InspectorView` Prep/Lab/Output UI, Presets sidebar, and Film/Paper Stock Preview Tray (`TileImageCache`). Mac & PC live verified. |
 | 4 | Library, Filmstrip, Grid & Flight | **Done** (Smoothness Proof reviewed 2026-11-25) | `9c1020ed` | Colour-managed background thumbnails, virtualized filmstrip + contact-sheet grid with hand-drawn marks (cached sprites), library menus, `SheetFlight` Photo↔Grid flight, `NEGS_FRAME_BENCH`. PC 60.0–60.8 fps, 0 dropped frames. |
 | 5 | Compare, Crop, Negative, Export, Batch & Settings | **Done** (5a + 5b) | 5a `200def15`, 5b `7720b5ca` | Print on its sheet, crop, negative pick, Compare; export card → native dialog, batch, Settings window, full menus (in-window menu bar + caption buttons off the Mac), Lightroom. Exports byte-identical to `windows/` and SwiftUI. |
-| 6 | Windows Cutover & Packaging | **Gate ready, awaiting Go** | branch `gpui-p6-windows-cutover` | ABBA vs Win32 `Negs.exe` (GPUI ahead on grid, strip, tabs, RAM; behind on startup and size), Windows parity (menu keys/ticks, TaskDialog errors, taskbar, WinSparkle, end-session, single instance, tooltips), packaging plan prepared, not applied. |
+| 6 | Windows Cutover & Packaging | **Parity merged; cutover awaiting Go** | `5bc98c59` | ABBA vs Win32 `Negs.exe` (GPUI ahead on grid, strip, tabs, RAM; behind on startup and size), Windows parity (menu keys/ticks, TaskDialog errors, taskbar, WinSparkle, end-session, single instance, tooltips), packaging plan prepared, not applied. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
 
 ---
 
-## 2026-11-25 — Phase 6: Windows cutover gate (branch `gpui-p6-windows-cutover`)
+## 2026-11-25 — Phase 6: Windows cutover gate (`5bc98c59`; cutover not applied)
 
 ### What landed
+- Branch `gpui-p6-windows-cutover` (`fedfe600` … `f610edd7`, 12 commits) merged `--no-ff` into local `main`; `app/` tests 98/98 on the merged tree on both machines.
 - Under `app/` and `docs/` only (no `crates/`, `vendor/`, `web/`, `windows/`, root `Cargo.toml`/`Cargo.lock`; `app/Cargo.lock` unchanged). Not pushed.
 - **Speed:** the canvas read the display's ICC profile and rebuilt its transform on every paint: 82% of the main thread in a slider drag (macOS `sample`). Now it does so only when the window changes display or becomes active. PC slider UI went 30 → 51 fps; Mac strip fling 73 → 91–120 fps. The grid's first open now flies too (it had no size before its first frame). `NEGS_TRACE_UI=<file>` times drag steps and renders.
 - **Menu bar from the keyboard** (`menu_bar.rs`, `menu_state.rs`):
