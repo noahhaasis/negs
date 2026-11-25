@@ -95,6 +95,20 @@ actions!(
         LowerRating,
         OpenInLightroom,
         OpenInLightroomClassic,
+        NewPreset,
+        ImportPresets,
+        ShowPresetsFolder,
+        ToggleFullScreen,
+        Recent0,
+        Recent1,
+        Recent2,
+        Recent3,
+        Recent4,
+        Recent5,
+        Recent6,
+        Recent7,
+        Recent8,
+        Recent9,
         UndoAction,
         RedoAction,
         ToggleOriginal,
@@ -209,6 +223,7 @@ pub struct NegsApp {
     resume_offer: bool,
     /// The Lightroom kinds File lists.
     menu_lightroom: Vec<negs_app::lightroom::Kind>,
+    menu_recent: Vec<PathBuf>,
     pub settings_window: Option<gpui::WindowHandle<settings_window::SettingsView>>,
     /// The library's context or filter menu, when open.
     pub menu: Option<MenuState>,
@@ -372,6 +387,7 @@ impl NegsApp {
             menu_bar: None,
             resume_offer: false,
             menu_lightroom: Vec::new(),
+            menu_recent: Vec::new(),
             menu: None,
             bench: bench::Bench::from_env(),
             startup,
@@ -407,10 +423,12 @@ impl NegsApp {
     pub fn after_model_update(&mut self, cx: &mut Context<Self>) {
         self.keep_ticking(cx);
         // File's Lightroom items follow what's installed.
+        // File's Lightroom items and Open Recent follow the model.
         let kinds = self.model.lightroom_kinds();
-        if kinds != self.menu_lightroom {
-            cx.set_menus(menus(&kinds));
+        if kinds != self.menu_lightroom || self.model.prefs.recent_files != self.menu_recent {
+            cx.set_menus(menus(&kinds, &self.model.prefs.recent_files));
             self.menu_lightroom = kinds;
+            self.menu_recent = self.model.prefs.recent_files.clone();
         }
         if self.model.zoom_command != self.last_zoom_command {
             self.last_zoom_command = self.model.zoom_command;
@@ -613,6 +631,16 @@ impl NegsApp {
             }
         })
         .detach();
+    }
+
+    /// File › Open Recent: a file that's gone is dropped from the list,
+    /// with the model's error (as the empty state's list does).
+    fn open_recent(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(path) = self.model.prefs.recent_files.get(index).cloned() {
+            self.model.open(&path);
+            self.after_model_update(cx);
+            cx.notify();
+        }
     }
 
     /// Help › About Negs: the version, the credits and the licence.
@@ -1165,6 +1193,36 @@ impl gpui::Render for NegsApp {
             .on_action(cx.listener(|this, _: &OpenInLightroomClassic, window, cx| {
                 this.run_command(library_menu::Command::Lightroom(negs_app::lightroom::Kind::Classic), None, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &Recent0, _window, cx| this.open_recent(0, cx)))
+            .on_action(cx.listener(|this, _: &Recent1, _window, cx| this.open_recent(1, cx)))
+            .on_action(cx.listener(|this, _: &Recent2, _window, cx| this.open_recent(2, cx)))
+            .on_action(cx.listener(|this, _: &Recent3, _window, cx| this.open_recent(3, cx)))
+            .on_action(cx.listener(|this, _: &Recent4, _window, cx| this.open_recent(4, cx)))
+            .on_action(cx.listener(|this, _: &Recent5, _window, cx| this.open_recent(5, cx)))
+            .on_action(cx.listener(|this, _: &Recent6, _window, cx| this.open_recent(6, cx)))
+            .on_action(cx.listener(|this, _: &Recent7, _window, cx| this.open_recent(7, cx)))
+            .on_action(cx.listener(|this, _: &Recent8, _window, cx| this.open_recent(8, cx)))
+            .on_action(cx.listener(|this, _: &Recent9, _window, cx| this.open_recent(9, cx)))
+            .on_action(cx.listener(|this, _: &NewPreset, _window, cx| {
+                if !this.model.can_change_presets() {
+                    return;
+                }
+                if !(this.model.inspector_visible && this.model.pane() == Pane::Presets) {
+                    this.toggle_pane(Pane::Presets, cx);
+                }
+                this.model.new_preset();
+                this.after_model_update(cx);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|_this, _: &ImportPresets, window, cx| {
+                presets::PresetsState::prompt_import_presets(window, cx);
+            }))
+            .on_action(cx.listener(|_this, _: &ShowPresetsFolder, _window, _cx| {
+                presets::PresetsState::show_presets_folder(None);
+            }))
+            .on_action(cx.listener(|_this, _: &ToggleFullScreen, window, _cx| {
+                window.toggle_fullscreen();
+            }))
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
                 this.request_quit(window, cx);
             }))
@@ -1282,6 +1340,8 @@ fn bind_shortcuts(cx: &mut App) {
         KeyBinding::new(&format!("{modifier}-d"), DuplicatePhoto, non_text),
         KeyBinding::new(&format!("{modifier}-shift-r"), ResetEdits, non_text),
         KeyBinding::new("]", RaiseRating, non_text),
+        KeyBinding::new(&format!("{modifier}-shift-o"), ImportPresets, non_text),
+        KeyBinding::new(if cfg!(target_os = "macos") { "ctrl-cmd-f" } else { "f11" }, ToggleFullScreen, None),
         KeyBinding::new("[", LowerRating, non_text),
         KeyBinding::new(&format!("{modifier}-z"), UndoAction, None),
         KeyBinding::new(&format!("{modifier}-shift-z"), RedoAction, None),
@@ -1317,21 +1377,30 @@ fn bind_shortcuts(cx: &mut App) {
 }
 
 fn install_menus(cx: &mut App) {
-    cx.set_menus(menus(&[]));
+    cx.set_menus(menus(&[], &[]));
 }
 
 /// The menus: the Mac's menu bar, and the in-window menu bar elsewhere
 /// (`menu_bar.rs`), in the Windows app's order (`build_menu`).
-fn menus(lightroom: &[negs_app::lightroom::Kind]) -> Vec<Menu> {
+fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Menu> {
     let mac = cfg!(target_os = "macos");
     let trash = if mac { "Move to Trash…" } else if cfg!(target_os = "windows") { "Move to Recycle Bin…" } else { "Move to Trash…" };
-    let mut file = vec![
-        MenuItem::action("Open…", OpenPhoto),
-        MenuItem::separator(),
+    let recent_actions: [Box<dyn gpui::Action>; 10] = [Box::new(Recent0), Box::new(Recent1), Box::new(Recent2), Box::new(Recent3), Box::new(Recent4), Box::new(Recent5), Box::new(Recent6), Box::new(Recent7), Box::new(Recent8), Box::new(Recent9)];
+    let mut file = vec![MenuItem::action("Open…", OpenPhoto)];
+    if !recent.is_empty() {
+        let items = recent
+            .iter()
+            .zip(recent_actions)
+            .map(|(path, action)| MenuItem::Action { name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into(), action, os_action: None })
+            .collect();
+        file.push(MenuItem::submenu(Menu { name: "Open Recent".into(), items }));
+    }
+    file.push(MenuItem::separator());
+    file.extend([
         MenuItem::action("Save Preview…", SavePreview),
         MenuItem::action("Export Photograph…", ExportPhoto),
         MenuItem::action("Export LUT…", ExportLut),
-    ];
+    ]);
     // Open in Lightroom, Open in Lightroom Classic: only those installed.
     for kind in lightroom {
         let title = format!("Open in {}", kind.title());
@@ -1340,6 +1409,7 @@ fn menus(lightroom: &[negs_app::lightroom::Kind]) -> Vec<Menu> {
             negs_app::lightroom::Kind::Classic => MenuItem::action(title, OpenInLightroomClassic),
         });
     }
+    file.extend([MenuItem::separator(), MenuItem::action("New Preset", NewPreset), MenuItem::action("Import Presets…", ImportPresets), MenuItem::action("Show Presets Folder", ShowPresetsFolder)]);
     if !mac {
         file.extend([MenuItem::separator(), MenuItem::action("Settings…", OpenSettings), MenuItem::separator(), MenuItem::action("Exit", QuitApp)]);
     }
@@ -1405,6 +1475,7 @@ fn menus(lightroom: &[negs_app::lightroom::Kind]) -> Vec<Menu> {
             MenuItem::action("Presets", ShowPresets),
             MenuItem::action("Inspector", ToggleInspector),
             MenuItem::action("Image Only", ToggleImageOnly),
+            MenuItem::action("Full Screen", ToggleFullScreen),
             MenuItem::action("Grid", ToggleGrid),
             MenuItem::action("Compare", ToggleCompare),
             MenuItem::action("Split Before/After", ToggleSplit),
