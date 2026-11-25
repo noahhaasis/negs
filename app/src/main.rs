@@ -13,9 +13,12 @@ mod color_display;
 mod host_gpui;
 mod inspector;
 mod marks_gpui;
+mod presets;
 mod status;
 mod theme_gpui;
+mod tile_cache;
 mod titlebar;
+mod tray;
 mod widgets;
 
 use std::io::Write;
@@ -24,9 +27,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext, Application, Context, FocusHandle, Focusable, IntoElement, KeyBinding, Menu,
-    MenuItem, MouseButton, MouseMoveEvent, MouseUpEvent, PathPromptOptions, Point, SharedString,
-    TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, size,
+    App, AppContext, Application, Context, FocusHandle, Focusable, IntoElement, KeyBinding,
+    KeyDownEvent, Menu, MenuItem, MouseButton, MouseMoveEvent, MouseUpEvent, PathPromptOptions,
+    Point, SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div,
+    prelude::*, px, size,
 };
 use negs_app::host;
 use negs_app::model::{Edge, ExportSize, LibraryKey, Model, Pane, SaveSettings};
@@ -42,9 +46,11 @@ use crate::inspector::{
     InspectorState, build_inspector_view, handle_root_mouse_move, handle_root_mouse_up,
     render_inspector_column,
 };
+use crate::presets::PresetsState;
 use crate::status::render_status_bar;
 use crate::theme_gpui::{GpuiTheme, initial_theme, next_theme, register_fonts};
 use crate::titlebar::{render_theme_menu, render_titlebar};
+use crate::tray::{TrayState, render_tray};
 
 actions!(
     negs,
@@ -121,6 +127,8 @@ pub struct NegsApp {
     pub theme_menu_open: bool,
     pub canvas: CanvasState,
     pub inspector: InspectorState,
+    pub presets: PresetsState,
+    pub tray: TrayState,
     pub startup: StartupReport,
     focus_handle: FocusHandle,
     last_zoom_command: u64,
@@ -239,6 +247,8 @@ impl NegsApp {
         .detach();
 
         let inspector = InspectorState::new(initial_scope_height, cx);
+        let presets = PresetsState::new(cx);
+        let tray = TrayState::new(cx);
         let mut app = Self {
             model,
             host,
@@ -246,6 +256,8 @@ impl NegsApp {
             theme_menu_open: false,
             canvas: CanvasState::with_display_profile(display_profile),
             inspector,
+            presets,
+            tray,
             startup,
             focus_handle,
             last_zoom_command: 0,
@@ -269,6 +281,8 @@ impl NegsApp {
         if changed {
             self.canvas.display_profile = next.clone();
             self.canvas.invalidate_images();
+            self.presets.tile_cache.invalidate();
+            self.tray.tile_cache.invalidate();
             self.model.set_preview_color(next.transform);
         }
     }
@@ -342,6 +356,7 @@ impl NegsApp {
 
     pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
         self.inspector.close_popovers();
+        self.presets.close_context_menu();
         self.model.toggle_inspector();
         self.after_model_update(cx);
         cx.notify();
@@ -349,6 +364,7 @@ impl NegsApp {
 
     pub fn toggle_pane(&mut self, pane: Pane, cx: &mut Context<Self>) {
         self.inspector.close_popovers();
+        self.presets.close_context_menu();
         self.model.toggle_pane(pane);
         self.after_model_update(cx);
         cx.notify();
@@ -496,15 +512,29 @@ impl gpui::Render for NegsApp {
 
         let titlebar_el = render_titlebar(self, window, cx).into_any_element();
         let canvas_el = render_canvas(self, window, cx).into_any_element();
+        let tray_el = render_tray(self, window, cx);
         let inspector_el = render_inspector_column(self, window, cx);
         self.stamp_startup("inspector_shown");
-        let status_el = render_status_bar(self, cx).into_any_element();
+        let show_status = self.model.tray_shown().is_none();
+        let status_el = show_status.then(|| render_status_bar(self, cx).into_any_element());
         let theme_menu = render_theme_menu(self, cx);
 
         div()
             .id("negs-app-root")
             .track_focus(&self.focus_handle)
             .key_context("NegsApp")
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.tray.handle_key_down(event, &mut this.model, window, cx) {
+                    this.after_model_update(cx);
+                    return;
+                }
+                if this
+                    .presets
+                    .handle_key_down(event, &mut this.model, window, cx)
+                {
+                    this.after_model_update(cx);
+                }
+            }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if this.inspector.has_active_drag() {
                     handle_root_mouse_move(this, event, window, cx);
@@ -643,11 +673,12 @@ impl gpui::Render for NegsApp {
                             .h_full()
                             .flex()
                             .flex_col()
-                            .child(canvas_el),
+                            .child(canvas_el)
+                            .when_some(tray_el, |el, tray| el.child(tray)),
                     )
                     .when_some(inspector_el, |el, col| el.child(col)),
             )
-            .child(status_el)
+            .when_some(status_el, |el, status| el.child(status))
             .when_some(theme_menu, |el, menu| el.child(menu))
     }
 }

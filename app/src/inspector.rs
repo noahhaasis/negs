@@ -863,25 +863,8 @@ fn render_pane_header(
                         .when(can_presets, |el| {
                             el.cursor_pointer()
                                 .hover(move |s| s.text_color(hover_paper))
-                                .on_click(cx.listener(|_this, _, _window, cx| {
-                                    let receiver = cx.prompt_for_paths(PathPromptOptions {
-                                        files: true,
-                                        directories: false,
-                                        multiple: true,
-                                        prompt: Some(SharedString::from("Import Presets")),
-                                    });
-                                    cx.spawn(async move |this, cx| {
-                                        if let Ok(Ok(Some(paths))) = receiver.await {
-                                            if !paths.is_empty() {
-                                                let _ = this.update(cx, |app, cx| {
-                                                    app.model.import_presets(paths, None);
-                                                    app.after_model_update(cx);
-                                                    cx.notify();
-                                                });
-                                            }
-                                        }
-                                    })
-                                    .detach();
+                                .on_click(cx.listener(|_this, _, window, cx| {
+                                    crate::presets::PresetsState::prompt_import_presets(window, cx);
                                 }))
                         })
                         .child("Import…"),
@@ -1614,167 +1597,6 @@ fn render_color_picker_popover(
         .into_any_element()
 }
 
-/// Clean placeholder for `Pane::Presets` that Phase 3b replaces with the full
-/// Presets browser & live-preview cards.
-pub fn render_presets_placeholder(app: &NegsApp, cx: &mut Context<NegsApp>) -> impl IntoElement {
-    let theme = &app.theme;
-    let count = app.model.presets.len();
-    let subtitle = if count == 0 {
-        "No saved presets yet. Use New or Import… above.".to_string()
-    } else if count == 1 {
-        "1 preset available in your library.".to_string()
-    } else {
-        format!("{count} presets available in your library.")
-    };
-
-    let _ = cx;
-    div()
-        .id("presets-pane-placeholder")
-        .flex_1()
-        .w_full()
-        .min_h_0()
-        .px(px(20.0))
-        .py(px(28.0))
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(8.0))
-        .child(
-            div()
-                .font_family(theme.serif_family.clone())
-                .text_size(px(16.0))
-                .text_color(theme.paper)
-                .child("Presets"),
-        )
-        .child(
-            div()
-                .text_size(px(12.0))
-                .text_color(theme.dim)
-                .child(subtitle),
-        )
-}
-
-/// Compact fallback stock selector shown when `model.tray_shown()` is `Some(paper)`.
-/// Phase 3b replaces this single hook with the full searchable Stock Tray.
-pub fn render_stock_tray_fallback(
-    app: &NegsApp,
-    theme: &GpuiTheme,
-    cx: &mut Context<NegsApp>,
-) -> Option<AnyElement> {
-    let paper = app.model.tray_shown()?;
-    let current_id = if paper {
-        app.model.state.paper.clone()
-    } else {
-        app.model.state.film.clone()
-    };
-    let stocks: Vec<(String, String)> = if paper {
-        app.model
-            .listed_papers()
-            .into_iter()
-            .map(|s| (s.id.clone(), s.name.clone()))
-            .collect()
-    } else {
-        app.model
-            .listed_films()
-            .into_iter()
-            .map(|s| (s.id.clone(), s.name.clone()))
-            .collect()
-    };
-    let heading = if paper { "Paper stocks" } else { "Film stocks" };
-    let hover = theme.subtle_hover;
-
-    Some(
-        div()
-            .id("stock-tray-fallback")
-            .w_full()
-            .max_h(px(220.0))
-            .bg(theme.film)
-            .border_b_1()
-            .border_color(theme.line)
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px(px(16.0))
-                    .py(px(6.0))
-                    .border_b_1()
-                    .border_color(theme.line)
-                    .child(
-                        div()
-                            .text_size(px(10.5))
-                            .text_color(theme.dim)
-                            .child(format!("{heading} ({})", stocks.len())),
-                    )
-                    .child(
-                        div()
-                            .id("stock-tray-fallback-close")
-                            .cursor_pointer()
-                            .text_size(px(11.0))
-                            .text_color(theme.dim)
-                            .on_click(cx.listener(move |this, _, _window, cx| {
-                                this.model.toggle_tray(paper);
-                                cx.notify();
-                            }))
-                            .child("Close"),
-                    ),
-            )
-            .child(
-                div()
-                    .id("stock-tray-fallback-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .py(px(3.0))
-                    .flex()
-                    .flex_col()
-                    .children(stocks.into_iter().enumerate().map(|(i, (id, name))| {
-                        let selected = id == current_id;
-                        div()
-                            .id(SharedString::from(format!("tray-fb-item-{i}")))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .px(px(16.0))
-                            .py(px(4.5))
-                            .cursor_pointer()
-                            .hover(move |s| s.bg(hover))
-                            .on_click(cx.listener(move |this, _, _window, cx| {
-                                if paper {
-                                    this.model.choose_paper(&id);
-                                } else {
-                                    this.model.choose_film(&id);
-                                }
-                                this.model.toggle_tray(paper);
-                                this.after_model_update(cx);
-                                cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .font_family(theme.serif_family.clone())
-                                    .text_size(px(12.5))
-                                    .text_color(if selected { theme.paper } else { theme.label })
-                                    .truncate()
-                                    .child(name),
-                            )
-                            .when(selected, |el| {
-                                el.child(
-                                    div()
-                                        .w(px(5.0))
-                                        .h(px(5.0))
-                                        .rounded_full()
-                                        .bg(theme.accent),
-                                )
-                            })
-                    })),
-            )
-            .into_any_element(),
-    )
-}
-
 /// Renders the entire collapsible right-hand Inspector column.
 pub fn render_inspector_column(
     app: &mut NegsApp,
@@ -1824,10 +1646,9 @@ pub fn render_inspector_column(
     let pane_header = render_pane_header(app, &view, &theme, cx);
 
     let body = if is_presets {
-        render_presets_placeholder(app, cx).into_any_element()
+        crate::presets::render_presets(app, window, cx).into_any_element()
     } else {
         let stock_strip = render_stock_strip(app, &theme, cx);
-        let tray_fallback = render_stock_tray_fallback(app, &theme, cx);
         let scopes = render_scopes(
             is_waveform,
             app.inspector.scope_height,
@@ -1891,7 +1712,6 @@ pub fn render_inspector_column(
             .flex()
             .flex_col()
             .child(stock_strip)
-            .when_some(tray_fallback, |el, fb| el.child(fb))
             .child(scopes)
             .child(tab_bar)
             .child(scroll_area)
