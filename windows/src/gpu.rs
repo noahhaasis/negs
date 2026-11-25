@@ -13,13 +13,9 @@ use bytemuck::{Pod, Zeroable};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, Win32WindowHandle, WindowsDisplayHandle};
 use wgpu::util::DeviceExt;
 
-pub const LUT_SIZE: u32 = 4096;
+pub const LUT_SIZE: u32 = negs_app::icc::LUT_SIZE as u32;
 /// The shader's `REC2020_TO_SRGB`, row-major, for the software canvas.
-pub const REC2020_TO_SRGB: [[f32; 3]; 3] = [
-    [1.6603176, -0.5875727, -0.0729166],
-    [-0.1244067, 1.1328007, -0.0083489],
-    [-0.0181114, -0.1005965, 1.1187665],
-];
+pub use negs_app::icc::REC2020_TO_SRGB;
 const PHOTO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 const SHADER: &str = r#"

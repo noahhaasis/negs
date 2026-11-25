@@ -1,0 +1,64 @@
+# Pure-Rust shared application core for Negs (UI-toolkit-agnostic).
+# Its own workspace so building or testing it never changes the film engine's
+# feature unification or lock file.
+[workspace]
+resolver = "2"
+
+[package]
+name = "negs-app"
+version = "0.20.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[dependencies]
+# Crop, border and 35mm geometry, so the canvas cuts the same pixels as the exporter.
+spektrafilm-io = { path = "../spektrafilm-io", default-features = false }
+# The image buffers spektrafilm-io crops and borders, for edited thumbnails.
+spektrafilm-math = { path = "../spektrafilm-math" }
+# The library: .negs sidecars, ratings, flags, per-photograph edits, undo.
+negs-library = { path = "../negs-library" }
+# Hand-drawn marks geometry.
+negs-marks = { path = "../negs-marks" }
+serde = { version = "1", features = ["derive"] }
+# Exact float reading: the catalog's defaults must equal the sidecar tables' to the bit.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+rawler = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.58"
+windows = { version = "0.58", features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_EventLog",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Performance",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_ColorSystem",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(not(windows))'.dependencies]
+libc = "0.2"
+icu_normalizer = "2.2"
+icu_properties = "2.2"
+
+# The engine's rawler (spektrafilm-io uses its develop_intermediate_owned);
+# see vendor/README.md.
+[patch.crates-io]
+rawler = { path = "../../vendor/rawler" }

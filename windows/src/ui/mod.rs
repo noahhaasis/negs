@@ -23,7 +23,6 @@ mod empty;
 mod grid;
 mod grid_bench;
 mod ink;
-pub mod folder_watch;
 pub mod inspector;
 mod library;
 mod motion;
@@ -1486,7 +1485,58 @@ fn forward_to_running(path: Option<&Path>) -> bool {
 /// Startup, in the order `windows-ui-features.md` §17 asks for: helper and
 /// catalog first, the window's first frame next, then the adjustments, the
 /// GPU and everything else.
+struct Win32Host;
+
+impl negs_app::host::Host for Win32Host {
+    fn post(&self, task: negs_app::host::ModelTask) {
+        post(move |app: &mut App| task(&mut app.model));
+    }
+
+    fn after(&self, delay: Duration, task: negs_app::host::TimedModelTask) {
+        after(delay, move |app: &mut App| task(&mut app.model));
+    }
+
+    fn thumbnail_filed(&self, key: String, bgra: Vec<u8>, width: u32, height: u32) {
+        post(move |app: &mut App| {
+            app.thumbs.filed(key, bgra, width, height);
+            app.model.dirty |= dirty::STRIP;
+        });
+    }
+
+    fn batch_refresh(&self) {
+        batch::refresh();
+    }
+
+    fn export_finished(&self) {
+        post(|app: &mut App| app.export_finished());
+    }
+
+    fn note_recent_document(&self, path: &Path) {
+        note_recent_document(path);
+    }
+
+    fn decimal_separator(&self) -> char {
+        inspector::decimal_separator()
+    }
+
+    fn canvas_scale(&self) -> Option<f64> {
+        canvas::screen_pixels_per_photo_pixel()
+    }
+
+    fn bench_running(&self) -> bool {
+        crate::trace::bench_running()
+    }
+
+    fn owner_window_handle(&self) -> isize {
+        main_hwnd().0 as isize
+    }
+}
+
 pub fn run() {
+    negs_app::host::register(std::sync::Arc::new(Win32Host));
+    negs_app::picture::register_uploader(|rgba, width, height| {
+        crate::gpu::shared().map(|gpu| std::sync::Arc::new(gpu.upload(rgba, width, height)) as negs_app::picture::GpuResource)
+    });
     // Held until process exit, including test launches with multiple instances.
     // The installer/uninstaller waits for every app to stop before touching data.
     let _app_lifetime_mutex = unsafe { CreateMutexW(None, false, w!("Local\\Negs.AppLifetime")) };

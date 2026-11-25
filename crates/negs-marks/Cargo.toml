@@ -1,0 +1,11 @@
+# The hand-drawn marks' geometry (pencil stroke, rings, stars, the reject's
+# cross, the pick's box), ported from the macOS app. No Win32 types, so its
+# tests run anywhere: cargo test --manifest-path crates/negs-marks/Cargo.toml
+[workspace]
+
+[package]
+name = "negs-marks"
+version = "0.20.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
