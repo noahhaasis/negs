@@ -282,7 +282,7 @@ impl Focusable for SettingsView {
 }
 
 impl Render for SettingsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let app = self.app.read(cx);
         let theme = app.theme.clone();
         let tab = Tab::parse(&app.model.prefs.settings_tab);
@@ -292,7 +292,15 @@ impl Render for SettingsView {
         let (paper, label, dim, accent, track, line) = (theme.paper, theme.label, theme.dim, theme.accent, theme.track, theme.line);
 
         // The tabs, as words with the pencil under the chosen one.
-        let mut tabs = div().flex().gap(px(22.0)).px(px(28.0)).pt(px(44.0)).pb(px(8.0)).border_b_1().border_color(line);
+        let mut tabs = div().flex().gap(px(22.0)).px(px(28.0)).pb(px(8.0)).border_b_1().border_color(line);
+        // Off the Mac: a strip to drag the window by, with Close (GPUI's
+        // own title bar is hidden there).
+        let top = div()
+            .flex()
+            .h(px(36.0))
+            .flex_none()
+            .child(div().flex_1().h_full().when(!cfg!(target_os = "macos"), |d| d.window_control_area(gpui::WindowControlArea::Drag)))
+            .children(crate::titlebar::caption_buttons(&theme, window, true));
         for t in Tab::ALL {
             let chosen = t == tab;
             tabs = tabs.child(
@@ -512,6 +520,7 @@ impl Render for SettingsView {
             .bg(theme.panel)
             .text_color(paper)
             .font_family(theme.ui_family.clone())
+            .child(top)
             .child(tabs)
             .child(body)
     }

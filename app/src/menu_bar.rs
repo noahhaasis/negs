@@ -71,7 +71,7 @@ pub fn render_words(app: &NegsApp, window: &Window, cx: &mut Context<NegsApp>) -
     }
     let menus = cx.get_menus()?;
     let theme = &app.theme;
-    let mut row = div().flex().items_center().gap(px(2.0)).ml(px(6.0));
+    let mut row = div().flex().flex_none().items_center().gap(px(2.0)).ml(px(6.0));
     for (i, menu) in menus.iter().enumerate() {
         let open = app.menu_bar.filter(|o| o.menu == i);
         let mut word = div()
