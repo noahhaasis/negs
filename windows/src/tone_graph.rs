@@ -3,15 +3,415 @@
 //! photograph's film exposure behind it; dragging it sets Print exposure and
 //! the print curves' gammas. Adapted from SpektraMac's Print tab "Contrast"
 //! graph (GPL-3.0). The window that draws it is `ui::tone_graph`.
-//!
-//! The curve maths, handles, hits and drags run in the shared core
-//! (core/src/rules/tone, through `negs_core_rules`); the helper's JSON and
-//! the requests stay Rust there. This module keeps its API and tests.
 
-pub use negs_core_rules::tone_graph::*;
+use serde_json::Value;
 
-#[cfg(test)]
 use crate::json;
+use crate::state;
+
+pub const PRINT_EXPOSURE: &str = "enlarger.print_exposure";
+pub const ACTIVE: &str = "print_render.density_curves_morph.active";
+pub const GAMMA: &str = "print_render.density_curves_morph.gamma_factor";
+pub const FAST: &str = "print_render.density_curves_morph.gamma_factor_fast";
+pub const SLOW: &str = "print_render.density_curves_morph.gamma_factor_slow";
+/// The sliders' ranges and step, which the drags keep to.
+pub const EXPOSURE_RANGE: (f64, f64) = (0.1, 5.0);
+pub const GAMMA_RANGE: (f64, f64) = (0.5, 2.0);
+const STEP: f64 = 0.01;
+/// The film exposures the graph shows, in stops over mid-grey.
+pub const SHOWN: (f64, f64) = (-6.0, 6.0);
+/// Greys per curve the helper computes.
+pub const POINTS: usize = 256;
+
+/// The controls the graph moves, as they act: the gammas are 1 while the
+/// print curves are off.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Controls {
+    pub print_exposure: f64,
+    pub gamma: f64,
+    pub fast: f64,
+    pub slow: f64,
+}
+
+impl Default for Controls {
+    fn default() -> Self {
+        Self { print_exposure: 1.0, gamma: 1.0, fast: 1.0, slow: 1.0 }
+    }
+}
+
+impl Controls {
+    pub fn read<'a>(value: impl Fn(&str) -> &'a Value) -> Self {
+        let positive = |path: &str| Some(json::number(value(path))).filter(|v| *v > 0.0).unwrap_or(1.0);
+        let mut controls = Self { print_exposure: positive(PRINT_EXPOSURE), ..Self::default() };
+        if json::boolean(value(ACTIVE)) {
+            (controls.gamma, controls.fast, controls.slow) = (positive(GAMMA), positive(FAST), positive(SLOW));
+        }
+        controls
+    }
+}
+
+/// What a curve is asked for: the film, paper and params as rendered.
+pub fn request(film: &str, paper: &str, params: &Value) -> Value {
+    serde_json::json!({"film": film, "paper": paper, "params": params})
+}
+
+/// A request without the controls the graph predicts, so a curve for the
+/// same settings otherwise can stand in while the next is computed.
+fn settings(request: &Value) -> Value {
+    let mut settings = request.clone();
+    for path in [PRINT_EXPOSURE, ACTIVE, GAMMA, FAST, SLOW] {
+        json::set(&mut settings, &format!("params.{path}"), Value::Null);
+    }
+    settings
+}
+
+/// The helper's `tone_curve`: per grey, the film's exposure in stops, the
+/// paper's log10 exposure and the scan, per channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Curve {
+    /// What it was computed for (`request`).
+    pub request: Value,
+    pub controls: Controls,
+    /// Mean film exposure per grey, in stops (the x axis).
+    pub stops: Vec<f64>,
+    /// Per channel, per grey; None when scanning the film directly.
+    pub paper: Option<[Vec<f64>; 3]>,
+    pub rgb: [Vec<f64>; 3],
+}
+
+fn triples(value: &Value) -> Option<Vec<[f64; 3]>> {
+    value.as_array()?.iter().map(|t| match t.as_array()?.as_slice() {
+        [r, g, b] => Some([r.as_f64()?, g.as_f64()?, b.as_f64()?]),
+        _ => None,
+    }).collect()
+}
+
+fn channels(triples: &[[f64; 3]]) -> [Vec<f64>; 3] {
+    [0, 1, 2].map(|c| triples.iter().map(|t| t[c]).collect())
+}
+
+impl Curve {
+    pub fn parse(result: &Value, request: Value, controls: Controls) -> Option<Self> {
+        let film = triples(&result["film"])?;
+        let rgb = triples(&result["rgb"])?;
+        if film.len() < 2 || film.len() != rgb.len() {
+            return None;
+        }
+        let paper = triples(&result["paper"]).filter(|p| p.len() == film.len());
+        Some(Self {
+            request,
+            controls,
+            stops: film.iter().map(|f| (f[0] + f[1] + f[2]) / 3.0).collect(),
+            paper: paper.as_deref().map(channels),
+            rgb: channels(&rgb),
+        })
+    }
+
+    /// Computed for the same settings as `request`, apart from the controls
+    /// the prediction moves.
+    pub fn matches(&self, request: &Value) -> bool {
+        json::same(&settings(&self.request), &settings(request))
+    }
+
+    pub fn luma(r: f64, g: f64, b: f64) -> f64 {
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
+    /// The curve's brightness per grey for `channel` (None: neutral, the luma).
+    pub fn brightness(&self, channel: Option<usize>) -> Vec<f64> {
+        brightness(&self.rgb, channel)
+    }
+
+    /// Paper exposure per grey for `channel` (None: the layers' mean).
+    pub fn paper_exposure(&self, channel: Option<usize>) -> Option<Vec<f64>> {
+        self.paper.as_ref().map(|paper| mean_or(paper, channel))
+    }
+
+    /// The curve `next` would give, predicted from this one: print exposure
+    /// shifts the paper exposure by log10(new/old); the gammas scale it about
+    /// 0 (slow above, fast below), and the brightness is this curve's at the
+    /// scaled exposure. Exact for print exposure and overall gamma, close for
+    /// fast and slow; the helper's next curve corrects it.
+    pub fn predicted(&self, next: Controls) -> Display {
+        let Some(paper) = self.paper.as_ref().filter(|_| next != self.controls) else {
+            return Display { stops: self.stops.clone(), rgb: self.rgb.clone(), paper: self.paper.clone() };
+        };
+        let shift = (next.print_exposure / self.controls.print_exposure).log10();
+        let gamma = next.gamma / self.controls.gamma;
+        let (slow, fast) = (next.slow / self.controls.slow, next.fast / self.controls.fast);
+        let (mut rgb, mut out) = (self.rgb.clone(), paper.clone());
+        for c in 0..3 {
+            for i in 0..self.stops.len() {
+                let x = paper[c][i] + shift;
+                let k = gamma * if x >= 0.0 { slow } else { fast };
+                out[c][i] = x;
+                rgb[c][i] = interpolate(&self.rgb[c], index_of_decreasing(&paper[c], k * x));
+            }
+        }
+        Display { stops: self.stops.clone(), rgb, paper: Some(out) }
+    }
+}
+
+fn brightness(rgb: &[Vec<f64>; 3], channel: Option<usize>) -> Vec<f64> {
+    match channel {
+        Some(c) => rgb[c].clone(),
+        None => (0..rgb[0].len()).map(|i| Curve::luma(rgb[0][i], rgb[1][i], rgb[2][i])).collect(),
+    }
+}
+
+fn mean_or(series: &[Vec<f64>; 3], channel: Option<usize>) -> Vec<f64> {
+    match channel {
+        Some(c) => series[c].clone(),
+        None => (0..series[0].len()).map(|i| (series[0][i] + series[1][i] + series[2][i]) / 3.0).collect(),
+    }
+}
+
+/// The fractional index where a decreasing series reaches `value`, clamped to the ends.
+pub fn index_of_decreasing(series: &[f64], value: f64) -> f64 {
+    let (Some(&first), Some(&last)) = (series.first(), series.last()) else { return 0.0 };
+    if value >= first {
+        return 0.0;
+    }
+    if value <= last {
+        return (series.len() - 1) as f64;
+    }
+    let (mut lo, mut hi) = (0, series.len() - 1);
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if series[mid] > value { lo = mid } else { hi = mid }
+    }
+    let span = series[lo] - series[hi];
+    lo as f64 + if span > 0.0 { (series[lo] - value) / span } else { 0.0 }
+}
+
+pub fn index_of_increasing(series: &[f64], value: f64) -> f64 {
+    let negated: Vec<f64> = series.iter().map(|v| -v).collect();
+    index_of_decreasing(&negated, -value)
+}
+
+pub fn interpolate(series: &[f64], index: f64) -> f64 {
+    if series.is_empty() {
+        return 0.0;
+    }
+    let i = index.clamp(0.0, (series.len() - 1) as f64);
+    let lo = i.floor() as usize;
+    let hi = (lo + 1).min(series.len() - 1);
+    series[lo] + (series[hi] - series[lo]) * (i - lo as f64)
+}
+
+/// A curve as drawn: per channel brightness and paper exposure per grey.
+#[derive(Clone, Debug)]
+pub struct Display {
+    pub stops: Vec<f64>,
+    pub rgb: [Vec<f64>; 3],
+    pub paper: Option<[Vec<f64>; 3]>,
+}
+
+impl Display {
+    pub fn brightness(&self, channel: Option<usize>) -> Vec<f64> {
+        brightness(&self.rgb, channel)
+    }
+
+    /// The handles' tones: where the paper's exposure is 0, and 2 stops
+    /// either side. None if the paper exposure never crosses 0.
+    pub fn handles(&self, channel: Option<usize>) -> Option<(f64, f64, f64)> {
+        let series = mean_or(self.paper.as_ref()?, channel);
+        let (&first, &last) = (series.first()?, series.last()?);
+        if !(first > 0.0 && last < 0.0) {
+            return None;
+        }
+        let middle = interpolate(&self.stops, index_of_decreasing(&series, 0.0));
+        Some((middle - 2.0, middle, middle + 2.0))
+    }
+
+    pub fn value(&self, series: &[f64], stops: f64) -> f64 {
+        interpolate(series, index_of_increasing(&self.stops, stops))
+    }
+}
+
+/// The photograph's film exposure: counts per layer over `range` stops.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FilmHistogram {
+    pub range: (f64, f64),
+    pub counts: [Vec<f64>; 3],
+}
+
+impl FilmHistogram {
+    pub fn parse(value: &Value) -> Option<Self> {
+        let stops: Vec<f64> = value["stops"].as_array()?.iter().map(|v| v.as_f64()).collect::<Option<_>>()?;
+        let counts: Vec<Vec<f64>> = value["counts"]
+            .as_array()?
+            .iter()
+            .map(|layer| layer.as_array()?.iter().map(|v| v.as_f64()).collect::<Option<Vec<f64>>>())
+            .collect::<Option<_>>()?;
+        let [low, high] = stops[..] else { return None };
+        let bins = counts.first()?.len();
+        if counts.len() != 3 || high <= low || bins < 2 || counts.iter().any(|c| c.len() != bins) {
+            return None;
+        }
+        let mut counts = counts.into_iter();
+        Some(Self { range: (low, high), counts: [0; 3].map(|_| counts.next().unwrap()) })
+    }
+
+    pub fn bins(&self, channel: Option<usize>) -> Vec<f64> {
+        mean_or(&self.counts, channel)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Handle {
+    Middle,
+    Shadows,
+    Highlights,
+    /// Anywhere else on the curve, at this tone in stops.
+    Curve(f64),
+}
+
+impl Handle {
+    pub fn title(self) -> &'static str {
+        match self {
+            Handle::Middle => "Print exposure",
+            Handle::Shadows => "Shadow contrast",
+            Handle::Highlights => "Highlight contrast",
+            Handle::Curve(_) => "Contrast",
+        }
+    }
+    pub fn path(self) -> &'static str {
+        match self {
+            Handle::Middle => PRINT_EXPOSURE,
+            Handle::Shadows => SLOW,
+            Handle::Highlights => FAST,
+            Handle::Curve(_) => GAMMA,
+        }
+    }
+    pub fn hint(self) -> &'static str {
+        match self {
+            Handle::Middle => "drag sideways",
+            _ => "drag up or down",
+        }
+    }
+    /// The same handle, wherever on the curve.
+    pub fn same(self, other: Option<Handle>) -> bool {
+        match (self, other) {
+            (Handle::Curve(_), Some(Handle::Curve(_))) => true,
+            (a, Some(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+/// The graph's frame in pixels: film exposure across, brightness up, with
+/// `inset` above and below.
+#[derive(Clone, Copy, Debug)]
+pub struct Geometry {
+    pub width: f64,
+    pub height: f64,
+    pub inset: f64,
+}
+
+impl Geometry {
+    pub fn x(&self, stops: f64) -> f64 {
+        (stops - SHOWN.0) / (SHOWN.1 - SHOWN.0) * self.width
+    }
+    pub fn stops(&self, x: f64) -> f64 {
+        SHOWN.0 + x / self.width.max(1.0) * (SHOWN.1 - SHOWN.0)
+    }
+    pub fn y(&self, brightness: f64) -> f64 {
+        self.inset + (1.0 - brightness.clamp(0.0, 1.0)) * (self.height - 2.0 * self.inset)
+    }
+    pub fn brightness(&self, y: f64) -> f64 {
+        (1.0 - (y - self.inset) / (self.height - 2.0 * self.inset).max(1.0)).clamp(0.001, 0.999)
+    }
+
+    pub fn handle_points(&self, display: &Display, channel: Option<usize>) -> Vec<(Handle, (f64, f64))> {
+        let Some((shadows, middle, highlights)) = display.handles(channel) else { return vec![] };
+        let curve = display.brightness(channel);
+        [(Handle::Shadows, shadows), (Handle::Middle, middle), (Handle::Highlights, highlights)]
+            .into_iter()
+            .map(|(handle, t)| (handle, (self.x(t), self.y(display.value(&curve, t)))))
+            .collect()
+    }
+
+    /// The handle within `radius` of `point`, or the curve within `tolerance` of it.
+    pub fn hit(&self, display: &Display, channel: Option<usize>, point: (f64, f64), radius: f64, tolerance: f64) -> Option<Handle> {
+        let nearest = self
+            .handle_points(display, channel)
+            .into_iter()
+            .map(|(handle, (x, y))| (handle, (x - point.0).hypot(y - point.1)))
+            .filter(|(_, d)| *d < radius)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((handle, _)) = nearest {
+            return Some(handle);
+        }
+        display.paper.as_ref()?;
+        let t = self.stops(point.0);
+        let y = self.y(display.value(&display.brightness(channel), t));
+        ((y - point.1).abs() < tolerance).then_some(Handle::Curve(t))
+    }
+}
+
+/// A drag in progress. Its values are solved on the curve it began with, so
+/// a newer curve arriving mid-drag doesn't make it jitter.
+#[derive(Clone, Debug)]
+pub struct Drag {
+    pub handle: Handle,
+    pub base: Curve,
+    /// The tone the drag acts at, in stops.
+    pub tone: f64,
+}
+
+impl Drag {
+    pub fn start(handle: Handle, base: &Curve, display: &Display, channel: Option<usize>) -> Option<Self> {
+        let tone = match handle {
+            Handle::Curve(t) => t,
+            _ => {
+                let (shadows, middle, highlights) = display.handles(channel)?;
+                match handle {
+                    Handle::Shadows => shadows,
+                    Handle::Highlights => highlights,
+                    _ => middle,
+                }
+            }
+        };
+        Some(Self { handle, base: base.clone(), tone })
+    }
+
+    /// The control the pointer at `point` asks for, snapped to its slider's
+    /// range and step; None where it can't be solved.
+    pub fn value(&self, current: Controls, channel: Option<usize>, geometry: &Geometry, point: (f64, f64)) -> Option<(&'static str, f64)> {
+        let base = &self.base;
+        let start = base.controls;
+        let paper = base.paper_exposure(channel)?;
+        let (path, value, range) = match self.handle {
+            Handle::Middle => {
+                // Paper exposure 0 under the pointer: new = base · 10^(−paper(t)).
+                let t = geometry.stops(point.0);
+                let p = interpolate(&paper, index_of_increasing(&base.stops, t));
+                (PRINT_EXPOSURE, start.print_exposure * 10f64.powf(-p), EXPOSURE_RANGE)
+            }
+            handle => {
+                // The tone on the base curve that already has the pointer's
+                // brightness; the scale is its paper exposure over the handle's.
+                let target = geometry.brightness(point.1);
+                let reached = interpolate(&paper, index_of_increasing(&base.brightness(channel), target));
+                let shift = (current.print_exposure / start.print_exposure).log10();
+                let at = interpolate(&paper, index_of_increasing(&base.stops, self.tone)) + shift;
+                if at.abs() <= 0.03 {
+                    return None;
+                }
+                let k = (reached / at).max(0.01);
+                let side = if at >= 0.0 { current.slow / start.slow } else { current.fast / start.fast };
+                let gamma = current.gamma / start.gamma;
+                match handle {
+                    Handle::Shadows => (SLOW, start.slow * k / gamma, GAMMA_RANGE),
+                    Handle::Highlights => (FAST, start.fast * k / gamma, GAMMA_RANGE),
+                    _ => (GAMMA, start.gamma * k / side, GAMMA_RANGE),
+                }
+            }
+        };
+        value.is_finite().then(|| (path, state::snap(value, range.0, range.1, STEP)))
+    }
+}
 
 #[cfg(test)]
 mod tests {

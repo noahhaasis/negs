@@ -1,5 +1,4 @@
 import AppKit
-import CNegsCore
 import Observation
 import SwiftUI
 
@@ -14,13 +13,28 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// The core's id (`NEGS_THEME_*`): the cases are in the core's order.
-    var coreId: UInt32 { UInt32(Self.allCases.firstIndex(of: self)!) }
-
-    var title: String { String(cString: Palette.core(coreId).title) }
+    var title: String {
+        switch self {
+        case .darkroom: "Darkroom"
+        case .contactSheet: "Contact sheet"
+        case .lightTable: "Light table"
+        case .daylight: "Daylight"
+        case .plain: "Plain"
+        case .plainDark: "Plain dark"
+        }
+    }
 
     /// The line under the swatches in Settings › Look.
-    var hint: String { String(cString: negs_theme_hint(coreId, NEGS_PLATFORM_MACOS)) }
+    var hint: String {
+        switch self {
+        case .darkroom: "Warm black, cream ink and the yellow pencil. The default."
+        case .contactSheet: "Ivory paper and the red grease pencil; the strip stays black film."
+        case .lightTable: "Lit white, graphite type and a yellow highlighter."
+        case .daylight: "Soft grey with an amber pencil, the calmest of the light ones."
+        case .plain: "Black on light grey in the system font, with plain blue marks. The easiest to read."
+        case .plainDark: "Plain in macOS’s dark greys: light words in the system font, blue marks."
+        }
+    }
 
     var palette: Palette { Palette.all[self]! }
 
@@ -101,35 +115,48 @@ struct Palette: Sendable {
         filmNS = NSColors(filmHex)
     }
 
-    /// The themes' tokens, from the shared core (core/src/theme).
-    static let all: [AppTheme: Palette] = Dictionary(uniqueKeysWithValues: AppTheme.allCases.map { theme in
-        let t = core(theme.coreId)
-        return (theme, Palette(Hex(t.hex), dark: t.dark != 0, highlighter: t.highlighter != 0, plain: t.plain != 0,
-                               filmInk: Hex(t.film)))
-    })
+    private static let darkroomHex = Hex(bg: 0x0c0b0a, panel: 0x161513, film: 0x000000, grid: 0x000000,
+                                         line: 0x2b2925, track: 0x47443d, dim: 0x918a7c, label: 0xbeb6a7, paper: 0xf2ebdd,
+                                         accent: 0xffd23f, fill: 0xffd23f, onFill: 0x14120c, warn: 0xff8a66, blank: 0x1c1b18)
 
-    static func core(_ id: UInt32) -> negs_theme_t {
-        var t = negs_theme_t()
-        precondition(negs_theme_get(id, &t) != 0, "the core has no theme \(id)")
-        return t
-    }
-
-    static let constants: negs_theme_constants_t = {
-        var c = negs_theme_constants_t()
-        negs_theme_constants(&c)
-        return c
-    }()
+    static let all: [AppTheme: Palette] = [
+        // The T2 · Label tokens (IMPLEMENTATION.md §2.1), unchanged.
+        .darkroom: Palette(darkroomHex, dark: true),
+        // Ivory paper and the red grease pencil of a Magnum contact sheet; the
+        // strip stays black film, its inks Darkroom's with a brighter red.
+        .contactSheet: Palette(Hex(bg: 0xf7f3ea, panel: 0xe9e2d3, film: 0x0c0b0a, grid: 0xf7f3ea,
+                                   line: 0xd6cdbb, track: 0xb3aa99, dim: 0x655c4e, label: 0x463f35, paper: 0x1d1a15,
+                                   accent: 0xc63a26, fill: 0xc63a26, onFill: 0xfff8ee, warn: 0x9a2f18, blank: 0xe2dccd),
+                               dark: false, filmInk: { var h = darkroomHex; h.accent = 0xe2492f; return h }()),
+        // A lit white table, graphite type; the yellow stays as a highlighter
+        // and in the Export button, ochre where it's a thin line.
+        .lightTable: Palette(Hex(bg: 0xffffff, panel: 0xededeb, film: 0xf3f3f1, grid: 0xf3f3f1,
+                                 line: 0xdcdcd9, track: 0xbdbdba, dim: 0x666663, label: 0x41413f, paper: 0x151514,
+                                 accent: 0xad7b00, fill: 0xffd23f, onFill: 0x14120c, warn: 0xb4381e, blank: 0xe4e4e1),
+                             dark: false, highlighter: true),
+        // Soft warm grey with an amber pencil.
+        .daylight: Palette(Hex(bg: 0xe8e6e1, panel: 0xd8d5cf, film: 0xc9c6bf, grid: 0xc9c6bf,
+                               line: 0xc6c2bb, track: 0xa29e96, dim: 0x57524b, label: 0x3a3631, paper: 0x161411,
+                               accent: 0xa35000, fill: 0xa35000, onFill: 0xffffff, warn: 0x912a16, blank: 0xd0cdc7), dark: false),
+        // Near native: neutral greys, near-black words (7 : 1 and up on every
+        // ground), a plain blue mark and the system font.
+        .plain: Palette(Hex(bg: 0xf7f7f7, panel: 0xececec, film: 0xe2e2e2, grid: 0xf7f7f7,
+                            line: 0xd2d2d2, track: 0xa6a6a6, dim: 0x4a4a4a, label: 0x1d1d1d, paper: 0x000000,
+                            accent: 0x0058d0, fill: 0x0062d9, onFill: 0xffffff, warn: 0xb0160a, blank: 0xe0e0e0),
+                        dark: false, plain: true),
+        // Plain in the system's dark greys: the sheet is macOS's dark window
+        // (1e1e1e), the panel its under-page grey, a tone lighter as in
+        // Darkroom, the strip darker. Words 7 : 1 and up on every ground,
+        // the system blue (dark) for marks, Apple's readable dark red.
+        .plainDark: Palette(Hex(bg: 0x1e1e1e, panel: 0x282828, film: 0x141414, grid: 0x1e1e1e,
+                                line: 0x3a3a3a, track: 0x5e5e5e, dim: 0xb4b4b4, label: 0xdcdcdc, paper: 0xf5f5f5,
+                                accent: 0x0091ff, fill: 0x0059d1, onFill: 0xffffff, warn: 0xff6961, blank: 0x2e2e2e),
+                            dark: true, plain: true),
+    ]
 
     /// The highlighter's yellow and strength (Light table).
-    static let highlighterInk: UInt32 = constants.highlighter_ink
-    static let highlighterOpacity = constants.highlighter_opacity
-}
-
-extension Palette.Hex {
-    init(_ h: negs_theme_hex_t) {
-        self.init(bg: h.bg, panel: h.panel, film: h.film, grid: h.grid, line: h.line, track: h.track, dim: h.dim,
-                  label: h.label, paper: h.paper, accent: h.accent, fill: h.fill, onFill: h.on_fill, warn: h.warn, blank: h.blank)
-    }
+    static let highlighterInk: UInt32 = 0xffd23f
+    static let highlighterOpacity = 0.85
 }
 
 /// The chosen theme, observed: SwiftUI views that read a `Theme` colour in
@@ -161,14 +188,13 @@ extension Theme {
     /// What dims the window under an alert: black at 0.28 on a dark theme, a
     /// warm brown at 0.12 on a light one (r28-light.html).
     static var dimming: NSColor {
-        let c = Palette.constants, d = palette.dark ? c.dimming_dark : c.dimming_light
-        return NSColor(srgbRed: d.0, green: d.1, blue: d.2, alpha: d.3)
+        palette.dark ? NSColor.black.withAlphaComponent(0.28) : NSColor(srgbRed: 0.24, green: 0.16, blue: 0.08, alpha: 0.12)
     }
     /// Words on a dark badge laid over a photograph: Darkroom's `paper` in
     /// every theme, since the badge stays dark.
     static var onPhoto: Color { AppTheme.darkroom.palette.colors.paper }
     /// The colour of shadows under alerts and tags: black, softer on a light theme.
-    static var shadowStrength: Double { palette.dark ? Palette.constants.shadow_dark : Palette.constants.shadow_light }
+    static var shadowStrength: Double { palette.dark ? 1 : 0.3 }
 
     /// Calls `apply` now and again after every theme change, for as long as
     /// `owner` lives: for AppKit views and layers that set their colours once.

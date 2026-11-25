@@ -1,2 +1,0 @@
-# The wrappers are libraries: their lock files are the hosts'.
-rust/*/Cargo.lock

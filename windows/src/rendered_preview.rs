@@ -1,20 +1,47 @@
 //! One lossless startup frame. A serial worker orders saves and invalidations;
 //! a single atomic file contains its identity, geometry and exact RGBA pixels.
-//!
-//! The shared core's (core/src/caches/preview, through negs_core_rules): the
-//! key, the checksum and the file run in Odin (core/diff/tests/
-//! rendered_preview.rs); the worker stays here.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
+use serde::{Deserialize, Serialize};
 
 use crate::engine::EnginePaths;
 use crate::state::EditState;
 
-use negs_core_rules::rendered_preview::{self as core, KeyState};
-pub use negs_core_rules::rendered_preview::Frame;
+const MAX_PIXELS: usize = 8192 * 8192 * 4;
+
+#[derive(Serialize, Deserialize)]
+pub struct Frame {
+    pub width: u32,
+    pub height: u32,
+    pub photo_width: f64,
+    pub photo_height: f64,
+    /// For Image Size readouts: the decoded source and the uncapped working
+    /// frame. Required, so records from before them never restore.
+    pub source_width: f64,
+    pub source_height: f64,
+    pub working_width: f64,
+    pub working_height: f64,
+    pub raw: bool,
+    /// The helper's `display_color_space`; records from before it are sRGB.
+    #[serde(default)]
+    pub display_space: String,
+    /// Shows the Lens corrections switch before the first render.
+    pub lens_correction_supported: bool,
+    #[serde(skip)]
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Header {
+    key: String,
+    frame: Frame,
+    checksum: u64,
+}
 
 type Work = Box<dyn FnOnce(&Path) + Send>;
 
@@ -75,25 +102,73 @@ impl RenderedPreviewCache {
 /// Compare the entire canonical identity, so settings cannot hash-collide.
 /// Crop, rotation and border are applied separately by the restored canvas;
 /// with an Image Size target the crop's extent is part of `state.rendered()`.
-/// A state the core doesn't read (a NaN serde writes as null) is keyed by
-/// its `rendered()` value, made here.
 pub fn key(source: &Path, state: &EditState, paths: &EnginePaths) -> Option<String> {
-    let json = serde_json::to_vec(state).ok()?;
-    match core::key(source, &paths.helper, &paths.data, KeyState::State(&json)) {
-        Ok(key) => key,
-        Err(()) => {
-            let rendered = serde_json::to_value(state.rendered()).ok()?;
-            core::key(source, &paths.helper, &paths.data, KeyState::Rendered(&rendered)).ok().flatten()
-        }
+    fn stamp(path: &Path) -> Result<String> {
+        let m = std::fs::metadata(path)?;
+        let modified = m.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+        let created = m.created()?.duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+        Ok(format!("{}|{}|{modified}|{created}", path.display(), m.len()))
     }
+    fn data_stamps(dir: &Path, files: &mut Vec<String>) -> Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                data_stamps(&entry.path(), files)?;
+            } else if kind.is_file() {
+                files.push(stamp(&entry.path())?);
+            }
+        }
+        Ok(())
+    }
+    let mut files = vec![stamp(source).ok()?, stamp(&paths.helper).ok()?, stamp(&paths.data).ok()?];
+    data_stamps(&paths.data, &mut files).ok()?;
+    files.sort();
+    serde_json::to_string(&serde_json::json!({"schema": 3, "state": state.rendered(), "files": files})).ok()
+}
+
+fn checksum(bytes: &[u8]) -> u64 {
+    let mut hash = DefaultHasher::new();
+    bytes.hash(&mut hash);
+    hash.finish()
 }
 
 fn read(file: &Path, key: &str) -> Result<Frame> {
-    core::read(file, key).map_err(anyhow::Error::msg)
+    ensure!(std::fs::metadata(file)?.len() <= (MAX_PIXELS + 1_048_576) as u64, "Invalid cached preview size");
+    let bytes = std::fs::read(file)?;
+    let end = bytes.iter().take(1_048_576).position(|&b| b == b'\n').ok_or_else(|| anyhow::anyhow!("Invalid cached preview header"))?;
+    let Header { key: saved, mut frame, checksum: expected } = serde_json::from_slice(&bytes[..end])?;
+    ensure!(saved == key && (1..=8192).contains(&frame.width) && (1..=8192).contains(&frame.height), "Cached preview does not match");
+    ensure!(
+        [frame.photo_width, frame.photo_height, frame.source_width, frame.source_height, frame.working_width, frame.working_height]
+            .iter()
+            .all(|v| v.is_finite() && *v >= 1.0),
+        "Invalid cached photograph size"
+    );
+    let pixels = &bytes[end + 1..];
+    ensure!(pixels.len() == frame.width as usize * frame.height as usize * 4 && checksum(pixels) == expected, "Invalid cached preview pixels");
+    frame.pixels = pixels.to_vec();
+    Ok(frame)
 }
 
-fn write(file: &Path, key: String, frame: Frame) -> Result<()> {
-    core::write(file, &key, &frame).map_err(anyhow::Error::msg)
+fn write(file: &Path, key: String, mut frame: Frame) -> Result<()> {
+    use std::io::Write;
+    let pixels = std::mem::take(&mut frame.pixels);
+    let mut bytes = serde_json::to_vec(&Header { key, frame, checksum: checksum(&pixels) })?;
+    bytes.push(b'\n');
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let staging = file.with_extension("tmp");
+    let result = (|| {
+        let mut output = std::fs::File::create(&staging)?;
+        output.write_all(&bytes)?;
+        output.write_all(&pixels)?;
+        drop(output);
+        crate::platform::replace_file(&staging, file)
+    })();
+    let _ = std::fs::remove_file(staging);
+    result
 }
 
 #[cfg(test)]

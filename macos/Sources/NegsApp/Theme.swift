@@ -1,5 +1,4 @@
 import AppKit
-import CNegsCore
 import CoreText
 import os
 import SwiftUI
@@ -105,13 +104,13 @@ enum Theme {
     static let didChange = Notification.Name("NegsThemeDidChange")
 
     /// Text selection: the pencil at 0.32, never system blue (§4.9).
-    static var selection: Color { accent.opacity(Palette.constants.selection_opacity) }
+    static var selection: Color { accent.opacity(0.32) }
     /// Outside the crop box the photograph darkens with this (§4.10).
-    static let cropShade = color(Palette.constants.crop_shade, opacity: Palette.constants.crop_shade_opacity)
+    static let cropShade = Color(.sRGB, red: 8 / 255, green: 7 / 255, blue: 6 / 255, opacity: 0.6)
     /// Disabled controls fade to this opacity (§2.1: 0.35–0.38).
-    static let disabledOpacity = Palette.constants.disabled_opacity
+    static let disabledOpacity = 0.36
     /// Strip frames other than the current one (§4.4).
-    static let stripDim = Palette.constants.strip_dim
+    static let stripDim = 0.42
 
     static func color(_ hex: UInt32, opacity: Double = 1) -> Color {
         let (r, g, b) = components(hex)
@@ -126,9 +125,16 @@ enum Theme {
     }
 
     /// The WCAG 2 contrast ratio between two sRGB colours, 1…21.
-    static func contrast(_ a: UInt32, _ b: UInt32) -> Double { negs_theme_contrast(a, b) }
+    static func contrast(_ a: UInt32, _ b: UInt32) -> Double {
+        let (hi, lo) = (max(luminance(a), luminance(b)), min(luminance(a), luminance(b)))
+        return (hi + 0.05) / (lo + 0.05)
+    }
     /// The WCAG 2 relative luminance of an sRGB colour, 0…1.
-    static func luminance(_ hex: UInt32) -> Double { negs_theme_luminance(hex) }
+    static func luminance(_ hex: UInt32) -> Double {
+        let (r, g, b) = components(hex)
+        func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+    }
 
     // MARK: Layout (§2.3), points
 
@@ -281,11 +287,11 @@ enum Theme {
     // MARK: Marks (§2.1)
 
     /// The pencil stroke's width: 2.1 pt, not scaled with the stroke.
-    static let pencilWidth = CGFloat(CoreMarks.constants.pencil_width)
+    static let pencilWidth: CGFloat = 2.1
     /// The pencil's height under a word: drawn 5–6 pt tall under the baseline.
     /// The highlighter's width (Light table): r28-light.html's 11 pt band, less its round ends.
-    static let highlighterWidth = CGFloat(CoreMarks.constants.highlighter_width)
-    static let pencilHeight = CGFloat(CoreMarks.constants.pencil_height)
+    static let highlighterWidth: CGFloat = 8.5
+    static let pencilHeight: CGFloat = 6
 }
 
 /// The one hand-drawn stroke reused for every underline mark: the SVG path
@@ -300,9 +306,20 @@ struct PencilStroke: Shape {
 
     /// For `CAShapeLayer`s: the same path, stretched to `rect`.
     static func cgPath(in rect: CGRect, plain: Bool = Theme.palette.plain) -> CGPath {
-        var segs = [negs_seg_t](repeating: negs_seg_t(), count: 3)
-        let n = negs_marks_pencil(CoreMarks.rect(rect), plain ? 1 : 0, &segs, segs.count)
-        return CoreMarks.cgPath(segs[0..<min(n, segs.count)])
+        if plain {
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: rect.minX + 1, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX - 1, y: rect.midY))
+            return path
+        }
+        let sx = rect.width / 100, sy = rect.height / 6
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * sx, y: rect.minY + y * sy) }
+        let path = CGMutablePath()
+        path.move(to: p(1, 3.6))
+        path.addCurve(to: p(70, 2.6), control1: p(22, 1.2), control2: p(47, 5.2))
+        // S: the first control point mirrors (47, 5.2) about (70, 2.6).
+        path.addCurve(to: p(99, 3.4), control1: p(93, 0), control2: p(93, 2.2))
+        return path
     }
 }
 
@@ -361,21 +378,44 @@ struct PencilRing: Shape {
     /// The rotation a ring is drawn at: −0.8° round thumbnails, −1° round
     /// tiles; none in Plain.
     static var tilt: Angle { tilt(-0.8) }
-    static func tilt(_ degrees: Double) -> Angle { .degrees(negs_marks_ring_tilt(degrees, Theme.palette.plain ? 1 : 0)) }
-    static let lineWidth = CGFloat(CoreMarks.constants.ring_line_width)
+    static func tilt(_ degrees: Double) -> Angle { Theme.palette.plain ? .zero : .degrees(degrees) }
+    static let lineWidth: CGFloat = 2
     /// How far a ring sits outside the picture it rings.
-    static let outset = CGSize(width: CoreMarks.constants.ring_outset_w, height: CoreMarks.constants.ring_outset_h)
+    static let outset = CGSize(width: 7, height: 6)
 
     func path(in rect: CGRect) -> Path { Path(Self.cgPath(in: rect, radii: radii, plain: plain)) }
 
     static func cgPath(in rect: CGRect, radii: Radii = .box, plain: Bool = Theme.palette.plain) -> CGPath {
-        var r = negs_radii_t()
-        let (h, v) = (radii.horizontal, radii.vertical)
-        r.horizontal = (Double(h.0), Double(h.1), Double(h.2), Double(h.3))
-        r.vertical = (Double(v.0), Double(v.1), Double(v.2), Double(v.3))
-        r.relative = radii.relative ? 1 : 0
-        var segs = [negs_seg_t](repeating: negs_seg_t(), count: 10)
-        let n = negs_marks_ring(CoreMarks.rect(rect), &r, plain ? 1 : 0, &segs, segs.count)
-        return CoreMarks.cgPath(segs[0..<min(n, segs.count)])
+        if plain {
+            let r = radii.relative ? min(rect.width, rect.height) / 2 : min(6, rect.width / 2, rect.height / 2)
+            return CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+        }
+        let (w, h) = (rect.width, rect.height)
+        var rx = [radii.horizontal.0, radii.horizontal.1, radii.horizontal.2, radii.horizontal.3]
+        var ry = [radii.vertical.0, radii.vertical.1, radii.vertical.2, radii.vertical.3]
+        if radii.relative {
+            rx = rx.map { $0 * w }
+            ry = ry.map { $0 * h }
+        }
+        // CSS: scale every radius by the smallest side / (sum of its radii).
+        let f = min(1, w / (rx[0] + rx[1]), w / (rx[3] + rx[2]), h / (ry[0] + ry[3]), h / (ry[1] + ry[2]))
+        rx = rx.map { $0 * f }
+        ry = ry.map { $0 * f }
+        let path = CGMutablePath()
+        // An elliptical quarter: from `start` round the corner, by a cubic
+        // with the usual 0.5523 control length.
+        let k: CGFloat = 0.5522847
+        let (x0, y0, x1, y1) = (rect.minX, rect.minY, rect.maxX, rect.maxY)
+        path.move(to: CGPoint(x: x0 + rx[0], y: y0))
+        path.addLine(to: CGPoint(x: x1 - rx[1], y: y0))
+        path.addCurve(to: CGPoint(x: x1, y: y0 + ry[1]), control1: CGPoint(x: x1 - rx[1] * (1 - k), y: y0), control2: CGPoint(x: x1, y: y0 + ry[1] * (1 - k)))
+        path.addLine(to: CGPoint(x: x1, y: y1 - ry[2]))
+        path.addCurve(to: CGPoint(x: x1 - rx[2], y: y1), control1: CGPoint(x: x1, y: y1 - ry[2] * (1 - k)), control2: CGPoint(x: x1 - rx[2] * (1 - k), y: y1))
+        path.addLine(to: CGPoint(x: x0 + rx[3], y: y1))
+        path.addCurve(to: CGPoint(x: x0, y: y1 - ry[3]), control1: CGPoint(x: x0 + rx[3] * (1 - k), y: y1), control2: CGPoint(x: x0, y: y1 - ry[3] * (1 - k)))
+        path.addLine(to: CGPoint(x: x0, y: y0 + ry[0]))
+        path.addCurve(to: CGPoint(x: x0 + rx[0], y: y0), control1: CGPoint(x: x0, y: y0 + ry[0] * (1 - k)), control2: CGPoint(x: x0 + rx[0] * (1 - k), y: y0))
+        path.closeSubpath()
+        return path
     }
 }

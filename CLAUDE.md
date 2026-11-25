@@ -16,13 +16,6 @@ variables for both sides.
 - `--dev` puts `spektrafilm-native`, `spektrafilm` and `spektrafilm-f64` in
   `target/release`, where the Swift tests look for them. Run Swift tests with
   `swift test --package-path macos --scratch-path target/swift-native`.
-- The macOS app links the shared app core (`core/`, Odin) from
-  `target/negs-core/libnegs_core.a`. `--dev` builds it; before a bare
-  `swift test` or `swift build`, run `python3 core/build.py lib` (~0.5 s).
-  `python3 core/build.py test` runs the core's own tests. Odin is pinned in
-  `core/ODIN_VERSION` and lives in `~/.negs/odin/<tag>`
-  (`python3 core/install_odin.py`). Port plan and log:
-  `docs/shared-core-plan.md`, `docs/shared-core-progress.md`.
 - Rust tests: run the crate or test you touched
   (`cargo test --release -p spektrafilm-core --test prep`) before the whole
   workspace (`cargo test --release --workspace --exclude spektrafilm-wasm`).
