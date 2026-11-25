@@ -16,6 +16,7 @@ mod marks_gpui;
 mod presets;
 mod status;
 mod theme_gpui;
+mod thumbs;
 mod tile_cache;
 mod titlebar;
 mod tray;

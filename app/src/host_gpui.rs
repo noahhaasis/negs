@@ -102,11 +102,10 @@ impl Host for GpuiHost {
         let _ = self.timer_tx.try_send(due);
     }
 
-    fn thumbnail_filed(&self, _key: String, _bgra: Vec<u8>, _width: u32, _height: u32) {
-        // Filmstrip/grid thumbnail cache arrives in Phase 4; wake the UI if needed.
-        self.post(Box::new(|model| {
-            model.dirty |= dirty::STRIP;
-        }));
+    fn thumbnail_filed(&self, key: String, bgra: Vec<u8>, width: u32, height: u32) {
+        // Colour-managed here, on the filing thread, then shown in the strip
+        // and grid at once (`thumbs::filed_from_host` wakes the UI).
+        crate::thumbs::filed_from_host(key, bgra, width, height);
     }
 
     fn batch_refresh(&self) {
