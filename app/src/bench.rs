@@ -74,6 +74,15 @@ enum Step {
     /// original), side by side or as a slider; None leaves.
     Compare(Option<(bool, negs_app::compare::Layout)>),
     ZoomActual(bool),
+    /// A parameter switched on or off (grain, glare: off for pixel compares).
+    Param(&'static str, bool),
+    /// The edits written to the photograph's sidecar now.
+    SaveLibrary,
+    /// The export card opened (File › Export: a batch in the grid), or closed.
+    Card(bool),
+    /// Exports the open photograph with the remembered choices into
+    /// `NEGS_BENCH_EXPORT_DIR` under its default name, and waits for it.
+    ExportHere,
     Write,
 }
 
@@ -93,6 +102,7 @@ pub struct Bench {
     quiet_since: Option<Instant>,
     started: Instant,
     notes: Vec<String>,
+    export_started: Option<Instant>,
     theme_before: Option<ThemeName>,
     /// The strip's scroll as a fling began.
     origin: f64,
@@ -106,6 +116,19 @@ impl Bench {
             let _ = std::fs::create_dir_all(dir);
         }
         use Step::*;
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "export") {
+            // The export card, single and batch, then a real export of the
+            // open photograph with grain and glare off (pixel compares).
+            let mut steps = vec![WaitLoaded, WaitDeveloped, Param("film_render.grain.active", false), Param("print_render.glare.active", false), WaitDeveloped, SaveLibrary, Hold(400)];
+            steps.extend([Card(true), Hold(500), Shot("export-card"), Card(false)]);
+            steps.extend([Theme(ThemeName::LightTable), Card(true), Hold(400), Shot("export-card-light-table"), Card(false), Theme(ThemeName::PlainDark), Card(true), Hold(400), Shot("export-card-plain-dark"), Card(false), Theme(ThemeName::Darkroom)]);
+            steps.extend([OpenGrid(None), WaitFlight, Select, Hold(300), Card(true), Hold(500), Shot("export-card-batch"), Card(false), CloseGrid(None), WaitFlight, Hold(300)]);
+            steps.extend([ExportHere, Hold(300), Write]);
+            if shots.is_none() {
+                steps.retain(|s| !matches!(s, Shot(_)));
+            }
+            return Some(Bench::with_steps(out, shots, steps));
+        }
         if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "print") {
             let mut steps = vec![WaitLoaded, WaitDeveloped, Hold(600), Shot("print-darkroom")];
             steps.extend([Theme(ThemeName::LightTable), Hold(400), Shot("print-light-table"), Theme(ThemeName::PlainDark), Hold(400), Shot("print-plain-dark")]);
@@ -160,6 +183,7 @@ impl Bench {
             quiet_since: None,
             started: now,
             notes: vec![],
+            export_started: None,
             theme_before: None,
             origin: 0.0,
         }
@@ -416,6 +440,45 @@ impl Bench {
                 app.model.zoom(!on);
                 app.after_model_update(cx);
                 self.next();
+            }
+            Step::Param(path, on) => {
+                app.model.set(path, serde_json::Value::Bool(on));
+                app.after_model_update(cx);
+                self.next();
+            }
+            Step::SaveLibrary => {
+                if let Err(error) = app.model.library_save_now() {
+                    self.notes.push(format!("library save: {error}"));
+                }
+                self.next();
+            }
+            Step::Card(open) => {
+                if open {
+                    crate::export_card::open(app, true, cx);
+                } else {
+                    crate::export_card::close(app, cx);
+                }
+                self.next();
+            }
+            Step::ExportHere => {
+                if self.step_frames == 1 {
+                    match std::env::var_os("NEGS_BENCH_EXPORT_DIR") {
+                        Some(dir) => {
+                            let choices = crate::export_card::Choices::from_prefs(&app.model.prefs);
+                            let path = std::path::PathBuf::from(dir).join(app.model.default_name(choices.format));
+                            self.notes.push(format!("export {} with {:?}", path.display(), choices.engine));
+                            self.export_started = Some(Instant::now());
+                            app.model.export(path, choices.engine, choices.size(), choices.settings());
+                            app.after_model_update(cx);
+                        }
+                        None => self.notes.push("ExportHere: NEGS_BENCH_EXPORT_DIR unset".into()),
+                    }
+                } else if (!app.model.exporting && !app.model.saving && in_step > Duration::from_millis(500)) || in_step > Duration::from_secs(600) {
+                    if let Some(started) = self.export_started.take() {
+                        self.notes.push(format!("export ended after {:.1} s: {}", started.elapsed().as_secs_f64(), app.model.status));
+                    }
+                    self.next();
+                }
             }
             Step::Write => self.write(app, cx),
         }

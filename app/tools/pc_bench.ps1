@@ -2,10 +2,11 @@
 # with schtasks /it; see docs/gpui-app-handoff-p5.md), capturing the window
 # whenever the app writes <name>.ready.
 #   pc_bench.ps1 -Root <scratch dir with photos\> -Exe <worktree>\app\target\release\Negs.exe [-Tour print]
-# -Tour print walks the photograph view for pictures instead (NEGS_BENCH_TOUR).
+# -Tour print walks the photograph view for pictures instead (NEGS_BENCH_TOUR);
+# -Tour export -ExportDir <dir> also exports the open photograph there.
 # Writes <Root>\bench-pc.json, <Root>\shots\*.png, <Root>\run.log, and
 # <Root>\finished.txt last. The profile is <Root>\profile.
-param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe, [string]$Tour = '')
+param([Parameter(Mandatory=$true)][string]$Root, [Parameter(Mandatory=$true)][string]$Exe, [string]$Tour = '', [string]$ExportDir = '')
 $ErrorActionPreference = 'Continue'
 $root = $Root
 $shots = Join-Path $root 'shots'
@@ -42,6 +43,7 @@ $psi.EnvironmentVariables['SPEKTRAFILM_ROOT'] = 'C:\Users\Noah\Projects\negs'
 $psi.EnvironmentVariables['NEGS_FRAME_BENCH'] = (Join-Path $root 'bench-pc.json')
 $psi.EnvironmentVariables['NEGS_BENCH_SHOTS'] = $shots
 if ($Tour) { $psi.EnvironmentVariables['NEGS_BENCH_TOUR'] = $Tour }
+if ($ExportDir) { $psi.EnvironmentVariables['NEGS_BENCH_EXPORT_DIR'] = $ExportDir }
 $proc = [System.Diagnostics.Process]::Start($psi)
 $errTask = $proc.StandardError.ReadToEndAsync()
 "started pid $($proc.Id)" | Out-File -Append $log
