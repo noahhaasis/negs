@@ -8,14 +8,21 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bench;
 mod canvas;
 mod color_display;
+mod grid;
 mod host_gpui;
 mod inspector;
+mod library_menu;
 mod marks_gpui;
+mod marks_raster;
+mod motion;
 mod presets;
 mod status;
+mod strip;
 mod theme_gpui;
+mod thumbs;
 mod tile_cache;
 mod titlebar;
 mod tray;
@@ -46,7 +53,12 @@ use crate::inspector::{
     InspectorState, build_inspector_view, handle_root_mouse_move, handle_root_mouse_up,
     render_inspector_column,
 };
+use crate::grid::GridState;
+use crate::library_menu::MenuState;
+use crate::marks_raster::MarkSprites;
 use crate::presets::PresetsState;
+use crate::strip::StripState;
+use crate::thumbs::Thumbs;
 use crate::status::render_status_bar;
 use crate::theme_gpui::{GpuiTheme, initial_theme, next_theme, register_fonts};
 use crate::titlebar::{render_theme_menu, render_titlebar};
@@ -78,6 +90,8 @@ actions!(
         ToggleInspector,
         ShowAdjustments,
         ShowPresets,
+        ToggleGrid,
+        ToggleFilmstrip,
         QuitApp,
     ]
 );
@@ -129,6 +143,15 @@ pub struct NegsApp {
     pub inspector: InspectorState,
     pub presets: PresetsState,
     pub tray: TrayState,
+    /// The strip's and grid's thumbnails, their frames, and the marks' sprites.
+    pub thumbs: Thumbs,
+    pub strip: StripState,
+    pub grid: GridState,
+    pub sprites: MarkSprites,
+    /// The library's context or filter menu, when open.
+    pub menu: Option<MenuState>,
+    /// `NEGS_FRAME_BENCH`: the app driving itself and timing its frames.
+    bench: Option<bench::Bench>,
     pub startup: StartupReport,
     focus_handle: FocusHandle,
     last_zoom_command: u64,
@@ -178,6 +201,8 @@ impl NegsApp {
                 display_profile.transform.is_some()
             );
         }
+        let mut thumbs = Thumbs::default();
+        thumbs.set_display(display_profile.transform.clone());
         let mut model = Model::new(prefs);
         model.set_preview_color(display_profile.transform.clone());
         model.launch();
@@ -258,6 +283,12 @@ impl NegsApp {
             inspector,
             presets,
             tray,
+            thumbs,
+            strip: StripState::default(),
+            grid: GridState::default(),
+            sprites: MarkSprites::default(),
+            menu: None,
+            bench: bench::Bench::from_env(),
             startup,
             focus_handle,
             last_zoom_command: 0,
@@ -283,6 +314,7 @@ impl NegsApp {
             self.canvas.invalidate_images();
             self.presets.tile_cache.invalidate();
             self.tray.tile_cache.invalidate();
+            self.thumbs.set_display(next.transform.clone());
             self.model.set_preview_color(next.transform);
         }
     }
@@ -319,6 +351,23 @@ impl NegsApp {
             && build_inspector_view(&self.model).tone_graph;
         self.model.show_tone_graph(tone_graph_visible);
         let _ = self.model.pump_previews();
+
+        // The first developed picture is up: the strip's thumbnails (which
+        // waited, so as not to slow it) may develop now.
+        if self.model.image.is_some() && !self.model.first_render_shown {
+            self.model.first_render_shown = true;
+            self.model.dirty |= negs_app::model::dirty::STRIP;
+            self.startup.stamp("first_image_scene");
+        }
+
+        // Thumbnails that arrived; the strip and grid follow the model.
+        let folder = self.model.source.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+        self.thumbs.set_folder(folder);
+        let arrived = self.thumbs.drain();
+        if self.model.dirty != 0 || arrived {
+            strip::sync(self);
+            grid::sync(self);
+        }
 
         self.model.dirty = 0;
     }
@@ -497,7 +546,71 @@ impl NegsApp {
         if let Some(session) = self.model.session() {
             let _ = SessionStore::default().save(&session);
         }
+        self.thumbs.shutdown();
         self.model.shutdown();
+    }
+
+    /// F6: the strip shows or hides (remembered).
+    pub fn toggle_filmstrip(&mut self, cx: &mut Context<Self>) {
+        self.model.prefs.filmstrip_visible = !self.model.prefs.filmstrip_visible;
+        self.model.prefs.save();
+        self.model.dirty |= negs_app::model::dirty::STRIP;
+        self.after_model_update(cx);
+        cx.notify();
+    }
+
+    pub fn toggle_grid(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        grid::toggle(self);
+        window.focus(&self.focus_handle.clone());
+        self.after_model_update(cx);
+        cx.notify();
+    }
+
+    /// A rating or flag key: the photograph, or the grid's selection.
+    fn library_key(&mut self, key: LibraryKey, cx: &mut Context<Self>) {
+        self.model.library_key(key);
+        self.after_model_update(cx);
+        cx.notify();
+    }
+
+    /// Keys no binding took: the menu's Esc, the grid's, the strip's ← and
+    /// →, Delete. Not while typing in a field.
+    fn root_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let typing = window.context_stack().iter().any(|c| c.contains("TextInput"));
+        if typing {
+            return false;
+        }
+        let key = event.keystroke.key.as_str();
+        let m = &event.keystroke.modifiers;
+        if self.menu.is_some() && key == "escape" {
+            self.close_menu();
+            cx.notify();
+            return true;
+        }
+        if grid::key_down(self, event) {
+            self.after_model_update(cx);
+            cx.notify();
+            return true;
+        }
+        if self.grid.shown && self.grid.flying() {
+            return false;
+        }
+        let command = if cfg!(target_os = "macos") { m.platform } else { m.control };
+        match key {
+            "left" | "right" if !self.grid.shown && !command && !m.alt => {
+                strip::open_neighbour(self, if key == "left" { -1 } else { 1 });
+            }
+            "backspace" | "delete" if self.model.shelf.library.is_some() => {
+                // ⌘⌫ on the Mac, Shift+Delete on Windows: without asking
+                // (unless it can't go to the Trash).
+                let now = if cfg!(target_os = "macos") { m.platform } else { m.shift };
+                self.request_delete(None, !now, window, cx);
+            }
+            _ => return false,
+        }
+        self.after_model_update(cx);
+        cx.notify();
+        true
     }
 }
 
@@ -510,14 +623,40 @@ impl gpui::Render for NegsApp {
         };
         window.set_window_title(&win_title);
 
+        if let Some(mut bench) = self.bench.take() {
+            bench.frame_start();
+            bench.tick(self, window, cx);
+            self.bench = Some(bench);
+        }
+        thumbs::flush_drops(window);
+        self.sprites.begin_frame();
         let titlebar_el = render_titlebar(self, window, cx).into_any_element();
-        let canvas_el = render_canvas(self, window, cx).into_any_element();
+        // The grid first: a flight that ends shows the photograph view again.
+        let grid_el = grid::render_grid(self, window, cx);
+        // Under the open grid the photograph view isn't drawn (its size is
+        // kept, so the strip under it stays laid out for the fold).
+        let covered = self.grid.covers();
+        self.canvas.hide_photo = self.grid.flight.as_ref().is_some_and(|f| f.canvas_flyer.is_some());
+        let canvas_el = if covered {
+            div().flex_1().w_full().min_h_0().bg(self.theme.canvas).into_any_element()
+        } else {
+            render_canvas(self, window, cx).into_any_element()
+        };
         let tray_el = render_tray(self, window, cx);
-        let inspector_el = render_inspector_column(self, window, cx);
+        let strip_el = strip::render_strip(self, window, cx);
+        let inspector_el = if covered && self.model.inspector_visible {
+            Some(div().w(px(inspector::INSPECTOR_WIDTH)).h_full().flex_shrink_0().bg(self.theme.panel).into_any_element())
+        } else {
+            render_inspector_column(self, window, cx)
+        };
+        let menu_el = library_menu::render_menu(self, window, cx);
         self.stamp_startup("inspector_shown");
         let show_status = self.model.tray_shown().is_none();
         let status_el = show_status.then(|| render_status_bar(self, cx).into_any_element());
         let theme_menu = render_theme_menu(self, cx);
+        if let Some(bench) = self.bench.as_mut() {
+            bench.frame_end();
+        }
 
         div()
             .id("negs-app-root")
@@ -533,6 +672,10 @@ impl gpui::Render for NegsApp {
                     .handle_key_down(event, &mut this.model, window, cx)
                 {
                     this.after_model_update(cx);
+                    return;
+                }
+                if this.root_key_down(event, window, cx) {
+                    cx.stop_propagation();
                 }
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
@@ -563,6 +706,7 @@ impl gpui::Render for NegsApp {
                 this.prompt_save_preview(window, cx);
             }))
             .on_action(cx.listener(|this, _: &UndoAction, _window, cx| {
+                this.close_menu();
                 this.model.perform_undo();
                 this.after_model_update(cx);
                 cx.notify();
@@ -582,13 +726,19 @@ impl gpui::Render for NegsApp {
                 this.toggle_zoom_fit(cx);
             }))
             .on_action(cx.listener(|this, _: &ZoomIn, _window, cx| {
-                if this.model.source.is_some() {
+                if this.grid.covers() {
+                    grid::set_size(this, this.model.prefs.grid_size + negs_app::sheet_rules::GRID_SIZE_STEP);
+                    cx.notify();
+                } else if this.model.source.is_some() {
                     this.canvas.zoom_by(1.25);
                     cx.notify();
                 }
             }))
             .on_action(cx.listener(|this, _: &ZoomOut, _window, cx| {
-                if this.model.source.is_some() {
+                if this.grid.covers() {
+                    grid::set_size(this, this.model.prefs.grid_size - negs_app::sheet_rules::GRID_SIZE_STEP);
+                    cx.notify();
+                } else if this.model.source.is_some() {
                     this.canvas.zoom_by(0.8);
                     cx.notify();
                 }
@@ -601,40 +751,31 @@ impl gpui::Render for NegsApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &Rate0, _window, cx| {
-                this.model.library_key(LibraryKey::Rate(0));
-                cx.notify();
+                this.library_key(LibraryKey::Rate(0), cx);
             }))
             .on_action(cx.listener(|this, _: &Rate1, _window, cx| {
-                this.model.library_key(LibraryKey::Rate(1));
-                cx.notify();
+                this.library_key(LibraryKey::Rate(1), cx);
             }))
             .on_action(cx.listener(|this, _: &Rate2, _window, cx| {
-                this.model.library_key(LibraryKey::Rate(2));
-                cx.notify();
+                this.library_key(LibraryKey::Rate(2), cx);
             }))
             .on_action(cx.listener(|this, _: &Rate3, _window, cx| {
-                this.model.library_key(LibraryKey::Rate(3));
-                cx.notify();
+                this.library_key(LibraryKey::Rate(3), cx);
             }))
             .on_action(cx.listener(|this, _: &Rate4, _window, cx| {
-                this.model.library_key(LibraryKey::Rate(4));
-                cx.notify();
+                this.library_key(LibraryKey::Rate(4), cx);
             }))
             .on_action(cx.listener(|this, _: &Rate5, _window, cx| {
-                this.model.library_key(LibraryKey::Rate(5));
-                cx.notify();
+                this.library_key(LibraryKey::Rate(5), cx);
             }))
             .on_action(cx.listener(|this, _: &FlagPick, _window, cx| {
-                this.model.library_key(LibraryKey::Pick);
-                cx.notify();
+                this.library_key(LibraryKey::Pick, cx);
             }))
             .on_action(cx.listener(|this, _: &FlagReject, _window, cx| {
-                this.model.library_key(LibraryKey::Reject);
-                cx.notify();
+                this.library_key(LibraryKey::Reject, cx);
             }))
             .on_action(cx.listener(|this, _: &FlagUnflag, _window, cx| {
-                this.model.library_key(LibraryKey::Unflag);
-                cx.notify();
+                this.library_key(LibraryKey::Unflag, cx);
             }))
             .on_action(cx.listener(|this, _: &CycleTheme, _window, cx| {
                 this.cycle_theme(cx);
@@ -647,6 +788,12 @@ impl gpui::Render for NegsApp {
             }))
             .on_action(cx.listener(|this, _: &ShowPresets, _window, cx| {
                 this.toggle_pane(Pane::Presets, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleGrid, window, cx| {
+                this.toggle_grid(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFilmstrip, _window, cx| {
+                this.toggle_filmstrip(cx);
             }))
             .on_action(cx.listener(|this, _: &QuitApp, _window, cx| {
                 this.shutdown_cleanly();
@@ -674,12 +821,15 @@ impl gpui::Render for NegsApp {
                             .flex()
                             .flex_col()
                             .child(canvas_el)
+                            .when_some(strip_el, |el, strip| el.child(strip))
                             .when_some(tray_el, |el, tray| el.child(tray)),
                     )
                     .when_some(inspector_el, |el, col| el.child(col)),
             )
             .when_some(status_el, |el, status| el.child(status))
+            .when_some(grid_el, |el, grid| el.child(grid))
             .when_some(theme_menu, |el, menu| el.child(menu))
+            .when_some(menu_el, |el, menu| el.child(menu))
     }
 }
 
@@ -710,6 +860,8 @@ fn bind_shortcuts(cx: &mut App) {
         KeyBinding::new("u", FlagUnflag, non_text),
         KeyBinding::new("t", CycleTheme, non_text),
         KeyBinding::new("i", ToggleInspector, non_text),
+        KeyBinding::new("g", ToggleGrid, non_text),
+        KeyBinding::new("f6", ToggleFilmstrip, None),
         KeyBinding::new("f7", ShowAdjustments, None),
         KeyBinding::new("f8", ShowPresets, None),
         KeyBinding::new(&format!("{modifier}-q"), QuitApp, None),
@@ -750,6 +902,8 @@ fn install_menus(cx: &mut App) {
                 MenuItem::action("Adjustments", ShowAdjustments),
                 MenuItem::action("Presets", ShowPresets),
                 MenuItem::action("Toggle Inspector", ToggleInspector),
+                MenuItem::action("Grid", ToggleGrid),
+                MenuItem::action("Filmstrip", ToggleFilmstrip),
                 MenuItem::separator(),
                 MenuItem::action("Cycle Theme", CycleTheme),
             ],
