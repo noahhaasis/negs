@@ -43,23 +43,30 @@ type Delivery = Box<dyn FnOnce(&mut App) + Send>;
 /// taken in on the UI thread.
 static DELIVERIES: Mutex<Vec<Delivery>> = Mutex::new(Vec::new());
 
-/// Takes `delivery` in on the UI thread, with every other that arrives
-/// before it runs, and then syncs the strip and grid once. A sync visits
-/// every cell, so one per thumbnail stalled the window for seconds when a
-/// large folder's thumbnails arrived together (issue #24).
+/// How long deliveries gather before they're taken in.
+const DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Takes `delivery` in on the UI thread with every other that arrives
+/// within `DELIVERY_WAIT`, and then syncs the strip and grid once. A sync
+/// visits every cell, so one per thumbnail stalled the window for seconds
+/// when a large folder's thumbnails arrived together (issue #24). They're
+/// taken in on a timer, which waits for input and painting: posted tasks
+/// go before both, and while the readers kept up the window took no clicks.
 fn deliver(delivery: impl FnOnce(&mut App) + Send + 'static) {
     let mut waiting = DELIVERIES.lock().unwrap_or_else(|e| e.into_inner());
     waiting.push(Box::new(delivery));
     if waiting.len() == 1 {
         drop(waiting);
-        post(|app: &mut App| {
-            let waiting = std::mem::take(&mut *DELIVERIES.lock().unwrap_or_else(|e| e.into_inner()));
-            for delivery in waiting {
-                delivery(app);
-            }
-            app.model.dirty |= crate::model::dirty::STRIP;
-        });
+        post(|_: &mut App| super::after(DELIVERY_WAIT, take_deliveries));
     }
+}
+
+fn take_deliveries(app: &mut App) {
+    let waiting = std::mem::take(&mut *DELIVERIES.lock().unwrap_or_else(|e| e.into_inner()));
+    for delivery in waiting {
+        delivery(app);
+    }
+    app.model.dirty |= crate::model::dirty::STRIP;
 }
 
 /// A thumbnail's pixels, opaque BGRA.
