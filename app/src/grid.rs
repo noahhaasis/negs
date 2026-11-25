@@ -108,12 +108,24 @@ pub struct Flight {
     cells: HashMap<usize, (bool, f64)>,
     /// When it's over (ms).
     end: f64,
+    /// Held still at this many ms (the bench's mid-flight captures).
+    frozen: Option<f64>,
 }
 
 impl Flight {
     /// Milliseconds in.
     pub fn elapsed(&self) -> f64 {
-        self.started.elapsed().as_secs_f64() * 1000.0 / slow()
+        self.frozen.unwrap_or_else(|| self.started.elapsed().as_secs_f64() * 1000.0 / slow())
+    }
+
+    /// Holds it at `at` ms, or lets it go on from where it's held.
+    pub fn freeze(&mut self, at: Option<f64>) {
+        if at.is_none()
+            && let Some(held) = self.frozen
+        {
+            self.started = Instant::now() - Duration::from_secs_f64(held * slow() / 1000.0);
+        }
+        self.frozen = at;
     }
 
     pub fn done(&self, e: f64) -> bool {
@@ -332,6 +344,11 @@ fn relayout(app: &mut NegsApp) -> bool {
     true
 }
 
+/// Asks for the thumbnails in view now (the bench's scrolling).
+pub fn request_now(app: &mut NegsApp) {
+    request(app);
+}
+
 /// The rows in view, then ±32 around them; the pump develops what's missing.
 fn request(app: &mut NegsApp) {
     let grid = &app.grid;
@@ -520,7 +537,7 @@ fn start_flight(app: &mut NegsApp, opening: bool) {
     if opening {
         end += 20.0;
     }
-    app.grid.flight = Some(Flight { opening, started: Instant::now(), band, reach, flyers, canvas_flyer, cells, end });
+    app.grid.flight = Some(Flight { opening, started: Instant::now(), band, reach, flyers, canvas_flyer, cells, end, frozen: None });
 }
 
 /// A picture of shape `ratio` fitted inside `canvas` as the canvas fits a
@@ -1209,7 +1226,7 @@ mod tests {
             Flyer { index: 0, thumb: thumb.clone(), from: Rect::new(10.0, 706.0, 210.0, 140.0), to: Rect::new(16.0, 112.0, 264.0, 176.0), opacity: (1.0, 1.0), delay: 0.0 },
             Flyer { index: 1, thumb, from: Rect::new(226.0, 706.0, 210.0, 140.0), to: Rect::new(286.0, 112.0, 264.0, 176.0), opacity: (rules::STRIP_DIM as f32, 1.0), delay: 32.0 },
         ];
-        Flight { opening, started: Instant::now(), band, reach, flyers, canvas_flyer: None, cells, end: if opening { 32.0 + DURATION + 20.0 } else { DURATION } }
+        Flight { opening, started: Instant::now(), band, reach, flyers, canvas_flyer: None, cells, end: if opening { 32.0 + DURATION + 20.0 } else { DURATION }, frozen: None }
     }
 
     #[test]

@@ -8,6 +8,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bench;
 mod canvas;
 mod color_display;
 mod grid;
@@ -149,6 +150,8 @@ pub struct NegsApp {
     pub sprites: MarkSprites,
     /// The library's context or filter menu, when open.
     pub menu: Option<MenuState>,
+    /// `NEGS_FRAME_BENCH`: the app driving itself and timing its frames.
+    bench: Option<bench::Bench>,
     pub startup: StartupReport,
     focus_handle: FocusHandle,
     last_zoom_command: u64,
@@ -285,6 +288,7 @@ impl NegsApp {
             grid: GridState::default(),
             sprites: MarkSprites::default(),
             menu: None,
+            bench: bench::Bench::from_env(),
             startup,
             focus_handle,
             last_zoom_command: 0,
@@ -611,6 +615,11 @@ impl gpui::Render for NegsApp {
         };
         window.set_window_title(&win_title);
 
+        if let Some(mut bench) = self.bench.take() {
+            bench.frame_start();
+            bench.tick(self, window, cx);
+            self.bench = Some(bench);
+        }
         thumbs::flush_drops(window);
         self.sprites.begin_frame();
         let titlebar_el = render_titlebar(self, window, cx).into_any_element();
@@ -637,6 +646,9 @@ impl gpui::Render for NegsApp {
         let show_status = self.model.tray_shown().is_none();
         let status_el = show_status.then(|| render_status_bar(self, cx).into_any_element());
         let theme_menu = render_theme_menu(self, cx);
+        if let Some(bench) = self.bench.as_mut() {
+            bench.frame_end();
+        }
 
         div()
             .id("negs-app-root")

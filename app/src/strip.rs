@@ -285,6 +285,11 @@ fn relist(app: &mut NegsApp) {
     }
 }
 
+/// Asks for the thumbnails in view now (the bench's scrolling).
+pub fn request_now(app: &mut NegsApp) {
+    request(app);
+}
+
 /// The thumbnails in view first, then ±32 around the middle; the pump
 /// develops what's missing.
 fn request(app: &mut NegsApp) {
