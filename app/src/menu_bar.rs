@@ -430,14 +430,17 @@ pub fn render_words(app: &NegsApp, window: &Window, cx: &mut Context<NegsApp>) -
     if cfg!(target_os = "macos") {
         return None;
     }
-    let all = menus(app, window, cx);
+    // Only the open menu's rows: asking what's enabled needs the last
+    // frame's dispatch tree, which the first frame doesn't have.
+    let all = cx.get_menus().unwrap_or_default();
     if all.is_empty() {
         return None;
     }
     let theme = &app.theme;
     let cues = app.alt.down || app.menu_bar.is_some_and(|o| o.keys);
     let mut row = div().flex().flex_none().items_center().gap(px(2.0)).ml(px(6.0));
-    for (i, (name, rows)) in all.into_iter().enumerate() {
+    for (i, menu) in all.iter().enumerate() {
+        let name = menu.name.to_string();
         let open = app.menu_bar.filter(|o| o.menu == i);
         let lit = open.is_some();
         let mut word = div()
@@ -466,6 +469,7 @@ pub fn render_words(app: &NegsApp, window: &Window, cx: &mut Context<NegsApp>) -
                 }
             }));
         if let Some(open) = open.filter(|o| o.dropped) {
+            let rows = rows_of(app, &menu.items, window, cx);
             word = word.child(deferred(render_rows(app, rows, open, None, cues, cx)).with_priority(2));
         }
         row = row.child(word);
