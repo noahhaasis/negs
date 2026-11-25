@@ -123,9 +123,11 @@ pub fn render_titlebar(
                 )
                 .children(crate::menu_bar::render_words(app, window, cx))
                 .when_some(photo_name, |el, name| {
-                    el.child(div().text_size(px(12.0)).text_color(theme.dim).child("/"))
+                    let drag = !cfg!(target_os = "macos");
+                    el.child(div().text_size(px(12.0)).text_color(theme.dim).when(drag, |d| d.window_control_area(gpui::WindowControlArea::Drag)).child("/"))
                         .child(
                             div()
+                                .when(drag, |d| d.window_control_area(gpui::WindowControlArea::Drag))
                                 .text_size(px(13.0))
                                 .text_color(theme.paper)
                                 .truncate()
