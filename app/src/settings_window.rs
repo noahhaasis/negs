@@ -517,30 +517,34 @@ impl Render for SettingsView {
     }
 }
 
-/// Opens Settings, or brings it to the front.
+/// Opens Settings, or brings it to the front. The window opens after this
+/// update: `open_window` draws it at once, and its view reads the app.
 pub fn open(app: &mut NegsApp, cx: &mut Context<NegsApp>) {
-    if let Some(handle) = app.settings_window {
-        if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
-            return;
-        }
+    if let Some(handle) = app.settings_window
+        && handle.update(cx, |_, window, _| window.activate_window()).is_ok()
+    {
+        return;
     }
     let entity = cx.entity();
-    let bounds = Bounds::centered(None, size(px(520.0), px(640.0)), cx);
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(px(440.0), px(420.0))),
-        titlebar: Some(gpui::TitlebarOptions { title: Some(SharedString::from("Settings")), appears_transparent: true, traffic_light_position: Some(gpui::Point::new(px(14.0), px(13.0))) }),
-        app_id: Some("negs".to_string()),
-        ..Default::default()
-    };
-    let handle: Option<WindowHandle<SettingsView>> = cx
-        .open_window(options, move |window, cx| {
-            let view = cx.new(|cx| SettingsView::new(entity, cx));
-            window.focus(&view.read(cx).focus.clone());
-            view
-        })
-        .ok();
-    app.settings_window = handle;
+    cx.defer(move |cx| {
+        let bounds = Bounds::centered(None, size(px(520.0), px(640.0)), cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_min_size: Some(size(px(440.0), px(420.0))),
+            titlebar: Some(gpui::TitlebarOptions { title: Some(SharedString::from("Settings")), appears_transparent: true, traffic_light_position: Some(gpui::Point::new(px(14.0), px(13.0))) }),
+            app_id: Some("negs".to_string()),
+            ..Default::default()
+        };
+        let app_entity = entity.clone();
+        let handle: Option<WindowHandle<SettingsView>> = cx
+            .open_window(options, move |window, cx| {
+                let view = cx.new(|cx| SettingsView::new(app_entity, cx));
+                window.focus(&view.read(cx).focus.clone());
+                view
+            })
+            .ok();
+        entity.update(cx, |app, _| app.settings_window = handle);
+    });
 }
 
 #[cfg(test)]

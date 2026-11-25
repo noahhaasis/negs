@@ -64,10 +64,12 @@ while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
     $name = [IO.Path]::GetFileNameWithoutExtension($r.Name)
     $done = Join-Path $shots ($name + '.done')
     if (Test-Path $done) { continue }
-    [NegsWin]::SetForegroundWindow($h) | Out-Null
+    # settings-*: Settings' own window, in front.
+    $w = $h
+    if ($name -like 'settings-*') { $w = [NegsWin]::GetForegroundWindow() } else { [NegsWin]::SetForegroundWindow($h) | Out-Null }
     Start-Sleep -Milliseconds 250
     $rc = New-Object NegsWin+RECT
-    if ([NegsWin]::DwmGetWindowAttribute($h, 9, [ref]$rc, 16) -ne 0) { [NegsWin]::GetWindowRect($h, [ref]$rc) | Out-Null }
+    if ([NegsWin]::DwmGetWindowAttribute($w, 9, [ref]$rc, 16) -ne 0) { [NegsWin]::GetWindowRect($w, [ref]$rc) | Out-Null }
     $bmp = New-Object System.Drawing.Bitmap ($rc.R - $rc.L), ($rc.B - $rc.T)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen($rc.L, $rc.T, 0, 0, $bmp.Size)

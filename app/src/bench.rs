@@ -93,6 +93,10 @@ enum Step {
     Key(LibraryKey),
     /// Notes what the first `n` photographs carry: marks, exposure, crop.
     Report(usize),
+    /// Opens Settings at a page, or closes it.
+    Settings(Option<crate::settings_window::Tab>),
+    /// Opens a menu of the in-window menu bar (by title) and a submenu.
+    MenuBar(Option<(&'static str, Option<usize>)>),
     Write,
 }
 
@@ -126,6 +130,22 @@ impl Bench {
             let _ = std::fs::create_dir_all(dir);
         }
         use Step::*;
+        if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "settings") {
+            // Settings' four pages, two themes on Look, and (off the Mac)
+            // the in-window menu bar's Photo › Rating open.
+            use crate::settings_window::Tab;
+            let mut steps = vec![WaitLoaded, WaitDeveloped, Hold(400)];
+            for (tab, name) in [(Tab::Photographs, "settings-photographs"), (Tab::Speed, "settings-speed"), (Tab::Upkeep, "settings-upkeep"), (Tab::Look, "settings-look")] {
+                steps.extend([Settings(Some(tab)), Hold(700), Shot(name)]);
+            }
+            steps.extend([Theme(ThemeName::LightTable), Hold(500), Shot("settings-look-light-table"), Theme(ThemeName::PlainDark), Hold(500), Shot("settings-look-plain-dark"), Theme(ThemeName::Darkroom)]);
+            steps.extend([Settings(Some(Tab::Photographs)), Settings(None), Hold(400)]);
+            if !cfg!(target_os = "macos") {
+                steps.extend([MenuBar(Some(("Photo", Some(2)))), Hold(500), Shot("menu-photo-rating"), MenuBar(Some(("File", None))), Hold(400), Shot("menu-file"), MenuBar(None)]);
+            }
+            steps.push(Write);
+            return Some(Bench::with_steps(out, shots, steps));
+        }
         if std::env::var("NEGS_BENCH_TOUR").is_ok_and(|t| t == "sidecar") {
             // The sidecar round trip (`NEGS_BENCH_SIDE`): mac1 edits, crops
             // and rates; pc reads that, then edits two others; mac2 reads.
@@ -545,6 +565,29 @@ impl Bench {
                     }
                     self.notes.push(line);
                 }
+                self.next();
+            }
+            Step::Settings(tab) => {
+                match tab {
+                    Some(tab) => {
+                        app.model.prefs.settings_tab = tab.title().into();
+                        crate::settings_window::open(app, cx);
+                    }
+                    None => {
+                        if let Some(handle) = app.settings_window.take() {
+                            let _ = handle.update(cx, |_, window, _| window.remove_window());
+                        }
+                    }
+                }
+                cx.notify();
+                self.next();
+            }
+            Step::MenuBar(open) => {
+                app.menu_bar = open.and_then(|(title, sub)| {
+                    let menu = cx.get_menus()?.iter().position(|m| m.name.as_ref() == title)?;
+                    Some(crate::menu_bar::Open { menu, sub })
+                });
+                cx.notify();
                 self.next();
             }
             Step::Write => self.write(app, cx),
