@@ -12,10 +12,68 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 1 | Extract Pure-Rust `crates/negs-app` | **Done** | `85281bf8` | Promoted `windows/marks` → `crates/negs-marks`; extracted all 32 non-UI modules + 6 themes + `Model` into standalone `crates/negs-app` behind `Host` & `platform`; `windows/` thin shell green on PC. |
 | 2 | GPUI Shell + Color-Managed Canvas | **Done** | `bd8c7662` | Standalone `app/` workspace on `gpui 0.2.2`; embedded Newsreader + 6 themes; fused linear-light exact-fit Lanczos-3 + per-display ICC/P3 pipeline; vector `negs-marks`; Mac & PC live verified. |
 | 3 | Inspector, Presets & Stock Tray | **Done** | `87cb390d` | Custom darkroom widgets (`InkSlider`, `TextInput`, `Scopes`, `ToneGraph`, `ColorFilterDiscs`), full 26-kind `InspectorView` Prep/Lab/Output UI, Presets sidebar, and Film/Paper Stock Preview Tray (`TileImageCache`). Mac & PC live verified. |
-| 4 | Library, Filmstrip, Grid & Flight | **Ready** | — | `negs-library` + folder watcher, filmstrip with `negs-marks`, contact-sheet grid, 60 fps `SheetFlight` transition. |
+| 4 | Library, Filmstrip, Grid & Flight | **Checkpoint** (Windows Smoothness Proof, awaiting Noah) | `9c1020ed` | Colour-managed background thumbnails, virtualized filmstrip + contact-sheet grid with hand-drawn marks (cached sprites), library menus, `SheetFlight` Photo↔Grid flight, `NEGS_FRAME_BENCH`. PC 60.0–60.8 fps, 0 dropped frames. |
 | 5 | Compare, Crop, Negative, Export, Batch & Settings | Pending | — | Full feature parity with `windows/` and `macos/`. |
 | 6 | Windows Cutover & Packaging | Pending | — | ABBA perf/screenshot report vs Win32 `Negs.exe`, Go/No-Go gate, installer + CI cutover. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
+
+---
+
+## 2026-11-25 — Phase 4: Library, Filmstrip, Contact-Sheet Grid & SheetFlight (`9c1020ed`)
+
+### What landed
+- Branch `gpui-p4-library-grid` (`f82004ad` … `51e93a3a`, 8 commits) merged `--no-ff` into local `main` at `9c1020ed`; 4,808 insertions across 12 files, all under `app/src/`. No changes to `crates/`, `vendor/`, `web/`, root or `app/` `Cargo.toml`/`Cargo.lock`. Not pushed.
+- `app/src/thumbs.rs`: background reader threads behind `negs_app::{sheet_rules, thumbnail, thumb_compose, embedded_preview, rendered_preview}`. Developed thumbnails (on-disk store, keyed by the engine stamp) win over the camera's embedded preview; both are converted to the display's ICC/P3 BGRA8 `RenderImage` off the UI thread. Two bounded LRUs (developed, embedded). Evicted and replaced images queue for `window.drop_image` and are flushed every frame; `Host::thumbnail_filed` → `thumbs::filed_from_host` swaps in a freshly developed thumbnail. Display changes bump an epoch so late results for the old display are dropped.
+- `app/src/marks_gpui.rs` + `app/src/marks_raster.rs`: `negs-marks` stars, reject cross, pick/selection boxes and pencil underline. GPUI 0.2.2's `paint_path` re-tessellates with lyon on the CPU every frame (~7 µs per polygon), so marks are rasterised once (non-zero fill, 4 sub-scanlines, box-blurred halo) into an LRU sprite cache (96 MB / 1,500 sprites, 3 ms per-frame making budget). Paths stay as the fallback and for boxes that fade during a flight.
+- `app/src/strip.rs`: virtualized bottom filmstrip driven by `sheet_rules::StripLayout`: frames dimmed to `STRIP_DIM` except the open one, rejects dimmed, `+J` pairs, hover/press, eased glide to the open frame, wheel scrolling, ⌘/Ctrl-click toggle and Shift range, right-click library menu, `F6` toggle. Before the library loads it lists the folder in natural order.
+- `app/src/grid.rs`: virtualized contact sheet driven by `sheet_rules::SheetLayout`:
+  - interactive filter sentence ("Showing *all* ⌄ · 72 photographs", × to clear) and the foot (counts + Size slider, keeping the anchor frame in place);
+  - rubber-band selection on top of the existing selection, arrows/Home/End/PageUp/PageDown with Shift ranges, ⌘/Ctrl-A, double-click/Enter/E to open, Esc to fold;
+  - ratings, flags, Trash with undo through the shared model;
+  - an auto-hiding scroll bar and wheel glide.
+- `SheetFlight` (Photo ↔ Grid), on both platforms, with Swift's timing: 480 ms, cubic-bezier(.22,.8,.24,1), 16 ms stagger up to 12 steps, boxes from 0.35, a 180 ms fold fade, and a mask reaching 25% past the top. Frames in view fly from the strip to their cells and back (`fadeIntoFrame` keeps flyer + frame at the frame's opacity). Beyond the Mac, the open photo itself flies from the canvas to its cell (`canvas.hide_photo` while it does). System Reduce Motion is honoured (`motion.rs`: macOS `reduceMotion`, Windows `SPI_GETCLIENTAREAANIMATION`, `NEGS_REDUCE_MOTION` override): the grid then shows at once.
+- `app/src/library_menu.rs`: the Photo menu's library commands as a darkroom popover: ratings, Pick/Reject/Unflagged, Copy/Paste/Paste from Previous, Duplicate, Reset, Trash / Delete Rejected (with the platform alert via `window.prompt`), Advance After Rating. The grid sentence uses the same popover for its filter menu.
+- `main.rs` / `titlebar.rs`: `G` (`NegsApp && !TextInput`), `Esc`, and the title bar's Photo / Grid pills switch views. View menu items for Grid and Filmstrip (`F6`). ⌘/Ctrl ± resize the grid while it covers the view. The canvas and inspector are swapped for placeholders while the grid covers them.
+- `app/src/bench.rs`: `NEGS_FRAME_BENCH=<out.json>` drives the app itself after loading:
+  - steps: strip fling 4 s, five open/fold flights, grid fling 6 s, filter, themes, and frozen mid-flight frames;
+  - output: per-phase frame-interval and render-time percentiles;
+  - `NEGS_BENCH_SHOTS=<dir>` writes `<name>.ready` and waits for `<name>.done`, so an outside script can capture the real window.
+
+### Decisions
+- **Grid and arrow keys go through the root `on_key_down`**, with a `window.context_stack()` "TextInput" check, not through actions. GPUI runs matched action bindings first, and an action that stops propagation hides the key from `on_key_down`. Single-key bindings stay `NegsApp && !TextInput`.
+- **The GPUI shell sets `model.first_render_shown`** once a developed image is on screen, as `windows/` does after its first scene. Launch-gated work (thumbnail pump, prefetch) waited for it forever otherwise.
+- **A keyed thumbnail request looks for its developed thumbnail on disk once, even when an embedded preview already covers that size.** Without this, a read that happened before the store knew the engine (no key yet) kept the camera preview for good. The Z 6 test roll's previews are monochrome, so the strip stayed grey. Regression test: `a_key_learnt_after_the_embedded_preview_still_finds_the_developed_one`.
+- **Flights carry only frames in view in both the strip and the grid**, as on the Mac, so the bench re-centres the strip on the open photo after its fling.
+- **Open question for Noah:** `sheet_rules::FADE_MS` records that on Win32 the Mac flight "felt slow" at 59 Hz (2026-11-20), so `windows/` fades instead (150 ms). The Phase 4 brief asks for `SheetFlight` on both platforms, and that is what the GPUI app does; the PC run below holds 60 fps through it. Whether it should become a fade on Windows is a feel call for the checkpoint.
+
+### Verification Gate
+- **Unit tests (`app/`): 58 passed, 0 failed on macOS and on the PC.** 23 are new: thumbnails, sprites, strip hit-testing and glide, flight mask, stagger and fold, arrows/Home/End, Shift ranges, rubber band, strip clicks, bench flings. There are 0 warnings in `negs-gpui`; the one in `spektrafilm-io` is upstream engine code, left alone.
+- **Frame bench:**
+  - Scratch copies: Mac 72 Nikon Z 6 NEFs (APFS clones); PC 67 NEFs copied from `Downloads\102ND750` + `Downloads\raws`.
+  - Profiles: scratch `NEGS_PROFILE_DIR` on both.
+  - "Interval" is the time between presented frames; "render" is the CPU time of our `render()` + paint.
+
+| Phase | Machine | Frames | fps | Interval median / p95 / p99 / max (ms) | Render p99 / max (ms) | > 25 ms |
+|---|---|---|---|---|---|---|
+| Strip fling 4 s | PC (60 Hz, 125%) | 240 | **60.0** | 16.69 / 17.21 / 17.37 / 18.31 | 0.89 / 0.90 | **0** |
+| Flight open ×5 | PC | 177 | **60.8** | 16.56 / 17.52 / 17.80 / 19.26 | 6.04 / 6.65 | **0** |
+| Flight fold ×5 | PC | 150 | **60.5** | 16.41 / 18.61 / 18.94 / 19.86 | 5.68 / 5.70 | **0** |
+| Grid fling 6 s | PC | 359 | **60.0** | 16.66 / 16.92 / 17.01 / 17.37 | 0.37 / 0.40 | **0** |
+| Strip fling 4 s | Mac (ProMotion, 2×) | 299 | 74.9 | 12.85 / 16.58 / 17.95 / 22.74 | 0.42 / 0.44 | 0 |
+| Flight open ×5 | Mac | 230 | 75.7 | 12.99 / 16.66 / 16.78 / 24.41 | 4.16 / 4.22 | 0 |
+| Flight fold ×5 | Mac | 188 | 75.6 | 12.88 / 16.58 / 16.76 / 18.61 | 3.83 / 9.66 | 0 |
+| Grid fling 6 s | Mac | 585 | 97.7 | 10.46 / 17.52 / 22.65 / 41.77 | 4.80 / 24.21 | 3 |
+
+  - **PC reading of the "p99 ≤ 16.7 ms" target:** the display runs at 60 Hz, so the present interval is one refresh (16.67 ms) plus timestamp jitter. Its p99 is 17.0–18.9 ms. No frame was dropped: the longest is 19.9 ms, against 33 ms for a skipped refresh. Our CPU render p99 is ≤ 6.0 ms. So the literal p99 ≤ 16.7 ms is met by render time, not by the present interval; the interval shows a steady 60 fps.
+  - **Mac:** the Mac shows a mixed 8.3 / 16.7 ms cadence on its 120 Hz panel. During the run Docker was using ~300% CPU. An earlier run with no shots gave a grid p99 of 14.2 ms and 1 frame > 25 ms; this run's 3 slow grid frames include a 24 ms render spike, probably sprite or thumbnail uploads as new rows enter. That needs a look in Phase 5 with a quiet machine.
+  - **PC cold start:** 66 thumbnails were developed by the engine on first open (80 s until settled). The Mac profile already had them on disk (1 s).
+  - The JSON's `window` field is `[grid viewport height, strip width]` in DIPs: Mac `[724, 940]`, PC `[716.8, 925.6]`.
+- **Screenshots (real windows; Mac `screencapture -l`, PC `CopyFromScreen` in Console Session 1):** strip, grid, filtered grid, Contact Sheet and Light Table themes, and frozen fold and open frames mid-flight. Both platforms show:
+  - developed, colour-managed thumbnails (PC: Dell P3424WEB ICC);
+  - stars, crosses, pick boxes, yellow selection boxes and pencil marks;
+  - the sentence and foot;
+  - flyers staggering out of the strip while the canvas photo shrinks into its cell.
+- **PC cleanup:** `schtasks negs-gpui-p4` was deleted after the run, and so were worktree `negs\worktrees\gpui-p4` and `C:\Users\Noah\.negs\scratch\gpui-p4`. Noah's main checkout, installed Negs, profiles and photo folders were never touched.
 
 ---
 
