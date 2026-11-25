@@ -11,6 +11,8 @@
 mod bench;
 mod canvas;
 mod color_display;
+mod crop_view;
+mod facts;
 mod grid;
 mod host_gpui;
 mod inspector;
@@ -19,6 +21,8 @@ mod marks_gpui;
 mod marks_raster;
 mod motion;
 mod presets;
+mod print;
+mod sheet;
 mod status;
 mod strip;
 mod theme_gpui;
@@ -92,6 +96,10 @@ actions!(
         ShowPresets,
         ToggleGrid,
         ToggleFilmstrip,
+        ToggleCrop,
+        RotatePhoto,
+        FlipPhoto,
+        ToggleImageOnly,
         QuitApp,
     ]
 );
@@ -148,6 +156,11 @@ pub struct NegsApp {
     pub strip: StripState,
     pub grid: GridState,
     pub sprites: MarkSprites,
+    /// The camera's facts, for the caption.
+    pub facts: facts::Facts,
+    /// The crop panel's fields, and the angle slider's track.
+    pub crop_panel: crop_view::CropPanel,
+    pub crop_panel_track: (f32, f32),
     /// The library's context or filter menu, when open.
     pub menu: Option<MenuState>,
     /// `NEGS_FRAME_BENCH`: the app driving itself and timing its frames.
@@ -287,6 +300,9 @@ impl NegsApp {
             strip: StripState::default(),
             grid: GridState::default(),
             sprites: MarkSprites::default(),
+            facts: facts::Facts::default(),
+            crop_panel: crop_view::CropPanel::new(cx),
+            crop_panel_track: (0.0, 1.0),
             menu: None,
             bench: bench::Bench::from_env(),
             startup,
@@ -336,6 +352,14 @@ impl NegsApp {
             self.canvas.invalidate_images();
             self.inspector.close_popovers();
             self.inspector.editing_slider = None;
+        }
+        // Cropping and closing the photograph end Image Only and upside down.
+        if self.model.cropping() || self.model.source.is_none() {
+            self.canvas.image_only = false;
+            self.canvas.upside_down = false;
+        }
+        if !self.model.cropping() {
+            self.canvas.crop_drag = None;
         }
         // Keep Original loaded whenever Before/After or Split mode is active.
         if (self.canvas.before_after || self.canvas.split_mode)
@@ -567,6 +591,22 @@ impl NegsApp {
     }
 
     /// A rating or flag key: the photograph, or the grid's selection.
+    /// The button came up: a crop drag, the angle slider, a press on the
+    /// print's words that wandered off.
+    fn end_crop_drags(&mut self, cx: &mut Context<Self>) {
+        canvas::crop_drag_end(self, cx);
+        if self.crop_panel.slider.take().is_some() {
+            if let Some(s) = self.model.crop_session.as_mut() {
+                s.end_straightening();
+            }
+            self.model.crop_changed();
+            cx.notify();
+        }
+        if self.canvas.pressed.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn library_key(&mut self, key: LibraryKey, cx: &mut Context<Self>) {
         self.model.library_key(key);
         self.after_model_update(cx);
@@ -585,6 +625,35 @@ impl NegsApp {
         if self.menu.is_some() && key == "escape" {
             self.close_menu();
             cx.notify();
+            return true;
+        }
+        let plain = !m.platform && !m.control && !m.alt && !m.shift;
+        // Cropping: Return applies, Esc cancels.
+        if self.model.cropping() {
+            if let Some(apply) = crop_view::key(key, false).filter(|_| plain) {
+                self.model.end_crop(apply);
+                self.after_model_update(cx);
+                cx.notify();
+                return true;
+            }
+        }
+        if key == "escape" && plain {
+            if self.model.cancel_negative_pick() {
+            } else if self.canvas.image_only {
+                self.canvas.image_only = false;
+            } else {
+                return false;
+            }
+            self.after_model_update(cx);
+            cx.notify();
+            return true;
+        }
+        // Hold T: the photograph upside down, to judge its balance.
+        if key == "t" && plain && !self.grid.covers() {
+            if !event.is_held && self.model.image.is_some() && !self.model.cropping() && !self.canvas.upside_down {
+                self.canvas.upside_down = true;
+                cx.notify();
+            }
             return true;
         }
         if grid::key_down(self, event) {
@@ -644,14 +713,20 @@ impl gpui::Render for NegsApp {
         };
         let tray_el = render_tray(self, window, cx);
         let strip_el = strip::render_strip(self, window, cx);
+        let image_only = self.canvas.image_only && !covered;
         let inspector_el = if covered && self.model.inspector_visible {
             Some(div().w(px(inspector::INSPECTOR_WIDTH)).h_full().flex_shrink_0().bg(self.theme.panel).into_any_element())
+        } else if self.model.cropping() {
+            crop_view::render_panel(self, window, cx)
+        } else if image_only {
+            None
         } else {
             render_inspector_column(self, window, cx)
         };
+        let strip_el = if image_only { None } else { strip_el };
         let menu_el = library_menu::render_menu(self, window, cx);
         self.stamp_startup("inspector_shown");
-        let show_status = self.model.tray_shown().is_none();
+        let show_status = self.model.tray_shown().is_none() && !image_only;
         let status_el = show_status.then(|| render_status_bar(self, cx).into_any_element());
         let theme_menu = render_theme_menu(self, cx);
         if let Some(bench) = self.bench.as_mut() {
@@ -678,9 +753,27 @@ impl gpui::Render for NegsApp {
                     cx.stop_propagation();
                 }
             }))
+            .on_key_up(cx.listener(|this, event: &gpui::KeyUpEvent, _window, cx| {
+                if event.keystroke.key == "t" && this.canvas.upside_down {
+                    this.canvas.upside_down = false;
+                    cx.notify();
+                }
+            }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if this.inspector.has_active_drag() {
                     handle_root_mouse_move(this, event, window, cx);
+                }
+                if canvas::crop_drag_move(this, event.position, cx) {
+                    return;
+                }
+                if let Some((l, w)) = this.crop_panel.slider
+                    && event.pressed_button == Some(MouseButton::Left)
+                {
+                    if let Some(s) = this.model.crop_session.as_mut() {
+                        s.straighten(crop_view::slider_angle(f32::from(event.position.x), l, w));
+                    }
+                    this.model.crop_changed();
+                    cx.notify();
                 }
             }))
             .on_mouse_up(
@@ -689,6 +782,7 @@ impl gpui::Render for NegsApp {
                     if this.inspector.has_active_drag() {
                         handle_root_mouse_up(this, window, cx);
                     }
+                    this.end_crop_drags(cx);
                 }),
             )
             .on_mouse_up_out(
@@ -697,8 +791,40 @@ impl gpui::Render for NegsApp {
                     if this.inspector.has_active_drag() {
                         handle_root_mouse_up(this, window, cx);
                     }
+                    this.end_crop_drags(cx);
                 }),
             )
+            .on_action(cx.listener(|this, _: &ToggleCrop, _window, cx| {
+                if this.model.cropping() {
+                    this.model.end_crop(true);
+                } else {
+                    this.model.begin_crop();
+                }
+                this.after_model_update(cx);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &RotatePhoto, _window, cx| {
+                // As on the Mac: rotating starts cropping, where the turn is kept or undone.
+                if this.model.image.is_some() {
+                    if !this.model.cropping() {
+                        this.model.begin_crop();
+                    }
+                    this.model.rotate();
+                    this.after_model_update(cx);
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FlipPhoto, _window, cx| {
+                if this.model.image.is_some() {
+                    this.model.flip();
+                    this.after_model_update(cx);
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleImageOnly, _window, cx| {
+                this.canvas.image_only = !this.canvas.image_only && this.model.source.is_some() && !this.model.cropping();
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &OpenPhoto, window, cx| {
                 this.prompt_open_photo(window, cx);
             }))
@@ -858,7 +984,9 @@ fn bind_shortcuts(cx: &mut App) {
         KeyBinding::new("p", FlagPick, non_text),
         KeyBinding::new("x", FlagReject, non_text),
         KeyBinding::new("u", FlagUnflag, non_text),
-        KeyBinding::new("t", CycleTheme, non_text),
+        KeyBinding::new(&format!("{modifier}-k"), ToggleCrop, None),
+        KeyBinding::new(&format!("{modifier}-r"), RotatePhoto, None),
+        KeyBinding::new("f", ToggleImageOnly, non_text),
         KeyBinding::new("i", ToggleInspector, non_text),
         KeyBinding::new("g", ToggleGrid, non_text),
         KeyBinding::new("f6", ToggleFilmstrip, None),
@@ -904,6 +1032,7 @@ fn install_menus(cx: &mut App) {
                 MenuItem::action("Toggle Inspector", ToggleInspector),
                 MenuItem::action("Grid", ToggleGrid),
                 MenuItem::action("Filmstrip", ToggleFilmstrip),
+                MenuItem::action("Image Only", ToggleImageOnly),
                 MenuItem::separator(),
                 MenuItem::action("Cycle Theme", CycleTheme),
             ],
@@ -911,6 +1040,10 @@ fn install_menus(cx: &mut App) {
         Menu {
             name: "Photo".into(),
             items: vec![
+                MenuItem::action("Crop", ToggleCrop),
+                MenuItem::action("Rotate", RotatePhoto),
+                MenuItem::action("Flip Left to Right", FlipPhoto),
+                MenuItem::separator(),
                 MenuItem::action("Pick", FlagPick),
                 MenuItem::action("Reject", FlagReject),
                 MenuItem::action("Unflagged", FlagUnflag),
