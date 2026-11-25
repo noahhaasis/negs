@@ -133,6 +133,39 @@ pub fn render_words(app: &NegsApp, words: Words, cx: &mut Context<NegsApp>) -> A
         .into_any_element()
 }
 
+/// Offers to resume a batch the last session didn't finish, once launch
+/// has settled (the Mac's `offerBatchResume`, `ui/batch.rs`).
+pub fn offer_resume(app: &mut NegsApp, window: &mut gpui::Window, cx: &mut Context<NegsApp>) {
+    let Some(journal) = app.model.unfinished_batch() else { return };
+    let title = resume_title(&journal);
+    let answer = window.prompt(
+        gpui::PromptLevel::Info,
+        &title,
+        Some("Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export."),
+        &["Resume", "Discard"],
+        cx,
+    );
+    cx.spawn(async move |this, cx| {
+        let resume = answer.await == Ok(0);
+        let _ = this.update(cx, |app, cx| {
+            app.model.resume_batch(journal, resume);
+            app.after_model_update(cx);
+            cx.notify();
+        });
+    })
+    .detach();
+}
+
+pub fn resume_title(journal: &negs_app::batch::Journal) -> String {
+    let count = journal.remaining();
+    let photographs = if count == 1 { "1 photograph".to_string() } else { format!("{count} photographs") };
+    let folder = journal.destination.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    match journal.options.lightroom.as_deref() {
+        Some(kind) => format!("Resume sending {photographs} to {}?", negs_app::batch::lightroom_title(kind)),
+        None => format!("Resume exporting {photographs} to “{folder}”?"),
+    }
+}
+
 pub fn toggle(app: &mut NegsApp) {
     if app.model.batch_popover_shown {
         close(app);
@@ -281,6 +314,15 @@ mod tests {
         assert_eq!(view.title, "Exporting 2 of 3");
         assert_eq!(view.line, "DSC_1");
         assert_eq!(view.buttons(), vec![Button::Cancel, Button::Show]);
+    }
+
+    #[test]
+    fn the_resume_offer_counts_what_is_left() {
+        let r = run(&[Status::Done, Status::Waiting, Status::Waiting], false);
+        assert_eq!(resume_title(&r.journal), "Resume exporting 2 photographs to “Roll”?");
+        let mut one = run(&[Status::Done, Status::Waiting], false);
+        one.journal.options.lightroom = Some("classic".into());
+        assert_eq!(resume_title(&one.journal), "Resume sending 1 photograph to Lightroom Classic?");
     }
 
     #[test]

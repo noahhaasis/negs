@@ -47,7 +47,7 @@ fn pill_button(
 
 pub fn render_titlebar(
     app: &NegsApp,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<NegsApp>,
 ) -> impl IntoElement {
     let theme = &app.theme;
@@ -117,6 +117,7 @@ pub fn render_titlebar(
                         .text_color(theme.paper)
                         .child("Negs"),
                 )
+                .children(crate::menu_bar::render_words(app, window, cx))
                 .when_some(photo_name, |el, name| {
                     el.child(div().text_size(px(12.0)).text_color(theme.dim).child("/"))
                         .child(

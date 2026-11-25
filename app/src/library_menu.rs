@@ -38,6 +38,9 @@ pub enum Command {
     FilterFlag(usize),
     FilterEdited,
     FilterUnedited,
+    /// "Export 3 Photographs…": the export card (ticket 48).
+    Export,
+    Lightroom(negs_app::lightroom::Kind),
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +98,14 @@ pub fn library_entries(app: &NegsApp) -> Vec<Entry> {
     out.push(entry("Copy Edits", Some(&format!("{m}⇧C")), can, false, Command::CopyEdits));
     out.push(entry("Paste Edits", Some(&format!("{m}⇧V")), model.can_paste_edits(), false, Command::PasteEdits));
     out.push(entry("Paste from Previous", None, model.can_paste_from_previous(), false, Command::PastePrevious));
+    out.push(rule());
+    // Export and each Lightroom installed, between the edits and Duplicate
+    // as on the Mac (`batch::export_items`).
+    let targets = model.export_targets().len();
+    out.push(entry(if targets > 1 { format!("Export {targets} Photographs…") } else { "Export…".into() }, None, model.can_export_any(), false, Command::Export));
+    for kind in model.lightroom_kinds() {
+        out.push(entry(negs_app::lightroom::menu_title(kind, targets), None, model.can_open_in_lightroom(kind), false, Command::Lightroom(kind)));
+    }
     out.push(rule());
     out.push(entry("Duplicate", Some(&format!("{m}D")), can, false, Command::Duplicate));
     out.push(entry("Reset Edits", None, can, false, Command::ResetEdits));
@@ -165,6 +176,8 @@ impl NegsApp {
         let model = &mut self.model;
         match command {
             Command::CompareOffer => {}
+            Command::Export => return crate::export_card::open(self, true, cx),
+            Command::Lightroom(kind) => model.open_in_lightroom(kind),
             Command::Rate(stars) => model.library_key(LibraryKey::Rate(stars)),
             Command::Raise => model.library_key(LibraryKey::Raise),
             Command::Lower => model.library_key(LibraryKey::Lower),

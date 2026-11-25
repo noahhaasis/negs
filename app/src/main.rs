@@ -25,6 +25,8 @@ mod marks_raster;
 mod motion;
 mod presets;
 mod print;
+mod menu_bar;
+mod settings_window;
 mod sheet;
 mod status;
 mod strip;
@@ -78,6 +80,21 @@ actions!(
         SavePreview,
         ExportPhoto,
         ExportLut,
+        OpenSettings,
+        AboutNegs,
+        CopyEdits,
+        PasteEdits,
+        PastePrevious,
+        DuplicatePhoto,
+        ResetEdits,
+        TrashPhoto,
+        TrashRejected,
+        ToggleAdvance,
+        ClearFilter,
+        RaiseRating,
+        LowerRating,
+        OpenInLightroom,
+        OpenInLightroomClassic,
         UndoAction,
         RedoAction,
         ToggleOriginal,
@@ -187,6 +204,12 @@ pub struct NegsApp {
     pub export_card: Option<export_card::ExportCard>,
     /// A one-second tick runs while an export or a batch does (its seconds, its rule).
     ticking: bool,
+    pub menu_bar: Option<menu_bar::Open>,
+    /// Offer to resume an unfinished batch once the window can ask.
+    resume_offer: bool,
+    /// The Lightroom kinds File lists.
+    menu_lightroom: Vec<negs_app::lightroom::Kind>,
+    pub settings_window: Option<gpui::WindowHandle<settings_window::SettingsView>>,
     /// The library's context or filter menu, when open.
     pub menu: Option<MenuState>,
     /// `NEGS_FRAME_BENCH`: the app driving itself and timing its frames.
@@ -310,6 +333,19 @@ impl NegsApp {
         })
         .detach();
 
+        // Back from another app: the folder as it left it, and Lightroom
+        // installed meanwhile or photos added there (`WM_ACTIVATEAPP`).
+        cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() && this.model.first_render_shown {
+                this.model.library_refresh();
+                if this.model.lightroom_detected() {
+                    this.model.refresh_lightroom(Duration::ZERO);
+                }
+                this.after_model_update(cx);
+            }
+        })
+        .detach();
+
         let inspector = InspectorState::new(initial_scope_height, cx);
         let presets = PresetsState::new(cx);
         let tray = TrayState::new(cx);
@@ -332,6 +368,10 @@ impl NegsApp {
             compare: compare_view::CompareView::default(),
             export_card: None,
             ticking: false,
+            settings_window: None,
+            menu_bar: None,
+            resume_offer: false,
+            menu_lightroom: Vec::new(),
             menu: None,
             bench: bench::Bench::from_env(),
             startup,
@@ -366,6 +406,12 @@ impl NegsApp {
 
     pub fn after_model_update(&mut self, cx: &mut Context<Self>) {
         self.keep_ticking(cx);
+        // File's Lightroom items follow what's installed.
+        let kinds = self.model.lightroom_kinds();
+        if kinds != self.menu_lightroom {
+            cx.set_menus(menus(&kinds));
+            self.menu_lightroom = kinds;
+        }
         if self.model.zoom_command != self.last_zoom_command {
             self.last_zoom_command = self.model.zoom_command;
             if self.model.fit_image {
@@ -412,6 +458,10 @@ impl NegsApp {
             self.model.first_render_shown = true;
             self.model.dirty |= negs_app::model::dirty::STRIP;
             self.startup.stamp("first_image_scene");
+            // Which Lightroom is installed, off the launch path (ticket 48).
+            self.model.refresh_lightroom(Duration::from_secs(2));
+            // A batch the last session didn't finish: offered at the next frame.
+            self.resume_offer = true;
         }
 
         // Thumbnails that arrived; the strip and grid follow the model.
@@ -565,6 +615,15 @@ impl NegsApp {
         .detach();
     }
 
+    /// Help › About Negs: the version, the credits and the licence.
+    pub fn about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let detail = format!(
+            "Version {}\n\nNegs is built on Andrea Volpato's spektrafilm, the spectral film simulation behind every stock, and turbasvin's spektrafilm-rs, the Rust port that runs it on the GPU.\n\nLicensed under the GNU General Public License, version 3.",
+            env!("CARGO_PKG_VERSION")
+        );
+        let _ = window.prompt(gpui::PromptLevel::Info, "Negs", Some(&detail), &["OK"], cx);
+    }
+
     /// Quitting cancels an export or a batch in flight, so it asks first
     /// (`applicationShouldTerminate`); a Save Preview being written holds
     /// the quit until it's done.
@@ -700,6 +759,10 @@ impl NegsApp {
         }
         let key = event.keystroke.key.as_str();
         let m = &event.keystroke.modifiers;
+        if key == "escape" && menu_bar::close(self) {
+            cx.notify();
+            return true;
+        }
         if self.menu.is_some() && key == "escape" {
             self.close_menu();
             cx.notify();
@@ -782,6 +845,9 @@ impl gpui::Render for NegsApp {
             self.bench = Some(bench);
         }
         thumbs::flush_drops(window);
+        if std::mem::take(&mut self.resume_offer) && self.bench.is_none() {
+            batch_view::offer_resume(self, window, cx);
+        }
         self.sprites.begin_frame();
         let titlebar_el = render_titlebar(self, window, cx).into_any_element();
         // The grid first: a flight that ends shows the photograph view again.
@@ -816,6 +882,7 @@ impl gpui::Render for NegsApp {
         };
         let menu_el = library_menu::render_menu(self, window, cx);
         let card_el = export_card::render(self, window, cx);
+        let menu_scrim = menu_bar::render_scrim(self, cx);
         let batch_el = batch_view::render_popover(self, cx);
         self.stamp_startup("inspector_shown");
         let show_status = self.model.tray_shown().is_none() && !image_only;
@@ -960,6 +1027,12 @@ impl gpui::Render for NegsApp {
             .on_action(cx.listener(|this, _: &ExportPhoto, _window, cx| {
                 export_card::open(this, true, cx);
             }))
+            .on_action(cx.listener(|this, _: &OpenSettings, _window, cx| {
+                settings_window::open(this, cx);
+            }))
+            .on_action(cx.listener(|this, _: &AboutNegs, window, cx| {
+                this.about(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ExportLut, _window, cx| {
                 export_card::export_lut(this, cx);
             }))
@@ -1053,6 +1126,45 @@ impl gpui::Render for NegsApp {
             .on_action(cx.listener(|this, _: &ToggleFilmstrip, _window, cx| {
                 this.toggle_filmstrip(cx);
             }))
+            .on_action(cx.listener(|this, _: &CopyEdits, window, cx| {
+                this.run_command(library_menu::Command::CopyEdits, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PasteEdits, window, cx| {
+                this.run_command(library_menu::Command::PasteEdits, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PastePrevious, window, cx| {
+                this.run_command(library_menu::Command::PastePrevious, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &DuplicatePhoto, window, cx| {
+                this.run_command(library_menu::Command::Duplicate, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ResetEdits, window, cx| {
+                this.run_command(library_menu::Command::ResetEdits, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TrashPhoto, window, cx| {
+                this.run_command(library_menu::Command::Trash, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TrashRejected, window, cx| {
+                this.run_command(library_menu::Command::TrashRejected, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleAdvance, window, cx| {
+                this.run_command(library_menu::Command::Advance, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ClearFilter, window, cx| {
+                this.run_command(library_menu::Command::ClearFilter, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &RaiseRating, window, cx| {
+                this.run_command(library_menu::Command::Raise, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &LowerRating, window, cx| {
+                this.run_command(library_menu::Command::Lower, None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenInLightroom, window, cx| {
+                this.run_command(library_menu::Command::Lightroom(negs_app::lightroom::Kind::Cloud), None, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenInLightroomClassic, window, cx| {
+                this.run_command(library_menu::Command::Lightroom(negs_app::lightroom::Kind::Classic), None, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
                 this.request_quit(window, cx);
             }))
@@ -1087,6 +1199,7 @@ impl gpui::Render for NegsApp {
             .when_some(grid_el, |el, grid| el.child(grid))
             .when_some(theme_menu, |el, menu| el.child(menu))
             .when_some(menu_el, |el, menu| el.child(menu))
+            .when_some(menu_scrim, |el, scrim| el.child(scrim))
             .when_some(batch_el, |el, popover| el.child(popover))
             .when_some(card_el, |el, card| el.child(card))
     }
@@ -1163,6 +1276,13 @@ fn bind_shortcuts(cx: &mut App) {
         KeyBinding::new(&format!("{modifier}-s"), SavePreview, None),
         KeyBinding::new(&format!("{modifier}-shift-e"), ExportPhoto, None),
         KeyBinding::new(&format!("{modifier}-shift-l"), ExportLut, None),
+        KeyBinding::new(&format!("{modifier}-,"), OpenSettings, None),
+        KeyBinding::new(&format!("{modifier}-shift-c"), CopyEdits, non_text),
+        KeyBinding::new(&format!("{modifier}-shift-v"), PasteEdits, non_text),
+        KeyBinding::new(&format!("{modifier}-d"), DuplicatePhoto, non_text),
+        KeyBinding::new(&format!("{modifier}-shift-r"), ResetEdits, non_text),
+        KeyBinding::new("]", RaiseRating, non_text),
+        KeyBinding::new("[", LowerRating, non_text),
         KeyBinding::new(&format!("{modifier}-z"), UndoAction, None),
         KeyBinding::new(&format!("{modifier}-shift-z"), RedoAction, None),
         KeyBinding::new("\\", ToggleOriginal, non_text),
@@ -1197,93 +1317,138 @@ fn bind_shortcuts(cx: &mut App) {
 }
 
 fn install_menus(cx: &mut App) {
-    cx.set_menus(vec![
-        Menu {
+    cx.set_menus(menus(&[]));
+}
+
+/// The menus: the Mac's menu bar, and the in-window menu bar elsewhere
+/// (`menu_bar.rs`), in the Windows app's order (`build_menu`).
+fn menus(lightroom: &[negs_app::lightroom::Kind]) -> Vec<Menu> {
+    let mac = cfg!(target_os = "macos");
+    let trash = if mac { "Move to Trash…" } else if cfg!(target_os = "windows") { "Move to Recycle Bin…" } else { "Move to Trash…" };
+    let mut file = vec![
+        MenuItem::action("Open…", OpenPhoto),
+        MenuItem::separator(),
+        MenuItem::action("Save Preview…", SavePreview),
+        MenuItem::action("Export Photograph…", ExportPhoto),
+        MenuItem::action("Export LUT…", ExportLut),
+    ];
+    // Open in Lightroom, Open in Lightroom Classic: only those installed.
+    for kind in lightroom {
+        let title = format!("Open in {}", kind.title());
+        file.push(match kind {
+            negs_app::lightroom::Kind::Cloud => MenuItem::action(title, OpenInLightroom),
+            negs_app::lightroom::Kind::Classic => MenuItem::action(title, OpenInLightroomClassic),
+        });
+    }
+    if !mac {
+        file.extend([MenuItem::separator(), MenuItem::action("Settings…", OpenSettings), MenuItem::separator(), MenuItem::action("Exit", QuitApp)]);
+    }
+    let mut out = Vec::new();
+    if mac {
+        out.push(Menu {
             name: "Negs".into(),
-            items: vec![MenuItem::action("Quit Negs", QuitApp)],
-        },
-        Menu {
-            name: "File".into(),
             items: vec![
-                MenuItem::action("Open…", OpenPhoto),
-                MenuItem::action("Save Preview…", SavePreview),
-                MenuItem::action("Export Photograph…", ExportPhoto),
-                MenuItem::action("Export LUT…", ExportLut),
+                MenuItem::action("About Negs", AboutNegs),
+                MenuItem::separator(),
+                MenuItem::action("Settings…", OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit Negs", QuitApp),
             ],
-        },
-        Menu {
-            name: "Edit".into(),
-            items: vec![
-                MenuItem::action("Undo", UndoAction),
-                MenuItem::action("Redo", RedoAction),
-            ],
-        },
-        Menu {
-            name: "View".into(),
-            items: vec![
-                MenuItem::action("Original", ToggleOriginal),
-                MenuItem::action("Split Before/After", ToggleSplit),
-                MenuItem::separator(),
-                MenuItem::action("Toggle Fit / 100%", ToggleZoomFit),
-                MenuItem::action("Zoom In", ZoomIn),
-                MenuItem::action("Zoom Out", ZoomOut),
-                MenuItem::action("Zoom to Fit", ZoomFit),
-                MenuItem::action("Actual Size", ZoomActual),
-                MenuItem::separator(),
-                MenuItem::action("Adjustments", ShowAdjustments),
-                MenuItem::action("Presets", ShowPresets),
-                MenuItem::action("Toggle Inspector", ToggleInspector),
-                MenuItem::action("Grid", ToggleGrid),
-                MenuItem::action("Filmstrip", ToggleFilmstrip),
-                MenuItem::action("Compare", ToggleCompare),
-                MenuItem::action("Image Only", ToggleImageOnly),
-                MenuItem::separator(),
-                MenuItem::submenu(Menu {
-                    name: "Theme".into(),
-                    items: vec![
-                        MenuItem::action("Darkroom", ThemeDarkroom),
-                        MenuItem::action("Contact Sheet", ThemeContactSheet),
-                        MenuItem::action("Light Table", ThemeLightTable),
-                        MenuItem::action("Daylight", ThemeDaylight),
-                        MenuItem::action("Plain", ThemePlain),
-                        MenuItem::action("Plain Dark", ThemePlainDark),
-                    ],
-                }),
-                MenuItem::submenu(Menu {
-                    name: "Viewer Sheet".into(),
-                    items: vec![
-                        MenuItem::action("Theme’s Own", SheetTheme),
-                        MenuItem::action("Darkroom", SheetDarkroom),
-                        MenuItem::action("Black", SheetBlack),
-                        MenuItem::action("Charcoal", SheetCharcoal),
-                        MenuItem::action("22% Grey", SheetGrey22),
-                        MenuItem::action("Middle Grey", SheetMiddleGrey),
-                        MenuItem::action("Light Grey", SheetLightGrey),
-                        MenuItem::action("Paper", SheetPaper),
-                    ],
-                }),
-            ],
-        },
-        Menu {
-            name: "Photo".into(),
-            items: vec![
-                MenuItem::action("Crop", ToggleCrop),
-                MenuItem::action("Rotate", RotatePhoto),
-                MenuItem::action("Flip Left to Right", FlipPhoto),
-                MenuItem::separator(),
-                MenuItem::action("Pick", FlagPick),
-                MenuItem::action("Reject", FlagReject),
-                MenuItem::action("Unflagged", FlagUnflag),
-                MenuItem::separator(),
-                MenuItem::action("Rate 5 Stars", Rate5),
-                MenuItem::action("Rate 4 Stars", Rate4),
-                MenuItem::action("Rate 3 Stars", Rate3),
-                MenuItem::action("Rate 2 Stars", Rate2),
-                MenuItem::action("Rate 1 Star", Rate1),
-                MenuItem::action("Clear Rating", Rate0),
-            ],
-        },
-    ]);
+        });
+    }
+    out.push(Menu { name: "File".into(), items: file });
+    out.push(Menu { name: "Edit".into(), items: vec![MenuItem::action("Undo", UndoAction), MenuItem::action("Redo", RedoAction)] });
+    out.push(Menu {
+        name: "Photo".into(),
+        items: vec![
+            MenuItem::action("Show Original", ToggleOriginal),
+            MenuItem::separator(),
+            MenuItem::submenu(Menu {
+                name: "Rating".into(),
+                items: vec![
+                    MenuItem::action("None", Rate0),
+                    MenuItem::separator(),
+                    MenuItem::action("★", Rate1),
+                    MenuItem::action("★★", Rate2),
+                    MenuItem::action("★★★", Rate3),
+                    MenuItem::action("★★★★", Rate4),
+                    MenuItem::action("★★★★★", Rate5),
+                    MenuItem::separator(),
+                    MenuItem::action("Raise Rating", RaiseRating),
+                    MenuItem::action("Lower Rating", LowerRating),
+                ],
+            }),
+            MenuItem::submenu(Menu {
+                name: "Flag".into(),
+                items: vec![MenuItem::action("Pick", FlagPick), MenuItem::action("Reject", FlagReject), MenuItem::action("Unflagged", FlagUnflag)],
+            }),
+            MenuItem::separator(),
+            MenuItem::action("Copy Edits", CopyEdits),
+            MenuItem::action("Paste Edits", PasteEdits),
+            MenuItem::action("Paste from Previous", PastePrevious),
+            MenuItem::separator(),
+            MenuItem::action("Duplicate", DuplicatePhoto),
+            MenuItem::action("Reset Edits", ResetEdits),
+            MenuItem::separator(),
+            MenuItem::action(trash, TrashPhoto),
+            MenuItem::action("Delete Rejected Photographs…", TrashRejected),
+            MenuItem::separator(),
+            MenuItem::action("Advance After Rating", ToggleAdvance),
+            MenuItem::action("Clear Filter", ClearFilter),
+        ],
+    });
+    out.push(Menu {
+        name: "View".into(),
+        items: vec![
+            MenuItem::action("Film Strip", ToggleFilmstrip),
+            MenuItem::action("Adjustments", ShowAdjustments),
+            MenuItem::action("Presets", ShowPresets),
+            MenuItem::action("Inspector", ToggleInspector),
+            MenuItem::action("Image Only", ToggleImageOnly),
+            MenuItem::action("Grid", ToggleGrid),
+            MenuItem::action("Compare", ToggleCompare),
+            MenuItem::action("Split Before/After", ToggleSplit),
+            MenuItem::separator(),
+            MenuItem::action("Fit Photograph", ZoomFit),
+            MenuItem::action("Actual Size", ZoomActual),
+            MenuItem::action("Toggle Fit / 100%", ToggleZoomFit),
+            MenuItem::action("Zoom In", ZoomIn),
+            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::separator(),
+            MenuItem::action("Rotate Clockwise", RotatePhoto),
+            MenuItem::action("Flip Horizontal", FlipPhoto),
+            MenuItem::action("Crop", ToggleCrop),
+            MenuItem::separator(),
+            MenuItem::submenu(Menu {
+                name: "Theme".into(),
+                items: vec![
+                    MenuItem::action("Darkroom", ThemeDarkroom),
+                    MenuItem::action("Contact Sheet", ThemeContactSheet),
+                    MenuItem::action("Light Table", ThemeLightTable),
+                    MenuItem::action("Daylight", ThemeDaylight),
+                    MenuItem::action("Plain", ThemePlain),
+                    MenuItem::action("Plain Dark", ThemePlainDark),
+                ],
+            }),
+            MenuItem::submenu(Menu {
+                name: "Viewer Sheet".into(),
+                items: vec![
+                    MenuItem::action("Theme’s Own", SheetTheme),
+                    MenuItem::action("Darkroom", SheetDarkroom),
+                    MenuItem::action("Black", SheetBlack),
+                    MenuItem::action("Charcoal", SheetCharcoal),
+                    MenuItem::action("22% Grey", SheetGrey22),
+                    MenuItem::action("Middle Grey", SheetMiddleGrey),
+                    MenuItem::action("Light Grey", SheetLightGrey),
+                    MenuItem::action("Paper", SheetPaper),
+                ],
+            }),
+        ],
+    });
+    if !mac {
+        out.push(Menu { name: "Help".into(), items: vec![MenuItem::action("About Negs", AboutNegs)] });
+    }
+    out
 }
 
 fn cli_photo_arg() -> Option<PathBuf> {
