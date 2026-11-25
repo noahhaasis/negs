@@ -1704,8 +1704,15 @@ pub fn render_inspector_column(
             .enumerate()
             .map(|(idx, row)| {
                 let el = render_row(app, row, idx == 0, &theme, window, cx);
-                // The row's help, as the Windows app's tooltips on its label and control.
-                match row.help.clone().map(SharedString::from).or_else(|| row.kind.and_then(|k| k.help()).map(SharedString::from)) {
+                // The row's help, as the Windows app's tooltips on its label and
+                // control. `RowView::help` is Match brightness's, or a slider's
+                // reset ("Reset to 0", on its ↺).
+                let help = match row.kind {
+                    Some(Kind::MatchBrightness) => row.help.clone().map(SharedString::from),
+                    Some(kind) => kind.help().map(SharedString::from),
+                    None => None,
+                };
+                match help {
                     Some(help) if !help.is_empty() => div().id(("row-tip", row.id)).tooltip(crate::tooltip::tip(help, &theme)).child(el).into_any_element(),
                     _ => el,
                 }
