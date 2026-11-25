@@ -201,11 +201,86 @@ impl MatrixProfile {
     }
 }
 
+/// Extracts the human-readable profile description from an ICC `desc` tag
+/// (supports ICC v2 `desc` ASCII and ICC v4 `mluc` UTF-16BE).
+pub fn profile_name(data: &[u8]) -> Option<String> {
+    let count = be32(data, 128)? as usize;
+    for i in 0..count.min(256) {
+        let at = 132 + i * 12;
+        if data.get(at..at + 4)? != b"desc" {
+            continue;
+        }
+        let offset = be32(data, at + 4)? as usize;
+        let size = be32(data, at + 8)? as usize;
+        let t = data.get(offset..offset + size)?;
+        match t.get(0..4)? {
+            b"desc" => {
+                let len = be32(t, 8)? as usize;
+                let raw = t.get(12..12 + len)?;
+                let trimmed = raw.split(|&b| b == 0).next().unwrap_or(raw);
+                let text = String::from_utf8_lossy(trimmed).trim().to_string();
+                if !text.is_empty() {
+                    return Some(text);
+                }
+            }
+            b"mluc" => {
+                let records = be32(t, 8)? as usize;
+                if records == 0 {
+                    return None;
+                }
+                // First record starts at offset 16: lang(2) + country(2) + length(4) + offset(4).
+                let rec_len = be32(t, 20)? as usize;
+                let rec_off = be32(t, 24)? as usize;
+                let raw = t.get(rec_off..rec_off + rec_len)?;
+                let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+                let text = String::from_utf16_lossy(&units).trim_matches('\0').trim().to_string();
+                if !text.is_empty() {
+                    return Some(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Transform for the active monitor via `crate::platform::monitor_icc_profile_bytes()`,
 /// or `None` for plain sRGB.
 pub fn for_current_monitor() -> Option<Transform> {
     let (bytes, label) = crate::platform::monitor_icc_profile_bytes()?;
     parse(&bytes)?.transform(&label)
+}
+
+/// Transform for a specific platform display ID (macOS `CGDirectDisplayID`;
+/// delegates to the active monitor on Windows), or `None` for plain sRGB.
+pub fn for_display_id(display_id: u32) -> Option<Transform> {
+    let (bytes, label) = crate::platform::monitor_icc_profile_bytes_for_display(display_id)?;
+    parse(&bytes)?.transform(&label)
+}
+
+/// Returns both the display `Transform` (or `None` when sRGB) and a human-readable
+/// profile label (e.g. `"Display P3"`, `"Color LCD"`, or `"sRGB"`).
+pub fn describe_display(display_id: Option<u32>) -> (Option<Transform>, String) {
+    let loaded = match display_id {
+        Some(id) => crate::platform::monitor_icc_profile_bytes_for_display(id),
+        None => crate::platform::monitor_icc_profile_bytes(),
+    };
+    let Some((bytes, path)) = loaded else {
+        return (None, "sRGB".to_string());
+    };
+    let name = profile_name(&bytes).unwrap_or_else(|| {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("ICC")
+            .to_string()
+    });
+    let transform = parse(&bytes).and_then(|p| p.transform(&path));
+    if transform.is_some() {
+        (transform, name)
+    } else {
+        (None, format!("{name} (sRGB)"))
+    }
 }
 
 /// Windows convenience: profile path for `hwnd`'s monitor.
@@ -317,5 +392,39 @@ mod tests {
             }
         }
         assert!(parse(b"not a profile").is_none());
+    }
+
+    #[test]
+    fn profile_name_reads_v2_desc_and_v4_mluc() {
+        // Minimal ICC with v2 'desc' tag.
+        let mut v2 = vec![0u8; 128];
+        v2.extend(1u32.to_be_bytes());
+        v2.extend(b"desc");
+        let offset = 128u32 + 4 + 12;
+        let text = b"Display P3\0";
+        let mut body = b"desc\0\0\0\0".to_vec();
+        body.extend((text.len() as u32).to_be_bytes());
+        body.extend(text);
+        v2.extend(offset.to_be_bytes());
+        v2.extend((body.len() as u32).to_be_bytes());
+        v2.extend(body);
+        assert_eq!(profile_name(&v2).as_deref(), Some("Display P3"));
+
+        // Minimal ICC with v4 'mluc' tag.
+        let mut v4 = vec![0u8; 128];
+        v4.extend(1u32.to_be_bytes());
+        v4.extend(b"desc");
+        let utf16: Vec<u8> = "Color LCD".encode_utf16().flat_map(u16::to_be_bytes).collect();
+        let mut body = b"mluc\0\0\0\0".to_vec();
+        body.extend(1u32.to_be_bytes()); // records
+        body.extend(12u32.to_be_bytes()); // record size
+        body.extend(b"enUS");
+        body.extend((utf16.len() as u32).to_be_bytes());
+        body.extend(28u32.to_be_bytes()); // offset within tag
+        body.extend(utf16);
+        v4.extend(offset.to_be_bytes());
+        v4.extend((body.len() as u32).to_be_bytes());
+        v4.extend(body);
+        assert_eq!(profile_name(&v4).as_deref(), Some("Color LCD"));
     }
 }

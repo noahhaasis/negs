@@ -342,6 +342,11 @@ pub fn monitor_icc_profile_bytes() -> Option<(Vec<u8>, PathBuf)> {
     Some((data, path))
 }
 
+/// Monitor ICC profile bytes for a specific display (delegates to the host window's monitor on Windows).
+pub fn monitor_icc_profile_bytes_for_display(_display_id: u32) -> Option<(Vec<u8>, PathBuf)> {
+    monitor_icc_profile_bytes()
+}
+
 // MARK: FolderWatch
 
 struct StopEvent(HANDLE);

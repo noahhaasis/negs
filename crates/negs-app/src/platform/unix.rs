@@ -268,6 +268,19 @@ pub fn monitor_icc_profile_bytes() -> Option<(Vec<u8>, PathBuf)> {
     }
 }
 
+/// Monitor ICC profile bytes for a specific platform display ID (macOS `CGDirectDisplayID`).
+pub fn monitor_icc_profile_bytes_for_display(display_id: u32) -> Option<(Vec<u8>, PathBuf)> {
+    #[cfg(target_os = "macos")]
+    {
+        monitor_icc_macos(Some(display_id)).or_else(|| monitor_icc_macos(None))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = display_id;
+        None
+    }
+}
+
 /// macOS CoreGraphics ICC lookup for a specific display ID (or the main display if `None`).
 #[cfg(target_os = "macos")]
 pub fn monitor_icc_macos(display_id: Option<u32>) -> Option<(Vec<u8>, PathBuf)> {
@@ -303,7 +316,10 @@ pub fn monitor_icc_macos(display_id: Option<u32>) -> Option<(Vec<u8>, PathBuf)> 
             None
         };
         CFRelease(data);
-        bytes.map(|b| (b, PathBuf::from(format!("display-{id}.icc"))))
+        bytes.map(|b| {
+            let label = crate::icc::profile_name(&b).unwrap_or_else(|| format!("display-{id}.icc"));
+            (b, PathBuf::from(label))
+        })
     }
 }
 
