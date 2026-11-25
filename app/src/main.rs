@@ -23,15 +23,19 @@ mod library_menu;
 mod marks_gpui;
 mod marks_raster;
 mod motion;
+mod place;
 mod presets;
 mod print;
 mod menu_bar;
+mod menu_state;
 mod settings_window;
 mod sheet;
 mod status;
 mod strip;
 mod theme_gpui;
 mod trace_ui;
+mod updates;
+mod win;
 mod thumbs;
 mod tile_cache;
 mod titlebar;
@@ -154,6 +158,8 @@ actions!(
         ThemePlain,
         ThemePlainDark,
         QuitApp,
+        CheckForUpdates,
+        ToggleAllControls,
     ]
 );
 
@@ -220,6 +226,13 @@ pub struct NegsApp {
     /// A one-second tick runs while an export or a batch does (its seconds, its rule).
     ticking: bool,
     pub menu_bar: Option<menu_bar::Open>,
+    /// Alt held on its own (the menu bar's access keys show, off the Mac).
+    pub alt: menu_bar::AltState,
+    /// The window's place, written to the preferences on quitting.
+    window_place: Option<(gpui::WindowBounds, f32)>,
+    /// An export or batch was running at the last frame (to flash the taskbar when it ends).
+    was_exporting: bool,
+    updates_scheduled: bool,
     /// Offer to resume an unfinished batch once the window can ask.
     resume_offer: bool,
     /// The Lightroom kinds File lists.
@@ -344,6 +357,7 @@ impl NegsApp {
 
         // Observe window moves/resizes to refresh active monitor ICC profile automatically.
         cx.observe_window_bounds(window, |this, window, cx| {
+            this.window_place = Some((window.window_bounds(), window.scale_factor()));
             this.refresh_display_profile(window, cx);
             cx.notify();
         })
@@ -390,6 +404,10 @@ impl NegsApp {
             ticking: false,
             settings_window: None,
             menu_bar: None,
+            alt: menu_bar::AltState::default(),
+            window_place: None,
+            was_exporting: false,
+            updates_scheduled: false,
             resume_offer: false,
             menu_lightroom: Vec::new(),
             menu_recent: Vec::new(),
@@ -402,6 +420,25 @@ impl NegsApp {
             shut_down: false,
         };
         app.startup.stamp("gpu_ready");
+        app.window_place = Some((window.window_bounds(), window.scale_factor()));
+        // Logging off or shutting down: the edits and the session saved, nothing asked.
+        let weak = cx.entity().downgrade();
+        let mut async_cx = cx.to_async();
+        win::on_end_session(window, Box::new(move || {
+            let _ = weak.update(&mut async_cx, |app, _| app.shutdown_cleanly());
+        }));
+        // WinSparkle asks to quit to install an update.
+        if let Some(requests) = updates::quit_requests() {
+            cx.spawn(async move |this, cx| {
+                while requests.recv().await.is_ok() {
+                    let _ = this.update(cx, |app, cx| {
+                        app.shutdown_cleanly();
+                        cx.quit();
+                    });
+                }
+            })
+            .detach();
+        }
         app.after_model_update(cx);
         app
     }
@@ -495,7 +532,19 @@ impl NegsApp {
             self.model.refresh_lightroom(Duration::from_secs(2));
             // A batch the last session didn't finish: offered at the next frame.
             self.resume_offer = true;
+            // The updater, 3 s later, never during startup.
+            if !self.updates_scheduled && updates::configured() {
+                self.updates_scheduled = true;
+                let automatic = self.model.prefs.check_for_updates;
+                cx.spawn(async move |_, cx| {
+                    cx.background_executor().timer(Duration::from_secs(3)).await;
+                    updates::start(automatic);
+                })
+                .detach();
+            }
         }
+        // A downloaded update waits for an export or a save.
+        updates::set_busy(self.model.exporting || self.model.saving || self.model.batch_running());
 
         // Thumbnails that arrived; the strip and grid follow the model.
         let folder = self.model.source.as_deref().and_then(Path::parent).map(Path::to_path_buf);
@@ -728,6 +777,33 @@ impl NegsApp {
         .detach();
     }
 
+    /// Errors and notices as dialogs, and the taskbar's progress (Windows).
+    fn windows_chrome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The bench drives itself: nothing may wait for a button.
+        if self.bench.is_none() {
+            if let Some(error) = self.model.error.take() {
+                win::show_error(window, cx, &error, true);
+            }
+            if let Some((message, explanation)) = self.model.notice.take() {
+                win::show_message(window, cx, &message, &explanation, None, false);
+            }
+        }
+        let progress = match self.model.batch.as_ref().filter(|_| self.model.batch_running()) {
+            Some(run) => {
+                let (done, failed) = batch_view::View::of(run).rule;
+                win::Progress::Count(((done + failed) * 1000.0).round() as u64, 1000)
+            }
+            None if self.model.exporting => win::Progress::Busy,
+            None => win::Progress::None,
+        };
+        win::set_progress(window, progress);
+        let exporting = progress != win::Progress::None;
+        if self.was_exporting && !exporting {
+            win::flash_if_background(window);
+        }
+        self.was_exporting = exporting;
+    }
+
     pub fn shutdown_cleanly(&mut self) {
         if self.shut_down {
             return;
@@ -741,6 +817,13 @@ impl NegsApp {
         if let Some(session) = self.model.session() {
             let _ = SessionStore::default().save(&session);
         }
+        if let Some((bounds, scale)) = self.window_place {
+            let (window, pixels) = place::to_prefs(bounds, scale);
+            self.model.prefs.window = Some(window);
+            self.model.prefs.window_pixels = Some(pixels);
+            self.model.prefs.save();
+        }
+        updates::stop();
         self.thumbs.shutdown();
         self.model.shutdown();
     }
@@ -889,6 +972,7 @@ impl gpui::Render for NegsApp {
             self.bench = Some(bench);
         }
         thumbs::flush_drops(window);
+        self.windows_chrome(window, cx);
         if std::mem::take(&mut self.resume_offer) && self.bench.is_none() {
             batch_view::offer_resume(self, window, cx);
         }
@@ -942,7 +1026,22 @@ impl gpui::Render for NegsApp {
         div()
             .id("negs-app-root")
             .track_focus(&self.focus_handle)
-            .key_context(if self.export_card.is_some() { "NegsApp Modal" } else { "NegsApp" })
+            .key_context(if self.export_card.is_some() {
+                "NegsApp Modal"
+            } else if self.menu_bar.is_some() {
+                "NegsApp MenuBar"
+            } else {
+                "NegsApp"
+            })
+            // The menu bar's keys come first (off the Mac): Alt, F10, Alt+letter, and all keys while it has focus.
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if menu_bar::key(this, event, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .on_modifiers_changed(cx.listener(|this, event: &gpui::ModifiersChangedEvent, window, cx| {
+                menu_bar::modifiers_changed(this, &event.modifiers, window, cx);
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.tray.handle_key_down(event, &mut this.model, window, cx) {
                     this.after_model_update(cx);
@@ -1245,6 +1344,16 @@ impl gpui::Render for NegsApp {
             .on_action(cx.listener(|_this, _: &ToggleFullScreen, window, _cx| {
                 window.toggle_fullscreen();
             }))
+            .on_action(cx.listener(|_this, _: &CheckForUpdates, _window, _cx| {
+                updates::check(true);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleAllControls, _window, cx| {
+                this.model.prefs.lab_all_controls = !this.model.prefs.lab_all_controls;
+                this.model.prefs.save();
+                this.model.dirty |= negs_app::model::dirty::STRUCTURE | negs_app::model::dirty::INSPECTOR | negs_app::model::dirty::CHROME;
+                this.after_model_update(cx);
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
                 this.request_quit(window, cx);
             }))
@@ -1350,7 +1459,7 @@ fn compare_note(app: &NegsApp, (original, number, place): (bool, String, String)
 
 fn bind_shortcuts(cx: &mut App) {
     let modifier = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
-    let non_text = Some("NegsApp && !TextInput && !Modal");
+    let non_text = Some("NegsApp && !TextInput && !Modal && !MenuBar");
     cx.bind_keys([
         KeyBinding::new(&format!("{modifier}-o"), OpenPhoto, None),
         KeyBinding::new(&format!("{modifier}-s"), SavePreview, None),
@@ -1367,6 +1476,8 @@ fn bind_shortcuts(cx: &mut App) {
         KeyBinding::new("[", LowerRating, non_text),
         KeyBinding::new(&format!("{modifier}-z"), UndoAction, None),
         KeyBinding::new(&format!("{modifier}-shift-z"), RedoAction, None),
+        // Windows' own Redo key.
+        KeyBinding::new("ctrl-y", RedoAction, if cfg!(target_os = "macos") { Some("Never") } else { None }),
         KeyBinding::new("\\", ToggleOriginal, non_text),
         KeyBinding::new("shift-\\", ToggleSplit, non_text),
         KeyBinding::new("|", ToggleSplit, non_text),
@@ -1406,22 +1517,22 @@ fn install_menus(cx: &mut App) {
 /// (`menu_bar.rs`), in the Windows app's order (`build_menu`).
 fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Menu> {
     let mac = cfg!(target_os = "macos");
-    let trash = if mac { "Move to Trash…" } else if cfg!(target_os = "windows") { "Move to Recycle Bin…" } else { "Move to Trash…" };
+    let trash = if mac { "Move to Trash…" } else if cfg!(target_os = "windows") { "&Move to Recycle Bin…" } else { "&Move to Trash…" };
     let recent_actions: [Box<dyn gpui::Action>; 10] = [Box::new(Recent0), Box::new(Recent1), Box::new(Recent2), Box::new(Recent3), Box::new(Recent4), Box::new(Recent5), Box::new(Recent6), Box::new(Recent7), Box::new(Recent8), Box::new(Recent9)];
-    let mut file = vec![MenuItem::action("Open…", OpenPhoto)];
+    let mut file = vec![MenuItem::action("&Open…", OpenPhoto)];
     if !recent.is_empty() {
         let items = recent
             .iter()
             .zip(recent_actions)
             .map(|(path, action)| MenuItem::Action { name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into(), action, os_action: None })
             .collect();
-        file.push(MenuItem::submenu(Menu { name: "Open Recent".into(), items }));
+        file.push(MenuItem::submenu(Menu { name: "Open &Recent".into(), items }));
     }
     file.push(MenuItem::separator());
     file.extend([
-        MenuItem::action("Save Preview…", SavePreview),
-        MenuItem::action("Export Photograph…", ExportPhoto),
-        MenuItem::action("Export LUT…", ExportLut),
+        MenuItem::action("&Save Preview…", SavePreview),
+        MenuItem::action("&Export Photograph…", ExportPhoto),
+        MenuItem::action("Export &LUT…", ExportLut),
     ]);
     // Open in Lightroom, Open in Lightroom Classic: only those installed.
     for kind in lightroom {
@@ -1431,9 +1542,9 @@ fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Men
             negs_app::lightroom::Kind::Classic => MenuItem::action(title, OpenInLightroomClassic),
         });
     }
-    file.extend([MenuItem::separator(), MenuItem::action("New Preset", NewPreset), MenuItem::action("Import Presets…", ImportPresets), MenuItem::action("Show Presets Folder", ShowPresetsFolder)]);
+    file.extend([MenuItem::separator(), MenuItem::action("&New Preset", NewPreset), MenuItem::action("&Import Presets…", ImportPresets), MenuItem::action("Show Presets &Folder", ShowPresetsFolder)]);
     if !mac {
-        file.extend([MenuItem::separator(), MenuItem::action("Settings…", OpenSettings), MenuItem::separator(), MenuItem::action("Exit", QuitApp)]);
+        file.extend([MenuItem::separator(), MenuItem::action("Se&ttings…", OpenSettings), MenuItem::separator(), MenuItem::action("E&xit", QuitApp)]);
     }
     let mut out = Vec::new();
     if mac {
@@ -1448,17 +1559,17 @@ fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Men
             ],
         });
     }
-    out.push(Menu { name: "File".into(), items: file });
-    out.push(Menu { name: "Edit".into(), items: vec![MenuItem::action("Undo", UndoAction), MenuItem::action("Redo", RedoAction)] });
+    out.push(Menu { name: "&File".into(), items: file });
+    out.push(Menu { name: "&Edit".into(), items: vec![MenuItem::action("&Undo", UndoAction), MenuItem::action("&Redo", RedoAction)] });
     out.push(Menu {
-        name: "Photo".into(),
+        name: "&Photo".into(),
         items: vec![
-            MenuItem::action("Show Original", ToggleOriginal),
+            MenuItem::action("Show &Original", ToggleOriginal),
             MenuItem::separator(),
             MenuItem::submenu(Menu {
-                name: "Rating".into(),
+                name: "R&ating".into(),
                 items: vec![
-                    MenuItem::action("None", Rate0),
+                    MenuItem::action("&None", Rate0),
                     MenuItem::separator(),
                     MenuItem::action("★", Rate1),
                     MenuItem::action("★★", Rate2),
@@ -1466,82 +1577,102 @@ fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Men
                     MenuItem::action("★★★★", Rate4),
                     MenuItem::action("★★★★★", Rate5),
                     MenuItem::separator(),
-                    MenuItem::action("Raise Rating", RaiseRating),
-                    MenuItem::action("Lower Rating", LowerRating),
+                    MenuItem::action("&Raise Rating", RaiseRating),
+                    MenuItem::action("&Lower Rating", LowerRating),
                 ],
             }),
             MenuItem::submenu(Menu {
-                name: "Flag".into(),
-                items: vec![MenuItem::action("Pick", FlagPick), MenuItem::action("Reject", FlagReject), MenuItem::action("Unflagged", FlagUnflag)],
+                name: "&Flag".into(),
+                items: vec![MenuItem::action("&Pick", FlagPick), MenuItem::action("&Reject", FlagReject), MenuItem::action("&Unflagged", FlagUnflag)],
             }),
             MenuItem::separator(),
-            MenuItem::action("Copy Edits", CopyEdits),
-            MenuItem::action("Paste Edits", PasteEdits),
-            MenuItem::action("Paste from Previous", PastePrevious),
+            MenuItem::action("&Copy Edits", CopyEdits),
+            MenuItem::action("&Paste Edits", PasteEdits),
+            MenuItem::action("Paste from Pre&vious", PastePrevious),
             MenuItem::separator(),
-            MenuItem::action("Duplicate", DuplicatePhoto),
-            MenuItem::action("Reset Edits", ResetEdits),
+            MenuItem::action("&Duplicate", DuplicatePhoto),
+            MenuItem::action("&Reset Edits", ResetEdits),
             MenuItem::separator(),
             MenuItem::action(trash, TrashPhoto),
-            MenuItem::action("Delete Rejected Photographs…", TrashRejected),
+            MenuItem::action("Delete Re&jected Photographs…", TrashRejected),
             MenuItem::separator(),
-            MenuItem::action("Advance After Rating", ToggleAdvance),
-            MenuItem::action("Clear Filter", ClearFilter),
+            MenuItem::action("Advance After Ra&ting", ToggleAdvance),
+            MenuItem::separator(),
+            MenuItem::submenu(Menu { name: menu_bar::FILTER.into(), items: vec![] }),
+            MenuItem::action("C&lear Filter", ClearFilter),
         ],
     });
     out.push(Menu {
-        name: "View".into(),
+        name: "&View".into(),
         items: vec![
-            MenuItem::action("Film Strip", ToggleFilmstrip),
-            MenuItem::action("Adjustments", ShowAdjustments),
-            MenuItem::action("Presets", ShowPresets),
-            MenuItem::action("Inspector", ToggleInspector),
-            MenuItem::action("Image Only", ToggleImageOnly),
-            MenuItem::action("Full Screen", ToggleFullScreen),
-            MenuItem::action("Grid", ToggleGrid),
-            MenuItem::action("Compare", ToggleCompare),
-            MenuItem::action("Split Before/After", ToggleSplit),
+            MenuItem::action("&Film Strip", ToggleFilmstrip),
+            MenuItem::action("&Adjustments", ShowAdjustments),
+            MenuItem::action("&Presets", ShowPresets),
+            MenuItem::action("I&nspector", ToggleInspector),
+            MenuItem::action("&Image Only", ToggleImageOnly),
+            MenuItem::action("F&ull Screen", ToggleFullScreen),
+            MenuItem::action("&Grid", ToggleGrid),
+            MenuItem::action("C&ompare", ToggleCompare),
+            MenuItem::action("S&plit Before/After", ToggleSplit),
+            MenuItem::action("Show A&ll Controls", ToggleAllControls),
             MenuItem::separator(),
-            MenuItem::action("Fit Photograph", ZoomFit),
-            MenuItem::action("Actual Size", ZoomActual),
+            MenuItem::action("Fi&t Photograph", ZoomFit),
+            MenuItem::action("Actual &Size", ZoomActual),
             MenuItem::action("Toggle Fit / 100%", ToggleZoomFit),
-            MenuItem::action("Zoom In", ZoomIn),
-            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::action("Zoom &In", ZoomIn),
+            MenuItem::action("Zoom &Out", ZoomOut),
             MenuItem::separator(),
-            MenuItem::action("Rotate Clockwise", RotatePhoto),
-            MenuItem::action("Flip Horizontal", FlipPhoto),
-            MenuItem::action("Crop", ToggleCrop),
+            MenuItem::action("&Rotate Clockwise", RotatePhoto),
+            MenuItem::action("Flip &Horizontal", FlipPhoto),
+            MenuItem::action("&Crop", ToggleCrop),
             MenuItem::separator(),
             MenuItem::submenu(Menu {
-                name: "Theme".into(),
+                name: "T&heme".into(),
                 items: vec![
-                    MenuItem::action("Darkroom", ThemeDarkroom),
-                    MenuItem::action("Contact Sheet", ThemeContactSheet),
-                    MenuItem::action("Light Table", ThemeLightTable),
-                    MenuItem::action("Daylight", ThemeDaylight),
-                    MenuItem::action("Plain", ThemePlain),
-                    MenuItem::action("Plain Dark", ThemePlainDark),
+                    MenuItem::action("&Darkroom", ThemeDarkroom),
+                    MenuItem::action("&Contact Sheet", ThemeContactSheet),
+                    MenuItem::action("&Light Table", ThemeLightTable),
+                    MenuItem::action("Da&ylight", ThemeDaylight),
+                    MenuItem::action("&Plain", ThemePlain),
+                    MenuItem::action("Plain Dar&k", ThemePlainDark),
                 ],
             }),
             MenuItem::submenu(Menu {
-                name: "Viewer Sheet".into(),
+                name: "&Viewer Sheet".into(),
                 items: vec![
-                    MenuItem::action("Theme’s Own", SheetTheme),
-                    MenuItem::action("Darkroom", SheetDarkroom),
-                    MenuItem::action("Black", SheetBlack),
-                    MenuItem::action("Charcoal", SheetCharcoal),
-                    MenuItem::action("22% Grey", SheetGrey22),
-                    MenuItem::action("Middle Grey", SheetMiddleGrey),
-                    MenuItem::action("Light Grey", SheetLightGrey),
-                    MenuItem::action("Paper", SheetPaper),
+                    MenuItem::action("&Theme’s Own", SheetTheme),
+                    MenuItem::action("&Darkroom", SheetDarkroom),
+                    MenuItem::action("&Black", SheetBlack),
+                    MenuItem::action("C&harcoal", SheetCharcoal),
+                    MenuItem::action("&22% Grey", SheetGrey22),
+                    MenuItem::action("&Middle Grey", SheetMiddleGrey),
+                    MenuItem::action("&Light Grey", SheetLightGrey),
+                    MenuItem::action("&Paper", SheetPaper),
                 ],
             }),
         ],
     });
     if !mac {
-        out.push(Menu { name: "Help".into(), items: vec![MenuItem::action("About Negs", AboutNegs)] });
+        out.push(Menu { name: "&Help".into(), items: vec![MenuItem::action("Check for &Updates…", CheckForUpdates), MenuItem::separator(), MenuItem::action("&About Negs", AboutNegs)] });
+    }
+    if mac {
+        // The Mac's menus have no access keys.
+        for menu in &mut out {
+            strip_access_keys(menu);
+        }
     }
     out
+}
+
+fn strip_access_keys(menu: &mut Menu) {
+    menu.name = menu_bar::plain(&menu.name).0.into();
+    for item in &mut menu.items {
+        match item {
+            MenuItem::Action { name, .. } => *name = menu_bar::plain(name).0.into(),
+            MenuItem::Submenu(sub) => strip_access_keys(sub),
+            _ => {}
+        }
+    }
 }
 
 fn cli_photo_arg() -> Option<PathBuf> {
@@ -1565,7 +1696,11 @@ fn main() {
         install_menus(cx);
         cx.activate(true);
 
-        let bounds = WindowBounds::centered(size(px(1280.0), px(840.0)), cx);
+        // Where it was last time, if that's still on a display.
+        let saved = Preferences::load();
+        let displays: Vec<_> = cx.displays().iter().map(|d| d.bounds()).collect();
+        let bounds = place::from_prefs(saved.window, saved.window_pixels, &displays)
+            .unwrap_or_else(|| WindowBounds::centered(size(px(1280.0), px(840.0)), cx));
         let options = WindowOptions {
             window_bounds: Some(bounds),
             window_min_size: Some(size(px(800.0), px(560.0))),

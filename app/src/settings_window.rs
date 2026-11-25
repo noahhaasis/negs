@@ -44,6 +44,7 @@ pub enum Tick {
     Previews,
     LimitPreview,
     LowMemory,
+    AutoUpdates,
 }
 
 /// A list that opens under its row.
@@ -86,7 +87,7 @@ const LIGHTROOM_CLOUD: &str = "Open in Lightroom sends full-size 16-bit TIFFs. E
 const LIGHTROOM_CLASSIC: &str = "Lightroom Classic adds the TIFFs in “Negs for Lightroom” in Pictures where they are, so Negs never deletes them. Delete them only once Classic no longer needs them.";
 
 /// Each page's rows, as the Windows app's (`settings::items`). Updates
-/// aren't configured in this app yet (the updater is Phase 6's choice).
+/// show only where WinSparkle is configured (`updates.rs`).
 pub fn rows(tab: Tab) -> Vec<Row> {
     match tab {
         Tab::Photographs => vec![
@@ -119,7 +120,16 @@ pub fn rows(tab: Tab) -> Vec<Row> {
             Row::Hint(Hint::Text("Develops the grain one colour at a time. Same result, less memory, longer export.")),
         ],
         Tab::Upkeep => {
-            let mut rows = vec![Row::Section("Updates"), Row::Updates, Row::Hint(Hint::Text("Install a release build to receive updates."))];
+            let mut rows = if crate::updates::configured() {
+                vec![
+                    Row::Section("Updates"),
+                    Row::Tick("Automatically check for updates", Tick::AutoUpdates),
+                    Row::Hint(Hint::Text("Updates are installed only when you choose to restart Negs.")),
+                    Row::Updates,
+                ]
+            } else {
+                vec![Row::Section("Updates"), Row::Updates, Row::Hint(Hint::Text("Install a release build to receive updates."))]
+            };
             rows.push(Row::Section("Lightroom"));
             for kind in Kind::ALL {
                 rows.push(Row::Lightroom(kind));
@@ -148,6 +158,7 @@ pub fn ticked(model: &negs_app::model::Model, tick: Tick) -> bool {
         Tick::Previews => prefs.previews,
         Tick::LimitPreview => prefs.limits_preview(),
         Tick::LowMemory => prefs.low_memory_export,
+        Tick::AutoUpdates => prefs.check_for_updates,
     }
 }
 
@@ -160,6 +171,11 @@ pub fn set_tick(model: &mut negs_app::model::Model, tick: Tick, on: bool) {
         Tick::Previews => model.set_previews(on),
         Tick::LimitPreview => model.set_limit_preview(on),
         Tick::LowMemory => model.set_low_memory_export(on),
+        Tick::AutoUpdates => {
+            crate::updates::set_automatic(on);
+            model.prefs.check_for_updates = on;
+            model.prefs.save();
+        }
     }
 }
 
@@ -438,6 +454,27 @@ impl Render for SettingsView {
                     }
                     el.into_any_element()
                 }
+                Row::Updates if crate::updates::configured() => div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .py(px(6.0))
+                    .child(div().font_family(serif.clone()).italic().text_size(px(13.5)).text_color(dim).child(crate::updates::last_check().map_or_else(String::new, |when| format!("Last checked {when}"))))
+                    .child(
+                        div()
+                            .id("settings-check-updates")
+                            .px(px(10.0))
+                            .py(px(3.0))
+                            .rounded(px(4.0))
+                            .border_1()
+                            .border_color(track)
+                            .text_size(px(12.0))
+                            .text_color(label)
+                            .cursor_pointer()
+                            .on_click(|_, _, _| crate::updates::check(true))
+                            .child("Check for Updates…"),
+                    )
+                    .into_any_element(),
                 Row::Updates => div().py(px(6.0)).text_size(px(13.0)).text_color(label).child("Updates are not configured for this build.").into_any_element(),
                 Row::Lightroom(kind) => {
                     let words = match self.sent[kind as usize] {

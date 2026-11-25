@@ -604,8 +604,8 @@ impl Bench {
             }
             Step::MenuBar(open) => {
                 app.menu_bar = open.and_then(|(title, sub)| {
-                    let menu = cx.get_menus()?.iter().position(|m| m.name.as_ref() == title)?;
-                    Some(crate::menu_bar::Open { menu, sub })
+                    let menu = cx.get_menus()?.iter().position(|m| crate::menu_bar::plain(m.name.as_ref()).0 == title)?;
+                    Some(crate::menu_bar::Open { menu, sub, hot: sub, ..crate::menu_bar::Open::mouse(menu) })
                 });
                 cx.notify();
                 self.next();
