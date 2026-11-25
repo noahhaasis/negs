@@ -299,6 +299,45 @@ enum Command {
         #[serde(default)]
         fit: Option<Fit>,
     },
+    /// Memory-bounded tiled full-resolution export directly to disk.
+    /// Keeps large RAWs compact in RAM and renders fixed-size padded tiles on
+    /// GPU (with exact two-pass global grain USM sums) so mobile and low-VRAM
+    /// devices export 24–60 MP photos without holding a full-frame f32 image.
+    ExportTiled {
+        input: PathBuf,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        output: PathBuf,
+        #[serde(default)]
+        save_options: spektrafilm_io::save::SaveOptions,
+        #[serde(default = "default_true")]
+        crop_after_post: bool,
+        #[serde(default)]
+        border: Option<BorderStyle>,
+        #[serde(default)]
+        border_options: BorderOptions,
+        #[serde(default)]
+        instagram: bool,
+        #[serde(default)]
+        crop: Option<Crop>,
+        #[serde(default)]
+        rotate_cw: i32,
+        #[serde(default)]
+        flip: bool,
+        #[serde(default)]
+        fit: Option<Fit>,
+        /// Target padded tile pixel count (defaults to ~2.4 MP on GPU, ~1.8 MP on CPU).
+        #[serde(default)]
+        target_tile_pixels: Option<u64>,
+        /// Maximum per-tile overlap halo in pixels (defaults to 384).
+        #[serde(default)]
+        max_halo: Option<u32>,
+    },
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Default)]
@@ -555,7 +594,7 @@ fn catalog(data: &Path) -> Result<Value> {
         data.display()
     );
     catalog["protocol"] = json!(1);
-    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true, "tone_curve": true, "place_exposure": true, "brightness_reference": true});
+    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true, "tone_curve": true, "place_exposure": true, "brightness_reference": true, "export_tiled": true});
     // What a preset leaves as it is: a preset's thumbnail changes only with these.
     catalog["preset_kept"] = json!(presets::KEPT);
     Ok(catalog)
@@ -1320,6 +1359,91 @@ impl Session {
                 let save_options = spektrafilm_io::save::SaveOptions { linear: !encoded, ..save_options };
                 spektrafilm_io::save::save_image_with_options(image, &output, metadata.as_ref(), &save_options)?;
                 Ok(json!({"saved": output}))
+            }
+            Command::ExportTiled {
+                input,
+                film,
+                paper,
+                mut params,
+                output,
+                save_options,
+                crop_after_post,
+                border,
+                border_options,
+                instagram,
+                crop,
+                rotate_cw,
+                flip,
+                fit,
+                target_tile_pixels,
+                max_halo,
+            } => {
+                // Release cached preview working copies & GPU film cache before
+                // full-resolution tiled export so low-RAM phones keep headroom.
+                self.output = None;
+                self.scaled = None;
+                self.interactive = None;
+                self.prepared_photo = Default::default();
+                self.prepared_interactive = Default::default();
+                self.thumbnail_source = None;
+                self.thumbnail_wb_sources.clear();
+                self.negative_frame = None;
+                self.source = None;
+                self.metering = None;
+                self.refresh_backend();
+                let backend = self.backend.get_or_insert_with(spektrafilm_gpu::select_backend);
+                backend.release_film_cache();
+                let default_pixels = if backend.is_gpu() {
+                    spektrafilm_core::tiled_export::DEFAULT_GPU_TILE_PIXELS
+                } else {
+                    spektrafilm_core::tiled_export::DEFAULT_CPU_TILE_PIXELS
+                };
+                let target_pixels = target_tile_pixels.unwrap_or(default_pixels).max(65_536);
+                let halo_cap = max_halo.unwrap_or(spektrafilm_core::tiled_export::DEFAULT_MAX_TILE_HALO);
+                let post = std::mem::take(&mut params.post);
+                let finish = spektrafilm_core::tiled_export::ExportFinish {
+                    post,
+                    crop,
+                    crop_after_post,
+                    flip,
+                    rotate_cw,
+                    border,
+                    border_options,
+                    instagram,
+                    fit,
+                    save_options,
+                };
+                let report = spektrafilm_core::tiled_export::export_tiled_to_file(
+                    &input,
+                    &output,
+                    &film,
+                    &paper,
+                    *params,
+                    finish,
+                    data,
+                    backend.as_ref(),
+                    target_pixels,
+                    halo_cap,
+                )?;
+                Ok(json!({
+                    "saved": output,
+                    "source_width": report.source_width,
+                    "source_height": report.source_height,
+                    "output_width": report.output_width,
+                    "output_height": report.output_height,
+                    "source_kind": report.source_kind,
+                    "backend": report.backend,
+                    "total_tiles": report.total_tiles,
+                    "tile_width": report.tile_width,
+                    "tile_height": report.tile_height,
+                    "halo": report.halo,
+                    "two_pass_usm": report.two_pass_usm,
+                    "decode_ms": report.decode_ms,
+                    "pass1_ms": report.pass1_ms,
+                    "render_ms": report.render_ms,
+                    "finish_ms": report.finish_ms,
+                    "elapsed_ms": report.elapsed_ms,
+                }))
             }
             Command::Render {
                 input,

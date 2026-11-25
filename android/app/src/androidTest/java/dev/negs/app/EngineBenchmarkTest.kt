@@ -148,6 +148,8 @@ class EngineBenchmarkTest {
             put("preview_long_side", policy.previewLongSide)
             put("initial_viewport_long_side", policy.initialViewportLongSide)
             put("max_preview_source_pixels", policy.maxPreviewSourcePixels)
+            put("export_tile_pixels", policy.exportTilePixels)
+            put("export_max_halo", policy.exportMaxHalo)
             put("initial_memory", systemMemory(appContext))
         }
         logEvent(deviceInfo)
@@ -525,26 +527,14 @@ class EngineBenchmarkTest {
             }
 
             try {
-                var renderMs = 0L
-                var saveMs = 0L
                 lateinit var expRes: JsonObject
-                lateinit var saveRes: JsonObject
-                withTimeout(300_000L) {
+                withTimeout(900_000L) {
                     engine.exclusive {
-                        val t0 = SystemClock.elapsedRealtime()
-                        expRes = send("render", buildJsonObject {
+                        expRes = send("export_tiled", buildJsonObject {
                             put("input", photoFile.path)
-                            put("source_generation", 1)
                             put("film", film)
                             put("paper", paper)
                             put("params", exportParams)
-                            put("limit_preview", false)
-                        })
-                        renderMs = SystemClock.elapsedRealtime() - t0
-                        val renderId = expRes["request_id"].number()!!.toLong()
-                        val t1 = SystemClock.elapsedRealtime()
-                        saveRes = send("save", buildJsonObject {
-                            put("render_id", renderId)
                             put("output", exportJpg.path)
                             put("save_options", buildJsonObject {
                                 put("jpeg_quality", 92)
@@ -552,8 +542,9 @@ class EngineBenchmarkTest {
                             })
                             put("crop_after_post", true)
                             put("rotate_cw", 0)
+                            put("target_tile_pixels", policy.exportTilePixels)
+                            put("max_halo", policy.exportMaxHalo)
                         })
-                        saveMs = SystemClock.elapsedRealtime() - t1
                     }
                 }
                 sampling.set(false)
@@ -565,16 +556,25 @@ class EngineBenchmarkTest {
                     put("photo", label)
                     put("step", "export_full")
                     put("killed", false)
-                    put("render_wall_ms", renderMs)
-                    put("render_engine_ms", expRes["elapsed_ms"] ?: JsonNull)
-                    put("save_wall_ms", saveMs)
+                    put("tiled", true)
                     put("total_wall_ms", SystemClock.elapsedRealtime() - tExp)
+                    put("engine_elapsed_ms", expRes["elapsed_ms"] ?: JsonNull)
+                    put("decode_ms", expRes["decode_ms"] ?: JsonNull)
+                    put("pass1_ms", expRes["pass1_ms"] ?: JsonNull)
+                    put("render_ms", expRes["render_ms"] ?: JsonNull)
+                    put("finish_ms", expRes["finish_ms"] ?: JsonNull)
                     put("backend", expRes["backend"] ?: JsonNull)
+                    put("source_kind", expRes["source_kind"] ?: JsonNull)
+                    put("total_tiles", expRes["total_tiles"] ?: JsonNull)
+                    put("tile_width", expRes["tile_width"] ?: JsonNull)
+                    put("tile_height", expRes["tile_height"] ?: JsonNull)
+                    put("halo", expRes["halo"] ?: JsonNull)
+                    put("two_pass_usm", expRes["two_pass_usm"] ?: JsonNull)
                     put("output_width", expRes["output_width"] ?: JsonNull)
                     put("output_height", expRes["output_height"] ?: JsonNull)
                     put("preview_file_bytes", exportPreview.length())
                     put("jpeg_bytes", exportJpg.length())
-                    put("saved", saveRes["saved"] ?: JsonNull)
+                    put("saved", expRes["saved"] ?: JsonNull)
                     put("min_avail_mib_during_export", minAvailMib.get())
                     put("max_app_pss_kib_during_export", maxAppPssKib.get())
                     put("sampled_peak_engine_hwm_kib", peakEngineHwmKib.get())

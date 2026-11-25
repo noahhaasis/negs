@@ -30,6 +30,8 @@ data class MemoryPolicy(
     val previewLongSide: Int,
     val initialViewportLongSide: Int,
     val maxPreviewSourcePixels: Int,
+    val exportTilePixels: Long,
+    val exportMaxHalo: Int,
 ) {
     /** The engine process's environment for this policy. */
     fun environment(): Map<String, String> = buildMap {
@@ -82,6 +84,14 @@ data class MemoryPolicy(
                 // Fallback fitted viewport width before Compose reports the measured canvas size.
                 initialViewportLongSide = screenShort.coerceIn(720, 1440),
                 maxPreviewSourcePixels = if (total < 5 * GIB) 2_200_000 else MAX_PREVIEW_PIXELS,
+                // Full-resolution tiled GPU export parameters:
+                // - <5 GiB (e.g. 4 GB Adreno 610): 2.2 MP tiles (~26 MiB/buf, ~105 MiB GPU set)
+                //   with halo capped at 128 px (keeps 24 MP to 20 tiles and 60 MP to 48 tiles).
+                // - >=5 GiB (6-8+ GB Mali-G68 / Adreno 740 / Mali-G715): 4.5 MP tiles (~54 MiB/buf,
+                //   ~216 MiB GPU working set — under half of 128 MiB storage-buffer limits) with
+                //   halo capped at 256 px (24 MP in 12 tiles, 60 MP in 24 tiles).
+                exportTilePixels = if (total < 5 * GIB) 2_200_000L else 4_500_000L,
+                exportMaxHalo = if (total < 5 * GIB) 128 else 256,
             )
         }
     }

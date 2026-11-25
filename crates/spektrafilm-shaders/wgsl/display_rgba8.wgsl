@@ -27,7 +27,7 @@ fn display_byte(v: f32) -> u32 {
     if params.encoded == 0u {
         x = select(1.055 * pow(x, 1.0 / 2.4) - 0.055, 12.92 * x, x <= 0.0031308);
     }
-    return u32(floor(x * 255.0 + 0.5));
+    return u32(round(clamp(x, 0.0, 1.0) * 255.0));
 }
 
 // Threads per workgroup; the host may lower it to what the GPU's
