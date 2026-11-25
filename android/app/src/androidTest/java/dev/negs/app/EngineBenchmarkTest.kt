@@ -28,6 +28,7 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * Real-device benchmark driving [Engine] directly (avoiding UI / onTrimMemory):
@@ -145,6 +146,8 @@ class EngineBenchmarkTest {
             put("gpu_budget_mib", policy.gpuBudgetMiB)
             put("diffusion_grid_budget_mib", policy.diffusionGridBudgetBytes / (1024L * 1024L))
             put("preview_long_side", policy.previewLongSide)
+            put("initial_viewport_long_side", policy.initialViewportLongSide)
+            put("max_preview_source_pixels", policy.maxPreviewSourcePixels)
             put("initial_memory", systemMemory(appContext))
         }
         logEvent(deviceInfo)
@@ -273,6 +276,7 @@ class EngineBenchmarkTest {
                 put("wall_ms", quickMs)
                 put("engine_ms", quickRes["elapsed_ms"] ?: JsonNull)
                 put("backend", quickRes["backend"] ?: JsonNull)
+                put("gpu_rgba8", quickRes["gpu_rgba8"] ?: JsonNull)
                 put("width", quickRes["width"] ?: JsonNull)
                 put("height", quickRes["height"] ?: JsonNull)
                 put("source_width", sw)
@@ -285,9 +289,10 @@ class EngineBenchmarkTest {
             })
             previewQuick.delete()
 
-            // Step 3: settled screen-size preview (matches Editor.kt)
+            // Step 3a: settled fitted-viewport preview (matches Editor.kt default 1x view)
+            val fittedSide = policy.initialViewportLongSide
             val settledScale = if (pw > 0 && ph > 0) {
-                (policy.previewLongSide.toDouble() / max(pw, ph)).coerceAtMost(1.0)
+                (fittedSide.toDouble() / max(pw, ph)).coerceAtMost(1.0)
             } else {
                 0.5
             }
@@ -310,9 +315,103 @@ class EngineBenchmarkTest {
                 put("wall_ms", prevMs)
                 put("engine_ms", prevRes["elapsed_ms"] ?: JsonNull)
                 put("backend", prevRes["backend"] ?: JsonNull)
+                put("gpu_rgba8", prevRes["gpu_rgba8"] ?: JsonNull)
                 put("width", prevRes["width"] ?: JsonNull)
                 put("height", prevRes["height"] ?: JsonNull)
                 put("scale", settledScale)
+                put("engine_stats", queryStats())
+                put("memory", systemMemory(context))
+            })
+            previewSettled.delete()
+
+            // Step 3b: interactive slider drag (8 consecutive frames adapting toward BUDGET_MS = 90)
+            var adaptive = 0.5
+            val dragFrames = mutableListOf<JsonObject>()
+            val dragWallTimes = mutableListOf<Long>()
+            val dragEvs = listOf(-0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8)
+            val previewDrag = File(workDir, "preview_drag.rgba")
+            for ((idx, ev) in dragEvs.withIndex()) {
+                val targetSide = max(Editor.MIN_INTERACTIVE_SIDE, (fittedSide * adaptive).roundToInt()).coerceAtMost(fittedSide)
+                val dragScale = if (pw > 0 && ph > 0) {
+                    (targetSide.toDouble() / max(pw, ph)).coerceAtMost(1.0)
+                } else {
+                    0.25
+                }
+                val dragParams = defaults.with("prep.exposure_ev", ev.json())
+                val t0 = SystemClock.elapsedRealtime()
+                val res = engine.call("render", buildJsonObject {
+                    put("input", photoFile.path)
+                    put("source_generation", 1)
+                    put("film", film)
+                    put("paper", paper)
+                    put("params", dragParams)
+                    put("limit_preview", true)
+                    put("preview_path", previewDrag.path)
+                    if (dragScale < 1.0) put("interactive_scale", dragScale)
+                })
+                val readBytes = previewDrag.readBytes().size
+                val wallMs = SystemClock.elapsedRealtime() - t0
+                val engineMs = res["elapsed_ms"].number() ?: wallMs.toDouble()
+                dragWallTimes.add(wallMs)
+                dragFrames.add(buildJsonObject {
+                    put("frame", idx)
+                    put("ev", ev)
+                    put("width", res["width"] ?: JsonNull)
+                    put("height", res["height"] ?: JsonNull)
+                    put("wall_ms", wallMs)
+                    put("engine_ms", engineMs)
+                    put("bytes", readBytes)
+                    put("gpu_rgba8", res["gpu_rgba8"] ?: JsonNull)
+                    put("adaptive_scale", adaptive)
+                })
+                adaptive = Editor.nextInteractiveScale(adaptive, max(engineMs, wallMs.toDouble()))
+            }
+            previewDrag.delete()
+            val last4Avg = dragWallTimes.takeLast(4).average()
+            logEvent(buildJsonObject {
+                put("event", "step")
+                put("photo", label)
+                put("step", "interactive_drag")
+                put("frame_count", dragFrames.size)
+                put("last4_avg_wall_ms", last4Avg)
+                put("min_wall_ms", dragWallTimes.minOrNull() ?: 0L)
+                put("max_wall_ms", dragWallTimes.maxOrNull() ?: 0L)
+                put("final_adaptive_scale", adaptive)
+                put("frames", JsonArray(dragFrames))
+                put("engine_stats", queryStats())
+                put("memory", systemMemory(context))
+            })
+
+            // Step 3c: zoomed settled preview (policy.previewLongSide, matching baseline 2340-2400 px
+            // so we also verify Adreno 610 doesn't hang before place_exposure).
+            val zoomedScale = if (pw > 0 && ph > 0) {
+                (policy.previewLongSide.toDouble() / max(pw, ph)).coerceAtMost(1.0)
+            } else {
+                0.5
+            }
+            val tZoom = SystemClock.elapsedRealtime()
+            val zoomRes = engine.call("render", buildJsonObject {
+                put("input", photoFile.path)
+                put("source_generation", 1)
+                put("film", film)
+                put("paper", paper)
+                put("params", defaults)
+                put("limit_preview", true)
+                put("preview_path", previewSettled.path)
+                if (zoomedScale < 1.0) put("interactive_scale", zoomedScale)
+            })
+            val zoomMs = SystemClock.elapsedRealtime() - tZoom
+            logEvent(buildJsonObject {
+                put("event", "step")
+                put("photo", label)
+                put("step", "preview_zoomed")
+                put("wall_ms", zoomMs)
+                put("engine_ms", zoomRes["elapsed_ms"] ?: JsonNull)
+                put("backend", zoomRes["backend"] ?: JsonNull)
+                put("gpu_rgba8", zoomRes["gpu_rgba8"] ?: JsonNull)
+                put("width", zoomRes["width"] ?: JsonNull)
+                put("height", zoomRes["height"] ?: JsonNull)
+                put("scale", zoomedScale)
                 put("engine_stats", queryStats())
                 put("memory", systemMemory(context))
             })
@@ -440,7 +539,6 @@ class EngineBenchmarkTest {
                             put("paper", paper)
                             put("params", exportParams)
                             put("limit_preview", false)
-                            put("preview_path", exportPreview.path)
                         })
                         renderMs = SystemClock.elapsedRealtime() - t0
                         val renderId = expRes["request_id"].number()!!.toLong()
