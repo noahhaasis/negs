@@ -13,9 +13,81 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 2 | GPUI Shell + Color-Managed Canvas | **Done** | `bd8c7662` | Standalone `app/` workspace on `gpui 0.2.2`; embedded Newsreader + 6 themes; fused linear-light exact-fit Lanczos-3 + per-display ICC/P3 pipeline; vector `negs-marks`; Mac & PC live verified. |
 | 3 | Inspector, Presets & Stock Tray | **Done** | `87cb390d` | Custom darkroom widgets (`InkSlider`, `TextInput`, `Scopes`, `ToneGraph`, `ColorFilterDiscs`), full 26-kind `InspectorView` Prep/Lab/Output UI, Presets sidebar, and Film/Paper Stock Preview Tray (`TileImageCache`). Mac & PC live verified. |
 | 4 | Library, Filmstrip, Grid & Flight | **Done** (Smoothness Proof reviewed 2026-11-25) | `9c1020ed` | Colour-managed background thumbnails, virtualized filmstrip + contact-sheet grid with hand-drawn marks (cached sprites), library menus, `SheetFlight` Photo↔Grid flight, `NEGS_FRAME_BENCH`. PC 60.0–60.8 fps, 0 dropped frames. |
-| 5 | Compare, Crop, Negative, Export, Batch & Settings | **5a done**, 5b in progress | 5a `200def15` | Full feature parity with `windows/` and `macos/`. |
+| 5 | Compare, Crop, Negative, Export, Batch & Settings | **Done** (5a + 5b) | 5a `200def15`, 5b see below | Print on its sheet, crop, negative pick, Compare; export card → native dialog, batch, Settings window, full menus (in-window menu bar + caption buttons off the Mac), Lightroom. Exports byte-identical to `windows/` and SwiftUI. |
 | 6 | Windows Cutover & Packaging | Pending | — | ABBA perf/screenshot report vs Win32 `Negs.exe`, Go/No-Go gate, installer + CI cutover. |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
+
+---
+
+## 2026-11-25 — Phase 5b: Export, Batch, Settings, Menus
+
+### What landed
+- Branch `gpui-p5b-export-settings` (`f72db1a1` … `0dcbf717`, 14 commits) merged `--no-ff` into local `main`. Changes are under `app/` and this log only (no `crates/`, `vendor/`, `web/`, `windows/`, or any `Cargo.toml`/`Cargo.lock`). Not pushed.
+- `app/src/export_card.rs`: **Save Preview…, Export Photograph… and Export N Photographs…** go through a darkroom options card (Format, Engine, Size + px, Bit depth, Colour space, JPEG quality; for a batch: File name, If a file exists), with the message that follows the choices. Its button opens the plain system save or folder dialog with the name and extension already set. A typed extension picks the format. The choices are remembered in the preferences (`exportEngine`, `outputFormat`, `exportEdge`, …, `lastSaveFolder`, `batchNaming`). **Export LUT…** saves `<film>_<paper>.cube`. Esc closes the card and Return confirms; other keys wait.
+- `app/src/batch_view.rs`: the batch popover over the status line (progress rule, the photograph being exported, failures listed then "and N more", skipped, Cancel / Retry Failed / Show in Finder·Explorer·Files). The status line's words show a running batch, Lightroom's words, the outcome, or "Exporting name · N s" + Cancel. They tick each second. **A batch the last session didn't finish is offered at launch** (Resume / Discard).
+- Quitting during an export or batch asks ("Continue Exporting" / "Quit"), and while a preview is being written it says so and stays open (QuitApp and the window's close).
+- `app/src/settings_window.rs`: **Settings** (⌘, / Ctrl+,) is its own window with `windows/`'s four pages:
+  - Photographs: new photographs' film and paper, Match to camera brightness, Fotufilm films, Negs-built films, RAW + JPEG, sidecars.
+  - Speed: previews, 12 MP limit, low-memory export.
+  - Upkeep: updates not configured; Lightroom sent copies and Delete Sent Copies, with Classic's question first.
+  - Look: theme swatches and Viewer sheet.
+  - The page is remembered (`settingsTab`).
+- **Menus** in `windows/`' order: File (Open, Open Recent ▸, Save Preview, Export Photograph, Export LUT, Open in Lightroom [Classic] for each one installed, New Preset, Import Presets, Show Presets Folder; Settings and Exit off the Mac), Edit, Photo (Show Original, Rating ▸, Flag ▸, Copy/Paste Edits, Paste from Previous, Duplicate, Reset Edits, Move to Trash/Recycle Bin, Delete Rejected, Advance After Rating, Clear Filter), View (panes, Image Only, Full Screen, Grid, Compare, Split, zoom, rotate, flip, crop, Theme ▸, Viewer Sheet ▸), Help › About (Negs › About/Settings/Quit on the Mac). New keys: ⌘/Ctrl+Shift+C/V, ⌘/Ctrl+D, ⌘/Ctrl+Shift+R, `[` `]`, ⌘/Ctrl+Shift+O, F11 (Ctrl+Cmd+F on the Mac). The library's right-click menu gains Export… and Open in Lightroom.
+- `app/src/menu_bar.rs`: **an in-window menu bar off the Mac.** GPUI 0.2.2 keeps menus on Windows and Linux but draws none. Their words sit after "Negs", each opens its menu under it (submenus beside, shortcuts as Windows writes them), and moving onto another word while one is open switches.
+- **Caption buttons and dragging off the Mac** (`titlebar::caption_buttons`). GPUI's own title bar is hidden, so the Windows window had no Minimise, Maximise or Close and could not be dragged. They are now `WindowControlArea`s (Segoe MDL2 glyphs, red Close hover). "Negs", the file name and the space between the title bar's groups drag the window. Settings has a drag strip and Close.
+- **Tiles off → stock menu.** With Settings › Speed's previews off, the print's film/paper/read-as words and the inspector's Film and Paper open the stocks as a menu, as `windows/` does: favourites starred, groups under headings, the chosen one ticked, Your negative last. The library menu scrolls when long.
+- Lightroom is detected 2 s after the first picture, and again when the window becomes active (with `library_refresh`, as `WM_ACTIVATEAPP` does).
+- Bench tours (`NEGS_BENCH_TOUR`): `export` (cards + a real Reference export into `NEGS_BENCH_EXPORT_DIR`), `sidecar` (`NEGS_BENCH_SIDE=mac1|pc|mac2`), `settings` (each page, two themes, the stock menu; off the Mac the menu bar), `hold` (idle 20 s for outside checks). `settings-*` shots capture the front window (`winid … front`, `GetForegroundWindow`).
+
+### Decisions
+- **Options card, then the native dialog** (Noah, 2026-11-25). GPUI's save dialog takes no filters or controls, so the format, engine and size are chosen in-window first. The batch's folder chooser comes the same way.
+- **Questions use GPUI's native prompt** (NSAlert / TaskDialog): quit, resume batch, Delete Sent Copies, Delete Rejected. Errors keep the status line's error. A darkroom-styled alert card would only restyle those dialogs.
+- **Off the Mac the title bar leaves out the stock badge.** The menus need the room, and the caption under the print and the status line name the film and paper already. With it, at 1584 px the file name was cut to "_NI" and only 16 px were left to drag by.
+- **Drag only where nothing is clickable.** GPUI's Windows hit test returns the first control area under the pointer before any click handler, so a Drag area behind the pills would swallow their clicks.
+- **Menus are rebuilt** when the installed Lightroom kinds or the recent files change (`cx.set_menus`). Open Recent uses ten fixed actions (`Recent0…9`), as `actions!` carries no data.
+- **Settings opens after the update that asks for it** (`cx.defer`). `open_window` draws at once, and Settings reads the app entity, which would still be leased (it panicked on the first try).
+- **Settings' tick test only reads.** The setters save preferences, and `negs-app`'s test-profile guard is `cfg(test)` of its own crate, so an `app/` test calling them would write the real profile.
+
+### Deferred (and why)
+- **Updates** (Settings › Upkeep, Help › Check for Updates): the updater is Phase 6's choice (WinSparkle vs. MSIX); the page says "not configured".
+- **Menu state:** GPUI 0.2.2 menus have no checked or disabled items, and their titles are fixed. So there is no tick on Film Strip, Adjustments or Advance After Rating, no "Undo Change Film", and impossible items are no-ops rather than grey. This needs GPUI menus or our own (Phase 6).
+- **The menu bar from the keyboard** (Alt, F10, Alt+letter, arrows): with the Phase 6 accessibility pass.
+- **Photo › Filter ▸** (the grid sentence's menu has it; Photo has Clear Filter); **View › Show All Controls**; **Edit › Cut/Copy/Paste/Select All** items (text fields take the keys themselves).
+- **Taskbar progress and flashing** (`ITaskbarList3`) and the exporter log as an expandable error detail: Windows-only work for Phase 6.
+- **Lightroom buttons in the inspector's Export foot** (it's in File and the library menu), and the grid foot's batch words.
+
+### Verification Gate
+- **Unit tests (`app/`): 93 passed, 0 failed on macOS and on the PC** (15 new: export card choices/destination/messages, batch popover and resume title, Settings pages/ticks/sizes, menu shortcut words, stock menu and Read as). 0 warnings in `negs-gpui`.
+- **Export byte-identity:** `_NHA9786.NEF`, Reference, PNG 8-bit sRGB, full size, grain and glare off via the sidecar.
+  - PC: GPUI app and shipping `windows/` `Negs.exe` both write 28,667,269 bytes, SHA-256 `F47D7676…1F763`. The same again from the final build (35.8 s; 67.5 s once while another session compiled on the PC).
+  - Mac: the GPUI app and the shipping SwiftUI app (an isolated copy of `dist/negs-macos-dev`, same engine binaries) both write `3f1d1062…760e8a`.
+  - Mac and PC differ from each other (ARM vs x86 f64), as before.
+- **Sidecar round trip** (8 NEFs; scratch copies on both):
+  - Mac edits `_NHA9786` (+0.7 EV, square crop), rates `_NHA9787` 3★ and picks `_NHA9788`: 3 sidecars.
+  - On the PC, the GPUI app reads all of them back exactly (ev 0.7, crop 0.166,0,0.668×1; 3★; Pick), then rates `_NHA9789` 5★ and gives `_NHA9790` −0.3 EV + Reject.
+  - Back on the Mac, all five read as written.
+  - The Mac's three sidecars stayed **byte-identical** through the PC session, and all five through the second Mac session. Untouched photos got no sidecar.
+- **Title-bar hit test on the PC** (real cursor moves, `WM_NCHITTEST`): "Negs", the file name and the space before the pills → `HTCAPTION`; the menu words and pills → `HTCLIENT`; then `HTMINBUTTON`, `HTMAXBUTTON`, `HTCLOSE`.
+- **Phase 4 frame bench re-run**, A/B against pre-5b `main` (`200def15`) built the same way and run alternately (base, 5b, base, 5b):
+
+| Phase | Machine | pre-5b fps (2 runs) | 5b fps (2 runs) | 5b interval p99 (ms) | 5b render p99 / max (ms) |
+|---|---|---|---|---|---|
+| Strip fling 4 s | Mac | 73.7 / 74.4 | 73.9 / 69.3 | 22.4 / 31.7 | 0.6 / 0.7 |
+| Flight open ×5 | Mac | 77.2 / 61.9 | 77.9 / 75.7 | 13.7 / 14.2 | 3.8 / 4.4 |
+| Flight fold ×5 | Mac | 76.1 / 57.9 | 76.7 / 75.2 | 15.1 / 15.3 | 3.6 / 3.8 |
+| Grid fling 6 s | Mac | 119.6 / 119.6 | 119.3 / 119.8 | 10.7 / 10.2 | 1.7 / 2.4 |
+| Strip fling 4 s | PC | 55.2 / 47.2 | 53.8 / 47.2 | 34.9 / 39.5 | 2.5 / 2.7 |
+| Flight open ×5 | PC | 51.6 / 53.1 | 50.3 / 52.4 | 44.8 / 31.0 | 9.0 / 27.0 |
+| Flight fold ×5 | PC | 51.1 / 50.9 | 49.7 / 49.6 | 46.9 / 36.4 | 10.6 / 17.7 |
+| Grid fling 6 s | PC | 60.0 / 60.0 | 60.0 / 60.0 | 20.0 / 20.6 | 1.5 / 1.9 |
+
+  - **5b and pre-5b are the same within noise on both machines.** Today's machines are busier than at Phase 4: the Mac was on battery with Docker at ~300% CPU; the PC had Adobe Creative Cloud helpers, Defender, another session's `rustc` and another session's `Negs.exe` (`.negs\idle\fix`). The PC's strip and flights (≈50 fps, against 60 at Phase 4) are as low in the pre-5b build.
+  - **The Mac grid fling spike from Phase 4 (24 ms render) did not recur.** Grid render max was 2.4–5.8 ms in five runs, at ~119 fps. A ~70 ms strip hitch appears once per run in both builds; it is older than 5b.
+- **Screenshots (real windows):**
+  - Mac: `/private/tmp/claude-501/-Users-noahhaasis-Projects-negs/3d47e6be-b5c8-4129-bdd3-5e7c7e85cdc3/scratchpad/mac-export/shots/export-card*.png` (Darkroom, Light Table, Plain dark, batch), `/private/tmp/claude-501/-Users-noahhaasis-Projects-negs/3d47e6be-b5c8-4129-bdd3-5e7c7e85cdc3/scratchpad/mac-settings/shots/*.png` (each Settings page, Look in Light Table and Plain dark, the tiles-off stock menu).
+  - PC: `/private/tmp/claude-501/-Users-noahhaasis-Projects-negs/3d47e6be-b5c8-4129-bdd3-5e7c7e85cdc3/scratchpad/pc/shots5b/*.png` (the same, plus `menu-file.png` and `menu-photo-rating.png`, the in-window menu bar with caption buttons).
+- Seen once on the PC, not reproduced: a run restored the canvas at 100% (`fitImage: false` in the scratch session). The same tour sequence from a clean session keeps Fit.
+- **PC cleanup:** `schtasks negs-gpui-p5`, worktree `negs\worktrees\gpui-p5` and `C:\Users\Noah\.negs\scratch\gpui-p5` deleted after the gate. Noah's main checkout, installed Negs, profiles and photo folders were never touched.
 
 ---
 
