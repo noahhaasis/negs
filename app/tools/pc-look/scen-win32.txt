@@ -1,0 +1,55 @@
+probe strip 0 900 1150
+probe canvas 385 400 390
+probe canvas 385 250 390
+probe insp 1160 360 420
+probe insp 1160 750 420
+probe slider 1360 487 110
+probe grid 20 300 1110
+probe grid 20 600 1110
+front
+wait 1500
+mark begin idle canvas
+wait 2000
+mark end idle
+mark begin strip strip
+wheel 580 900 -40 120 8
+wait 800
+mark end strip
+wheel 580 900 40 120 8
+wait 1500
+mark latency grid_open grid
+mark begin grid_open grid
+key 0x47
+wait 1200
+mark end grid_open
+mark begin grid_scroll grid
+wheel 580 500 -40 180 8
+wait 800
+mark end grid_scroll
+wheel 580 500 40 180 8
+wait 1500
+mark latency grid_close canvas
+mark begin grid_close canvas
+key 0x47
+wait 1200
+mark end grid_close
+wait 1000
+mark latency tab_lab insp
+click 1287 300
+wait 1000
+mark latency tab_output insp
+click 1378 300
+wait 1000
+mark latency tab_prep insp
+click 1211 300
+wait 1500
+mark begin slider_ui slider
+mark begin slider_canvas canvas
+drag 1449 487 1417 487 250 16
+wait 1500
+mark end slider_ui
+mark end slider_canvas
+keydown 0x11
+key 0x5A
+keyup 0x11
+wait 1500

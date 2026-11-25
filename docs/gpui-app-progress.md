@@ -15,6 +15,7 @@ See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-coordinator.md](gpui-app-
 | 4 | Library, Filmstrip, Grid & Flight | **Done** (Smoothness Proof reviewed 2026-11-25) | `9c1020ed` | Colour-managed background thumbnails, virtualized filmstrip + contact-sheet grid with hand-drawn marks (cached sprites), library menus, `SheetFlight` Photo↔Grid flight, `NEGS_FRAME_BENCH`. PC 60.0–60.8 fps, 0 dropped frames. |
 | 5 | Compare, Crop, Negative, Export, Batch & Settings | **Done** (5a + 5b) | 5a `200def15`, 5b `7720b5ca` | Print on its sheet, crop, negative pick, Compare; export card → native dialog, batch, Settings window, full menus (in-window menu bar + caption buttons off the Mac), Lightroom. Exports byte-identical to `windows/` and SwiftUI. |
 | 6 | Windows Cutover & Packaging | **Parity merged; cutover deferred** (look first) | `5bc98c59` | ABBA vs Win32 `Negs.exe` (GPUI ahead on grid, strip, tabs, RAM; behind on startup and size), Windows parity (menu keys/ticks, TaskDialog errors, taskbar, WinSparkle, end-session, single instance, tooltips), packaging plan prepared, not applied. |
+| 6L | Look parity (before the cutover) | **Next** | — | Make `app/` look like Negs, case by case (Win32 / SwiftUI / GPUI / fix each original's visual bugs), area by area with six-theme shots; see [gpui-app-handoff-look.md](gpui-app-handoff-look.md). |
 | 7 | Linux Adoption & macOS Polish | Pending | — | 7a Linux (T2 parity, retire GTK4), 7b macOS (HIG polish, Go/No-Go before retiring SwiftUI). |
 
 ---
