@@ -98,7 +98,39 @@ pub fn want(model: &Model, item: &Item, unedited: Option<&str>) -> Want {
     let Some(library) = &model.shelf.library else { return none };
     let Some(file) = library.file(item) else { return none };
     let Some(look) = library.look(item).or(unedited) else { return none };
-    Want { item: item.clone(), key: edited_store::thumbnails().key(file, item, look), loose: Store::loose_key(file, item, look) }
+    let engine = edited_store::thumbnails().engine();
+    KEYS.with(|keys| {
+        let mut keys = keys.borrow_mut();
+        if let Some(known) = keys.get(item).filter(|k| k.size == file.size && k.modified == file.modified && k.look == look && k.engine == engine) {
+            return Want { item: item.clone(), key: known.key.clone(), loose: known.loose.clone() };
+        }
+        let want = Want { item: item.clone(), key: edited_store::thumbnails().key(file, item, look), loose: Store::loose_key(file, item, look) };
+        if keys.len() >= KEYS_KEPT {
+            keys.clear();
+        }
+        let known = KnownKeys { size: file.size, modified: file.modified, look: look.to_owned(), engine, key: want.key.clone(), loose: want.loose.clone() };
+        keys.insert(item.clone(), known);
+        want
+    })
+}
+
+/// An item's keys and what they were made from. Every sync asks every
+/// cell's keys, and hashing them anew each time cost a large folder tens
+/// of milliseconds per sync (issue #24).
+struct KnownKeys {
+    size: Option<u64>,
+    modified: Option<std::time::SystemTime>,
+    look: String,
+    engine: Option<String>,
+    key: Option<String>,
+    loose: Option<String>,
+}
+
+/// Enough for a few large folders; past it the keys are made again.
+const KEYS_KEPT: usize = 50_000;
+
+thread_local! {
+    static KEYS: std::cell::RefCell<HashMap<Item, KnownKeys>> = std::cell::RefCell::new(HashMap::new());
 }
 
 /// The unedited look, once a library is open.
