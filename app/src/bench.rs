@@ -40,6 +40,9 @@ enum Step {
     Mark,
     Shot(&'static str),
     StripFling(f64),
+    /// The strip back on the open photograph (where the fling left it is
+    /// nowhere near the grid's cells, so nothing would fly).
+    CentreStrip,
     OpenGrid(Option<&'static str>),
     CloseGrid(Option<&'static str>),
     WaitFlight,
@@ -83,7 +86,7 @@ impl Bench {
             let _ = std::fs::create_dir_all(dir);
         }
         use Step::*;
-        let mut steps = vec![WaitLoaded, WaitThumbs(150.0), Mark, Hold(400), Shot("strip"), StripFling(4.0), Hold(300)];
+        let mut steps = vec![WaitLoaded, WaitThumbs(150.0), Mark, Hold(400), Shot("strip"), StripFling(4.0), CentreStrip, Hold(300)];
         // A first opening to warm the grid's thumbnails, then settle.
         steps.extend([OpenGrid(None), WaitFlight, WaitThumbs(150.0), CloseGrid(None), WaitFlight, Hold(500)]);
         for _ in 0..5 {
@@ -153,6 +156,13 @@ impl Bench {
         self.step_frames += 1;
         let in_step = self.step_started.elapsed();
         let Some(step) = self.steps.get(self.at).cloned() else { return };
+        if self.step_frames % 120 == 1 {
+            eprintln!(
+                "bench: step {} {:?} frame {} library {} source {} first_render {} failed {} strip {} outstanding {} in_grid {}",
+                self.at, step, self.step_frames, app.model.shelf.library.is_some(), app.model.source.is_some(), app.model.first_render_shown,
+                app.model.render_failed, app.strip.cells.len(), app.thumbs.outstanding(), app.model.shelf.in_grid
+            );
+        }
         if self.started.elapsed() > Duration::from_secs(600) {
             self.notes.push(format!("timed out at step {} ({step:?})", self.at));
             return self.write(app, cx);
@@ -227,6 +237,11 @@ impl Bench {
                     self.measure(None);
                     self.next();
                 }
+            }
+            Step::CentreStrip => {
+                crate::strip::centre_open(app);
+                crate::strip::request_now(app);
+                self.next();
             }
             Step::OpenGrid(phase) => {
                 grid::open(app);

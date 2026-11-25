@@ -213,6 +213,9 @@ enum Arrived {
     Embedded { path: PathBuf, size: ThumbSize, thumb: Option<Arc<Thumb>>, epoch: u64 },
     Headers { ratios: Vec<(PathBuf, f64)> },
     Developed { key: String, thumb: Option<Arc<Thumb>>, found: bool, epoch: u64 },
+    /// A developed thumbnail looked for on disk (its embedded preview
+    /// already shown) and not there: the pump develops it.
+    Missed { path: PathBuf, size: ThumbSize },
 }
 
 fn arrivals() -> &'static Mutex<Vec<Arrived>> {
@@ -266,6 +269,8 @@ pub fn unedited_look(model: &Model) -> Option<String> {
 struct Job {
     path: PathBuf,
     size: ThumbSize,
+    /// Only the developed thumbnail on disk: the embedded one's shown.
+    edited_only: bool,
     key: Option<String>,
     loose: Option<String>,
 }
@@ -295,6 +300,11 @@ pub struct Thumbs {
     header_ratios: HashMap<PathBuf, f64>,
     headers_asked: HashSet<PathBuf>,
     reading: HashSet<(PathBuf, ThumbSize)>,
+    /// Developed thumbnails' keys looked for on disk already. Without it a
+    /// photograph whose embedded preview was read before its key was known
+    /// (the store learns the engine's stamp after launch) kept showing the
+    /// camera's preview.
+    looked_up: HashSet<String>,
     unreadable: HashSet<PathBuf>,
     queue: Option<Arc<Queue>>,
     /// Keys found on disk, being developed, or that failed to develop.
@@ -326,6 +336,7 @@ impl Default for Thumbs {
             header_ratios: HashMap::new(),
             headers_asked: HashSet::new(),
             reading: HashSet::new(),
+            looked_up: HashSet::new(),
             unreadable: HashSet::new(),
             queue: None,
             on_disk: HashSet::new(),
@@ -378,6 +389,7 @@ impl Thumbs {
         }
         self.edited.clear();
         self.reading.clear();
+        self.looked_up.clear();
         if let Some(queue) = &self.queue {
             queue.jobs.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
@@ -440,6 +452,9 @@ impl Thumbs {
                 self.stats.read += 1;
                 let bytes = thumb.bytes();
                 self.edited.insert(key, thumb, bytes);
+            }
+            Arrived::Missed { path, size } => {
+                self.reading.remove(&(path, size));
             }
             Arrived::Embedded { path, size, thumb, epoch } => {
                 self.reading.remove(&(path.clone(), size));
@@ -516,6 +531,10 @@ impl Thumbs {
         let mut kept = Vec::with_capacity(queued.len());
         for job in queued.drain(..) {
             if job.size == size {
+                // Not taken yet: asked for again below, in today's order.
+                if let Some(key) = &job.key {
+                    self.looked_up.remove(key);
+                }
                 self.reading.remove(&(job.path, job.size));
             } else {
                 kept.push(job);
@@ -527,13 +546,24 @@ impl Thumbs {
             let has_edited = want.key.as_ref().is_some_and(|k| self.edited.contains(k));
             // The strip's (432) serves the grid's smaller size (384) as well.
             let covered = ThumbSize::ALL.iter().any(|s| s.pixels() >= size.pixels() && self.embedded[slot(*s)].contains(path));
-            if has_edited || covered || self.unreadable.contains(path) {
+            if has_edited || self.unreadable.contains(path) {
                 continue;
+            }
+            // Covered by an embedded preview: only its developed one, once.
+            let edited_only = covered;
+            if edited_only {
+                let Some(key) = &want.key else { continue };
+                if self.looked_up.contains(key) || self.developing.contains(key) || self.failed.contains(key) {
+                    continue;
+                }
             }
             if !self.reading.insert((path.clone(), size)) {
                 continue;
             }
-            queued.push(Job { path: path.clone(), size, key: want.key.clone(), loose: want.loose.clone() });
+            if let Some(key) = &want.key {
+                self.looked_up.insert(key.clone());
+            }
+            queued.push(Job { path: path.clone(), size, edited_only, key: want.key.clone(), loose: want.loose.clone() });
         }
         queue.ready.notify_all();
     }
@@ -760,6 +790,9 @@ fn read_one(job: Job) -> Arrived {
             }
         }
     }
+    if job.edited_only {
+        return Arrived::Missed { path: job.path, size: job.size };
+    }
     let thumb = negs_app::thumbnail::read(&job.path, job.size.pixels()).and_then(|(bgra, w, h)| make_thumb(bgra, w, h, false, cm.as_deref()));
     Arrived::Embedded { path: job.path, size: job.size, thumb, epoch }
 }
@@ -960,6 +993,33 @@ mod tests {
         assert!(thumbs.shown(&want, ThumbSize::Strip).is_none(), "converted for the old display");
         assert!(!thumbs.reading.contains(&(path, ThumbSize::Strip)), "and no longer being read");
         assert_eq!(thumbs.stats.dropped_stale, 1);
+    }
+
+    #[test]
+    fn a_key_learnt_after_the_embedded_preview_still_finds_the_developed_one() {
+        let _guard = serial();
+        let mut thumbs = Thumbs::default();
+        let path = PathBuf::from("/nonexistent/negs-test/DSC_0001.NEF");
+        thumbs.arrived(Arrived::Embedded { path: path.clone(), size: ThumbSize::Strip, thumb: make_thumb(vec![9; 16], 2, 2, false, None), epoch: display_epoch() });
+        let unkeyed = Want { item: Item::photo(&path), key: None, loose: None };
+        thumbs.read(&[&unkeyed], ThumbSize::Strip);
+        assert_eq!(thumbs.outstanding(), 0, "covered, nothing more to read");
+        // The store learnt the engine: the photograph has a key now.
+        let keyed = Want { item: Item::photo(&path), key: Some("k1".into()), loose: None };
+        thumbs.read(&[&keyed], ThumbSize::Strip);
+        assert_eq!(thumbs.outstanding(), 1, "its developed thumbnail is looked for");
+        thumbs.read(&[&keyed], ThumbSize::Strip);
+        assert_eq!(thumbs.outstanding(), 1, "once");
+        // The reader finds nothing on disk and says so.
+        let started = std::time::Instant::now();
+        while thumbs.outstanding() > 0 && started.elapsed() < std::time::Duration::from_secs(5) {
+            thumbs.drain();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(thumbs.outstanding(), 0);
+        thumbs.read(&[&keyed], ThumbSize::Strip);
+        assert_eq!(thumbs.outstanding(), 0, "not on disk: left to the pump, not asked again");
+        thumbs.shutdown();
     }
 
     #[test]

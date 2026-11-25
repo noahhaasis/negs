@@ -308,6 +308,15 @@ fn request(app: &mut NegsApp) {
     app.thumbs.pump(&app.model, &all, range, open);
 }
 
+/// Scrolls the open frame to the middle at once.
+pub fn centre_open(app: &mut NegsApp) {
+    let strip = &mut app.strip;
+    if let Some(i) = strip.open_index() {
+        let visible = strip.visible_width();
+        strip.set_scroll(rules::centred(strip.layout.middle(i), visible, strip.layout.width));
+    }
+}
+
 /// Brings the strip up to date at once, a glide to its end: under a folding
 /// sheet, whose flyers land on its frames.
 pub fn settle(app: &mut NegsApp) {

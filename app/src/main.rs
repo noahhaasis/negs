@@ -352,6 +352,14 @@ impl NegsApp {
         self.model.show_tone_graph(tone_graph_visible);
         let _ = self.model.pump_previews();
 
+        // The first developed picture is up: the strip's thumbnails (which
+        // waited, so as not to slow it) may develop now.
+        if self.model.image.is_some() && !self.model.first_render_shown {
+            self.model.first_render_shown = true;
+            self.model.dirty |= negs_app::model::dirty::STRIP;
+            self.startup.stamp("first_image_scene");
+        }
+
         // Thumbnails that arrived; the strip and grid follow the model.
         let folder = self.model.source.as_deref().and_then(Path::parent).map(Path::to_path_buf);
         self.thumbs.set_folder(folder);
