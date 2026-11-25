@@ -37,6 +37,31 @@ use crate::{json as js, state};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+type Delivery = Box<dyn FnOnce(&mut App) + Send>;
+
+/// What the readers, helpers and header threads have brought, not yet
+/// taken in on the UI thread.
+static DELIVERIES: Mutex<Vec<Delivery>> = Mutex::new(Vec::new());
+
+/// Takes `delivery` in on the UI thread, with every other that arrives
+/// before it runs, and then syncs the strip and grid once. A sync visits
+/// every cell, so one per thumbnail stalled the window for seconds when a
+/// large folder's thumbnails arrived together (issue #24).
+fn deliver(delivery: impl FnOnce(&mut App) + Send + 'static) {
+    let mut waiting = DELIVERIES.lock().unwrap_or_else(|e| e.into_inner());
+    waiting.push(Box::new(delivery));
+    if waiting.len() == 1 {
+        drop(waiting);
+        post(|app: &mut App| {
+            let waiting = std::mem::take(&mut *DELIVERIES.lock().unwrap_or_else(|e| e.into_inner()));
+            for delivery in waiting {
+                delivery(app);
+            }
+            app.model.dirty |= crate::model::dirty::STRIP;
+        });
+    }
+}
+
 /// A thumbnail's pixels, opaque BGRA.
 pub struct Pixels {
     pub bgra: Vec<u8>,
@@ -229,10 +254,7 @@ impl Thumbs {
                 let started = std::time::Instant::now();
                 let read: Vec<(PathBuf, f64)> = batch.iter().filter_map(|p| crate::thumbnail::header_ratio(p).map(|r| (p.clone(), r))).collect();
                 crate::trace::event("headers_read", || json!({"count": batch.len(), "known": read.len(), "ms": started.elapsed().as_secs_f64() * 1000.0}));
-                post(move |app: &mut App| {
-                    app.thumbs.header_ratios.extend(read);
-                    app.model.dirty |= crate::model::dirty::STRIP;
-                });
+                deliver(move |app: &mut App| app.thumbs.header_ratios.extend(read));
             }
         });
     }
@@ -452,10 +474,7 @@ fn run_develop(engine: Arc<EngineClient>, mut job: DevelopJob, generation: u64) 
     let store = edited_store::thumbnails();
     let key = job.key.clone();
     let finish = move |pixels: Option<Arc<Pixels>>, found: bool| {
-        post(move |app: &mut App| {
-            app.thumbs.developed(key, pixels, found);
-            app.model.dirty |= crate::model::dirty::STRIP;
-        });
+        deliver(move |app: &mut App| app.thumbs.developed(key, pixels, found));
     };
     if store.contains(&job.key) {
         return finish(None, true);
@@ -561,10 +580,7 @@ fn start_readers() -> Arc<Queue> {
                     };
                     json!({"name": name, "size": size as usize, "kind": kind, "width": w, "height": h, "ms": started.elapsed().as_secs_f64() * 1000.0})
                 });
-                post(move |app: &mut App| {
-                    app.thumbs.arrived(arrived);
-                    app.model.dirty |= crate::model::dirty::STRIP;
-                });
+                deliver(move |app: &mut App| app.thumbs.arrived(arrived));
             }
         });
     }
