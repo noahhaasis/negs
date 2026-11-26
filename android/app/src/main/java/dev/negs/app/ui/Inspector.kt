@@ -40,7 +40,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -267,20 +268,28 @@ object Inspector {
     @Composable
     private fun SliderRow(
         label: String, value: Double, min: Double, max: Double, step: Double, enabled: Boolean, modified: Boolean,
-        onReset: () -> Unit, onChange: (Double, Boolean) -> Unit, onDone: () -> Unit,
+        onReset: () -> Unit, onChange: (Double, Boolean) -> Unit, onDone: () -> Unit, resettable: Boolean = true,
     ) {
         Column(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // A fixed height, and Reset's slot kept while hidden, so the first
+            // change doesn't grow the row or slide the value along.
+            Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically) {
                 // Double tap the name to reset, as on desktop.
                 Text(
                     label, color = if (modified) Palette.fg else Palette.muted, fontSize = 13.sp,
                     modifier = Modifier.weight(1f).combinedClickable(onClick = {}, onDoubleClick = onReset),
                 )
-                Text(Controls.format(value, step), color = Palette.muted, fontSize = 12.sp)
-                if (modified) {
-                    TextButton(onClick = onReset, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
-                        Text("Reset", color = Palette.faint, fontSize = 11.sp)
-                    }
+                Text(
+                    Controls.format(value, step), color = Palette.muted, fontSize = 12.sp,
+                    style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
+                )
+                if (resettable) {
+                    Text(
+                        "Reset", color = Palette.faint, fontSize = 11.sp,
+                        modifier = Modifier.alpha(if (modified) 1f else 0f)
+                            .clickable(enabled = modified, onClick = onReset)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
                 }
             }
             Slider(
@@ -386,7 +395,7 @@ object Inspector {
     private fun PercentRow(label: String, fraction: Double, min: Double, max: Double, enabled: Boolean, step: Double = 0.1, onChange: (Double) -> Unit) {
         SliderRow(
             label, fraction * 100, min, max, step, enabled, false,
-            onReset = {}, onChange = { v, _ -> onChange(v / 100) }, onDone = {},
+            onReset = {}, onChange = { v, _ -> onChange(v / 100) }, onDone = {}, resettable = false,
         )
     }
 
