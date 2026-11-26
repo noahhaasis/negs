@@ -117,7 +117,7 @@ class Engine(
             }
         } catch (e: Exception) {
             pending.remove(id)
-            throw EngineDied("The engine couldn't be reached: ${e.message}")
+            throw EngineDied(tr("The engine couldn’t be reached: {message}", "message" to e.message))
         }
         return if (timeoutMs > 0L) {
             try {
@@ -126,7 +126,7 @@ class Engine(
                 pending.remove(id)
                 Log.e(TAG, "command '$command' timed out after ${timeoutMs}ms; killing hung engine")
                 kill()
-                throw EngineDied("The engine stopped responding")
+                throw EngineDied(tr("The engine stopped responding"))
             }
         } else {
             answer.await()
@@ -185,7 +185,7 @@ class Engine(
             }
         }
         // 137 and 9: killed, which on a phone means memory.
-        val reason = if (code == 137 || code == 9) "Android stopped the engine to free memory" else "The engine stopped (exit $code)"
+        val reason = if (code == 137 || code == 9) tr("Android stopped the engine to free memory") else tr("The engine stopped (exit {code})", "code" to code)
         if (pending.isNotEmpty()) {
             _lastExit.value = reason
             Log.w(TAG, reason)

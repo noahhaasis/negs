@@ -20,6 +20,12 @@ val syncSamples by tasks.registering(Sync::class) {
     from(rootProject.file("../web/sample")) { include("DSC_6377.dng") }
     into(layout.buildDirectory.dir("generated/samples/samples"))
 }
+// The web app's translations (I18n.kt): the app's own strings are in
+// src/main/assets/locales.
+val syncLocales by tasks.registering(Sync::class) {
+    from(rootProject.file("../web/locales")) { include("*.js") }
+    into(layout.buildDirectory.dir("generated/locales/locales"))
+}
 // Optional 60 MP Leica Q3 RAW for Firebase Test Lab instrumentation benchmarks.
 val largeRawPath = providers.gradleProperty("negsLargeRaw").orNull
 val syncLargeRaw by tasks.registering(Sync::class) {
@@ -58,6 +64,7 @@ android {
     buildFeatures { compose = true }
     sourceSets["main"].assets.srcDir(engineData)
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/samples"))
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/locales"))
     sourceSets["androidTest"].assets.srcDir(layout.buildDirectory.dir("generated/testSamples"))
     packaging {
         // The engine runs as a program from the native library directory,
@@ -70,7 +77,7 @@ android {
     }
 }
 
-tasks.named("preBuild") { dependsOn(syncEngineData, syncSamples, syncLargeRaw) }
+tasks.named("preBuild") { dependsOn(syncEngineData, syncSamples, syncLocales, syncLargeRaw) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")

@@ -17,6 +17,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        I18n.start(applicationContext)
         if (savedInstanceState == null) opened(intent)
         setContent { NegsTheme { EditorScreen(editor) } }
     }
@@ -42,7 +43,7 @@ class MainActivity : ComponentActivity() {
             presets.isNotEmpty() -> editor.importPresets(presets)
             uris.isNotEmpty() -> editor.open(uris.first())
             intent.action == Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let { text ->
-                if (!editor.importPresetLink(text)) editor.notify("There’s no preset link in what was shared.")
+                if (!editor.importPresetLink(text)) editor.notify(tr("There’s no preset link in what was shared."))
             }
         }
     }

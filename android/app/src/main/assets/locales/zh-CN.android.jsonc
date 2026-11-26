@@ -1,0 +1,118 @@
+// The Android app's Simplified Chinese strings that the web app's
+// dictionary (web/locales/zh-CN.js, which I18n.kt reads first) doesn't
+// have. Keys are the English in the Kotlin sources; android/check-i18n.mjs
+// checks that each is still used, isn't the web's already, and keeps its
+// {name} holes.
+{
+
+  // ---- Starting, opening, rendering ---------------------------------------------
+
+  "Preparing the film data…": "正在准备胶片数据…",
+  "Starting the engine…": "正在启动引擎…",
+  "Developing {name}…": "正在显影 {name}…",
+  "Couldn’t open the photo: {message}": "无法打开照片：{message}",
+  "{message}. Rendering again…": "{message}。正在重新渲染…",
+  "Couldn’t show the original": "无法显示原图",
+  "The engine didn’t start": "引擎未能启动",
+  "The engine couldn’t be reached: {message}": "无法连接引擎：{message}",
+  "The engine stopped responding": "引擎无响应",
+  "Android stopped the engine to free memory": "Android 为释放内存停止了引擎",
+  "The engine stopped (exit {code})": "引擎已停止（退出码 {code}）",
+  "Develop a photo on film": "用胶片冲洗一张照片",
+  "Open a RAW, JPEG, PNG or TIFF. It stays on your phone.": "打开 RAW、JPEG、PNG 或 TIFF 文件。照片只保存在你的手机上",
+  "Open photo": "打开照片",
+  "OK": "好",
+
+  // ---- The top bar and its menu -------------------------------------------------
+
+  "Crop and straighten": "裁剪与校正",
+  "Hide advanced controls": "隐藏高级控件",
+  "Show advanced controls": "显示高级控件",
+  "Reset adjustments": "重置调整",
+  "Settings…": "设置…",
+  "Share…": "分享…",
+
+  // ---- Export ---------------------------------------------------------------------
+
+  "Rendering for export…": "正在渲染导出…",
+  "Saved to Pictures/Negs": "已保存到 Pictures/Negs",
+  "Export failed: {message}": "导出失败：{message}",
+  "LUT exported": "LUT 已导出",
+  "Balance Print failed: {message}": "放印平衡失败：{message}",
+
+  // ---- Inspector ------------------------------------------------------------------
+
+  "Reset": "重置",
+  "Starts at {ev} EV to match the camera.": "从 {ev} EV 起步，以匹配相机。",
+  "Starts at {ev} EV to match the camera, held back to protect highlights.": "从 {ev} EV 起步以匹配相机，为保护高光有所收敛。",
+  "The camera preview is too dark or too bright to match.": "相机预览过暗或过亮，无法匹配。",
+  "Matching would take more than ±3 EV.": "匹配需要超过 ±3 EV。",
+  "The 35mm strip needs a 3:2 or 3:4 photograph. Crop it to one of those to see it.": "35mm 底片条需要 3:2 或 3:4 的照片。裁剪为其中一种比例即可看到",
+  "Search films and papers": "搜索胶片和相纸",
+  "Scanned directly: no paper.": "直接扫描：不用相纸。",
+
+  // ---- Crop -----------------------------------------------------------------------
+
+  "Aspect ratio": "宽高比",
+  "Drag corners or edges to resize, or drag inside to move. Drag the dial below the photograph to level it. Borders are added after cropping.":
+    "拖动角或边调整大小，拖动中间移动。拖动照片下方的拨盘校正水平。边框在裁剪之后添加",
+
+  // ---- Presets --------------------------------------------------------------------
+
+  "Presets": "预设",
+  "New preset": "新建预设",
+  "Rename preset": "重命名预设",
+  "Import…": "导入…",
+  "Save": "保存",
+  "Rename": "重命名",
+  "Apply": "应用",
+  "Rename…": "重命名…",
+  "Save as file…": "存为文件…",
+  "Move earlier": "前移",
+  "Move later": "后移",
+  "Delete": "删除",
+  "Delete…": "删除…",
+  "More for {name}": "{name} 的更多操作",
+  "A preset keeps a film, a paper and the Lab settings, to use again on other photos. Save this look with New preset, or import presets made in Negs or spektrafilm.":
+    "预设保存胶片、相纸和暗房设置，可以在其他照片上再次使用。用“新建预设”保存当前效果，或导入在 Negs 或 spektrafilm 中制作的预设",
+  "tap to apply · hold for more": "轻点应用 · 长按查看更多",
+  "scanned directly": "直接扫描",
+  "printed on {paper}": "放印于 {paper}",
+  "Delete “{name}”?": "删除“{name}”？",
+  "The preset is removed from Negs. The photo you’re editing keeps its settings.": "预设将从 Negs 中移除。正在编辑的照片会保留其设置",
+  "Share “{name}”": "分享“{name}”",
+  "Saved “{name}”": "已保存“{name}”",
+  "Deleted “{name}”": "已删除“{name}”",
+  "Added “{name}” to the presets": "已将“{name}”添加到预设",
+  "Added {n} presets": "已添加 {n} 个预设",
+  "Added {n} presets. Not imported: {failures}": "已添加 {n} 个预设。未导入：{failures}",
+  "No presets were imported. {failures}": "没有导入任何预设。{failures}",
+  "Couldn’t import {failures}": "无法导入 {failures}",
+  "Couldn’t list the presets: {message}": "无法列出预设：{message}",
+  "Couldn’t save the preset: {message}": "无法保存预设：{message}",
+  "Couldn’t add the preset: {message}": "无法添加预设：{message}",
+  "Couldn’t rename “{name}”: {message}": "无法重命名“{name}”：{message}",
+  "Couldn’t delete “{name}”: {message}": "无法删除“{name}”：{message}",
+  "Couldn’t share “{name}”: {message}": "无法分享“{name}”：{message}",
+  "Couldn’t save “{name}”: {message}": "无法保存“{name}”：{message}",
+  "Couldn’t save the order: {message}": "无法保存顺序：{message}",
+  "A preset named “{name}” already exists.": "已存在名为“{name}”的预设。",
+  "“{name}” changed. The list has been updated; try again.": "“{name}”已更改。列表已更新，请重试",
+  "Couldn’t find a free name for the preset.": "找不到可用的预设名称。",
+  "Couldn’t rename the preset.": "无法重命名预设。",
+  "Couldn’t delete the preset.": "无法删除预设。",
+  "Couldn’t save the presets’ order.": "无法保存预设的顺序。",
+  "The file is too large to be a preset.": "文件太大，不是预设文件。",
+  "The file isn’t text.": "该文件不是文本文件。",
+  "The engine didn’t read a film.": "引擎未读到胶片。",
+  "The engine didn’t read a paper.": "引擎未读到相纸。",
+  "This version of Negs doesn’t have the preset’s film or paper.": "此版本的 Negs 没有该预设所用的胶片或相纸。",
+  "This preset link is from a newer Negs. Update the app, then open it again.": "此预设链接来自更新版本的 Negs。请更新应用，然后再次打开",
+  "There’s no preset link in what was shared.": "分享的内容中没有预设链接。",
+
+  // ---- Settings -------------------------------------------------------------------
+
+  "Show each film and paper on your photograph. Off, the Stock tab lists them by name, and Negs uses less memory.":
+    "在你的照片上预览每种胶片和相纸。关闭时，胶片与相纸页只按名称列出，Negs 占用的内存更少。",
+  "The interface language.": "界面语言。",
+}

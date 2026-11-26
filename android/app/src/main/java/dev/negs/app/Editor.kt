@@ -109,11 +109,11 @@ class Editor(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             try {
-                status = "Preparing the film data…"
+                status = tr("Preparing the film data…")
                 val data = withContext(Dispatchers.IO) { EngineData.prepare(context) }
                 dataDir = data
                 engine = Engine(context, data, memory)
-                status = "Starting the engine…"
+                status = tr("Starting the engine…")
                 val loaded = Catalog.parse(engine.call("catalog"))
                 catalog = loaded
                 edit = Edit("", "kodak_portra_endura", loaded.defaults)
@@ -353,10 +353,10 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 matchFailure = null
                 referenceFor = null
                 edit = edit.copy(params = edit.params.with("prep.exposure_ev", offset.coerceIn(-3.0, 3.0).json()))
-                status = "Developing $name…"
+                status = tr("Developing {name}…", "name" to name)
                 changed()
             } catch (e: Exception) {
-                message = Message("Couldn't open the photo: ${e.message}", error = true)
+                message = Message(tr("Couldn’t open the photo: {message}", "message" to e.message), error = true)
             } finally {
                 busy = false
             }
@@ -449,12 +449,12 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 status = "${width}×${height} · ${result["backend"].text() ?: ""} · $ms ms"
             }
         } catch (e: EngineDied) {
-            message = Message("${e.message}. Rendering again…", error = true)
+            message = Message(tr("{message}. Rendering again…", "message" to e.message), error = true)
             delay(300)
             dirty.trySend(Unit)
         } catch (e: Exception) {
             lastKey = key
-            message = Message(e.message ?: "The render failed", error = true)
+            message = Message(e.message ?: tr("Render failed"), error = true)
         } finally {
             busy = false
         }
@@ -494,7 +494,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 val bitmap = withContext(Dispatchers.IO) { readRgba(file, w, h) }
                 if (photo.generation == this@Editor.photo?.generation) original = bitmap
             } catch (e: Exception) {
-                message = Message(e.message ?: "Couldn't show the original", error = true)
+                message = Message(e.message ?: tr("Couldn’t show the original"), error = true)
             }
         }
     }
@@ -513,6 +513,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
 
     /** Asks for `stock`'s preview, behind the photograph's own renders. */
     fun wantThumbnail(stock: Stock, longSide: Int) {
+        if (!stockPreviews) return
         val photo = photo ?: return
         val tile = tileEdit(stock)
         val cut = crop
@@ -534,7 +535,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 val w = result["width"].number()!!.toInt()
                 val h = result["height"].number()!!.toInt()
                 val bitmap = withContext(Dispatchers.IO) { readRgba(file, w, h) }
-                if (photo.generation == this@Editor.photo?.generation) thumbnails[stock.id] = key to bitmap
+                if (photo.generation == this@Editor.photo?.generation && stockPreviews) thumbnails[stock.id] = key to bitmap
             } catch (e: Exception) {
                 Log.w(Engine.TAG, "thumbnail ${stock.id}: ${e.message}")
             }
@@ -561,9 +562,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 val y = r["y_filter_shift"].number() ?: 0.0
                 edit = edit.copy(params = edit.params.with("enlarger.m_filter_shift", m.json()).with("enlarger.y_filter_shift", y.json()))
                 changed()
-                message = Message("Print balanced: magenta %.2f, yellow %.2f".format(m, y))
+                message = Message(tr("Print balanced: magenta {m}, yellow {y}", "m" to "%.2f".format(m), "y" to "%.2f".format(y)))
             } catch (e: Exception) {
-                message = Message("Balance Print failed: ${e.message}", error = true)
+                message = Message(tr("Balance Print failed: {message}", "message" to e.message), error = true)
             } finally {
                 balancing = false
             }
@@ -595,7 +596,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
             // A pending brightness match first: the export is what it shows.
             awaitMatch()
             val asked = edit
-            message = Message(photoSize?.let { (w, h) -> "Rendering ${w}×${h} for export…" } ?: "Rendering for export…")
+            message = Message(photoSize?.let { (w, h) -> tr("Rendering {width}×{height} for export…", "width" to w, "height" to h) } ?: tr("Rendering for export…"))
             val dir = File(context.cacheDir, "export").apply { deleteRecursively(); mkdirs() }
             val name = "${photo.name.substringBeforeLast('.')}-${asked.film}.jpg"
             val out = File(dir, name)
@@ -628,9 +629,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                     })
                 }
                 val uri = withContext(Dispatchers.IO) { publish(out) }
-                message = Message("Saved to Pictures/Negs", share = uri)
+                message = Message(tr("Saved to Pictures/Negs"), share = uri)
             } catch (e: Exception) {
-                message = Message("Export failed: ${e.message}", error = true)
+                message = Message(tr("Export failed: {message}", "message" to e.message), error = true)
             } finally {
                 exporting = false
                 // The preview's frame comes back at its own size.
@@ -707,11 +708,11 @@ class Editor(app: Application) : AndroidViewModel(app) {
         if (!raw) return null
         matchUnavailable()?.let { return it }
         if (matchFailedHere()) return matchFailure?.message
-        if (matchPending() || matching) return "Matching…"
+        if (matchPending() || matching) return tr("Matching…")
         val ev = m.ev ?: return null
         val value = "${if (ev >= 0) "+" else "−"}${"%.2f".format(kotlin.math.abs(ev))}"
-        return if (m.limited) "Starts at $value EV to match the camera, held back to protect highlights."
-        else "Starts at $value EV to match the camera."
+        return if (m.limited) tr("Starts at {ev} EV to match the camera, held back to protect highlights.", "ev" to value)
+        else tr("Starts at {ev} EV to match the camera.", "ev" to value)
     }
 
     /** On: from the match, Exposure back to 0. Off: the brightness stays, all of it Exposure's. */
@@ -764,7 +765,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 })
                 if (r["usable"].bool() == false) {
                     if (photo.generation == this.photo?.generation) {
-                        matchFailure = MatchFailure(photo.generation, null, r["reason"].text() ?: "The camera preview couldn’t be read.")
+                        matchFailure = MatchFailure(photo.generation, null, r["reason"].text() ?: tr("The camera preview couldn’t be read."))
                     }
                     return
                 }
@@ -782,7 +783,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
             val ev = result["exposure_ev"].number()
             Log.i(Engine.TAG, "matched camera brightness: $ev EV in ${result["elapsed_ms"].number()?.roundToInt()} ms")
             if (ev == null || !ev.isFinite() || kotlin.math.abs(ev) > 3) {
-                matchFailure = MatchFailure(photo.generation, inputs, "No reliable brightness match with these settings.")
+                matchFailure = MatchFailure(photo.generation, inputs, tr("No reliable brightness match with these settings."))
             } else {
                 applyMatch(ev, result["highlight_limited"].bool() == true, inputs)
             }
@@ -871,7 +872,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
         val asked = edit
         viewModelScope.launch {
             val file = File(context.cacheDir, "export.cube")
-            message = Message("Exporting LUT…")
+            message = Message(tr("Exporting LUT…"))
             try {
                 engine.call("export_lut", buildJsonObject {
                     put("film", asked.film)
@@ -883,9 +884,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri, "wt")!!.use { out -> file.inputStream().use { it.copyTo(out) } }
                 }
-                message = Message("LUT exported")
+                message = Message(tr("LUT exported"))
             } catch (e: Exception) {
-                message = Message("LUT export failed: ${e.message}", error = true)
+                message = Message(tr("Couldn’t export the LUT: {message}", "message" to e.message), error = true)
             } finally {
                 file.delete()
             }
@@ -932,6 +933,28 @@ class Editor(app: Application) : AndroidViewModel(app) {
         prefs.edit().putBoolean("showNegsBuiltFilms", on).apply()
     }
 
+    /**
+     * Settings › Film and paper previews (web `stockPreviews`): the Stock tab
+     * shows each film and paper on the photograph, or, off, lists them by
+     * name, and the engine lets go of what the previews kept.
+     */
+    var stockPreviews by mutableStateOf(prefs.getBoolean("stockPreviews", true)); private set
+
+    fun chooseStockPreviews(on: Boolean) {
+        stockPreviews = on
+        prefs.edit().putBoolean("stockPreviews", on).apply()
+        if (on || !::engine.isInitialized) return
+        // A preview under way finishes, and isn't kept.
+        thumbnails.clear()
+        viewModelScope.launch {
+            try {
+                engine.call("release_thumbnails", urgent = false)
+            } catch (e: Exception) {
+                Log.w(Engine.TAG, "release_thumbnails: ${e.message}")
+            }
+        }
+    }
+
     // ---- Presets -------------------------------------------------------------------
 
     /*
@@ -958,7 +981,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
         val listed = try {
             withContext(Dispatchers.IO) { presetLibrary.list() }
         } catch (e: Exception) {
-            message = Message("Couldn’t list the presets: ${e.message}", error = true)
+            message = Message(tr("Couldn’t list the presets: {message}", "message" to e.message), error = true)
             emptyList()
         }
         presets = listed
@@ -979,10 +1002,10 @@ class Editor(app: Application) : AndroidViewModel(app) {
     /** What the engine reads in preset [text]; throws if it can't be used here. */
     private suspend fun validate(text: String): PresetStatus.Valid {
         val r = engine.call("preset_import", buildJsonObject { put("text", text) }, urgent = false)
-        val film = r["film"].text() ?: throw PresetError("The engine didn’t read a film.")
-        val paper = r["paper"].text() ?: throw PresetError("The engine didn’t read a paper.")
+        val film = r["film"].text() ?: throw PresetError(tr("The engine didn’t read a film."))
+        val paper = r["paper"].text() ?: throw PresetError(tr("The engine didn’t read a paper."))
         if (catalog?.stock(film) == null || catalog?.stock(paper) == null) {
-            throw PresetError("This version of Negs doesn’t have the preset’s film or paper.")
+            throw PresetError(tr("This version of Negs doesn’t have the preset’s film or paper."))
         }
         return PresetStatus.Valid(film, paper, r["params"].at("io.scan_film").bool() == true, text)
     }
@@ -1007,16 +1030,16 @@ class Editor(app: Application) : AndroidViewModel(app) {
                     val film = r["film"].text()!!
                     val paper = r["paper"].text()!!
                     if (catalog?.stock(film) == null || catalog?.stock(paper) == null) {
-                        throw PresetError("This version of Negs doesn’t have the preset’s film or paper.")
+                        throw PresetError(tr("This version of Negs doesn’t have the preset’s film or paper."))
                     }
                     edit = Edit(film, paper, r["params"] as JsonObject)
                     changed()
                     appliedPreset = PresetName.key(preset.name)
-                    message = Message("Applied “${preset.name}”")
+                    message = Message(tr("Applied “{name}”.", "name" to preset.name))
                     return@launch
                 }
             } catch (e: Exception) {
-                message = Message("Couldn’t apply “${preset.name}”: ${e.message}", error = true)
+                message = Message(tr("Couldn’t apply “{name}”: {message}", "name" to preset.name, "message" to e.message), error = true)
                 reloadPresets()
             }
         }
@@ -1030,7 +1053,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
     fun presetNameProblem(name: String, renaming: PresetFile? = null): String? =
         PresetName.problem(name) ?: name.takeIf { n ->
             presets.any { it != renaming && PresetName.key(it.name) == PresetName.key(n) }
-        }?.let { "A preset named “$it” already exists." }
+        }?.let { tr("A preset named “{name}” already exists.", "name" to it) }
 
     /** Saves the film, paper and Lab settings as a new preset named [name]. */
     fun newPreset(name: String) {
@@ -1048,9 +1071,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 // The edit's settings are this preset's: it's the one ringed.
                 appliedPreset = PresetName.key(file.name)
                 reloadPresets()
-                message = Message("Saved “${file.name}”")
+                message = Message(tr("Saved “{name}”", "name" to file.name))
             } catch (e: Exception) {
-                message = Message("Couldn’t save the preset: ${e.message}", error = true)
+                message = Message(tr("Couldn’t save the preset: {message}", "message" to e.message), error = true)
             }
         }
     }
@@ -1064,7 +1087,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 presetThumbnails.remove(preset.file.path)?.let { presetThumbnails[renamed.file.path] = it }
                 if (appliedPreset == PresetName.key(preset.name)) appliedPreset = PresetName.key(renamed.name)
             } catch (e: Exception) {
-                message = Message("Couldn’t rename “${preset.name}”: ${e.message}", error = true)
+                message = Message(tr("Couldn’t rename “{name}”: {message}", "name" to preset.name, "message" to e.message), error = true)
             }
             reloadPresets()
         }
@@ -1075,9 +1098,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
             try {
                 presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.delete(preset) } }
                 if (appliedPreset == PresetName.key(preset.name)) appliedPreset = null
-                message = Message("Deleted “${preset.name}”")
+                message = Message(tr("Deleted “{name}”", "name" to preset.name))
             } catch (e: Exception) {
-                message = Message("Couldn’t delete “${preset.name}”: ${e.message}", error = true)
+                message = Message(tr("Couldn’t delete “{name}”: {message}", "name" to preset.name, "message" to e.message), error = true)
             }
             reloadPresets()
         }
@@ -1096,7 +1119,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
             try {
                 presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.setOrder(list) } }
             } catch (e: Exception) {
-                message = Message("Couldn’t save the order: ${e.message}", error = true)
+                message = Message(tr("Couldn’t save the order: {message}", "message" to e.message), error = true)
                 reloadPresets()
             }
         }
@@ -1128,9 +1151,15 @@ class Editor(app: Application) : AndroidViewModel(app) {
             }
             reloadPresets()
             message = when {
-                failures.isEmpty() -> Message(if (added.size == 1) "Added “${added[0]}” to the presets" else "Added ${added.size} presets")
-                added.isEmpty() -> Message((if (failures.size == 1) "Couldn’t import " else "No presets were imported. ") + failures.joinToString("\n"), error = true)
-                else -> Message("Added ${added.size} presets. Not imported: " + failures.joinToString("\n"), error = true)
+                failures.isEmpty() -> Message(
+                    if (added.size == 1) tr("Added “{name}” to the presets", "name" to added[0]) else tr("Added {n} presets", "n" to added.size),
+                )
+                added.isEmpty() -> Message(
+                    (if (failures.size == 1) tr("Couldn’t import {failures}") else tr("No presets were imported. {failures}"))
+                        .replace("{failures}", failures.joinToString("\n")),
+                    error = true,
+                )
+                else -> Message(tr("Added {n} presets. Not imported: {failures}", "n" to added.size).replace("{failures}", failures.joinToString("\n")), error = true)
             }
         }
     }
@@ -1146,9 +1175,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 validate(preset)
                 val file = presetLock.withLock { withContext(Dispatchers.IO) { presetLibrary.add(preset.toByteArray(), name) } }
                 reloadPresets()
-                message = Message("Added “${file.name}” to the presets")
+                message = Message(tr("Added “{name}” to the presets", "name" to file.name))
             } catch (e: Exception) {
-                message = Message("Couldn’t add the preset: ${e.message}", error = true)
+                message = Message(tr("Couldn’t add the preset: {message}", "message" to e.message), error = true)
             }
         }
         return true
@@ -1163,7 +1192,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 val n = input.read(buffer)
                 if (n < 0) break
                 out.write(buffer, 0, n)
-                if (out.size() > PresetLibrary.MAX_FILE_BYTES) throw PresetError("The file is too large to be a preset.")
+                if (out.size() > PresetLibrary.MAX_FILE_BYTES) throw PresetError(tr("The file is too large to be a preset."))
             }
             return out.toByteArray()
         }
@@ -1191,9 +1220,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                     clipData = android.content.ClipData.newRawUri(preset.name, uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                launch(Intent.createChooser(send, "Share “${preset.name}”"))
+                launch(Intent.createChooser(send, tr("Share “{name}”", "name" to preset.name)))
             } catch (e: Exception) {
-                message = Message("Couldn’t share “${preset.name}”: ${e.message}", error = true)
+                message = Message(tr("Couldn’t share “{name}”: {message}", "name" to preset.name, "message" to e.message), error = true)
                 reloadPresets()
             }
         }
@@ -1207,9 +1236,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                     val data = presetLibrary.read(preset)
                     context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(data) }
                 }
-                message = Message("Saved “${preset.name}.json”")
+                message = Message(tr("Saved “{name}”", "name" to "${preset.name}.json"))
             } catch (e: Exception) {
-                message = Message("Couldn’t save “${preset.name}”: ${e.message}", error = true)
+                message = Message(tr("Couldn’t save “{name}”: {message}", "name" to preset.name, "message" to e.message), error = true)
             }
         }
     }
@@ -1326,9 +1355,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
          * engine's reasons are worded for logs.
          */
         fun failureReason(reason: String): Pair<String, Boolean> = when {
-            "midtone quantiles" in reason -> "The camera preview is too dark or too bright to match." to true
-            "±3 EV" in reason -> "Matching would take more than ±3 EV." to false
-            else -> "No reliable brightness match with these settings." to false
+            "midtone quantiles" in reason -> tr("The camera preview is too dark or too bright to match.") to true
+            "±3 EV" in reason -> tr("Matching would take more than ±3 EV.") to false
+            else -> tr("No reliable brightness match with these settings.") to false
         }
 
         val RAW_EXTENSIONS = setOf("dng", "raf", "arw", "nef", "cr2", "cr3", "rw2", "orf", "pef", "srw", "nrw", "raw", "rwl", "3fr", "iiq", "erf", "srf", "sr2", "x3f", "mrw", "kdc", "dcr")

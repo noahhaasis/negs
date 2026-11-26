@@ -48,12 +48,12 @@ object PresetName {
 
     /** Why [name] can't name a preset, or null. */
     fun problem(name: String): String? {
-        if (name.isBlank()) return "Enter a name."
-        if (length(name) > MAX_LENGTH) return "Use at most $MAX_LENGTH characters."
-        if (name.any { Character.getType(it) == Character.CONTROL.toInt() || it in INVALID }) return "A name can’t contain / \\ : * ? \" < > or |."
-        if (name.startsWith(".")) return "A name can’t start with a period."
-        if (name.endsWith(".") || name.endsWith(" ") || name.startsWith(" ")) return "A name can’t start with a space or end with a space or period."
-        if (name.substringBefore('.').uppercase(Locale.ROOT).trim() in RESERVED) return "“$name” is reserved on Windows."
+        if (name.isBlank()) return tr("Enter a name.")
+        if (length(name) > MAX_LENGTH) return tr("Use at most {n} characters.", "n" to MAX_LENGTH)
+        if (name.any { Character.getType(it) == Character.CONTROL.toInt() || it in INVALID }) return tr("A name can’t contain / \\ : * ? \" < > or |.")
+        if (name.startsWith(".")) return tr("A name can’t start with a period.")
+        if (name.endsWith(".") || name.endsWith(" ") || name.startsWith(" ")) return tr("A name can’t start with a space or end with a space or period.")
+        if (name.substringBefore('.').uppercase(Locale.ROOT).trim() in RESERVED) return tr("“{name}” is reserved on Windows.", "name" to name)
         return null
     }
 
@@ -129,7 +129,7 @@ class PresetLibrary(val folder: File) {
                     taken += PresetName.key(candidate)
                 }
             }
-            throw PresetError("Couldn’t find a free name for the preset.")
+            throw PresetError(tr("Couldn’t find a free name for the preset."))
         } finally {
             temporary.delete()
         }
@@ -140,9 +140,9 @@ class PresetLibrary(val folder: File) {
         verify(preset)
         val target = File(folder, "$name.json")
         if (PresetName.key(name) != PresetName.key(preset.name) && list().any { PresetName.key(it.name) == PresetName.key(name) }) {
-            throw PresetError("A preset named “$name” already exists.")
+            throw PresetError(tr("A preset named “{name}” already exists.", "name" to name))
         }
-        if (!preset.file.renameTo(target)) throw PresetError("Couldn’t rename the preset.")
+        if (!preset.file.renameTo(target)) throw PresetError(tr("Couldn’t rename the preset."))
         val order = readOrder().toMutableList()
         val index = order.indexOfFirst { PresetName.key(it) == PresetName.key(preset.name) }
         if (index >= 0) {
@@ -154,7 +154,7 @@ class PresetLibrary(val folder: File) {
 
     fun delete(preset: PresetFile) {
         verify(preset)
-        if (!preset.file.delete()) throw PresetError("Couldn’t delete the preset.")
+        if (!preset.file.delete()) throw PresetError(tr("Couldn’t delete the preset."))
         writeOrder(readOrder().filter { PresetName.key(it) != PresetName.key(preset.name) })
     }
 
@@ -177,7 +177,7 @@ class PresetLibrary(val folder: File) {
         temporary.writeText(text)
         if (!temporary.renameTo(orderFile)) {
             temporary.delete()
-            throw PresetError("Couldn’t save the presets’ order.")
+            throw PresetError(tr("Couldn’t save the presets’ order."))
         }
     }
 
@@ -185,7 +185,7 @@ class PresetLibrary(val folder: File) {
     private fun verify(preset: PresetFile) {
         val f = preset.file
         if (!f.isFile || f.length() != preset.size || f.lastModified() != preset.modified) {
-            throw PresetError("“${preset.name}” changed. The list has been updated; try again.")
+            throw PresetError(tr("“{name}” changed. The list has been updated; try again.", "name" to preset.name))
         }
     }
 
@@ -194,7 +194,7 @@ class PresetLibrary(val folder: File) {
         const val MAX_FILE_BYTES = 1_048_576
 
         fun read(file: File): ByteArray {
-            if (file.length() > MAX_FILE_BYTES) throw PresetError("The file is too large to be a preset.")
+            if (file.length() > MAX_FILE_BYTES) throw PresetError(tr("The file is too large to be a preset."))
             return file.readBytes()
         }
 
@@ -203,7 +203,7 @@ class PresetLibrary(val folder: File) {
             val text = try {
                 Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(data)).toString()
             } catch (e: java.nio.charset.CharacterCodingException) {
-                throw PresetError("The file isn’t text.")
+                throw PresetError(tr("The file isn’t text."))
             }
             return text.removePrefix("﻿")
         }
@@ -245,13 +245,13 @@ object PresetLink {
 
     /** A link value's name and preset text; throws a [PresetError] saying why it can't be read. */
     fun decode(value: String): Pair<String, String> {
-        if (value.isEmpty()) throw PresetError("This preset link is empty.")
-        if (value.length + KEY.length + 2 > MAX_CHARS) throw PresetError("This preset link is too long.")
-        val damaged = PresetError("This preset link is damaged or incomplete.")
+        if (value.isEmpty()) throw PresetError(tr("This preset link is empty."))
+        if (value.length + KEY.length + 2 > MAX_CHARS) throw PresetError(tr("This preset link is too long."))
+        val damaged = PresetError(tr("This preset link is damaged or incomplete."))
         if (value.length % 4 == 1) throw damaged
         val bytes = try { Base64.decode(value, FLAGS) } catch (e: IllegalArgumentException) { throw damaged }
         if (bytes.isEmpty()) throw damaged
-        if (bytes[0] != VERSION) throw PresetError("This preset link is from a newer Negs. Update the app, then open it again.")
+        if (bytes[0] != VERSION) throw PresetError(tr("This preset link is from a newer Negs. Update the app, then open it again."))
         val inflater = Inflater(true)
         inflater.setInput(bytes, 1, bytes.size - 1)
         val out = ByteArrayOutputStream()
@@ -261,7 +261,7 @@ object PresetLink {
                 val n = inflater.inflate(buffer)
                 if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
                 out.write(buffer, 0, n)
-                if (out.size() > MAX_ENVELOPE_BYTES) throw PresetError("The preset in this link is too large.")
+                if (out.size() > MAX_ENVELOPE_BYTES) throw PresetError(tr("The preset in this link is too large."))
             }
         } catch (e: java.util.zip.DataFormatException) {
             throw damaged
