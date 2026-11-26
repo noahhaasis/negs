@@ -137,6 +137,7 @@ fun EditorScreen(editor: Editor) {
 @Composable
 private fun TopBar(editor: Editor, open: () -> Unit, exportLut: () -> Unit, modifier: Modifier) {
     var menu by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         ToolButton(onClick = open) { Icon(Icons.Default.FileOpen, "Open photo") }
         if (editor.photo != null) {
@@ -188,8 +189,10 @@ private fun TopBar(editor: Editor, open: () -> Unit, exportLut: () -> Unit, modi
                     text = { Text("Export LUT…") }, enabled = editor.catalog != null,
                     onClick = { menu = false; exportLut() },
                 )
+                DropdownMenuItem(text = { Text("Settings…") }, onClick = { menu = false; settings = true })
             }
         }
+        if (settings) SettingsDialog(editor) { settings = false }
     }
 }
 

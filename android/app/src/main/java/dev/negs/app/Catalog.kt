@@ -43,10 +43,17 @@ class Catalog(
     private fun isMotionPicturePrint(p: Stock) =
         p.paper && (p.cinePrint || "Vision" in p.name || "Print Film" in p.name)
 
-    /** Films as web/app.js `filmGroups` groups them (Negs-built ones hidden). */
-    fun filmGroups(current: String): List<Pair<String, List<Stock>>> {
+    /**
+     * Films as web/app.js `filmGroups` groups them, without those Settings
+     * hides (web `listsFilm`): Fotufilm ports by [fotufilm] ("all",
+     * "datasheets" or "off"), Negs-built films unless [negsBuilt]. The film
+     * in use stays listed.
+     */
+    fun filmGroups(current: String, fotufilm: String, negsBuilt: Boolean): List<Pair<String, List<Stock>>> {
         val cinemaPrints = papers.filter(::isMotionPicturePrint).map { it.id }.toSet()
-        val listed = films.filter { !it.negsBuilt || it.id == current }
+        fun lists(s: Stock) = (!s.fotufilm || fotufilm == "all" || (fotufilm == "datasheets" && s.manufacturerData)) &&
+            (negsBuilt || !s.negsBuilt)
+        val listed = films.filter { lists(it) || it.id == current }
         val kind = { s: Stock ->
             when {
                 s.bw -> "Black & White"
@@ -60,8 +67,9 @@ class Catalog(
             .filter { it.second.isNotEmpty() }
     }
 
-    fun paperGroups(current: String): List<Pair<String, List<Stock>>> {
-        val listed = papers.filter { !it.negsBuilt || it.id == current }
+    /** Papers as web/app.js `paperGroups`: Negs-built print films only if [negsBuilt]. */
+    fun paperGroups(current: String, negsBuilt: Boolean): List<Pair<String, List<Stock>>> {
+        val listed = papers.filter { negsBuilt || !it.negsBuilt || it.id == current }
         val kind = { s: Stock ->
             when {
                 s.bw -> "Black & White"

@@ -910,6 +910,28 @@ class Editor(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString(if (stock.paper) "favoritePapers" else "favoriteFilms", next.joinToString(",")).apply()
     }
 
+    // ---- Settings ------------------------------------------------------------------
+
+    /**
+     * Settings › Fotufilm films (web `fotufilmFilms`): which Fotufilm ports the
+     * Stock tab lists, "all", "datasheets" (not those modelled from sample
+     * photographs) or "off". Only the lists: an edit or preset keeps its film.
+     */
+    var fotufilmFilms by mutableStateOf(prefs.getString("fotufilmFilms", "all").takeIf { it in FOTUFILM_FILMS } ?: "all"); private set
+    /** Settings › Show Negs-built films (web `showNegsBuilt`): off, they stay out of the lists. */
+    var showNegsBuilt by mutableStateOf(prefs.getBoolean("showNegsBuiltFilms", false)); private set
+
+    fun chooseFotufilmFilms(choice: String) {
+        if (choice !in FOTUFILM_FILMS) return
+        fotufilmFilms = choice
+        prefs.edit().putString("fotufilmFilms", choice).apply()
+    }
+
+    fun chooseShowNegsBuilt(on: Boolean) {
+        showNegsBuilt = on
+        prefs.edit().putBoolean("showNegsBuiltFilms", on).apply()
+    }
+
     // ---- Presets -------------------------------------------------------------------
 
     /*
@@ -1289,6 +1311,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
         fun nextInteractiveScale(current: Double, elapsedMs: Double): Double =
             (current * sqrt(BUDGET_MS / max(elapsedMs, 1.0))).coerceIn(MIN_INTERACTIVE_SCALE, 1.0)
 
+        val FOTUFILM_FILMS = listOf("all", "datasheets", "off")
         val DEFAULT_FAVORITE_FILMS = listOf("kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200")
 
         /** Settings that can't change how bright the photograph develops, or are the user's own. */
