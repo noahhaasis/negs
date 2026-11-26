@@ -36,6 +36,54 @@ pub fn is_dng(bytes: &[u8]) -> bool {
     identify(bytes).unwrap_or(false)
 }
 
+/// File-path variant of [`is_dng`] that reads only the 8-byte TIFF header and
+/// IFD0 entries (~500 bytes), avoiding a full-file read for non-DNG RAWs.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_dng_file(path: &std::path::Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    fn identify(path: &std::path::Path) -> Option<bool> {
+        let mut f = std::fs::File::open(path).ok()?;
+        let mut hdr = [0u8; 8];
+        f.read_exact(&mut hdr).ok()?;
+        let little = match &hdr[0..2] {
+            b"II" => true,
+            b"MM" => false,
+            _ => return None,
+        };
+        let magic = if little {
+            u16::from_le_bytes([hdr[2], hdr[3]])
+        } else {
+            u16::from_be_bytes([hdr[2], hdr[3]])
+        };
+        if magic != 42 {
+            return None;
+        }
+        let ifd = if little {
+            u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]])
+        } else {
+            u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]])
+        };
+        f.seek(SeekFrom::Start(u64::from(ifd))).ok()?;
+        let mut cnt_buf = [0u8; 2];
+        f.read_exact(&mut cnt_buf).ok()?;
+        let count = usize::from(if little {
+            u16::from_le_bytes(cnt_buf)
+        } else {
+            u16::from_be_bytes(cnt_buf)
+        });
+        if count > 4096 {
+            return None;
+        }
+        let mut entries = vec![0u8; count * 12];
+        f.read_exact(&mut entries).ok()?;
+        Some(entries.chunks_exact(12).any(|e| {
+            let tag = [e[0], e[1]];
+            (if little { u16::from_le_bytes(tag) } else { u16::from_be_bytes(tag) }) == 50706
+        }))
+    }
+    identify(path).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

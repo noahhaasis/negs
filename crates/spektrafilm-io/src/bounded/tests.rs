@@ -132,6 +132,7 @@ fn bayer_sensor_tiled_demosaic_matches_full_develop_across_orientations() {
                 white,
                 orientation,
                 is_xtrans: false,
+                gain_maps: Vec::new(),
             };
             let (fw, fh) = sensor.full_size();
             assert_eq!((fw, fh), (expected.width, expected.height));
@@ -176,7 +177,7 @@ fn xtrans_sensor_banded_and_tiled_demosaic_matches_full_develop() {
     let full = crate::develop_decoded(raw.clone(), wb).unwrap();
 
     // Banded develop for mobile open.
-    let banded = develop_bands_cfa(raw.clone(), wb, (62, 56), 16, true).unwrap();
+    let banded = develop_bands_cfa(raw.clone(), wb, (62, 56), 16, true, &[]).unwrap();
     let expected_small = downsample_reference(&full, (62, 56));
     assert_eq!(banded.data.len(), expected_small.data.len());
     let max_diff = banded.data.iter().zip(&expected_small.data)
@@ -200,6 +201,7 @@ fn xtrans_sensor_banded_and_tiled_demosaic_matches_full_develop() {
             white,
             orientation,
             is_xtrans: true,
+            gain_maps: Vec::new(),
         };
         let (fw, fh) = sensor.full_size();
         assert_eq!((fw, fh), (expected.width, expected.height));
@@ -226,5 +228,196 @@ fn xtrans_sensor_banded_and_tiled_demosaic_matches_full_develop() {
             y += step;
         }
         assert!(worst < 1e-4, "X-Trans tiled demosaic orient={orientation} diverged: worst={worst}");
+    }
+}
+
+fn linear_rgb_fixture(width: usize, height: usize) -> RawImage {
+    let mut camera = Camera::new();
+    camera.color_matrix.insert(
+        rawler::imgop::xyz::Illuminant::D65,
+        vec![0.7, 0.1, 0.0, 0.0, 0.9, 0.1, 0.05, 0.0, 0.8],
+    );
+    let data = (0..width * height * 3)
+        .map(|i| {
+            let n = (i as u32).wrapping_mul(1664525).wrapping_add(1013904223);
+            if i % 19 == 0 { 50000 } else { ((n >> 17) as u16).saturating_add(500) }
+        })
+        .collect();
+    RawImage::new(
+        camera,
+        PixU16::new_with(data, width * 3, height),
+        3,
+        [1.8, 1.0, 1.5, 1.0],
+        RawPhotometricInterpretation::LinearRaw,
+        Some(BlackLevel::new(&[100_u16, 150, 200], 1, 1, 3)),
+        Some(WhiteLevel::new(vec![60000, 60000, 60000])),
+        false,
+    )
+}
+
+#[test]
+fn gain_map_cfa_bit_exact_parity_across_full_banded_and_compact_paths() {
+    use crate::gain_map::{OpcodeStage, parse_stage, test_helpers::*};
+    let active = Rect::new(Point::new(2, 2), Dim2::new(60, 48));
+    let crop = Rect::new(Point::new(4, 3), Dim2::new(55, 44));
+    // 4 per-CFA-position OpcodeList2 GainMaps (mirroring Android DngCreator)
+    // with asymmetric channel gains (>1.0 in corners, different R/Gr/Gb/B)
+    // plus an OpcodeList3 3-plane GainMap.
+    let list2_bodies = [
+        encode_gain_map_body(0, 0, 48, 60, 0, 1, 2, 2, 3, 3, 0.5, 0.5, 0.0, 0.0, 1,
+            &[2.2, 1.5, 2.1, 1.4, 1.0, 1.5, 2.3, 1.6, 2.4]),
+        encode_gain_map_body(0, 1, 48, 60, 0, 1, 2, 2, 3, 3, 0.5, 0.5, 0.0, 0.0, 1,
+            &[2.0, 1.4, 1.9, 1.3, 1.0, 1.4, 2.1, 1.5, 2.0]),
+        encode_gain_map_body(1, 0, 48, 60, 0, 1, 2, 2, 3, 3, 0.5, 0.5, 0.0, 0.0, 1,
+            &[2.05, 1.42, 1.95, 1.32, 1.02, 1.41, 2.12, 1.51, 2.03]),
+        encode_gain_map_body(1, 1, 48, 60, 0, 1, 2, 2, 3, 3, 0.5, 0.5, 0.0, 0.0, 1,
+            &[2.8, 1.8, 2.7, 1.7, 1.05, 1.75, 2.9, 1.85, 3.0]),
+    ];
+    let list2_refs: Vec<(u32, &[u8])> = list2_bodies.iter().map(|b| (9u32, b.as_slice())).collect();
+    let mut gain_maps = parse_stage(&encode_opcode_list(&list2_refs), OpcodeStage::List2);
+    let list3_body = encode_gain_map_body(
+        0, 0, 48, 60, 0, 3, 1, 1, 2, 2, 1.0, 1.0, 0.0, 0.0, 3,
+        &[1.05, 1.0, 1.1,  1.1, 1.02, 1.15,  1.08, 1.01, 1.12,  1.12, 1.03, 1.2],
+    );
+    gain_maps.extend(parse_stage(&encode_opcode_list(&[(9, &list3_body)]), OpcodeStage::List3));
+    assert_eq!(gain_maps.len(), 5);
+
+    for pattern in ["RGGB", "BGGR", "GBRG", "GRBG"] {
+        let mut raw = fixture(64, 52, pattern);
+        raw.active_area = Some(active);
+        raw.crop_area = Some(crop);
+        let wb = RawWhiteBalance::default();
+
+        let no_gain = crate::develop_decoded_with(raw.clone(), wb, crate::XTransDemosaic::default(), &[]).unwrap();
+        let full = crate::develop_decoded_with(raw.clone(), wb, crate::XTransDemosaic::default(), &gain_maps).unwrap();
+        assert_ne!(no_gain.data, full.data, "gain maps must visibly change output");
+
+        // 1. Banded CFA preview matches full-frame + downsample bit for bit.
+        let target = (27, 22);
+        let banded = develop_bands_cfa(raw.clone(), wb, target, 7, false, &gain_maps).unwrap();
+        assert_eq!(banded.data, downsample_reference(&full, target).data, "{pattern} banded mismatch");
+
+        // 2. Compact BayerSensor tiled demosaic + small_preview match bit for bit across orientations 1..=8.
+        let mut prepared = raw.clone();
+        white_balance::prepare(&mut prepared, wb).unwrap();
+        let black = prepared.blacklevel.as_bayer_array();
+        let white = prepared.whitelevel.as_bayer_array();
+        for orientation in 1..=8 {
+            let expected = full.clone().oriented(orientation);
+            let sensor = BayerSensor {
+                raw: prepared.clone(),
+                active,
+                crop,
+                wb,
+                black,
+                white,
+                orientation,
+                is_xtrans: false,
+                gain_maps: gain_maps.clone(),
+            };
+            // Check small_preview parity
+            let small = sensor.small_preview(24).unwrap();
+            let small_target = kept_size(crop.d.w as u32, crop.d.h as u32, 24, 0.0);
+            let expected_small = downsample_reference(&full, small_target).oriented(orientation);
+            assert_eq!(small.data, expected_small.data, "{pattern} orient={orientation} small_preview mismatch");
+
+            // Check tiled demosaic parity (including padded edge tiles)
+            let (fw, fh) = sensor.full_size();
+            let step = 19u32;
+            let mut y = 0;
+            while y < fh {
+                let mut x = 0;
+                while x < fw {
+                    let tile = sensor.demosaic_upright_rect(x, y, step + 5, step + 3).unwrap();
+                    for ly in 0..tile.height {
+                        let gy = (y + ly).min(fh - 1);
+                        for lx in 0..tile.width {
+                            let gx = (x + lx).min(fw - 1);
+                            assert_eq!(
+                                tile.get(lx, ly),
+                                expected.get(gx, gy),
+                                "{pattern} orient={orientation} tile=({x},{y}) at ({lx},{ly})"
+                            );
+                        }
+                    }
+                    x += step;
+                }
+                y += step;
+            }
+        }
+    }
+}
+
+#[test]
+fn gain_map_linear_rgb_bit_exact_parity_across_full_banded_and_compact_paths() {
+    use crate::gain_map::{OpcodeStage, parse_stage, test_helpers::*};
+    let mut raw = linear_rgb_fixture(40, 32);
+    let active = Rect::new(Point::new(0, 0), Dim2::new(40, 32));
+    let crop = Rect::new(Point::new(3, 2), Dim2::new(34, 27));
+    raw.active_area = Some(active);
+    raw.crop_area = Some(crop);
+
+    // Map 1 (List2): MapPlanes = 1 across planes 0..3
+    let b1 = encode_gain_map_body(0, 0, 32, 40, 0, 3, 1, 1, 2, 2, 1.0, 1.0, 0.0, 0.0, 1, &[1.8, 1.2, 1.3, 1.9]);
+    // Map 2 (List3): MapPlanes = 3 across planes 0..3 with per-channel shading
+    let b2 = encode_gain_map_body(
+        0, 0, 32, 40, 0, 3, 1, 1, 2, 2, 1.0, 1.0, 0.0, 0.0, 3,
+        &[1.1, 1.0, 1.4,  1.2, 1.05, 1.3,  1.15, 1.02, 1.35,  1.25, 1.08, 1.5],
+    );
+    let mut gain_maps = parse_stage(&encode_opcode_list(&[(9, &b1)]), OpcodeStage::List2);
+    gain_maps.extend(parse_stage(&encode_opcode_list(&[(9, &b2)]), OpcodeStage::List3));
+
+    let wb = RawWhiteBalance::default();
+    let full = crate::develop_decoded_with(raw.clone(), wb, crate::XTransDemosaic::default(), &gain_maps).unwrap();
+
+    // 1. Banded LinearRaw preview matches full-frame + downsample bit for bit.
+    let target = (17, 13);
+    let banded = develop_bands_linear_rgb(raw.clone(), wb, target, 5, &gain_maps).unwrap();
+    assert_eq!(banded.data, downsample_reference(&full, target).data, "LinearRaw banded mismatch");
+
+    // 2. CompactRawSensor::LinearRgb tiled extract matches full-frame bit for bit across orientations 1..=8.
+    let mut prepared = raw.clone();
+    white_balance::prepare(&mut prepared, wb).unwrap();
+    let black = prepared.blacklevel.as_vec();
+    let white = prepared.whitelevel.as_vec();
+    for orientation in 1..=8 {
+        let expected = full.clone().oriented(orientation);
+        let sensor = CompactRawSensor {
+            inner: CompactRawKind::LinearRgb {
+                raw: prepared.clone(),
+                active,
+                crop,
+                wb,
+                black: black.clone(),
+                white: white.clone(),
+                orientation,
+                gain_maps: gain_maps.clone(),
+            },
+            decoder: "rawler",
+            lens_correction_supported: false,
+        };
+        let (fw, fh) = sensor.full_size();
+        assert_eq!((fw, fh), (expected.width, expected.height));
+        let step = 13u32;
+        let mut y = 0;
+        while y < fh {
+            let mut x = 0;
+            while x < fw {
+                let tile = sensor.extract_upright_rect(x, y, step + 4, step + 3).unwrap();
+                for ly in 0..tile.height {
+                    let gy = (y + ly).min(fh - 1);
+                    for lx in 0..tile.width {
+                        let gx = (x + lx).min(fw - 1);
+                        assert_eq!(
+                            tile.get(lx, ly),
+                            expected.get(gx, gy),
+                            "LinearRaw orient={orientation} tile=({x},{y}) at ({lx},{ly})"
+                        );
+                    }
+                }
+                x += step;
+            }
+            y += step;
+        }
     }
 }

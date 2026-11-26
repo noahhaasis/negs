@@ -94,6 +94,7 @@ pub(crate) fn load_raw_path_kept(
         Err(e) => anyhow::bail!("RAW decode failed: {e:?}"),
     };
     let profile = if libraw.is_none() { crate::lens::read_profile_from(&src) } else { None };
+    let gain_maps = if libraw.is_none() { crate::gain_map::read_from(&src) } else { Vec::new() };
     let (decoder, orientation) = match libraw {
         #[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
         Some(Some(orientation)) => (crate::libraw::NAME, orientation),
@@ -127,7 +128,7 @@ pub(crate) fn load_raw_path_kept(
         let full = (crop.d.w as u32, crop.d.h as u32);
         let target = kept_size(full.0, full.1, max_dim, max_pixels);
         let image = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            develop_bands_cfa(raw, wb, target, OUTPUT_BAND_ROWS, is_xtrans)
+            develop_bands_cfa(raw, wb, target, OUTPUT_BAND_ROWS, is_xtrans, &gain_maps)
         }))
         .map_err(|p| anyhow::anyhow!("bounded RAW develop panicked: {}", crate::panic_message(&p)))??;
         (image, full)
@@ -136,7 +137,7 @@ pub(crate) fn load_raw_path_kept(
         let full = (crop.d.w as u32, crop.d.h as u32);
         let target = kept_size(full.0, full.1, max_dim, max_pixels);
         let image = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            develop_bands_linear_rgb(raw, wb, target, OUTPUT_BAND_ROWS)
+            develop_bands_linear_rgb(raw, wb, target, OUTPUT_BAND_ROWS, &gain_maps)
         }))
         .map_err(|p| anyhow::anyhow!("bounded LinearRaw develop panicked: {}", crate::panic_message(&p)))??;
         (image, full)
@@ -146,7 +147,7 @@ pub(crate) fn load_raw_path_kept(
         } else {
             crate::XTransDemosaic::Markesteijn
         };
-        let image = crate::develop_decoded_with(raw, wb, xtrans)?;
+        let image = crate::develop_decoded_with(raw, wb, xtrans, &gain_maps)?;
         let full = (image.width, image.height);
         let target = kept_size(full.0, full.1, max_dim, max_pixels);
         let image = if target == full { image } else { downsample_reference(&image, target) };
@@ -183,6 +184,7 @@ pub fn load_raw_bytes_kept(bytes: &[u8], wb: RawWhiteBalance, max_dim: u32, max_
     let raw = rawler::decode(&src, &params).map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
     let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
     let orientation = crate::raw_exif_orientation(&src, &params);
+    let gain_maps = crate::gain_map::read_from(&src);
     // Metadata no longer needs the copied file. In particular do not keep it
     // alongside the sensor + output or the small legacy control's resample.
     drop(src);
@@ -205,7 +207,7 @@ pub fn load_raw_bytes_kept(bytes: &[u8], wb: RawWhiteBalance, max_dim: u32, max_
         let full = (crop.d.w as u32, crop.d.h as u32);
         let target = kept_size(full.0, full.1, max_dim, max_pixels);
         let image = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            develop_bands_cfa(raw, wb, target, OUTPUT_BAND_ROWS, is_xtrans)
+            develop_bands_cfa(raw, wb, target, OUTPUT_BAND_ROWS, is_xtrans, &gain_maps)
         })).map_err(|p| anyhow::anyhow!("bounded RAW develop panicked: {}", crate::panic_message(&p)))??;
         (image, full)
     } else {
@@ -214,7 +216,7 @@ pub fn load_raw_bytes_kept(bytes: &[u8], wb: RawWhiteBalance, max_dim: u32, max_
         } else {
             crate::XTransDemosaic::Markesteijn
         };
-        let image = crate::develop_decoded_with(raw, wb, xtrans)?;
+        let image = crate::develop_decoded_with(raw, wb, xtrans, &gain_maps)?;
         let full = (image.width, image.height);
         let target = kept_size(full.0, full.1, max_dim, max_pixels);
         let image = if target == full { image } else { downsample_reference(&image, target) };
@@ -286,8 +288,15 @@ fn linear_rgb_geometry(raw: &RawImage) -> Result<Rect> {
 /// Banded downsampler for 3-channel LinearRaw DNGs so previews never allocate
 /// a full-frame `f32` RGB image (e.g. 24 MP LinearRaw stays ~146 MiB `u16`
 /// instead of ~584 MiB `f32`).
-fn develop_bands_linear_rgb(mut raw: RawImage, wb: RawWhiteBalance, target: (u32, u32), band_rows: usize) -> Result<ImageBuf> {
+fn develop_bands_linear_rgb(
+    mut raw: RawImage,
+    wb: RawWhiteBalance,
+    target: (u32, u32),
+    band_rows: usize,
+    gain_maps: &[crate::gain_map::GainMap],
+) -> Result<ImageBuf> {
     let crop = linear_rgb_geometry(&raw)?;
+    let active = crate::gain_map::active_rect(&raw);
     ensure!(band_rows > 0 && target.0 > 0 && target.1 > 0 && target.0 as usize <= crop.d.w && target.1 as usize <= crop.d.h, "invalid LinearRaw target");
     white_balance::prepare(&mut raw, wb)?;
     let black = raw.blacklevel.as_vec();
@@ -322,6 +331,9 @@ fn develop_bands_linear_rgb(mut raw: RawImage, wb: RawWhiteBalance, target: (u32
             }
         }
         rawler::imgop::raw::correct_blacklevel(&mut flat, &black, &white);
+        if !gain_maps.is_empty() {
+            crate::gain_map::apply_rgb_rect(gain_maps, &mut flat, crop.p.x, start_y, bw, bh, active);
+        }
         let pixels: Vec<[f32; 3]> = flat.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect();
         drop(flat);
         let mut rgb = crate::calibrate(&raw, Intermediate::ThreeColor(Color2D::new_with(pixels, bw, bh)));
@@ -415,10 +427,17 @@ pub(crate) fn downsample_reference(image: &ImageBuf, target: (u32, u32)) -> Imag
 
 #[cfg(test)]
 fn develop_bands(raw: RawImage, wb: RawWhiteBalance, target: (u32, u32), band_rows: usize) -> Result<ImageBuf> {
-    develop_bands_cfa(raw, wb, target, band_rows, false)
+    develop_bands_cfa(raw, wb, target, band_rows, false, &[])
 }
 
-fn develop_bands_cfa(mut raw: RawImage, wb: RawWhiteBalance, target: (u32, u32), band_rows: usize, allow_xtrans: bool) -> Result<ImageBuf> {
+fn develop_bands_cfa(
+    mut raw: RawImage,
+    wb: RawWhiteBalance,
+    target: (u32, u32),
+    band_rows: usize,
+    allow_xtrans: bool,
+    gain_maps: &[crate::gain_map::GainMap],
+) -> Result<ImageBuf> {
     let (active, crop, is_xtrans) = if allow_xtrans {
         cfa_geometry(&raw)?
     } else {
@@ -460,13 +479,28 @@ fn develop_bands_cfa(mut raw: RawImage, wb: RawWhiteBalance, target: (u32, u32),
         };
         let mut sensor = PixF32::new_with(data, raw.width, scale_end - scale_start);
         rawler::imgop::raw::correct_blacklevel_cfa(&mut sensor.data, raw.width, scale_end - scale_start, &black, &white);
+        if !gain_maps.is_empty() {
+            crate::gain_map::apply_cfa_strip(
+                gain_maps,
+                &mut sensor.data,
+                raw.width,
+                scale_start,
+                scale_end,
+                active.p.x,
+                active.p.x + active.d.w,
+                active,
+            );
+        }
         let roi = Rect::new(Point::new(active.p.x, start_y - scale_start), Dim2::new(active.d.w, end_y - start_y));
         // Original phase (adjusted for the strip's sensor-row origin), then
         // demosaic shifts by the active ROI. Full active width preserves true
         // left/right borders. Halos exclude artificial top/bottom interpolation
         // except at the true active-area boundaries.
-        let rgb = demosaic_cfa(&sensor, config, scale_start, roi, is_xtrans);
+        let mut rgb = demosaic_cfa(&sensor, config, scale_start, roi, is_xtrans);
         drop(sensor);
+        if !gain_maps.is_empty() {
+            crate::gain_map::apply_cfa_post_demosaic(gain_maps, &mut rgb, active.p.x, start_y, active);
+        }
         let mut rgb = crate::calibrate(&raw, Intermediate::ThreeColor(rgb));
         white_balance::finish(&mut rgb, wb, false)?;
         let image = crate::intermediate_to_image_buf(rgb);
@@ -512,6 +546,7 @@ pub struct BayerSensor {
     white: [f32; 4],
     orientation: u16,
     is_xtrans: bool,
+    gain_maps: Vec<crate::gain_map::GainMap>,
 }
 
 impl BayerSensor {
@@ -525,6 +560,7 @@ impl BayerSensor {
         let params = Default::default();
         let mut raw = rawler::decode(&src, &params).map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
         let orientation = crate::raw_exif_orientation(&src, &params);
+        let gain_maps = crate::gain_map::read_from(&src);
         drop(src);
         let estimate = raw.crop_area.or(raw.active_area).map(|r| r.d).unwrap_or(raw.dim());
         let pixels = estimate.w.saturating_mul(estimate.h).max(raw.width.saturating_mul(raw.height));
@@ -544,7 +580,7 @@ impl BayerSensor {
         white_balance::prepare(&mut raw, wb)?;
         let black = raw.blacklevel.as_bayer_array();
         let white = raw.whitelevel.as_bayer_array();
-        Ok(Some(Self { raw, active, crop, wb, black, white, orientation, is_xtrans }))
+        Ok(Some(Self { raw, active, crop, wb, black, white, orientation, is_xtrans, gain_maps }))
     }
 
     pub fn is_xtrans(&self) -> bool {
@@ -603,6 +639,18 @@ impl BayerSensor {
             &self.black,
             &self.white,
         );
+        if !self.gain_maps.is_empty() {
+            crate::gain_map::apply_cfa_strip(
+                &self.gain_maps,
+                &mut sensor.data,
+                self.raw.width,
+                scale_start,
+                scale_end,
+                start_x,
+                end_x,
+                self.active,
+            );
+        }
         let roi = Rect::new(
             Point::new(start_x, start_y - scale_start),
             Dim2::new(end_x - start_x, end_y - start_y),
@@ -610,8 +658,11 @@ impl BayerSensor {
         let RawPhotometricInterpretation::Cfa(config) = &self.raw.photometric else {
             unreachable!()
         };
-        let rgb = demosaic_cfa(&sensor, config, scale_start, roi, self.is_xtrans);
+        let mut rgb = demosaic_cfa(&sensor, config, scale_start, roi, self.is_xtrans);
         drop(sensor);
+        if !self.gain_maps.is_empty() {
+            crate::gain_map::apply_cfa_post_demosaic(&self.gain_maps, &mut rgb, start_x, start_y, self.active);
+        }
         let mut rgb = crate::calibrate(&self.raw, Intermediate::ThreeColor(rgb));
         white_balance::finish(&mut rgb, self.wb, false)?;
         let band = crate::intermediate_to_image_buf(rgb);
@@ -683,12 +734,27 @@ impl BayerSensor {
                 &self.black,
                 &self.white,
             );
+            if !self.gain_maps.is_empty() {
+                crate::gain_map::apply_cfa_strip(
+                    &self.gain_maps,
+                    &mut sensor.data,
+                    self.raw.width,
+                    scale_start,
+                    scale_end,
+                    self.active.p.x,
+                    self.active.p.x + self.active.d.w,
+                    self.active,
+                );
+            }
             let roi = Rect::new(
                 Point::new(self.active.p.x, start_y - scale_start),
                 Dim2::new(self.active.d.w, end_y - start_y),
             );
-            let rgb = demosaic_cfa(&sensor, config, scale_start, roi, self.is_xtrans);
+            let mut rgb = demosaic_cfa(&sensor, config, scale_start, roi, self.is_xtrans);
             drop(sensor);
+            if !self.gain_maps.is_empty() {
+                crate::gain_map::apply_cfa_post_demosaic(&self.gain_maps, &mut rgb, self.active.p.x, start_y, self.active);
+            }
             let mut rgb = crate::calibrate(&self.raw, Intermediate::ThreeColor(rgb));
             white_balance::finish(&mut rgb, self.wb, false)?;
             let image = crate::intermediate_to_image_buf(rgb);
@@ -723,11 +789,13 @@ enum CompactRawKind {
     Cfa(BayerSensor),
     LinearRgb {
         raw: RawImage,
+        active: Rect,
         crop: Rect,
         wb: RawWhiteBalance,
         black: Vec<f32>,
         white: Vec<f32>,
         orientation: u16,
+        gain_maps: Vec<crate::gain_map::GainMap>,
     },
 }
 
@@ -772,6 +840,7 @@ impl CompactRawSensor {
             Err(e) => anyhow::bail!("RAW decode failed: {e:?}"),
         };
         let profile = if libraw.is_none() { crate::lens::read_profile_from(src) } else { None };
+        let gain_maps = if libraw.is_none() { crate::gain_map::read_from(src) } else { Vec::new() };
         let lens_correction_supported = profile.is_some();
         // If lens correction is enabled and this file carries a warp/vignette
         // profile, fall back to full-frame develop so lens geometry stays exact.
@@ -813,6 +882,7 @@ impl CompactRawSensor {
                         white,
                         orientation,
                         is_xtrans,
+                        gain_maps,
                     }),
                     decoder,
                     lens_correction_supported,
@@ -821,11 +891,12 @@ impl CompactRawSensor {
         }
 
         if let Ok(crop) = linear_rgb_geometry(&raw) {
+            let active = crate::gain_map::active_rect(&raw);
             white_balance::prepare(&mut raw, wb)?;
             let black = raw.blacklevel.as_vec();
             let white = raw.whitelevel.as_vec();
             return Ok(Some(Self {
-                inner: CompactRawKind::LinearRgb { raw, crop, wb, black, white, orientation },
+                inner: CompactRawKind::LinearRgb { raw, active, crop, wb, black, white, orientation, gain_maps },
                 decoder,
                 lens_correction_supported,
             }));
@@ -865,7 +936,7 @@ impl CompactRawSensor {
     pub fn extract_upright_rect(&self, ux0: u32, uy0: u32, w: u32, h: u32) -> Result<ImageBuf> {
         match &self.inner {
             CompactRawKind::Cfa(s) => s.demosaic_upright_rect(ux0, uy0, w, h),
-            CompactRawKind::LinearRgb { raw, crop, wb, black, white, orientation } => {
+            CompactRawKind::LinearRgb { raw, active, crop, wb, black, white, orientation, gain_maps } => {
                 let (full_w, full_h) = self.full_size();
                 let (full_w, full_h) = (full_w as usize, full_h as usize);
                 let (cw, ch) = (crop.d.w, crop.d.h);
@@ -905,6 +976,18 @@ impl CompactRawSensor {
                     }
                 }
                 rawler::imgop::raw::correct_blacklevel(&mut flat, black, white);
+                if !gain_maps.is_empty() {
+                    let active = *active;
+                    flat.par_chunks_exact_mut(tw * 3).enumerate().for_each(|(ly, row)| {
+                        let gy = (oy + ly).min(full_h - 1);
+                        for lx in 0..tw {
+                            let gx = (ox + lx).min(full_w - 1);
+                            let (cx, cy) = upright_to_unoriented(gx, gy, cw, ch, orientation);
+                            let px: &mut [f32; 3] = (&mut row[lx * 3..lx * 3 + 3]).try_into().unwrap();
+                            crate::gain_map::apply_rgb_pixel(gain_maps, px, cpx + cx, cpy + cy, active);
+                        }
+                    });
+                }
                 let pixels: Vec<[f32; 3]> = flat.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect();
                 drop(flat);
                 let mut rgb = crate::calibrate(raw, Intermediate::ThreeColor(Color2D::new_with(pixels, tw, th)));

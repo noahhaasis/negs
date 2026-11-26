@@ -20,6 +20,7 @@ pub mod colour;
 pub mod crop;
 pub mod encoding;
 pub mod film35;
+mod gain_map;
 pub mod icc;
 pub mod image_size;
 pub mod lens;
@@ -401,9 +402,10 @@ fn develop_rawler_with(
         #[cfg(not(all(feature = "libraw", not(target_arch = "wasm32"))))]
         Err(e) => bail!("RAW decode failed: {e:?}"),
     };
+    let gain_maps = if libraw.is_none() { gain_map::read_from(src) } else { Vec::new() };
     let area = lens_area(&raw);
     let xtrans = xtrans(raw.width * raw.height);
-    let mut img = develop_decoded_with(raw, wb, xtrans)?;
+    let mut img = develop_decoded_with(raw, wb, xtrans, &gain_maps)?;
     // Lens corrections are defined in sensor coordinates: before orientation.
     // Their placement is rawler's frame, so none for LibRaw's (Nikon carries
     // none anyway).
@@ -450,14 +452,25 @@ fn lens_area(raw: &rawler::RawImage) -> Option<LensArea> {
 /// Develop an already decoded sensor; shared with the opt-in bounded loader tests.
 #[cfg(test)]
 fn develop_decoded(raw: rawler::RawImage, wb: RawWhiteBalance) -> Result<ImageBuf> {
-    develop_decoded_with(raw, wb, XTransDemosaic::default())
+    develop_decoded_with(raw, wb, XTransDemosaic::default(), &[])
 }
 
-fn develop_decoded_with(mut raw: rawler::RawImage, wb: RawWhiteBalance, xtrans: XTransDemosaic) -> Result<ImageBuf> {
-    use rawler::imgop::develop::{ProcessingStep, RawDevelop};
+fn develop_decoded_with(
+    mut raw: rawler::RawImage,
+    wb: RawWhiteBalance,
+    xtrans: XTransDemosaic,
+    gain_maps: &[gain_map::GainMap],
+) -> Result<ImageBuf> {
+    use rawler::imgop::develop::{Intermediate, ProcessingStep, RawDevelop};
     let mut dev = RawDevelop { xtrans, ..RawDevelop::default() };
     // Our `calibrate` replaces rawler's, which clips (see there).
     dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
+    let pre_gain = gain_map::has_pre_demosaic(gain_maps, &raw);
+    if pre_gain {
+        // Scale once and apply GainMaps in place; drop Rescale so rawler does
+        // not clone the full `Vec<f32>` on a second `apply_scaling()`.
+        dev.steps.retain(|s| !matches!(s, ProcessingStep::Rescale));
+    }
     // rawler guards `decode` against panics but not `develop_intermediate`,
     // which still has `panic!`/`unimplemented!`/`assert!` paths for unusual
     // files (e.g. Fuji SuperCCD with an active area, non-3x3 colour matrices
@@ -465,12 +478,26 @@ fn develop_decoded_with(mut raw: rawler::RawImage, wb: RawWhiteBalance, xtrans: 
     // into an error instead of taking the app down.
     let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<_> {
         white_balance::prepare(&mut raw, wb)?;
+        if pre_gain {
+            raw.apply_scaling().map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            gain_map::apply_full(gain_maps, &mut raw);
+        }
         // The develop consumes the sensor data, so it never holds a second
         // copy; the rest (the matrices, the white balance) calibrates.
         let meta = without_data(&mut raw);
-        let intermediate = dev
+        let mut intermediate = dev
             .develop_intermediate_owned(raw)
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        if gain_map::has_post_demosaic_cfa(gain_maps, &meta)
+            && meta.fuji_rotation_width.is_none()
+            && let Intermediate::ThreeColor(ref mut pixels) = intermediate
+        {
+            let active = gain_map::active_rect(&meta);
+            let crop = meta.crop_area.or(meta.active_area).unwrap_or(active);
+            if pixels.width == crop.d.w && pixels.height == crop.d.h {
+                gain_map::apply_cfa_post_demosaic(gain_maps, pixels, crop.p.x, crop.p.y, active);
+            }
+        }
         let mut intermediate = calibrate(&meta, intermediate);
         white_balance::finish(&mut intermediate, wb, white_balance::is_monochrome(&meta))?;
         Ok(intermediate)
