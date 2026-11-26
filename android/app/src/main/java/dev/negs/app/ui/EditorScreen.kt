@@ -334,6 +334,15 @@ private enum class Snap { Low, Mid, High }
 private fun Sheet(editor: Editor) {
     var snap by rememberSaveable { mutableStateOf(Snap.Mid) }
     var tab by rememberSaveable { mutableStateOf("Stock") }
+    // A preset arrived from another app: show it among the presets.
+    var presetsSeen by rememberSaveable { mutableStateOf(0) }
+    LaunchedEffect(editor.presetsShown) {
+        if (editor.presetsShown != presetsSeen) {
+            presetsSeen = editor.presetsShown
+            tab = "Presets"
+            if (snap == Snap.Low) snap = Snap.Mid
+        }
+    }
     var dragged by remember { mutableFloatStateOf(0f) }
     BoxWithConstraints {
         val screen = maxHeight

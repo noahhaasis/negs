@@ -26,14 +26,25 @@ class MainActivity : ComponentActivity() {
         opened(intent)
     }
 
-    /** "Open with" and "Share to" Negs. */
+    /** "Open with" and "Share to" Negs: a photograph, preset files, or a preset link. */
+    @Suppress("DEPRECATION")
     private fun opened(intent: Intent?) {
-        val uri: Uri? = when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            else -> null
+        intent ?: return
+        val uris: List<Uri> = when (intent.action) {
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+            Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra(Intent.EXTRA_STREAM))
+            Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+            else -> emptyList()
         }
-        uri?.let(editor::open)
+        val type = intent.type.orEmpty()
+        val presets = uris.filter { type == "application/json" || it.lastPathSegment.orEmpty().endsWith(".json", ignoreCase = true) }
+        when {
+            presets.isNotEmpty() -> editor.importPresets(presets)
+            uris.isNotEmpty() -> editor.open(uris.first())
+            intent.action == Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let { text ->
+                if (!editor.importPresetLink(text)) editor.notify("There’s no preset link in what was shared.")
+            }
+        }
     }
 
     override fun onResume() {
