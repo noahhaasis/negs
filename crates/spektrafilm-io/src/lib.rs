@@ -176,6 +176,56 @@ pub fn load_image_colour_limited(
     Ok(LoadedImage { image, colour, lens_correction_supported: false, full_size })
 }
 
+/// As [`load_image_colour_limited`], optionally bounding the kept working copy
+/// to at most `max_pixels` pixels (0 disables the pixel cap and matches
+/// [`load_image_colour_limited`] identically). Large Bayer/X-Trans RAWs use
+/// banded development ([`bounded`]) so a full-resolution `f32` RGB frame is
+/// never allocated; [`LoadedImage::full_size`] still reports the true upright
+/// photograph dimensions.
+pub fn load_image_colour_bounded(
+    path: &Path,
+    formats: Formats,
+    wb: RawWhiteBalance,
+    lens: LensCorrection,
+    interpretation: &InputInterpretation,
+    max_long_side: u32,
+    max_pixels: usize,
+) -> Result<LoadedImage> {
+    if max_pixels == 0 {
+        return load_image_colour_limited(path, formats, wb, lens, interpretation, max_long_side);
+    }
+    let ext = extension(path);
+    if is_raw_extension(&ext) {
+        let kept = bounded::load_raw_path_kept(
+            path,
+            wb,
+            lens,
+            max_long_side,
+            max_pixels as f64,
+            bounded::Mode::AutoBayer,
+        )?;
+        return Ok(LoadedImage {
+            image: kept.image,
+            colour: InputColour::raw(kept.decoder),
+            lens_correction_supported: kept.lens_correction_supported,
+            full_size: kept.full_size,
+        });
+    }
+    if formats == Formats::TiffPngRaw && !matches!(ext.as_str(), "tif" | "tiff" | "png") {
+        bail!("unsupported image format: .{ext} (supported: tiff, png, raw)");
+    }
+    let (img, info, format) = decode_no_limits(path)?;
+    let (image, colour) = colour::convert(img, &info, interpretation, format == image::ImageFormat::Png)?;
+    let full_size = (image.width, image.height);
+    let target = bounded::kept_size(full_size.0, full_size.1, max_long_side, max_pixels as f64);
+    let image = if target == full_size {
+        image
+    } else {
+        bounded::downsample_reference(&image, target)
+    };
+    Ok(LoadedImage { image, colour, lens_correction_supported: false, full_size })
+}
+
 /// Decode with the `image` crate's memory limits disabled and apply the
 /// EXIF/TIFF orientation tag, keeping what the file says about its colour.
 /// The default 512 MiB cap rejects large float TIFFs (a 60 MP 32-bit RGB

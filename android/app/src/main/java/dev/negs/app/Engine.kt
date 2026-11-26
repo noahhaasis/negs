@@ -4,12 +4,14 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -43,6 +45,7 @@ class Engine(
     private val context: Context,
     private val dataDir: File,
     private val policy: MemoryPolicy,
+    private val onStderr: ((String) -> Unit)? = null,
 ) {
     private var process: Process? = null
     private var stdin: BufferedWriter? = null
@@ -64,10 +67,15 @@ class Engine(
     /**
      * Sends `command` with `fields` and returns its result. `urgent` requests
      * (the photograph's renders, export) go before waiting background work
-     * (stock previews).
+     * (stock previews). When `timeoutMs > 0`, a hung engine process is killed
+     * and reported as [EngineDied] so the caller can recover.
      */
-    suspend fun call(command: String, fields: JsonObject = JsonObject(emptyMap()), urgent: Boolean = true): JsonObject =
-        exclusive(urgent) { send(command, fields) }
+    suspend fun call(
+        command: String,
+        fields: JsonObject = JsonObject(emptyMap()),
+        urgent: Boolean = true,
+        timeoutMs: Long = 0L,
+    ): JsonObject = exclusive(urgent) { send(command, fields, timeoutMs) }
 
     /**
      * Runs `block` with the engine to itself: requests that must follow each
@@ -84,11 +92,14 @@ class Engine(
     }
 
     inner class Session {
-        suspend fun send(command: String, fields: JsonObject = JsonObject(emptyMap())): JsonObject =
-            this@Engine.send(command, fields)
+        suspend fun send(
+            command: String,
+            fields: JsonObject = JsonObject(emptyMap()),
+            timeoutMs: Long = 0L,
+        ): JsonObject = this@Engine.send(command, fields, timeoutMs)
     }
 
-    private suspend fun send(command: String, fields: JsonObject): JsonObject {
+    private suspend fun send(command: String, fields: JsonObject, timeoutMs: Long): JsonObject {
         val id = ids.getAndIncrement()
         val answer = CompletableDeferred<JsonObject>()
         pending[id] = answer
@@ -108,7 +119,18 @@ class Engine(
             pending.remove(id)
             throw EngineDied("The engine couldn't be reached: ${e.message}")
         }
-        return answer.await()
+        return if (timeoutMs > 0L) {
+            try {
+                withTimeout(timeoutMs) { answer.await() }
+            } catch (_: TimeoutCancellationException) {
+                pending.remove(id)
+                Log.e(TAG, "command '$command' timed out after ${timeoutMs}ms; killing hung engine")
+                kill()
+                throw EngineDied("The engine stopped responding")
+            }
+        } else {
+            answer.await()
+        }
     }
 
     @Synchronized
@@ -132,7 +154,12 @@ class Engine(
         Log.i(TAG, "engine started (${_starts.value}): ${policy.environment()}")
         Thread({ readAnswers(started) }, "engine-stdout").start()
         Thread({
-            started.errorStream.bufferedReader().forEachLine { Log.i(TAG, it) }
+            runCatching {
+                started.errorStream.bufferedReader().forEachLine { line ->
+                    Log.i(TAG, line)
+                    onStderr?.invoke(line)
+                }
+            }
         }, "engine-stderr").start()
         return writer
     }
@@ -174,6 +201,15 @@ class Engine(
     @Synchronized
     fun stop() {
         runCatching { stdin?.close() }
+        stdin = null
+        process = null
+    }
+
+    /** Force-kills a hung engine process (used by benchmark timeouts). */
+    @Synchronized
+    fun kill() {
+        runCatching { stdin?.close() }
+        runCatching { process?.destroyForcibly() }
         stdin = null
         process = null
     }

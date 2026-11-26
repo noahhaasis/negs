@@ -582,6 +582,461 @@ pub fn apply_grain(
     out
 }
 
+/// SplitMix32 finalizer matching `grain.wgsl` / `grain_micro.wgsl`.
+#[inline]
+fn splitmix32(mut z: u32) -> u32 {
+    z = (z ^ (z >> 16)).wrapping_mul(0x85eb_ca6b);
+    z = (z ^ (z >> 13)).wrapping_mul(0xc2b2_ae35);
+    z ^ (z >> 16)
+}
+
+/// Per-pixel PCG32 matching `grain.wgsl`.
+struct PixelPcg32 {
+    state: u32,
+    inc: u32,
+}
+
+impl PixelPcg32 {
+    #[inline]
+    fn new(layer_seed: u32, gidx: u32) -> Self {
+        Self {
+            state: splitmix32(layer_seed) ^ splitmix32(gidx),
+            inc: (splitmix32(gidx ^ 0x9e37_79b9) << 1) | 1,
+        }
+    }
+
+    #[inline]
+    fn next_u32(&mut self) -> u32 {
+        let s = self.state;
+        self.state = s.wrapping_mul(747_796_405).wrapping_add(self.inc);
+        let word = ((s >> ((s >> 28) + 4)) ^ s).wrapping_mul(277_803_737);
+        (word >> 22) ^ word
+    }
+
+    #[inline]
+    fn uniform01(&mut self) -> f64 {
+        (((self.next_u32() >> 8) as f32 + 0.5) * (1.0 / 16_777_216.0)) as f64
+    }
+}
+
+fn log_factorial_f64(k: f64) -> f64 {
+    if k < 8.0 {
+        let mut r = 1.0;
+        let mut i = 2.0;
+        while i <= k {
+            r *= i;
+            i += 1.0;
+        }
+        return r.ln();
+    }
+    let x = k + 1.0;
+    (x - 0.5) * x.ln() - x + 0.918_938_533_204_672_7 + 1.0 / (12.0 * x) - 1.0 / (360.0 * x * x * x)
+}
+
+fn pcg_poisson(lam: f64, rng: &mut PixelPcg32) -> f64 {
+    if lam <= 0.0 {
+        return 0.0;
+    }
+    if lam < 10.0 {
+        let enlam = (-lam).exp();
+        let mut x = 0.0;
+        let mut prod = 1.0;
+        loop {
+            prod *= rng.uniform01();
+            if prod > enlam {
+                x += 1.0;
+            } else {
+                return x;
+            }
+        }
+    }
+    let slam = lam.sqrt();
+    let loglam = lam.ln();
+    let b = 0.931 + 2.53 * slam;
+    let a = -0.059 + 0.02483 * b;
+    let invalpha = 1.1239 + 1.1328 / (b - 3.4);
+    let vr = 0.9277 - 3.6224 / (b - 2.0);
+    loop {
+        let u = rng.uniform01() - 0.5;
+        let v = rng.uniform01();
+        let us = 0.5 - u.abs();
+        let k = ((2.0 * a / us + b) * u + lam + 0.43).floor();
+        if us >= 0.07 && v <= vr {
+            return k;
+        }
+        if k < 0.0 || (us < 0.013 && v > us) {
+            continue;
+        }
+        let lhs = v.ln() + invalpha.ln() - (a / (us * us) + b).ln();
+        let rhs = -lam + k * loglam - log_factorial_f64(k);
+        if lhs <= rhs {
+            return k;
+        }
+    }
+}
+
+fn pcg_binomial_inversion(n: f64, p: f64, rng: &mut PixelPcg32) -> f64 {
+    let q = 1.0 - p;
+    let qn = (n * q.ln()).exp();
+    let np = n * p;
+    let bound = n.min(np + 10.0 * (np * q + 1.0).sqrt()).floor();
+    let mut x = 0.0;
+    let mut px = qn;
+    let mut u = rng.uniform01();
+    while u > px {
+        x += 1.0;
+        if x > bound {
+            x = 0.0;
+            px = qn;
+            u = rng.uniform01();
+        } else {
+            u -= px;
+            px = ((n - x + 1.0) * p * px) / (x * q);
+        }
+    }
+    x
+}
+
+fn stirling_corr(x: f64) -> f64 {
+    let x2 = x * x;
+    (13680.0 - (462.0 - (132.0 - (99.0 - 140.0 / x2) / x2) / x2) / x2) / x / 166320.0
+}
+
+fn pcg_binomial_btpe(n: f64, p: f64, rng: &mut PixelPcg32) -> f64 {
+    let r = p;
+    let q = 1.0 - r;
+    let fm = n * r + r;
+    let m = fm.floor();
+    let p1 = (2.195 * (n * r * q).sqrt() - 4.6 * q).floor() + 0.5;
+    let xm = m + 0.5;
+    let xl = xm - p1;
+    let xr = xm + p1;
+    let c = 0.134 + 20.5 / (15.3 + m);
+    let a1 = (fm - xl) / (fm - xl * r);
+    let laml = a1 * (1.0 + a1 / 2.0);
+    let a2 = (xr - fm) / (xr * q);
+    let lamr = a2 * (1.0 + a2 / 2.0);
+    let p2 = p1 * (1.0 + 2.0 * c);
+    let p3 = p2 + c / laml;
+    let p4 = p3 + c / lamr;
+    let nrq = n * r * q;
+    loop {
+        let u = rng.uniform01() * p4;
+        let mut v = rng.uniform01();
+        let y = if u <= p1 {
+            return (xm - p1 * v + u).floor();
+        } else if u <= p2 {
+            let x = xl + (u - p1) / c;
+            v = v * c + 1.0 - (m - x + 0.5).abs() / p1;
+            if v > 1.0 { continue; }
+            x.floor()
+        } else if u <= p3 {
+            let yy = (xl + v.ln() / laml).floor();
+            if yy < 0.0 { continue; }
+            v *= (u - p2) * laml;
+            yy
+        } else {
+            let yy = (xr - v.ln() / lamr).floor();
+            if yy > n { continue; }
+            v *= (u - p3) * lamr;
+            yy
+        };
+        let k = (y - m).abs();
+        if k <= 20.0 || k >= nrq / 2.0 - 1.0 {
+            let s = r / q;
+            let a = s * (n + 1.0);
+            let mut f = 1.0;
+            if m < y {
+                let mut i = m + 1.0;
+                while i <= y { f *= a / i - s; i += 1.0; }
+            } else if m > y {
+                let mut i = y + 1.0;
+                while i <= m { f /= a / i - s; i += 1.0; }
+            }
+            if v > f { continue; }
+            return y;
+        }
+        let rho = (k / nrq) * ((k * (k / 3.0 + 0.625) + 1.0 / 6.0) / nrq + 0.5);
+        let t = -k * k / (2.0 * nrq);
+        let a_log = v.ln();
+        if a_log < t - rho { return y; }
+        if a_log > t + rho { continue; }
+        let (x1, f1, z, w) = (y + 1.0, m + 1.0, n - m + 1.0, n - y + 1.0);
+        let bound = xm * (f1 / x1).ln() + (n - m + 0.5) * (z / w).ln() + (y - m) * (w * r / (x1 * q)).ln()
+            + stirling_corr(f1) + stirling_corr(z) + stirling_corr(x1) + stirling_corr(w);
+        if a_log > bound { continue; }
+        return y;
+    }
+}
+
+fn pcg_binomial(n: f64, p: f64, rng: &mut PixelPcg32) -> f64 {
+    if n <= 0.0 {
+        return 0.0;
+    }
+    if p <= 0.5 {
+        if p * n <= 30.0 { pcg_binomial_inversion(n, p, rng) } else { pcg_binomial_btpe(n, p, rng) }
+    } else {
+        let q = 1.0 - p;
+        if q * n <= 30.0 { n - pcg_binomial_inversion(n, q, rng) } else { n - pcg_binomial_btpe(n, q, rng) }
+    }
+}
+
+/// Tiled CPU grain using per-pixel PCG32 streams indexed by global coordinates
+/// `(ox + lx, oy + ly)` (matching `grain.wgsl` and `grain_micro.wgsl`) so CPU
+/// fallback tiles are seamless across tile boundaries. When
+/// `mult_usm_sums_override` is `Some([Σbefore_rgb, Σafter_rgb])`, applies that
+/// global renormalization ratio instead of a tile-local ratio.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_grain_tiled(
+    density_cmy: ImageBuf,
+    pixel_size_um: f64,
+    settings: &GrainSettings,
+    curves: &GrainCurves,
+    positive: bool,
+    monochrome: bool,
+    tile_origin: (u32, u32, u32),
+    mult_usm_sums_override: Option<[f32; 6]>,
+) -> ImageBuf {
+    let (w, h) = (density_cmy.width, density_cmy.height);
+    let (ox, oy, full_w) = tile_origin;
+    let lp = layer_grain_params(curves, settings, pixel_size_um);
+    let interps: Vec<LayerInterp> =
+        (0..3).map(|ch| LayerInterp::new(curves, ch, positive)).collect();
+    let n_layers = lp.n_layers();
+    let channels: Vec<usize> = if monochrome { vec![0] } else { vec![0, 1, 2] };
+
+    let run_channel = |ch: usize| -> Vec<Scalar> {
+        let interp = &interps[ch];
+        let mut grain = vec![ZERO; (w as usize) * (h as usize)];
+        for l in 0..n_layers {
+            let dmin_l = lp.density_min_layers[l][ch];
+            let dmax = lp.density_max_layers[l][ch];
+            let npp = lp.n_particles_per_pixel[l][ch];
+            let gu = settings.uniformity[ch];
+            let seed_ch = if monochrome { 0 } else { ch };
+            let layer_seed = (seed_ch + l * 10) as u32;
+            let mut layer: Vec<Scalar> = density_cmy
+                .data
+                .par_chunks_exact(3)
+                .enumerate()
+                .map(|(idx, px)| {
+                    let pos = interp.locate(to_f64(px[ch]));
+                    let d = layer_density(curves, pos, l, ch) + dmin_l;
+                    let p = (d / dmax).clamp(1e-6, 1.0 - 1e-6);
+                    if !(npp.is_finite() && npp > 0.0) {
+                        return from_f64(p * dmax);
+                    }
+                    let sat = 1.0 - p * gu * (1.0 - 1e-6);
+                    let lx = (idx as u32) % w;
+                    let ly = (idx as u32) / w;
+                    let gidx = (ly + oy).wrapping_mul(full_w).wrapping_add(lx + ox);
+                    let mut rng = PixelPcg32::new(layer_seed, gidx);
+                    let n_seeds = pcg_poisson(npp / sat, &mut rng);
+                    let developed = pcg_binomial(n_seeds, p, &mut rng);
+                    from_f64(developed * (dmax / npp) * sat)
+                })
+                .collect();
+            blur_plane(&mut layer, w, h, lp.dye_cloud_sigma(settings.blur_dye_clouds_um, l, ch));
+            for (s, v) in grain.iter_mut().zip(&layer) {
+                *s += *v;
+            }
+        }
+
+        // Micro-structure (matching `grain_micro.wgsl`).
+        if let Some((sigma, blur_px)) = micro_structure_on(settings.micro_structure, pixel_size_um) {
+            let sigma2 = (sigma * sigma).ln_1p();
+            let s = sigma2.sqrt();
+            let lane = if monochrome { 0u32 } else { ch as u32 };
+            let key = 1000u32 + lane * 2;
+            let mut clumping: Vec<Scalar> = (0..(w as usize) * (h as usize))
+                .into_par_iter()
+                .map(|idx| {
+                    let lx = (idx as u32) % w;
+                    let ly = (idx as u32) / w;
+                    let gidx = (ly + oy).wrapping_mul(full_w).wrapping_add(lx + ox);
+                    let hash_u = |k: u32| -> f64 {
+                        (((splitmix32(gidx ^ splitmix32(k)) >> 8) as f32 + 0.5) * (1.0 / 16_777_216.0)) as f64
+                    };
+                    let u1 = hash_u(key);
+                    let u2 = hash_u(key + 1);
+                    let z = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+                    from_f64((z * s - 0.5 * sigma2).exp())
+                })
+                .collect();
+            if blur_px > 0.4 {
+                blur_plane(&mut clumping, w, h, blur_px);
+            }
+            for (v, c) in grain.iter_mut().zip(&clumping) {
+                *v *= *c;
+            }
+        }
+
+        blur_plane(&mut grain, w, h, settings.blur);
+
+        if settings.mult_usm_amount > 0.0 && settings.mult_usm_sigma > 0.0 {
+            const EPS: f64 = 1e-6;
+            for v in grain.iter_mut() {
+                *v = v.max(ZERO);
+            }
+            let mut blur = grain.clone();
+            blur_plane(&mut blur, w, h, settings.mult_usm_sigma);
+            let (eps, a, a1) = (from_f64(EPS), from_f64(settings.mult_usm_amount), from_f64(1.0 + settings.mult_usm_amount));
+            blur.par_iter_mut().zip(grain.par_iter()).for_each(|(g, &d)| {
+                *g = if d <= ZERO { ZERO } else { d.max(eps).powf(a1) / g.max(eps).powf(a) };
+            });
+            let ratio = match mult_usm_sums_override {
+                Some(sums) if sums[3 + ch] > 0.0 => (sums[ch] / sums[3 + ch]) as f64,
+                Some(_) => 1.0,
+                None => {
+                    let mass = deterministic_sum(&grain);
+                    let sharpened = deterministic_sum(&blur);
+                    if sharpened > 0.0 { mass / sharpened } else { 1.0 }
+                }
+            };
+            let scale = from_f64(ratio);
+            blur.par_iter_mut().for_each(|v| *v *= scale);
+            grain = blur;
+        }
+
+        let dmin = from_f64(settings.density_min[ch]);
+        grain.par_iter_mut().for_each(|v| *v -= dmin);
+        grain
+    };
+
+    let mut out_planes: Vec<(usize, Vec<Scalar>)> = channels.iter().map(|&ch| (ch, run_channel(ch))).collect();
+    let mut out = density_cmy;
+    if monochrome {
+        let (_, plane) = out_planes.pop().expect("channel 0");
+        for ch in 0..3 {
+            out.write_channel(ch, &plane);
+        }
+    } else {
+        for (ch, plane) in out_planes {
+            out.write_channel(ch, &plane);
+        }
+    }
+    out
+}
+
+/// Pass-1 CPU counterpart of `ChainOutput::GrainUsmSums`: runs tiled CPU grain
+/// through USM combine and returns the exact 64-bit fixed-point (scale 2^16)
+/// `[Σbefore_rgb, Σafter_rgb]` over `crop = (crop_x, crop_y, crop_w, crop_h)`.
+#[allow(clippy::too_many_arguments)]
+pub fn grain_usm_sums_tiled(
+    density_cmy: &ImageBuf,
+    pixel_size_um: f64,
+    settings: &GrainSettings,
+    curves: &GrainCurves,
+    positive: bool,
+    monochrome: bool,
+    tile_origin: (u32, u32, u32),
+    crop: (u32, u32, u32, u32),
+) -> [u64; 6] {
+    let (w, h) = (density_cmy.width, density_cmy.height);
+    let (ox, oy, full_w) = tile_origin;
+    let (cx, cy, cw, ch_h) = crop;
+    let lp = layer_grain_params(curves, settings, pixel_size_um);
+    let interps: Vec<LayerInterp> =
+        (0..3).map(|ch| LayerInterp::new(curves, ch, positive)).collect();
+    let n_layers = lp.n_layers();
+    let channels: Vec<usize> = if monochrome { vec![0] } else { vec![0, 1, 2] };
+    let mut sums = [0u64; 6];
+    let to_fixed = |v: f64| -> u64 { (v.clamp(0.0, 65535.0) * 65536.0).round_ties_even() as u64 };
+
+    for &ch in &channels {
+        let interp = &interps[ch];
+        let mut grain = vec![ZERO; (w as usize) * (h as usize)];
+        for l in 0..n_layers {
+            let dmin_l = lp.density_min_layers[l][ch];
+            let dmax = lp.density_max_layers[l][ch];
+            let npp = lp.n_particles_per_pixel[l][ch];
+            let gu = settings.uniformity[ch];
+            let seed_ch = if monochrome { 0 } else { ch };
+            let layer_seed = (seed_ch + l * 10) as u32;
+            let mut layer: Vec<Scalar> = density_cmy
+                .data
+                .par_chunks_exact(3)
+                .enumerate()
+                .map(|(idx, px)| {
+                    let pos = interp.locate(to_f64(px[ch]));
+                    let d = layer_density(curves, pos, l, ch) + dmin_l;
+                    let p = (d / dmax).clamp(1e-6, 1.0 - 1e-6);
+                    if !(npp.is_finite() && npp > 0.0) {
+                        return from_f64(p * dmax);
+                    }
+                    let sat = 1.0 - p * gu * (1.0 - 1e-6);
+                    let lx = (idx as u32) % w;
+                    let ly = (idx as u32) / w;
+                    let gidx = (ly + oy).wrapping_mul(full_w).wrapping_add(lx + ox);
+                    let mut rng = PixelPcg32::new(layer_seed, gidx);
+                    let n_seeds = pcg_poisson(npp / sat, &mut rng);
+                    let developed = pcg_binomial(n_seeds, p, &mut rng);
+                    from_f64(developed * (dmax / npp) * sat)
+                })
+                .collect();
+            blur_plane(&mut layer, w, h, lp.dye_cloud_sigma(settings.blur_dye_clouds_um, l, ch));
+            for (s, v) in grain.iter_mut().zip(&layer) {
+                *s += *v;
+            }
+        }
+        if let Some((sigma, blur_px)) = micro_structure_on(settings.micro_structure, pixel_size_um) {
+            let sigma2 = (sigma * sigma).ln_1p();
+            let s = sigma2.sqrt();
+            let lane = if monochrome { 0u32 } else { ch as u32 };
+            let key = 1000u32 + lane * 2;
+            let mut clumping: Vec<Scalar> = (0..(w as usize) * (h as usize))
+                .into_par_iter()
+                .map(|idx| {
+                    let lx = (idx as u32) % w;
+                    let ly = (idx as u32) / w;
+                    let gidx = (ly + oy).wrapping_mul(full_w).wrapping_add(lx + ox);
+                    let hash_u = |k: u32| -> f64 {
+                        (((splitmix32(gidx ^ splitmix32(k)) >> 8) as f32 + 0.5) * (1.0 / 16_777_216.0)) as f64
+                    };
+                    let u1 = hash_u(key);
+                    let u2 = hash_u(key + 1);
+                    let z = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+                    from_f64((z * s - 0.5 * sigma2).exp())
+                })
+                .collect();
+            if blur_px > 0.4 {
+                blur_plane(&mut clumping, w, h, blur_px);
+            }
+            for (v, c) in grain.iter_mut().zip(&clumping) {
+                *v *= *c;
+            }
+        }
+        blur_plane(&mut grain, w, h, settings.blur);
+        for v in grain.iter_mut() {
+            *v = v.max(ZERO);
+        }
+        let mut blur = grain.clone();
+        blur_plane(&mut blur, w, h, settings.mult_usm_sigma);
+        let (eps, a, a1) = (from_f64(1e-6), from_f64(settings.mult_usm_amount), from_f64(1.0 + settings.mult_usm_amount));
+        blur.par_iter_mut().zip(grain.par_iter()).for_each(|(g, &d)| {
+            *g = if d <= ZERO { ZERO } else { d.max(eps).powf(a1) / g.max(eps).powf(a) };
+        });
+        let mut sa = 0u64;
+        let mut sb = 0u64;
+        for row in cy..(cy + ch_h) {
+            let base = (row * w + cx) as usize;
+            for col in 0..cw as usize {
+                sa = sa.wrapping_add(to_fixed(to_f64(grain[base + col])));
+                sb = sb.wrapping_add(to_fixed(to_f64(blur[base + col])));
+            }
+        }
+        sums[ch] = sa;
+        sums[3 + ch] = sb;
+    }
+    if monochrome {
+        sums[1] = sums[0];
+        sums[2] = sums[0];
+        sums[4] = sums[3];
+        sums[5] = sums[3];
+    }
+    sums
+}
+
 /// The micro-structure as `add_micro_structure` applies it: `(lognormal
 /// sigma, blur σ px)` when the clumps are at least 5 % of a pixel.
 fn micro_structure_on(micro_structure: [f64; 2], pixel_size_um: f64) -> Option<(f64, f64)> {
@@ -639,6 +1094,7 @@ pub fn gpu_params(
         blur_px: settings.blur.max(0.0) as f32,
         mult_usm: (settings.mult_usm_amount > 0.0 && settings.mult_usm_sigma > 0.0)
             .then_some([settings.mult_usm_sigma as f32, settings.mult_usm_amount as f32]),
+        mult_usm_sums_override: None,
         base_seed: 0,
         monochrome,
     }

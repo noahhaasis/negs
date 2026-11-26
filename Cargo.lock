@@ -2208,6 +2208,7 @@ dependencies = [
 name = "spektrafilm-core"
 version = "0.20.1"
 dependencies = [
+ "anyhow",
  "blas-src",
  "cblas",
  "image",
@@ -2309,6 +2310,7 @@ dependencies = [
  "spektrafilm-gpu",
  "spektrafilm-io",
  "spektrafilm-math",
+ "spektrafilm-model",
  "tracing-subscriber",
 ]
 

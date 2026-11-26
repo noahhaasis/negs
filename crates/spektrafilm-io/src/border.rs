@@ -344,7 +344,7 @@ fn overlay_nine_patch_rgb8(out: &mut [u8], dw: u32, dh: u32, mut texture: RgbaIm
                 for c in 0..3 {
                     let tex: f32 = taps.iter().map(|&(i, k)| texels[i + c] as f32 * k).sum::<f32>() / 255.0;
                     let dst = pixel[c] as f32 / 255.0;
-                    pixel[c] = ((tex * alpha + dst * (1.0 - alpha)).clamp(0.0, 1.0) * 255.0).round() as u8;
+                    pixel[c] = ((tex * alpha + dst * (1.0 - alpha)).clamp(0.0, 1.0) * 255.0).round_ties_even() as u8;
                 }
             }
         });
@@ -363,7 +363,7 @@ fn overlay_strip_rgb8(out: &mut [u8], width: u32, _height: u32, renderer: &Rende
             let colour = encoding.from_linear_srgb([r, g, b]);
             for (value, c) in pixel.iter_mut().zip(colour) {
                 let dst = *value as f32 / 255.0;
-                *value = ((c * alpha + dst * (1.0 - alpha)).clamp(0.0, 1.0) * 255.0).round() as u8;
+                *value = ((c * alpha + dst * (1.0 - alpha)).clamp(0.0, 1.0) * 255.0).round_ties_even() as u8;
             }
         }
     });

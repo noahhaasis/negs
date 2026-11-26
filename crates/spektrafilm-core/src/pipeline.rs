@@ -197,6 +197,9 @@ pub struct Pipeline {
     /// Tile geometry when rendering a sub-rectangle of a larger full-resolution
     /// photograph: `(full_width, full_height, origin_x, origin_y)`.
     tile: Option<(u32, u32, u32, u32)>,
+    /// Pre-computed global multiplicative unsharp mask `[sum_before_rgb, sum_after_rgb]`
+    /// for tiled grain renormalization (`None` reduces over the image itself).
+    grain_usm_sums: Option<[f32; 6]>,
     /// True when the caller already applied `input_cctf_decoding`,
     /// `autoexposure_ev`, `camera.exposure_compensation_ev`, and `prep`
     /// (e.g. via [`crate::prep::TiledPrep`]).
@@ -344,6 +347,13 @@ impl Pipeline {
     /// follow the full photograph rather than the tile's dimensions.
     pub fn with_tile(mut self, full_width: u32, full_height: u32, origin_x: u32, origin_y: u32) -> Self {
         self.tile = Some((full_width, full_height, origin_x, origin_y));
+        self
+    }
+
+    /// Override the grain multiplicative unsharp mask `[sum_before_rgb, sum_after_rgb]`
+    /// with pre-computed whole-frame sums (used by tiled export Pass 2).
+    pub fn with_grain_usm_sums(mut self, sums: [f32; 6]) -> Self {
+        self.grain_usm_sums = Some(sums);
         self
     }
 
@@ -497,6 +507,7 @@ impl Pipeline {
             prepared_frame: None,
             film_cache: None,
             tile: None,
+            grain_usm_sums: None,
             prep_applied: false,
         };
         pipeline.apply_film_curves_morph();
@@ -693,6 +704,7 @@ impl Pipeline {
             prepared_frame: None,
             film_cache: None,
             tile: None,
+            grain_usm_sums: None,
             prep_applied: false,
         };
         // The enlarger illuminant with its dichroic filters, and the preflash.
@@ -882,7 +894,10 @@ impl Pipeline {
         print_stage_timing(stage_timings, "rescale", t);
         static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
         let mut backend = backend;
-        if let Err(reason) = backend.image_capacity(image.width, image.height) {
+        if !backend.is_healthy() {
+            tracing::warn!("GPU backend is unhealthy; rendering on CPU");
+            backend = &CPU;
+        } else if let Err(reason) = backend.image_capacity(image.width, image.height) {
             tracing::warn!(%reason, "GPU capacity exceeded; rendering on CPU");
             backend = &CPU;
         }
@@ -921,12 +936,18 @@ impl Pipeline {
                     tracing::warn!(%reason, "GPU effects exceed capacity; rendering on CPU");
                     backend = &CPU;
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    if !backend.is_healthy() {
+                        tracing::warn!("GPU backend lost device during film chain; rendering on CPU");
+                        backend = &CPU;
+                    }
+                }
             }
         }
 
         let t = Instant::now();
-        let log_raw = stages::filming::expose(
+        let phys_size = self.tile.map(|(fw, fh, _, _)| (fw, fh));
+        let log_raw = stages::filming::expose_tiled(
             image,
             &self.film,
             &self.params,
@@ -935,24 +956,34 @@ impl Pipeline {
             &select_illuminant(&self.front_illuminant),
             color_ref.filming_exposure_correction,
             autoexposure_ev,
+            phys_size,
+            self.prep_applied,
         );
         print_stage_timing(stage_timings, "filming_expose", t);
         dump_if_env("SPEKTRAFILM_DUMP_FILM_LOG_RAW", &log_raw);
         let t = Instant::now();
-        let filmed = stages::filming::develop(log_raw, &self.film, &self.params, backend);
+        let filmed = stages::filming::develop_tiled(
+            log_raw,
+            &self.film,
+            &self.params,
+            backend,
+            self.tile,
+            self.grain_usm_sums,
+        );
         print_stage_timing(stage_timings, "filming_develop", t);
         tracing::info!("pipeline: filming complete");
         dump_if_env("SPEKTRAFILM_DUMP_FILM_DENSITY", &filmed);
 
         let result = if self.params.io.scan_film {
             let t = Instant::now();
-            let result = stages::scanning::process(
+            let result = stages::scanning::scan_tiled(
                 filmed,
                 &self.film,
                 &self.params,
                 backend,
                 &color_ref,
                 &self.output_gamut,
+                self.tile,
             );
             print_stage_timing(stage_timings, "scanning", t);
             tracing::info!("pipeline: scanning complete (film scan)");
@@ -961,6 +992,59 @@ impl Pipeline {
             self.print_and_scan(filmed, backend, &color_ref)
         };
         Ok((result, backend.name()))
+    }
+
+    /// Pass-1 CPU counterpart of `ChainOutput::GrainUsmSums`: runs filming
+    /// through grain USM combine on the CPU for a tile and returns the exact
+    /// 64-bit fixed-point (scale 2^16) `[Σbefore_rgb, Σafter_rgb]` over `crop`.
+    pub fn grain_usm_sums_cpu(
+        &self,
+        image: ImageBuf,
+        crop: (u32, u32, u32, u32),
+    ) -> [u64; 6] {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        let autoexposure_ev = self.frame_autoexposure_ev(&image);
+        let phys_size = self.tile.map(|(fw, fh, _, _)| (fw, fh));
+        let (phys_w, phys_h) = phys_size.unwrap_or((image.width, image.height));
+        let tile_origin = self.tile.map_or((0, 0, image.width), |(fw, _, ox, oy)| (ox, oy, fw));
+        let log_raw = stages::filming::expose_tiled(
+            image,
+            &self.film,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+            color_ref.filming_exposure_correction,
+            autoexposure_ev,
+            phys_size,
+            self.prep_applied,
+        );
+        let density_cmy = stages::filming::develop_pre_grain_tiled(
+            log_raw,
+            &self.film,
+            &self.params,
+            &CPU,
+            phys_size,
+        );
+        let pixel_size_um = stages::filming::grain_pixel_size_um(&self.params, phys_w, phys_h);
+        spektrafilm_model::grain::grain_usm_sums_tiled(
+            &density_cmy,
+            pixel_size_um,
+            &crate::grain::grain_settings(&self.film, &self.params.film_render.grain),
+            &crate::grain::grain_curves(&self.film),
+            self.film.is_positive(),
+            self.params.film_render.grain.monochrome,
+            tile_origin,
+            crop,
+        )
     }
 
     /// Prints developed film density (`develop`'s scale) and scans the print.
@@ -987,13 +1071,14 @@ impl Pipeline {
         tracing::info!("pipeline: printing complete");
         dump_if_env("SPEKTRAFILM_DUMP_PRINT_DENSITY", &printed);
         let t = Instant::now();
-        let result = stages::scanning::process(
+        let result = stages::scanning::scan_tiled(
             printed,
             &self.print,
             &self.params,
             backend,
             color_ref,
             &self.output_gamut,
+            self.tile,
         );
         print_stage_timing(stage_timings, "scanning", t);
         tracing::info!("pipeline: scanning complete");
@@ -1018,7 +1103,10 @@ impl Pipeline {
         print_stage_timing(stage_timings, "rescale", t);
         static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
         let mut backend = backend;
-        if let Err(reason) = backend.image_capacity(image.width, image.height) {
+        if !backend.is_healthy() {
+            tracing::warn!("GPU backend is unhealthy; rendering on CPU");
+            backend = &CPU;
+        } else if let Err(reason) = backend.image_capacity(image.width, image.height) {
             tracing::warn!(%reason, "GPU capacity exceeded; rendering on CPU");
             backend = &CPU;
         }
@@ -1041,7 +1129,12 @@ impl Pipeline {
                 tracing::warn!(%reason, "GPU effects exceed capacity; rendering on CPU");
                 backend = &CPU;
             }
-            Ok(None) => {}
+            Ok(None) => {
+                if !backend.is_healthy() {
+                    tracing::warn!("GPU backend lost device during convert chain; rendering on CPU");
+                    backend = &CPU;
+                }
+            }
         }
         let t = Instant::now();
         self.convert_film(&mut image);
@@ -1247,6 +1340,21 @@ impl Pipeline {
                 spektrafilm_gpu::ChainResult::Scan(self.apply_post(self.finish_resident(out, backend)))
             }
             display => display,
+        }
+    }
+
+    /// Fallible version of [`Self::finish_submitted`]: returns `Err` when the
+    /// GPU device is lost or readback times out, letting callers fall back.
+    pub fn try_finish_submitted(
+        &self,
+        pending: Box<dyn spektrafilm_gpu::PendingFilmChain>,
+        backend: &dyn ComputeBackend,
+    ) -> Result<spektrafilm_gpu::ChainResult, String> {
+        match pending.try_finish()? {
+            spektrafilm_gpu::ChainResult::Scan(out) => Ok(spektrafilm_gpu::ChainResult::Scan(
+                self.apply_post(self.finish_resident(out, backend)),
+            )),
+            display => Ok(display),
         }
     }
 
@@ -1647,13 +1755,15 @@ impl Pipeline {
         // exact Poisson/binomial algorithms as `apply_grain`; only the random
         // stream differs.
         let grain = (film_effects && crate::grain::grain_active(&self.params)).then(|| {
-            spektrafilm_model::grain::gpu_params(
+            let mut gp = spektrafilm_model::grain::gpu_params(
                 &crate::grain::grain_curves(&self.film),
                 &crate::grain::grain_settings(&self.film, &self.params.film_render.grain),
                 stages::filming::grain_pixel_size_um(&self.params, phys_w, phys_h),
                 self.film.is_positive(),
                 self.params.film_render.grain.monochrome,
-            )
+            );
+            gp.mult_usm_sums_override = self.grain_usm_sums;
+            gp
         });
 
         // Glare in the resident chain — applied after scan_spectral on the

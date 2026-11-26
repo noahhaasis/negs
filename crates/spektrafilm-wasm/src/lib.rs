@@ -976,7 +976,9 @@ async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json:
             (width as u32, height as u32, rgba)
         }
         ChainResult::Rgba8 { width, height, rgba } => (width, height, rgba),
-        ChainResult::Presented { .. } => return Err(JsError::new("A preview was presented")),
+        ChainResult::Presented { .. } | ChainResult::GrainUsmSums(_) => {
+            return Err(JsError::new("Unexpected GPU result for preview"));
+        }
     };
     stages.mark("display");
     Ok(Rendered {
@@ -1391,6 +1393,9 @@ async fn render(
         }
         ChainResult::Rgba8 { width, height, rgba } => (width, height, rgba, false),
         ChainResult::Presented { width, height } => (width, height, Vec::new(), true),
+        ChainResult::GrainUsmSums(_) => {
+            return Err(JsError::new("Unexpected GPU result for render"));
+        }
     };
     {
         let mut state = state.borrow_mut();

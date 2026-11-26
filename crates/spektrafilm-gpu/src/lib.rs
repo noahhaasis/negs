@@ -206,6 +206,12 @@ pub trait ComputeBackend: MaybeSendSync {
         false
     }
 
+    /// False when a GPU backend has lost its device or timed out and should be
+    /// recreated (or replaced with CPU fallback).
+    fn is_healthy(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str;
 }
 
@@ -214,6 +220,12 @@ pub trait PendingFilmChain {
     /// The chain's output. Waits for the GPU natively; in a browser call it
     /// after `on_mapped` has run.
     fn finish(self: Box<Self>) -> ChainResult;
+
+    /// Fallible version of [`Self::finish`]: returns `Err` instead of panicking
+    /// if the GPU device was lost or timed out during readback.
+    fn try_finish(self: Box<Self>) -> Result<ChainResult, String> {
+        Ok(self.finish())
+    }
 }
 
 /// What [`ComputeBackend::submit_film_chain`] makes of the scan.
@@ -227,6 +239,10 @@ pub enum ChainOutput {
     Rgba8 { encoded: bool, post: Option<Arc<DisplayPost>> },
     /// Those bytes drawn on the backend's canvas, with nothing read back.
     Present { encoded: bool, post: Option<Arc<DisplayPost>> },
+    /// Tiled export Pass 1: run only through grain multiplicative unsharp mask
+    /// and reduce the per-channel `(before, after)` mass sums strictly over the
+    /// valid tile interior `[crop_x..crop_x+crop_w, crop_y..crop_y+crop_h]`.
+    GrainUsmSums { crop_x: u32, crop_y: u32, crop_w: u32, crop_h: u32 },
 }
 
 /// Post adjustments for the display pass, as
@@ -254,6 +270,8 @@ pub enum ChainResult {
     Scan(ImageBuf),
     Rgba8 { width: u32, height: u32, rgba: Vec<u8> },
     Presented { width: u32, height: u32 },
+    /// Exact 64-bit fixed-point (scale 2^16) `[sum_before_rgb, sum_after_rgb]`
+    GrainUsmSums([u64; 6]),
 }
 
 /// All inputs to the GPU-resident film chain. Bundled into a struct so the
@@ -549,6 +567,10 @@ pub struct GrainGpuParams {
     pub blur_px: f32,
     /// Multiplicative unsharp mask `(σ px, amount)` when it is on.
     pub mult_usm: Option<[f32; 2]>,
+    /// Pre-computed global multiplicative unsharp mask `[sum_before_rgb, sum_after_rgb]`
+    /// from tiled export Pass 1, fed into `grain_finalize.wgsl` identically to
+    /// whole-frame `grain_sum_reduce` so `sums[ch] / sums[3 + ch]` is bit-identical.
+    pub mult_usm_sums_override: Option<[f32; 6]>,
     pub base_seed: u32,
     /// One shared noise field across all channels (B&W single emulsion)
     /// instead of independent per-channel RNG streams.
