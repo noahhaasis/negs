@@ -38,7 +38,18 @@ use crate::widgets::text_input::{
 };
 use crate::widgets::tone_graph::{ToneGraphState, render_tone_graph};
 
-pub const INSPECTOR_WIDTH: f32 = 340.0;
+pub const INSPECTOR_MIN_WIDTH: f32 = 340.0;
+pub const INSPECTOR_MAX_WIDTH: f32 = 440.0;
+pub const CANVAS_MIN_WIDTH: f32 = 640.0;
+
+/// Clamps the resizable inspector column width (`340..=440 DIP`, `L6`),
+/// leaving at least `CANVAS_MIN_WIDTH` for the canvas whenever the window can.
+pub fn clamp_inspector_width(desired: f32, viewport_w: f32) -> f32 {
+    let max_for_window = (viewport_w - CANVAS_MIN_WIDTH).max(INSPECTOR_MIN_WIDTH);
+    desired
+        .clamp(INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH)
+        .min(max_for_window)
+}
 
 #[derive(Clone, Debug)]
 pub struct OpenChoice {
@@ -1768,22 +1779,19 @@ pub fn render_inspector_column(
         div()
             .id("inspector-column")
             .relative()
-            .w(px(INSPECTOR_WIDTH))
+            .w(px(app.inspector_width))
             .h_full()
             .flex_shrink_0()
             .flex()
             .flex_col()
             .bg(theme.panel)
+            .border_t_1()
             .border_l_1()
             .border_color(theme.line)
             .font_family(theme.ui_family.clone())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.theme_menu_open {
-                        this.theme_menu_open = false;
-                        cx.notify();
-                    }
                     if this.inspector.open_choice.is_some()
                         || this.inspector.open_tab_edits.is_some()
                         || this.inspector.open_color_picker.is_some()
@@ -1821,6 +1829,17 @@ pub fn render_inspector_column(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inspector_width_clamps_to_range_and_leaves_canvas_room() {
+        assert_eq!(clamp_inspector_width(300.0, 1320.0), INSPECTOR_MIN_WIDTH);
+        assert_eq!(clamp_inspector_width(380.0, 1320.0), 380.0);
+        assert_eq!(clamp_inspector_width(500.0, 1320.0), INSPECTOR_MAX_WIDTH);
+        // Window of 1000 px: max inspector leaving 640 px canvas is 360 px.
+        assert_eq!(clamp_inspector_width(420.0, 1000.0), 360.0);
+        // Narrow window: never goes below minimum 340 px.
+        assert_eq!(clamp_inspector_width(420.0, 900.0), INSPECTOR_MIN_WIDTH);
+    }
     use negs_app::border::{BorderSettings, BorderStyle};
     use negs_app::inspector_view::output::BorderWidth;
     use negs_app::inspector_view::schema::rows;

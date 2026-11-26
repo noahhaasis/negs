@@ -1037,9 +1037,6 @@ pub fn render_canvas(
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                if this.theme_menu_open {
-                    this.theme_menu_open = false;
-                }
                 mouse_down(this, event, window, cx);
             }),
         )

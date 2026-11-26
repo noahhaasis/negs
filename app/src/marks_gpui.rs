@@ -304,6 +304,7 @@ pub fn paint_highlighter(window: &mut Window, rect: Bounds<Pixels>, plain: bool,
 
 /// Active word underline: Light Table yellow highlighter (lifted behind the
 /// word's lower half) or standard grease-pencil / Plain straight bar (`L3`).
+#[allow(dead_code)]
 pub fn paint_word_underline(
     window: &mut Window,
     rect: Bounds<Pixels>,

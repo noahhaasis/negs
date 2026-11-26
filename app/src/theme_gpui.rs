@@ -8,10 +8,17 @@ use std::sync::{Arc, OnceLock};
 use gpui::{App, Font, FontFeatures, FontStyle, FontWeight, Hsla, SharedString, rgb};
 use negs_app::theme::{HIGHLIGHTER_INK, HIGHLIGHTER_OPACITY, ThemeName, Tokens, mix};
 
-const NEWSREADER_REGULAR: &[u8] = include_bytes!("../../macos/Fonts/Newsreader-Negs.ttf");
-const NEWSREADER_ITALIC: &[u8] = include_bytes!("../../macos/Fonts/Newsreader-Negs-Italic.ttf");
+// Static Newsreader optical-16pt weight instances generated with `hb-subset`
+// from `assets/fonts/newsreader/` (GPUI 0.2.2's font_kit/DirectWrite loaders
+// pick static faces by weight rather than varying the `wght` axis).
+const NEWSREADER_400: &[u8] = include_bytes!("../fonts/Newsreader-Negs-400.ttf");
+const NEWSREADER_500: &[u8] = include_bytes!("../fonts/Newsreader-Negs-500.ttf");
+const NEWSREADER_600: &[u8] = include_bytes!("../fonts/Newsreader-Negs-600.ttf");
+const NEWSREADER_700: &[u8] = include_bytes!("../fonts/Newsreader-Negs-700.ttf");
+const NEWSREADER_ITALIC_400: &[u8] = include_bytes!("../fonts/Newsreader-Negs-Italic-400.ttf");
+const NEWSREADER_ITALIC_700: &[u8] = include_bytes!("../fonts/Newsreader-Negs-Italic-700.ttf");
 
-/// Internal TTF family name of `macos/Fonts/Newsreader-Negs*.ttf`.
+/// Internal TTF family name of the Newsreader font faces.
 pub const NEWSREADER_FAMILY: &str = "Newsreader 16pt";
 
 /// Plain-theme size multiplier for system UI sans replacing Newsreader (`L2`,
@@ -70,8 +77,12 @@ pub fn tabular_features() -> FontFeatures {
 /// system, and detects Windows 11's `Segoe UI Variable` when available (`L5`).
 pub fn register_fonts(cx: &App) -> anyhow::Result<()> {
     let res = cx.text_system().add_fonts(vec![
-        Cow::Borrowed(NEWSREADER_REGULAR),
-        Cow::Borrowed(NEWSREADER_ITALIC),
+        Cow::Borrowed(NEWSREADER_400),
+        Cow::Borrowed(NEWSREADER_500),
+        Cow::Borrowed(NEWSREADER_600),
+        Cow::Borrowed(NEWSREADER_700),
+        Cow::Borrowed(NEWSREADER_ITALIC_400),
+        Cow::Borrowed(NEWSREADER_ITALIC_700),
     ]);
     #[cfg(target_os = "windows")]
     {
