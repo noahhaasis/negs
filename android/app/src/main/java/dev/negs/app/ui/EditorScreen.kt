@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
@@ -289,7 +290,13 @@ private fun PhotoView(editor: Editor, modifier: Modifier) {
     }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     LaunchedEffect(editor.photo) { scale = 1f; offset = Offset.Zero }
+    LaunchedEffect(canvasSize, scale) {
+        if (canvasSize.width > 0 && canvasSize.height > 0) {
+            editor.updateViewport(canvasSize.width, canvasSize.height, scale)
+        }
+    }
     val border = editor.border
     val out = editor.outputSize()
     // The film frame's or strip's texture, loaded once it's wanted.
@@ -313,13 +320,20 @@ private fun PhotoView(editor: Editor, modifier: Modifier) {
                 })
             },
     ) {
-        if (shownBitmap == null || out == null) return@Box
-        // Below the top bar's buttons, as the web's view keeps its padding.
-        Canvas(
+        // Measure the padded photo area even before the first frame arrives so
+        // the first settled render already targets the exact fitted viewport.
+        Box(
             Modifier.fillMaxSize().statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 56.dp, bottom = 12.dp)
-                .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
+                .onSizeChanged { canvasSize = it },
         ) {
-            drawPresented(shownBitmap, editor.crop, editor.rotation, out, border, texture)
+            if (shownBitmap != null && out != null) {
+                Canvas(
+                    Modifier.fillMaxSize()
+                        .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
+                ) {
+                    drawPresented(shownBitmap, editor.crop, editor.rotation, out, border, texture)
+                }
+            }
         }
     }
 }

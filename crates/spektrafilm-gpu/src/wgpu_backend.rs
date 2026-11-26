@@ -350,6 +350,11 @@ pub struct WgpuBackend {
     film_cache_budget: u64,
     /// Chains that reused a kept film side, for tests and diagnostics.
     film_cache_hits: std::sync::atomic::AtomicU64,
+    /// Set if the Vulkan/Metal/WebGPU device is lost, hits an internal/OOM
+    /// error, or times out waiting for readback. Checked before submitting new
+    /// work so callers fall back to CPU or recreate the backend instead of
+    /// hanging on a wedged driver context (e.g. Adreno KGSL `EDEADLK`).
+    device_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// One kept film side: the film density after grain of the last chain
@@ -781,7 +786,14 @@ impl WgpuBackend {
         // TODO(intel): Intel iGPUs also report IntegratedGpu, so they take the
         // mapped path. Check it renders the same as SPEKTRAFILM_WGPU_FORCE_STAGING
         // there and is actually faster.
-        let force_staging = std::env::var_os("SPEKTRAFILM_WGPU_FORCE_STAGING").is_some();
+        // On Android mobile GPUs (Adreno/Mali), pure DEVICE_LOCAL storage
+        // buffers keep full L2/UBWC caching and avoid KGSL host-mapped primary
+        // storage bugs; preview readback uses compact RGBA8 staging anyway.
+        let force_staging = match std::env::var("SPEKTRAFILM_WGPU_FORCE_STAGING").ok().as_deref() {
+            Some("0") => false,
+            Some(_) => true,
+            None => cfg!(target_os = "android"),
+        };
         let mut opt_feats =
             if adapter_info.device_type == wgpu::DeviceType::IntegratedGpu && !force_staging {
                 wgpu::Features::MAPPABLE_PRIMARY_BUFFERS & adapter.features()
@@ -806,6 +818,24 @@ impl WgpuBackend {
             .await
             .ok()?;
 
+        let device_lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let lost = device_lost.clone();
+            device.set_device_lost_callback(move |reason, message| {
+                if reason != wgpu::DeviceLostReason::Destroyed {
+                    tracing::error!(?reason, %message, "wgpu device lost");
+                    lost.store(true, std::sync::atomic::Ordering::Release);
+                }
+            });
+            let lost = device_lost.clone();
+            device.on_uncaptured_error(Box::new(move |error| {
+                tracing::error!(?error, "wgpu uncaptured error");
+                if matches!(error, wgpu::Error::OutOfMemory { .. } | wgpu::Error::Internal { .. }) {
+                    lost.store(true, std::sync::atomic::Ordering::Release);
+                }
+            }));
+        }
+
         let disk_pipeline_cache = cache_path
             .map(|path| crate::pipeline_cache::DiskPipelineCache::new(&device, path));
 
@@ -813,6 +843,13 @@ impl WgpuBackend {
         let mut max_workgroup_size = limits
             .max_compute_invocations_per_workgroup
             .min(limits.max_compute_workgroup_size_x);
+        // On Qualcomm Adreno mobile GPUs, 1024-thread workgroups spill
+        // registers on the spectral shaders and risk KGSL hangcheck timeouts;
+        // 256 matches Qualcomm's compute guidance and our grain/display passes.
+        #[cfg(target_os = "android")]
+        if adapter_info.name.contains("Adreno") {
+            max_workgroup_size = max_workgroup_size.min(256);
+        }
         if let Some(cap) = std::env::var("SPEKTRAFILM_WGPU_WORKGROUP_SIZE")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
@@ -829,6 +866,7 @@ impl WgpuBackend {
         let film_cache_budget = film_cache_budget(&device, capacity.memory_budget);
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android", target_arch = "wasm32")))]
         let film_cache_budget = film_cache_budget(&device, None);
+        let mappable_primary = device.features().contains(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS);
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android", target_arch = "wasm32"))]
         tracing::info!(
             adapter = adapter_info.name,
@@ -836,6 +874,7 @@ impl WgpuBackend {
             driver = adapter_info.driver,
             driver_info = adapter_info.driver_info,
             max_workgroup_size,
+            mappable_primary,
             max_storage_buffer_binding_size = capacity.max_binding,
             max_buffer_size = capacity.max_buffer,
             memory_budget_mib = capacity.memory_budget.map(|b| b >> 20),
@@ -847,6 +886,7 @@ impl WgpuBackend {
             adapter = adapter_info.name,
             backend = ?adapter_info.backend,
             max_workgroup_size,
+            mappable_primary,
             max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size,
             max_buffer_size = adapter_limits.max_buffer_size,
             film_cache_budget,
@@ -875,6 +915,7 @@ impl WgpuBackend {
             film_cache: std::sync::Mutex::new(Vec::new()),
             film_cache_budget,
             film_cache_hits: std::sync::atomic::AtomicU64::new(0),
+            device_lost,
             #[cfg(target_arch = "wasm32")]
             canvas: std::sync::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -882,6 +923,11 @@ impl WgpuBackend {
             #[cfg(target_arch = "wasm32")]
             adapter,
         })
+    }
+
+    /// True if the device has reported a loss, internal/OOM error, or timed out.
+    pub fn is_device_lost(&self) -> bool {
+        self.device_lost.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// `WORKGROUP_SIZE` for `shader_source`: its default, lowered to the
@@ -1347,9 +1393,9 @@ impl WgpuBackend {
         };
 
         // buf_b holds the final RGB. With MAPPABLE_PRIMARY_BUFFERS we add
-        // MAP_READ so it can be mapped directly for a zero-copy readback,
-        // skipping the slow Private→Shared blit on unified memory.
-        let buf_b = if mappable {
+        // MAP_READ only when reading back Scan directly; Rgba8/Present use
+        // their own compact readback/canvas path and let buf_b stay unmapped.
+        let buf_b = if mappable && output == crate::ChainOutput::Scan {
             self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("img_b"),
                 size: img_bytes as u64,
@@ -2172,9 +2218,24 @@ impl WgpuBackend {
             // 1b. Halation in-place on buf_b. Uses buf_a as blur scratch (the
             //     input RGB image is no longer needed), buf_c / buf_d for the
             //     scatter outputs and halation accumulator.
+            #[cfg(target_os = "android")]
+            let flush_android = |encoder: &mut wgpu::CommandEncoder| {
+                if n_pixels >= 256 * 256 {
+                    let finished = std::mem::replace(
+                        encoder,
+                        self.device.create_command_encoder(&Default::default()),
+                    )
+                    .finish();
+                    self.queue.submit(Some(finished));
+                }
+            };
+            #[cfg(target_os = "android")]
+            flush_android(&mut encoder);
             if let Some(hs) = halation_state.as_ref() {
                 hs.encode_passes(&mut encoder, n_pixels);
                 profiler.mark("halation", &mut encoder);
+                #[cfg(target_os = "android")]
+                flush_android(&mut encoder);
             }
             // 2. log10 in-place on buf_b: raw → log_raw (3 channels per thread).
             let (log10_pipe, log10_bg, _keepalive) = &bg_log10;
@@ -2193,6 +2254,12 @@ impl WgpuBackend {
                 ds.encode_passes(&mut encoder, n_pixels);
                 profiler.mark("dir_couplers", &mut encoder);
             }
+            // On Android Vulkan (notably Adreno 610 KGSL), a single multi-second
+            // command buffer trips the kernel hangcheck watchdog (~2 s) and
+            // permanently invalidates the context (`EDEADLK`). Flush into small
+            // per-stage submits so no individual IB approaches the watchdog.
+            #[cfg(target_os = "android")]
+            flush_android(&mut encoder);
             // 3c. Grain (buf_a in and out, via buf_b and both scratch buffers).
             if let Some(gs) = grain_state.as_ref() {
                 gs.encode_passes(&mut encoder);
@@ -2203,6 +2270,8 @@ impl WgpuBackend {
                 encoder.copy_buffer_to_buffer(&buf_a, 0, &entry.buffer, 0, img_bytes as u64);
                 profiler.mark("film_cache_store", &mut encoder);
             }
+            #[cfg(target_os = "android")]
+            flush_android(&mut encoder);
         }
         // 4 + 5. Printing: print_spectral (buf_a → buf_b) then the print
         //     density curve (buf_b → buf_a). Skipped for scan_film — the
@@ -2211,6 +2280,15 @@ impl WgpuBackend {
             // 4. Print spectral: buf_a → buf_b (log_raw_print)
             dispatch(&mut encoder, &print_pipe, &bg_print, n_pixels);
             profiler.mark("print_spectral", &mut encoder);
+            #[cfg(target_os = "android")]
+            if n_pixels >= 256 * 256 {
+                let finished = std::mem::replace(
+                    &mut encoder,
+                    self.device.create_command_encoder(&Default::default()),
+                )
+                .finish();
+                self.queue.submit(Some(finished));
+            }
             if let (Some(l2l), Some(ds), Some(l2g)) = (
                 enlarger_log_to_linear_state.as_ref(),
                 enlarger_diffusion_state.as_ref(),
@@ -2233,6 +2311,15 @@ impl WgpuBackend {
         // 6. Scan spectral: buf_a → buf_b (linear rgb, unclamped)
         dispatch(&mut encoder, &scan_pipe, &bg_scan, n_pixels);
         profiler.mark("scan_spectral", &mut encoder);
+        #[cfg(target_os = "android")]
+        if n_pixels >= 256 * 256 {
+            let finished = std::mem::replace(
+                &mut encoder,
+                self.device.create_command_encoder(&Default::default()),
+            )
+            .finish();
+            self.queue.submit(Some(finished));
+        }
         // 6b. Glare (in place on buf_b).
         if let Some(gs) = glare_state.as_ref() {
             gs.encode_passes(&mut encoder, n_pixels);
@@ -2336,6 +2423,7 @@ impl WgpuBackend {
         });
         FilmChainReadback {
             device: self.device.clone(),
+            device_lost: self.device_lost.clone(),
             buffer,
             output,
             mapped: rx,
@@ -3459,6 +3547,7 @@ impl WgpuBackend {
 #[cfg(feature = "wgpu-backend")]
 pub struct FilmChainReadback {
     device: wgpu::Device,
+    device_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
     buffer: wgpu::Buffer,
     output: crate::ChainOutput,
     mapped: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
@@ -3476,9 +3565,51 @@ impl FilmChainReadback {
     /// The chain's output. Waits for the GPU natively; a browser maps buffers
     /// only between tasks, so there call it after `on_mapped` has run.
     pub fn finish(self) -> crate::ChainResult {
+        self.try_finish().expect("GPU film chain readback failed")
+    }
+
+    /// Fallible version of [`Self::finish`]: detects device loss or driver
+    /// hangs instead of blocking indefinitely or panicking.
+    pub fn try_finish(self) -> Result<crate::ChainResult, String> {
         let (width, height, buffer) = (self.width, self.height, &self.buffer);
-        self.device.poll(wgpu::Maintain::Wait);
-        self.mapped.recv().unwrap().unwrap();
+        #[cfg(target_os = "android")]
+        let map_result = {
+            let deadline = web_time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut sleep_us = 250u64;
+            loop {
+                self.device.poll(wgpu::Maintain::Poll);
+                match self.mapped.try_recv() {
+                    Ok(res) => break res,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.device_lost.store(true, std::sync::atomic::Ordering::Release);
+                        return Err("GPU readback channel disconnected (device lost)".into());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
+                if self.device_lost.load(std::sync::atomic::Ordering::Acquire) {
+                    return Err("GPU device lost during render".into());
+                }
+                if web_time::Instant::now() >= deadline {
+                    self.device_lost.store(true, std::sync::atomic::Ordering::Release);
+                    tracing::error!("GPU readback timed out after 30 s; marking device lost");
+                    return Err("GPU readback timed out".into());
+                }
+                std::thread::sleep(std::time::Duration::from_micros(sleep_us));
+                sleep_us = (sleep_us * 2).min(2000);
+            }
+        };
+        #[cfg(not(target_os = "android"))]
+        let map_result = {
+            self.device.poll(wgpu::Maintain::Wait);
+            self.mapped.recv().map_err(|_| {
+                self.device_lost.store(true, std::sync::atomic::Ordering::Release);
+                "GPU readback channel disconnected".to_string()
+            })?
+        };
+        map_result.map_err(|e| {
+            self.device_lost.store(true, std::sync::atomic::Ordering::Release);
+            format!("GPU buffer map failed: {e}")
+        })?;
         let gpu_wait_ms = self.t_start.elapsed().as_secs_f32() * 1000.0 - self.cpu_setup_ms;
         let data = buffer.slice(..).get_mapped_range();
         let out = match self.output {
@@ -3501,7 +3632,7 @@ impl FilmChainReadback {
             ),
             "film chain timings"
         );
-        out
+        Ok(out)
     }
 }
 
@@ -3517,8 +3648,11 @@ impl FilmChainReadback {
 struct ImagePool(std::sync::Arc<std::sync::Mutex<Vec<ImageSet>>>);
 
 /// At most this much stays pooled: preview frames on a large display, not an
-/// export.
-#[cfg(feature = "wgpu-backend")]
+/// export. Android keeps a tighter 64 MiB cap (for interactive drag frames and
+/// `place_exposure` trials) so pooled buffers never bloat phone RAM.
+#[cfg(all(feature = "wgpu-backend", target_os = "android"))]
+const MAX_POOLED_BYTES: u64 = 64 << 20;
+#[cfg(all(feature = "wgpu-backend", not(target_os = "android")))]
 const MAX_POOLED_BYTES: u64 = 512 << 20;
 
 /// Sets up to this size (a stock preview's, the brightness match's ≤ 256 px
@@ -3571,7 +3705,7 @@ impl ImagePool {
     }
 
     fn put(&self, mut set: ImageSet) {
-        if !cfg!(target_arch = "wasm32") {
+        if !cfg!(any(target_arch = "wasm32", target_os = "android")) {
             return;
         }
         // What this render didn't reuse, and the sets that no longer fit,
@@ -3652,6 +3786,10 @@ impl ImageSet {
 impl crate::PendingFilmChain for FilmChainReadback {
     fn finish(self: Box<Self>) -> crate::ChainResult {
         FilmChainReadback::finish(*self)
+    }
+
+    fn try_finish(self: Box<Self>) -> Result<crate::ChainResult, String> {
+        FilmChainReadback::try_finish(*self)
     }
 }
 
@@ -4088,8 +4226,18 @@ impl ComputeBackend for WgpuBackend {
     }
 
     fn try_run_film_chain(&self, params: &crate::FilmChainParams<'_>) -> Option<ImageBuf> {
+        if self.is_device_lost() {
+            return None;
+        }
         self.film_chain_capacity(params).ok()?;
-        Some(self.run_film_chain(params))
+        match self.start_film_chain(params, crate::ChainOutput::Scan, Box::new(|| {})).try_finish() {
+            Ok(crate::ChainResult::Scan(image)) => Some(image),
+            Ok(_) => unreachable!("a scan was asked for"),
+            Err(err) => {
+                tracing::warn!(%err, "GPU film chain failed; falling back to CPU");
+                None
+            }
+        }
     }
 
     fn submit_film_chain(
@@ -4098,18 +4246,27 @@ impl ComputeBackend for WgpuBackend {
         output: crate::ChainOutput,
         on_mapped: Box<dyn FnOnce() + Send>,
     ) -> Option<Box<dyn crate::PendingFilmChain>> {
+        if self.is_device_lost() {
+            return None;
+        }
         self.film_chain_capacity(params).ok()?;
         Some(Box::new(self.start_film_chain(params, output, on_mapped)))
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android", target_arch = "wasm32"))]
     fn image_capacity(&self, width: u32, height: u32) -> Result<(), String> {
+        if self.is_device_lost() {
+            return Err("GPU device lost".into());
+        }
         let bytes = self.capacity.image(width, height)?;
         self.admit(bytes)
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android", target_arch = "wasm32"))]
     fn film_chain_capacity(&self, params: &crate::FilmChainParams<'_>) -> Result<(), String> {
+        if self.is_device_lost() {
+            return Err("GPU device lost".into());
+        }
         let mut bytes = self.capacity.image(params.image.width, params.image.height)?;
         // Camera and enlarger FFT states are prepared together and remain
         // alive through readback, even though their passes run sequentially.
@@ -4153,6 +4310,10 @@ impl ComputeBackend for WgpuBackend {
 
     fn is_gpu(&self) -> bool {
         true
+    }
+
+    fn is_healthy(&self) -> bool {
+        !self.is_device_lost()
     }
 
     fn name(&self) -> &str {

@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
@@ -33,8 +34,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
 import java.nio.ByteBuffer
+import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /** The photograph being edited: a copy of the picked file in the cache. */
 data class Photo(val name: String, val file: File, val generation: Long)
@@ -90,6 +95,14 @@ class Editor(app: Application) : AndroidViewModel(app) {
     private val dirty = Channel<Unit>(Channel.CONFLATED)
     private var lastKey: String? = null
     private var dimensions: Pair<Int, Int>? = null
+    /** Adaptive interactive drag scale (0.15..1.0 of settled size), targeting [BUDGET_MS]. */
+    private var interactiveScale = 0.5
+    /** Measured photo canvas viewport in pixels and current pinch/double-tap zoom. */
+    private var viewportPx: Pair<Int, Int>? = null
+    private var viewportZoom = 1f
+    private var settledRenderedLongSide = 0
+    private var settleJob: Job? = null
+    private var viewportJob: Job? = null
     /** The engine has started and the catalog is read. */
     private val started = kotlinx.coroutines.CompletableDeferred<Unit>()
 
@@ -133,13 +146,67 @@ class Editor(app: Application) : AndroidViewModel(app) {
 
     private fun changed(interactive: Boolean = false) {
         dragging = interactive
+        settleJob?.cancel()
+        if (interactive) {
+            // Safeguard (web/app.js settleTimer): settle even if drag ends without onValueChangeFinished.
+            settleJob = viewModelScope.launch {
+                delay(250)
+                if (dragging) settle()
+            }
+        }
         dirty.trySend(Unit)
     }
 
     /** A slider's drag ended: the settled frame follows. */
     fun settle() {
+        settleJob?.cancel()
         dragging = false
         dirty.trySend(Unit)
+    }
+
+    /** Reports the measured photo canvas extent in pixels and its current zoom. */
+    fun updateViewport(widthPx: Int, heightPx: Int, zoom: Float = 1f) {
+        if (widthPx <= 0 || heightPx <= 0) return
+        val clampedZoom = zoom.coerceIn(1f, 8f)
+        val prev = viewportPx
+        val prevZoom = viewportZoom
+        if (prev?.first == widthPx && prev.second == heightPx && abs(prevZoom - clampedZoom) < 0.01f) return
+        viewportPx = widthPx to heightPx
+        viewportZoom = clampedZoom
+        val dims = dimensions ?: return
+        if (photo == null || dragging || cropSession != null) return
+        val want = settledLongSide(dims.first, dims.second)
+        val needsRefresh = want > settledRenderedLongSide + 8 ||
+            (clampedZoom <= 1.01f && settledRenderedLongSide > 0 && abs(want - settledRenderedLongSide) > 64)
+        if (!needsRefresh) return
+        viewportJob?.cancel()
+        viewportJob = viewModelScope.launch {
+            delay(140)
+            if (!dragging && cropSession == null) dirty.trySend(Unit)
+        }
+    }
+
+    /**
+     * Target long side (in photograph pixels) for a settled preview covering
+     * the fitted viewport at the current zoom (web/app.js `renderSide`),
+     * bounded by `memory.maxPreviewSourcePixels` (~4.4 MP) and `previewLongSide`.
+     */
+    fun settledLongSide(photoW: Int, photoH: Int): Int {
+        val long = max(photoW, photoH).toDouble().coerceAtLeast(1.0)
+        val short = min(photoW, photoH).toDouble().coerceAtLeast(1.0)
+        val (outW, outH) = Crop.outputSize(crop, rotation, photoW, photoH)
+        val vp = viewportPx
+        val fittedLong = if (vp != null && vp.first > 0 && vp.second > 0 && outW > 0 && outH > 0) {
+            val fit = min(vp.first.toDouble() / outW, vp.second.toDouble() / outH)
+            val displayLong = max(outW, outH) * fit * viewportZoom.toDouble().coerceIn(1.0, 8.0)
+            val croppedLong = max(outW, outH).toDouble().coerceAtLeast(1.0)
+            long * (displayLong / croppedLong)
+        } else {
+            memory.initialViewportLongSide.toDouble()
+        }
+        val maxByPixels = floor(sqrt(memory.maxPreviewSourcePixels.toDouble() * long / short))
+        val cap = min(long, min(maxByPixels, memory.previewLongSide.toDouble()))
+        return fittedLong.roundToInt().coerceIn(min(MIN_INTERACTIVE_SIDE, cap.toInt().coerceAtLeast(1)), cap.toInt().coerceAtLeast(1))
     }
 
     /** Every value a film's presets fill (macOS Stock.presetPaths): a film change resets them. */
@@ -270,6 +337,8 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 showingOriginal = false
                 photoSize = null
                 dimensions = null
+                settledRenderedLongSide = 0
+                viewportZoom = 1f
                 rotation = 0
                 crop = CropSettings()
                 cropSession = null
@@ -325,25 +394,32 @@ class Editor(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * The newest edit, once: a settled frame at the screen's size, or while
-     * a slider moves a smaller one. Edits made meanwhile wait for it, and only
-     * the last of them renders next.
+     * The newest edit, once: a settled frame sized to the fitted viewport
+     * (growing on zoom up to ~4.4 MP), or while a slider moves an adaptive
+     * smaller frame targeting [BUDGET_MS] (web/app.js). Edits made meanwhile
+     * wait for it, and only the last of them renders next.
      */
     private suspend fun render() {
         val photo = photo ?: return
         val edit = edit
         val interactive = dragging
-        // Settled: the screen's long side; moving: half of it.
         val scale = dimensions?.let { (w, h) ->
-            val settled = memory.previewLongSide.toDouble() / max(w, h)
-            if (interactive) max(settled / 2, 640.0 / max(w, h)) else settled
+            val photoLong = max(w, h).toDouble()
+            val settledSide = settledLongSide(w, h)
+            val targetSide = if (interactive) {
+                max(MIN_INTERACTIVE_SIDE, (settledSide * interactiveScale).roundToInt()).coerceAtMost(settledSide)
+            } else {
+                settledSide
+            }
+            (targetSide.toDouble() / photoLong).coerceAtMost(1.0)
         } ?: 0.25
-        val key = listOf(photo.generation, edit, scale).toString()
+        val key = listOf(photo.generation, edit, (scale * 1000.0).roundToInt()).toString()
         if (key == lastKey) return
         busy = true
         val preview = File(context.cacheDir, "preview-${photo.generation % 2}.rgba")
+        val t0 = SystemClock.elapsedRealtime()
         try {
-            val result = engine.call("render", renderFields(photo, edit, preview, scale))
+            val result = engine.call("render", renderFields(photo, edit, preview, scale), timeoutMs = 45_000L)
             val width = result["width"].number()!!.toInt()
             val height = result["height"].number()!!.toInt()
             if (dimensions == null) {
@@ -359,6 +435,13 @@ class Editor(app: Application) : AndroidViewModel(app) {
             val sh = result["source_height"].number()?.toInt()
             if (sw != null && sh != null) photoSize = sw to sh
             val bitmap = withContext(Dispatchers.IO) { readRgba(preview, width, height) }
+            val frameWallMs = (SystemClock.elapsedRealtime() - t0).toDouble()
+            if (interactive) {
+                val elapsed = result["elapsed_ms"].number() ?: frameWallMs
+                interactiveScale = nextInteractiveScale(interactiveScale, max(elapsed, frameWallMs))
+            } else {
+                settledRenderedLongSide = max(width, height)
+            }
             if (photo.generation == this.photo?.generation) {
                 frame = Frame(bitmap, edit, interactive)
                 lastKey = key
@@ -524,9 +607,9 @@ class Editor(app: Application) : AndroidViewModel(app) {
                         put("film", asked.film)
                         put("paper", asked.paper)
                         put("params", asked.params)
-                        // The whole photograph: the preview's 12 MP cap is for the screen.
+                        // The whole photograph: the preview's cap is for the screen.
+                        // Omit preview_path to skip writing an unused 90-170 MiB RGBA file.
                         put("limit_preview", false)
-                        put("preview_path", File(dir, "export-preview.rgba").path)
                     })
                     val renderId = rendered["request_id"].number()!!.toLong()
                     val (w, h) = Crop.outputSize(
@@ -556,7 +639,6 @@ class Editor(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 message = Message("Export failed: ${e.message}", error = true)
             } finally {
-                File(dir, "export-preview.rgba").delete()
                 exporting = false
                 // The preview's frame comes back at its own size.
                 lastKey = null
@@ -702,7 +784,7 @@ class Editor(app: Application) : AndroidViewModel(app) {
                 put("paper", asked.paper)
                 put("params", params)
                 put("reference_path", reference.path)
-            })
+            }, timeoutMs = 45_000L)
             if (photo.generation != this.photo?.generation || match == null || matchInputs() != inputs) return
             val ev = result["exposure_ev"].number()
             Log.i(Engine.TAG, "matched camera brightness: $ev EV in ${result["elapsed_ms"].number()?.roundToInt()} ms")
@@ -1206,6 +1288,14 @@ class Editor(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        const val BUDGET_MS = 90.0
+        const val MIN_INTERACTIVE_SCALE = 0.15
+        const val MIN_INTERACTIVE_SIDE = 256
+
+        /** Adaptive interactive slider scale step (web/app.js). */
+        fun nextInteractiveScale(current: Double, elapsedMs: Double): Double =
+            (current * sqrt(BUDGET_MS / max(elapsedMs, 1.0))).coerceIn(MIN_INTERACTIVE_SCALE, 1.0)
+
         val DEFAULT_FAVORITE_FILMS = listOf("kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200")
 
         /** Settings that can't change how bright the photograph develops, or are the user's own. */

@@ -882,7 +882,10 @@ impl Pipeline {
         print_stage_timing(stage_timings, "rescale", t);
         static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
         let mut backend = backend;
-        if let Err(reason) = backend.image_capacity(image.width, image.height) {
+        if !backend.is_healthy() {
+            tracing::warn!("GPU backend is unhealthy; rendering on CPU");
+            backend = &CPU;
+        } else if let Err(reason) = backend.image_capacity(image.width, image.height) {
             tracing::warn!(%reason, "GPU capacity exceeded; rendering on CPU");
             backend = &CPU;
         }
@@ -921,7 +924,12 @@ impl Pipeline {
                     tracing::warn!(%reason, "GPU effects exceed capacity; rendering on CPU");
                     backend = &CPU;
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    if !backend.is_healthy() {
+                        tracing::warn!("GPU backend lost device during film chain; rendering on CPU");
+                        backend = &CPU;
+                    }
+                }
             }
         }
 
@@ -1018,7 +1026,10 @@ impl Pipeline {
         print_stage_timing(stage_timings, "rescale", t);
         static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
         let mut backend = backend;
-        if let Err(reason) = backend.image_capacity(image.width, image.height) {
+        if !backend.is_healthy() {
+            tracing::warn!("GPU backend is unhealthy; rendering on CPU");
+            backend = &CPU;
+        } else if let Err(reason) = backend.image_capacity(image.width, image.height) {
             tracing::warn!(%reason, "GPU capacity exceeded; rendering on CPU");
             backend = &CPU;
         }
@@ -1041,7 +1052,12 @@ impl Pipeline {
                 tracing::warn!(%reason, "GPU effects exceed capacity; rendering on CPU");
                 backend = &CPU;
             }
-            Ok(None) => {}
+            Ok(None) => {
+                if !backend.is_healthy() {
+                    tracing::warn!("GPU backend lost device during convert chain; rendering on CPU");
+                    backend = &CPU;
+                }
+            }
         }
         let t = Instant::now();
         self.convert_film(&mut image);
@@ -1247,6 +1263,21 @@ impl Pipeline {
                 spektrafilm_gpu::ChainResult::Scan(self.apply_post(self.finish_resident(out, backend)))
             }
             display => display,
+        }
+    }
+
+    /// Fallible version of [`Self::finish_submitted`]: returns `Err` when the
+    /// GPU device is lost or readback times out, letting callers fall back.
+    pub fn try_finish_submitted(
+        &self,
+        pending: Box<dyn spektrafilm_gpu::PendingFilmChain>,
+        backend: &dyn ComputeBackend,
+    ) -> Result<spektrafilm_gpu::ChainResult, String> {
+        match pending.try_finish()? {
+            spektrafilm_gpu::ChainResult::Scan(out) => Ok(spektrafilm_gpu::ChainResult::Scan(
+                self.apply_post(self.finish_resident(out, backend)),
+            )),
+            display => Ok(display),
         }
     }
 

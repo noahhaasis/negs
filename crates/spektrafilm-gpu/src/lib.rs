@@ -206,6 +206,12 @@ pub trait ComputeBackend: MaybeSendSync {
         false
     }
 
+    /// False when a GPU backend has lost its device or timed out and should be
+    /// recreated (or replaced with CPU fallback).
+    fn is_healthy(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str;
 }
 
@@ -214,6 +220,12 @@ pub trait PendingFilmChain {
     /// The chain's output. Waits for the GPU natively; in a browser call it
     /// after `on_mapped` has run.
     fn finish(self: Box<Self>) -> ChainResult;
+
+    /// Fallible version of [`Self::finish`]: returns `Err` instead of panicking
+    /// if the GPU device was lost or timed out during readback.
+    fn try_finish(self: Box<Self>) -> Result<ChainResult, String> {
+        Ok(self.finish())
+    }
 }
 
 /// What [`ComputeBackend::submit_film_chain`] makes of the scan.

@@ -80,6 +80,9 @@ enum Command {
         params: Box<RuntimeParams>,
         limit_preview: bool,
         preview_path: PathBuf,
+        /// Optional pixel cap for bounded preview decoding (`limit_preview: true`).
+        #[serde(default)]
+        max_source_pixels: Option<usize>,
     },
     /// The colour space a RAW's camera preview says it's in, for the Mac's
     /// Match camera brightness reference (`spektrafilm_io::brightness::
@@ -113,7 +116,10 @@ enum Command {
         paper: String,
         params: Box<RuntimeParams>,
         limit_preview: bool,
-        preview_path: PathBuf,
+        /// Optional RGBA8 display buffer path; omit on export renders that are
+        /// only followed by `save` to skip writing an unused preview file.
+        #[serde(default)]
+        preview_path: Option<PathBuf>,
         /// While a slider moves: render at this fraction of the photograph's
         /// size (the canvas resolution), a preview that is never saved.
         #[serde(default)]
@@ -123,6 +129,15 @@ enum Command {
         /// render itself is never cropped.
         #[serde(default)]
         crop: Option<Crop>,
+        /// Optional source pixel cap for bounded preview decoding when
+        /// `limit_preview` is true (ignored for full-resolution exports).
+        #[serde(default)]
+        max_source_pixels: Option<usize>,
+        /// Whether to retain the float `f32` scan in `Session.output` (for
+        /// `save` or post-only reuse). When `false` with `limit_preview: true`,
+        /// sRGB renders read back compact 4 B/px RGBA8 directly from the GPU.
+        #[serde(default)]
+        retain_output: Option<bool>,
     },
     /// A small render of the current source with another film/paper or a
     /// preset, for the stock and preset previews. Independent of the main render: it never replaces the
@@ -393,14 +408,40 @@ fn thumbnail_dimensions((width, height): (u32, u32), long_side: u32, crop: Optio
     }
 }
 
+/// How the held source was bounded when decoded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DecodeLimit {
+    Full,
+    LongSide(u32),
+    Pixels(usize),
+}
+
+/// Optional process-wide preview source pixel cap (set by Android's
+/// `MemoryPolicy`; unset on desktop so desktop keeps full-resolution decode).
+fn default_preview_max_source_pixels() -> Option<usize> {
+    std::env::var("SPEKTRAFILM_MAX_PREVIEW_SOURCE_PIXELS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+}
+
+/// When set (Android), `limit_preview: true` renders default to `retain_output: false`
+/// so preview readback uses compact GPU RGBA8 instead of 12 B/px `f32`.
+fn default_preview_rgba8() -> bool {
+    matches!(
+        std::env::var("SPEKTRAFILM_PREVIEW_RGBA8").ok().as_deref(),
+        Some("1" | "true" | "TRUE")
+    )
+}
+
 /// The decoded input, and what it was decoded with: a RAW's white balance
 /// and a non-RAW file's interpretation each need a new decode.
 struct Source {
     path: PathBuf,
     /// The photograph's whole size; `image`'s unless the read was reduced.
     full: (u32, u32),
-    /// The long side a reduced read was asked for; None when it is whole.
-    reduced_to: Option<u32>,
+    /// Whether the read was reduced by long side or pixel budget.
+    decode_limit: DecodeLimit,
     wb: spektrafilm_io::RawWhiteBalance,
     lens: spektrafilm_io::LensCorrection,
     lens_correction_supported: bool,
@@ -459,9 +500,26 @@ impl Source {
         })
     }
 
-    /// Large enough for a read limited to `max_long_side` (0 is whole).
-    fn covers(&self, max_long_side: u32) -> bool {
-        self.reduced_to.is_none_or(|read| max_long_side != 0 && max_long_side <= read)
+    fn is_reduced(&self) -> bool {
+        self.decode_limit != DecodeLimit::Full
+    }
+
+    /// Large enough for a read limited to `max_long_side` and/or `max_pixels`
+    /// (0 for both means the whole photograph).
+    fn covers(&self, max_long_side: u32, max_pixels: usize) -> bool {
+        if self.decode_limit == DecodeLimit::Full {
+            return true;
+        }
+        if max_long_side == 0 && max_pixels == 0 {
+            return false;
+        }
+        let side_ok = max_long_side == 0
+            || matches!(self.decode_limit, DecodeLimit::LongSide(read) if max_long_side <= read)
+            || self.image.width.max(self.image.height) >= max_long_side;
+        let pixels_ok = max_pixels == 0
+            || matches!(self.decode_limit, DecodeLimit::Pixels(cap) if max_pixels <= cap)
+            || (self.image.width as usize).saturating_mul(self.image.height as usize) >= max_pixels;
+        side_ok && pixels_ok
     }
 }
 
@@ -523,6 +581,15 @@ impl Session {
     /// divided by it here, as it is read, so every render, thumbnail and
     /// one-shot solve of the source sees the same flattened scan and none
     /// of them pays for it again.
+    /// Drops an unhealthy GPU backend (e.g. after Vulkan device loss) so the
+    /// next call cleanly re-initializes or falls back to CPU.
+    fn refresh_backend(&mut self) {
+        if self.backend.as_ref().is_some_and(|b| !b.is_healthy()) {
+            eprintln!("WARN GPU backend reported device loss; recreating compute backend");
+            self.backend = None;
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn load_source(
         &mut self,
@@ -532,12 +599,14 @@ impl Session {
         lens: spektrafilm_io::LensCorrection,
         interpretation: spektrafilm_io::InputInterpretation,
         max_long_side: u32,
+        max_pixels: usize,
         params: &RuntimeParams,
     ) -> Result<()> {
         let flat = LightFrame::requested(params);
         let reload = self.source_generation != source_generation
             || self.source.as_ref().is_none_or(|source| {
-                !source.current(input, wb, lens, &interpretation, flat.as_ref()) || !source.covers(max_long_side)
+                !source.current(input, wb, lens, &interpretation, flat.as_ref())
+                    || !source.covers(max_long_side, max_pixels)
             });
         if reload {
             // Release the last source's caches before decoding the next.
@@ -555,15 +624,33 @@ impl Session {
             if let Some(backend) = &self.backend {
                 backend.release_film_cache();
             }
-            let loaded = spektrafilm_io::load_image_colour_limited(
+            let loaded = spektrafilm_io::load_image_colour_bounded(
                 input,
                 spektrafilm_io::Formats::Any,
                 wb,
                 lens,
                 &interpretation,
                 max_long_side,
+                max_pixels,
             )?;
             let reduced = loaded.full_size != (loaded.image.width, loaded.image.height);
+            if reduced && max_pixels > 0 {
+                eprintln!(
+                    "INFO bounded preview decode: {}x{} -> {}x{} (cap {} px)",
+                    loaded.full_size.0,
+                    loaded.full_size.1,
+                    loaded.image.width,
+                    loaded.image.height,
+                    max_pixels
+                );
+            }
+            let decode_limit = if !reduced {
+                DecodeLimit::Full
+            } else if max_pixels > 0 {
+                DecodeLimit::Pixels(max_pixels)
+            } else {
+                DecodeLimit::LongSide(max_long_side)
+            };
             let mut image = loaded.image;
             let flat = flat.map(|light| {
                 let mut params = params.clone();
@@ -574,7 +661,7 @@ impl Session {
             self.source = Some(Source {
                 path: input.to_path_buf(),
                 full: loaded.full_size,
-                reduced_to: reduced.then_some(max_long_side),
+                decode_limit,
                 wb,
                 lens,
                 lens_correction_supported: loaded.lens_correction_supported,
@@ -683,13 +770,14 @@ impl Session {
             let declared = colour_space.then(|| scope.spawn(|| declared_preview_colour_space(&input)));
             if !own_decode {
                 let limit = if reduced_decode { reduced_read_side(long_side, crop.as_ref()) } else { 0 };
-                self.load_source(&input, source_generation, wb, lens, interpretation.clone(), limit, &params)?;
+                let max_pixels = if reduced_decode { 0 } else { default_preview_max_source_pixels().unwrap_or(0) };
+                self.load_source(&input, source_generation, wb, lens, interpretation.clone(), limit, max_pixels, &params)?;
             }
             declared.map(|thread| thread.join().map_err(|_| anyhow::anyhow!("Reading the preview's colour space failed"))?).transpose()
         })?;
         let decoded = started.elapsed();
-        let Source { full, reduced_to, .. } = self.source.as_ref().unwrap();
-        let (full, mut reduced) = (*full, reduced_to.is_some());
+        let Source { full, decode_limit, .. } = self.source.as_ref().unwrap();
+        let (full, mut reduced) = (*full, *decode_limit != DecodeLimit::Full);
         // The thumbnail is the whole frame; Image Size describes the export.
         image_size::clear(&mut params);
         let dimensions = thumbnail_dimensions(full, long_side, crop.as_ref());
@@ -702,8 +790,9 @@ impl Session {
                 Some(index) => index,
                 None => {
                     let limit = if reduced_decode { THUMBNAIL_FRAME_MAX } else { 0 };
-                    let mut loaded = spektrafilm_io::load_image_colour_limited(
-                        &input, spektrafilm_io::Formats::Any, wb, lens, &interpretation, limit,
+                    let max_pixels = if reduced_decode { 0 } else { default_preview_max_source_pixels().unwrap_or(0) };
+                    let mut loaded = spektrafilm_io::load_image_colour_bounded(
+                        &input, spektrafilm_io::Formats::Any, wb, lens, &interpretation, limit, max_pixels,
                     )?;
                     if let Some(light) = &flat {
                         let mut flat_params = (*params).clone();
@@ -772,6 +861,7 @@ impl Session {
                 "preview_colour_space": declared.flatten(), "elapsed_ms": ms(started.elapsed()), "cached_pipeline": cached,
             }));
         }
+        self.refresh_backend();
         let backend = self.backend.get_or_insert_with(spektrafilm_gpu::select_backend);
         let (output, used_backend) = pipeline.process_with_backend(working, backend.as_ref());
         let cropped = crop.map(|crop| crop.apply(&output));
@@ -876,7 +966,7 @@ impl Session {
         let (wb, lens) = (params.io.raw_white_balance, params.io.lens_correction);
         let interpretation = params.io.input_interpretation.clone();
         let side = spektrafilm_core::negative::ANALYSIS_SIDE;
-        self.load_source(input, source_generation, wb, lens, interpretation, side, params)?;
+        self.load_source(input, source_generation, wb, lens, interpretation, side, 0, params)?;
         let source = self.source.as_ref().unwrap();
         params.io.apply_input_colour(&source.colour);
         ensure!(RgbColourspace::find(&params.io.input_color_space).is_some(),
@@ -916,28 +1006,55 @@ impl Session {
                 let text = presets::export(&film, &paper, &params, data).map_err(anyhow::Error::msg)?;
                 Ok(json!({"text": text}))
             }
-            Command::Original { input, params, limit_preview, preview_path } => {
+            Command::Original { input, params, limit_preview, preview_path, max_source_pixels } => {
                 ensure!(input != preview_path, "Choose a different preview path to preserve the source");
                 ensure!(params.io.upscale_factor.is_finite()
                     && (0.1..=1.0).contains(&params.io.upscale_factor), "Invalid working resolution");
                 params.io.raw_white_balance.validate()?;
                 params.io.input_interpretation.validate()?;
-                let loaded = spektrafilm_io::load_image_colour(
-                    &input, spektrafilm_io::Formats::Any, params.io.raw_white_balance,
-                    params.io.lens_correction, &params.io.input_interpretation,
-                )?;
-                let source = loaded.image;
+                let max_pixels = if limit_preview {
+                    max_source_pixels.or_else(default_preview_max_source_pixels).unwrap_or(0)
+                } else {
+                    0
+                };
+                // Reuse the already-decoded session source when previewing so
+                // holding Show Original on Android doesn't re-decode a 60 MP RAW.
+                let reusable = limit_preview
+                    && self.source.as_ref().is_some_and(|s| {
+                        s.current(
+                            &input,
+                            params.io.raw_white_balance,
+                            params.io.lens_correction,
+                            &params.io.input_interpretation,
+                            None,
+                        ) && s.covers(0, max_pixels)
+                    });
+                let owned_loaded = if reusable {
+                    None
+                } else {
+                    Some(spektrafilm_io::load_image_colour_bounded(
+                        &input, spektrafilm_io::Formats::Any, params.io.raw_white_balance,
+                        params.io.lens_correction, &params.io.input_interpretation, 0, max_pixels,
+                    )?)
+                };
+                let (source, colour) = match &owned_loaded {
+                    Some(loaded) => (&loaded.image, &loaded.colour),
+                    None => {
+                        let s = self.source.as_ref().unwrap();
+                        (&s.image, &s.colour)
+                    }
+                };
                 // Never enlarged: an Image Size target is ignored, and the
                 // canvas fits the original to the developed photograph.
                 let factor = if params.io.photo_long_side_px.is_some() { 1.0 } else { params.io.upscale_factor };
                 let dimensions = preview_dimensions(source.width, source.height, factor, limit_preview);
                 let resized = (dimensions != (source.width, source.height))
-                    .then(|| rescale_preview_input_fast(&source, dimensions));
-                let working = resized.as_ref().unwrap_or(&source);
-                let (encoding, converted) = original_encoding(&params, &loaded.colour, working);
+                    .then(|| rescale_preview_input_fast(source, dimensions));
+                let working = resized.as_ref().unwrap_or(source);
+                let (encoding, converted) = original_encoding(&params, colour, working);
                 let working = converted.as_ref().unwrap_or(working);
                 let (width, height) = write_display(working, encoding, &PostParams::default(), &preview_path)?;
-                Ok(json!({"width": width, "height": height, "input_colour": loaded.colour,
+                Ok(json!({"width": width, "height": height, "input_colour": colour,
                           "display_color_space": DisplaySpace::of(encoding).name()}))
             }
             Command::Thumbnail {
@@ -1112,9 +1229,10 @@ impl Session {
                 if let Some(metering) = &self.metering {
                     pipeline = pipeline.with_metering_preview(metering.clone());
                 }
+                self.refresh_backend();
                 let backend = self.backend.get_or_insert_with(spektrafilm_gpu::select_backend);
                 let placement = spektrafilm_core::exposure_placement::place_exposure(
-                    &pipeline, &source.image, &reference, backend.as_ref(),
+                    &pipeline, &self.source.as_ref().unwrap().image, &reference, backend.as_ref(),
                 ).map_err(anyhow::Error::msg)?;
                 let mut result = serde_json::to_value(placement)?;
                 result["elapsed_ms"] = json!(started.elapsed().as_secs_f64() * 1000.0);
@@ -1213,6 +1331,8 @@ impl Session {
                 preview_path,
                 interactive_scale,
                 crop,
+                max_source_pixels,
+                retain_output,
             } => {
                 let started = Instant::now();
                 ensure!(
@@ -1240,17 +1360,24 @@ impl Session {
                 let lens = params.io.lens_correction;
                 let interpretation = params.io.input_interpretation.clone();
                 interpretation.validate()?;
-                self.load_source(&input, source_generation, wb, lens, interpretation, 0, &params)?;
+                let max_pixels = if limit_preview {
+                    max_source_pixels.or_else(default_preview_max_source_pixels).unwrap_or(0)
+                } else {
+                    0
+                };
+                self.load_source(&input, source_generation, wb, lens, interpretation, 0, max_pixels, &params)?;
                 let flat_answer = self.source.as_ref().unwrap().flat_answer();
-                let Source { image: source, colour: input_colour, lens_correction_supported, .. } =
-                    self.source.as_ref().unwrap();
+                let source_entry = self.source.as_ref().unwrap();
+                let (source_width, source_height) = source_entry.full;
+                let source_reduced = source_entry.is_reduced();
+                let Source { image: source, colour: input_colour, .. } = source_entry;
                 // RAW and decoded files are the engine's linear sRGB; manual
                 // pass-through keeps the params' input fields, as 0.8 did.
                 params.io.apply_input_colour(input_colour);
                 if params.camera.auto_exposure && self.metering.is_none() {
                     self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
                 }
-                let (source_width, source_height) = (source.width, source.height);
+                let source_img_size = (source.width, source.height);
                 // The uncapped frame an export develops, and the photograph the
                 // crop cuts from it; an invalid or too-large request fails here,
                 // before anything is allocated at that size.
@@ -1258,11 +1385,17 @@ impl Session {
                 image_size::clear(&mut params);
                 // The photograph's preview, at most 12 MP if limited; an
                 // interactive render is a smaller frame of it that never
-                // enlarges the source.
+                // enlarges the source. A bounded preview source also caps
+                // settled previews so we never upscale a 4 MP working copy.
                 let photo_dimensions = preview_cap(size.working, limit_preview);
                 let dimensions = match interactive_scale.filter(|&s| s < 1.0) {
-                    Some(s) => interactive_dimensions(photo_dimensions, s, (source_width, source_height)),
+                    Some(s) => interactive_dimensions(photo_dimensions, s, source_img_size),
+                    None if source_reduced => interactive_dimensions(photo_dimensions, 1.0, source_img_size),
                     None => photo_dimensions,
+                };
+                let retain = match retain_output {
+                    Some(v) => v,
+                    None => !(limit_preview && default_preview_rgba8()),
                 };
                 // The resolved size, not the crop: panning a crop, or any crop
                 // with the same working size, reuses the render.
@@ -1270,11 +1403,17 @@ impl Session {
                     "input": input, "source_generation": source_generation, "film": film,
                     "paper": paper, "params": params, "limit_preview": limit_preview,
                     "interactive_scale": interactive_scale, "working": size.working,
+                    "dimensions": dimensions,
                 });
                 let reused = self.output.take().filter(|last| last.key == render_key);
                 if let Some(last) = reused {
-                    write_display(&last.image, last.encoding, &post, &preview_path)?;
+                    let (width, height) = match &preview_path {
+                        Some(path) => write_display(&last.image, last.encoding, &post, path)?,
+                        None => (last.image.width as usize, last.image.height as usize),
+                    };
                     let mut response = last.response.clone();
+                    response["width"] = json!(width);
+                    response["height"] = json!(height);
                     // Edge rounding moves the crop's pixels with its position.
                     response["photo_crop_width"] = json!(size.photo.0);
                     response["photo_crop_height"] = json!(size.photo.1);
@@ -1340,6 +1479,11 @@ impl Session {
                     let counts = spektrafilm_core::tone_curve::film_histogram(&self.film_stops.as_ref().unwrap().1, ev, 128);
                     json!({"stops": spektrafilm_core::tone_curve::STOPS, "ev": ev, "counts": counts})
                 };
+                self.refresh_backend();
+                let source_entry = self.source.as_ref().unwrap();
+                let source = &source_entry.image;
+                let input_colour = source_entry.colour.clone();
+                let lens_correction_supported = source_entry.lens_correction_supported;
                 let working = if dimensions == photo_dimensions {
                     pipeline = pipeline.with_prepared_frame(self.prepared_photo.clone()).with_film_cache(0, self.source_loads);
                     working_source(
@@ -1355,7 +1499,69 @@ impl Session {
                 let backend = self
                     .backend
                     .get_or_insert_with(spektrafilm_gpu::select_backend);
-                let (output, used_backend) = if pipeline.params.io.scan_film && pipeline.film.is_positive() {
+                let encoding = Encoding::new(&params.io.output_color_space, params.io.output_cctf_encoding);
+                let slide_scan = pipeline.params.io.scan_film && pipeline.film.is_positive();
+
+                // Preview-only sRGB renders that don't need a retained float
+                // scan read back 4 B/px RGBA8 directly from the GPU, skipping
+                // the 12 B/px float readback and CPU tone-pack pass.
+                let gpu_rgba8 = if !retain
+                    && !slide_scan
+                    && preview_path.is_some()
+                    && dimensions.0 as usize <= DISPLAY_MAX_DIM
+                    && dimensions.1 as usize <= DISPLAY_MAX_DIM
+                    && pipeline.display_on_gpu(backend.as_ref())
+                {
+                    let display_post = (!post.is_identity()).then(|| {
+                        std::sync::Arc::new(
+                            PostProcess::new(&post, encoding.encoded, encoding.space.name).display(),
+                        )
+                    });
+                    let chain_out = spektrafilm_gpu::ChainOutput::Rgba8 {
+                        encoded: encoding.encoded,
+                        post: display_post,
+                    };
+                    pipeline
+                        .submit_resident(working, None, backend.as_ref(), chain_out, Box::new(|| {}))
+                        .and_then(|pending| match pipeline.try_finish_submitted(pending, backend.as_ref()) {
+                            Ok(spektrafilm_gpu::ChainResult::Rgba8 { width, height, rgba }) => {
+                                Some((width, height, rgba, backend.name().to_owned()))
+                            }
+                            Ok(_) => None,
+                            Err(err) => {
+                                eprintln!("WARN GPU RGBA8 preview failed ({err}); falling back to CPU");
+                                None
+                            }
+                        })
+                } else {
+                    None
+                };
+
+                if let Some((width, height, rgba, used_backend)) = gpu_rgba8 {
+                    std::fs::write(preview_path.as_ref().unwrap(), &rgba)
+                        .context("Writing preview buffer")?;
+                    self.output = None;
+                    return Ok(json!({
+                        "width": width, "height": height, "output_width": width, "output_height": height,
+                        "photo_width": photo_dimensions.0, "photo_height": photo_dimensions.1,
+                        "working_width": size.working.0, "working_height": size.working.1,
+                        "photo_crop_width": size.photo.0, "photo_crop_height": size.photo.1,
+                        "source_width": source_width, "source_height": source_height,
+                        "export_resolution": false,
+                        "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
+                        "input_colour": input_colour,
+                        "lens_correction_supported": lens_correction_supported,
+                        "flat_field": flat_answer,
+                        "output_color_space": encoding.space.name,
+                        "display_color_space": DisplaySpace::of(encoding).name(),
+                        "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
+                        "film_histogram": histogram,
+                        "cached_pipeline": cached_pipeline, "pipeline_ms": pipeline_ms,
+                        "gpu_rgba8": true,
+                    }));
+                }
+
+                let (output, used_backend) = if slide_scan {
                     pipeline.process_with_backend(working.clone(), backend.as_ref())
                 } else {
                     pipeline
@@ -1363,13 +1569,15 @@ impl Session {
                         .map(|output| (output, backend.name()))
                         .unwrap_or_else(|| pipeline.process_with_backend(working.clone(), backend.as_ref()))
                 };
-                let encoding = Encoding::new(&params.io.output_color_space, params.io.output_cctf_encoding);
-                let (width, height) = write_display(&output, encoding, &post, &preview_path)?;
+                let (width, height) = match &preview_path {
+                    Some(path) => write_display(&output, encoding, &post, path)?,
+                    None => (output.width as usize, output.height as usize),
+                };
                 // At the uncapped working size the output is byte-identical to
                 // a Fast (GPU) export, so the app can save it instead of
                 // rendering again. The display proxy's limit doesn't matter:
                 // Save uses this float output.
-                let export_resolution = (output.width, output.height) == size.working;
+                let export_resolution = !source_reduced && (output.width, output.height) == size.working;
                 let response = json!({
                     "width": width, "height": height, "output_width": output.width, "output_height": output.height,
                     "photo_width": photo_dimensions.0, "photo_height": photo_dimensions.1,
@@ -1387,16 +1595,20 @@ impl Session {
                     "film_histogram": histogram,
                     "cached_pipeline": cached_pipeline, "pipeline_ms": pipeline_ms,
                 });
-                self.output = Some(Rendered {
-                    id: request.id,
-                    key: render_key,
-                    response: response.clone(),
-                    source: input,
-                    film,
-                    encoding,
-                    post,
-                    image: output,
-                });
+                self.output = if retain {
+                    Some(Rendered {
+                        id: request.id,
+                        key: render_key,
+                        response: response.clone(),
+                        source: input,
+                        film,
+                        encoding,
+                        post,
+                        image: output,
+                    })
+                } else {
+                    None
+                };
                 Ok(response)
             }
         }
@@ -1910,8 +2122,9 @@ mod tests {
                 } else {
                     let rendered = session.handle(Request { id: 1, command: Command::Render {
                         input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
-                        paper: "kodak_supra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
-                        preview_path: dir.join("render.rgba"), interactive_scale: None, crop: None,
+                        paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
+                        preview_path: Some(dir.join("render.rgba")), interactive_scale: None, crop: None,
+                        max_source_pixels: None, retain_output: None,
                     } }, &data).unwrap();
                     (rendered["source_width"].as_u64().unwrap() as u32, rendered["source_height"].as_u64().unwrap() as u32)
                 };
@@ -2038,7 +2251,7 @@ mod tests {
         };
         let params = Box::new(RuntimeParams::default());
         let response = session.handle(Request { id: 8, command: Command::Original {
-            input: input.clone(), params, limit_preview: false, preview_path: preview.clone(),
+            input: input.clone(), params, limit_preview: false, preview_path: preview.clone(), max_source_pixels: None,
         } }, Path::new(".")).unwrap();
         assert_eq!(response["width"], 2);
         assert_eq!(response["height"], 1);
@@ -2091,7 +2304,8 @@ mod tests {
         let command = |params: Box<RuntimeParams>| Command::Render {
             input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
             paper: "kodak_portra_endura".into(), params, limit_preview: false,
-            preview_path: preview.clone(), interactive_scale: None, crop: None,
+            preview_path: Some(preview.clone()), interactive_scale: None, crop: None,
+            max_source_pixels: None, retain_output: None,
         };
         let response = session.handle(Request { id: 1, command: command(params.clone()) }, &data).unwrap();
         assert_eq!(response["output_color_space"], "Display P3");
@@ -2126,6 +2340,7 @@ mod tests {
 
         let original = session.handle(Request { id: 3, command: Command::Original {
             input: input.clone(), params, limit_preview: false, preview_path: dir.join("original.rgba"),
+            max_source_pixels: None,
         } }, &data).unwrap();
         assert_eq!(original["display_color_space"], DisplaySpace::Rec2020SrgbTransfer.name());
         std::fs::remove_dir_all(dir).unwrap();
@@ -2137,7 +2352,8 @@ mod tests {
         Command::Render {
             input: input.into(), source_generation: 1, film: "kodak_portra_400".into(),
             paper: "kodak_portra_endura".into(), params: Box::new(params), limit_preview: false,
-            preview_path: preview.into(), interactive_scale, crop,
+            preview_path: Some(preview.into()), interactive_scale, crop,
+            max_source_pixels: None, retain_output: None,
         }
     }
 
@@ -2157,7 +2373,8 @@ mod tests {
             params.settings.serial_grain = false;
             Command::Render {
                 input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_portra_endura".into(),
-                params, limit_preview: false, preview_path: preview.clone(), interactive_scale, crop: None,
+                params, limit_preview: false, preview_path: Some(preview.clone()), interactive_scale, crop: None,
+                max_source_pixels: None, retain_output: None,
             }
         };
         let settled = |quick_first: bool| {
@@ -2197,7 +2414,8 @@ mod tests {
             params.settings.serial_grain = false;
             Command::Render {
                 input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(), paper: "kodak_portra_endura".into(),
-                params, limit_preview: false, preview_path: preview.clone(), interactive_scale, crop: None,
+                params, limit_preview: false, preview_path: Some(preview.clone()), interactive_scale, crop: None,
+                max_source_pixels: None, retain_output: None,
             }
         };
         let settled = |decode_first: bool| {
@@ -2275,14 +2493,14 @@ mod tests {
             let Command::Render { mut params, .. } = render(&input, &preview, Some(60), None, None) else { unreachable!() };
             params.io.upscale_factor = 0.5;
             Command::Render { input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
-                paper: "kodak_portra_endura".into(), params, limit_preview: false, preview_path: preview.clone(),
-                interactive_scale: None, crop: None }
+                paper: "kodak_portra_endura".into(), params, limit_preview: false, preview_path: Some(preview.clone()),
+                interactive_scale: None, crop: None, max_source_pixels: None, retain_output: None }
         };
         assert!(send(5, mixed).unwrap_err().to_string().contains("factor must be 1"));
         // Original never enlarges, whatever the target.
         let original = send(6, Command::Original { input: input.clone(), params: {
             let mut params = RuntimeParams::default(); params.io.photo_long_side_px = Some(400); Box::new(params)
-        }, limit_preview: false, preview_path: preview.clone() }).unwrap();
+        }, limit_preview: false, preview_path: preview.clone(), max_source_pixels: None }).unwrap();
         assert_eq!((original["width"].as_u64(), original["height"].as_u64()), (Some(40), Some(30)));
         drop(send);
         assert_eq!(session.output.as_ref().unwrap().id, 3);
@@ -2433,7 +2651,8 @@ mod tests {
         let response = request(5, Command::Render {
             input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
             paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
-            preview_path: preview.clone(), interactive_scale: None, crop: None,
+            preview_path: Some(preview.clone()), interactive_scale: None, crop: None,
+            max_source_pixels: None, retain_output: None,
         })
         .unwrap();
         let histogram = &response["film_histogram"];
@@ -2482,7 +2701,8 @@ mod tests {
             session.handle(Request { id: 1, command: Command::Render {
                 input: input.to_path_buf(), source_generation: generation, film: "kodak_portra_400".into(),
                 paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
-                preview_path: preview, interactive_scale: None, crop: None,
+                preview_path: Some(preview), interactive_scale: None, crop: None,
+                max_source_pixels: None, retain_output: None,
             } }, &data).unwrap();
             let loads = session.source_loads;
             let answer = session.handle(Request { id: 2, command: Command::NegativeCheck {
@@ -2624,7 +2844,8 @@ mod tests {
         let render = |params: &RuntimeParams| Command::Render {
             input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
             paper: "kodak_portra_endura".into(), params: Box::new(params.clone()), limit_preview: false,
-            preview_path: preview.clone(), interactive_scale: None, crop: None,
+            preview_path: Some(preview.clone()), interactive_scale: None, crop: None,
+            max_source_pixels: None, retain_output: None,
         };
         let tile = |params: &RuntimeParams| Command::Thumbnail {
             input: input.clone(), source_generation: 1, film: "kodak_gold_200".into(),
@@ -2647,6 +2868,118 @@ mod tests {
         spektrafilm_io::save::save_image_with_options(&ImageBuf::from_data(w, h, pixels), &light, None, &options).unwrap();
         request(&mut session, 5, render(&params));
         assert_eq!(session.source_loads, 2, "a new light frame is read again");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bounded_preview_optional_path_and_gpu_rgba8_work_together() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-android-phase1-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.png");
+        let (w, h) = (120u32, 80u32);
+        let pixels = (0..w as usize * h as usize * 3)
+            .map(|i| ((i * 37) % 255) as spektrafilm_math::Scalar / 255.0)
+            .collect();
+        spektrafilm_io::save_image(&ImageBuf::from_data(w, h, pixels), &input, None).unwrap();
+
+        let mut params = RuntimeParams::default();
+        params.film_render.grain.active = false;
+        params.post.contrast = 15.0;
+
+        let mut session = Session::default();
+        let preview_rgba8 = dir.join("preview_rgba8.rgba");
+        let preview_f32 = dir.join("preview_f32.rgba");
+
+        // 1. Bounded preview with retain_output=false (Android preview path):
+        //    source is capped to ~2400 px (60x40), true source_width/height stay 120x80.
+        let r_bounded = session.handle(Request {
+            id: 1,
+            command: Command::Render {
+                input: input.clone(),
+                source_generation: 1,
+                film: "kodak_portra_400".into(),
+                paper: "kodak_portra_endura".into(),
+                params: Box::new(params.clone()),
+                limit_preview: true,
+                preview_path: Some(preview_rgba8.clone()),
+                interactive_scale: None,
+                crop: None,
+                max_source_pixels: Some(2400),
+                retain_output: Some(false),
+            },
+        }, &data).unwrap();
+        assert_eq!((r_bounded["source_width"].as_u64(), r_bounded["source_height"].as_u64()), (Some(120), Some(80)));
+        assert_eq!((r_bounded["width"].as_u64(), r_bounded["height"].as_u64()), (Some(60), Some(40)));
+        assert_eq!(r_bounded["export_resolution"], false);
+        assert!(session.output.is_none(), "retain_output=false must not keep f32 scan");
+        assert_eq!(session.source.as_ref().unwrap().image.width, 60);
+        let rgba8_bytes = std::fs::read(&preview_rgba8).unwrap();
+        assert_eq!(rgba8_bytes.len(), 60 * 40 * 4);
+
+        // Compare GPU RGBA8 bytes against f32 write_display at the same size.
+        let r_f32 = session.handle(Request {
+            id: 2,
+            command: Command::Render {
+                input: input.clone(),
+                source_generation: 1,
+                film: "kodak_portra_400".into(),
+                paper: "kodak_portra_endura".into(),
+                params: Box::new(params.clone()),
+                limit_preview: true,
+                preview_path: Some(preview_f32.clone()),
+                interactive_scale: None,
+                crop: None,
+                max_source_pixels: Some(2400),
+                retain_output: Some(true),
+            },
+        }, &data).unwrap();
+        assert_eq!((r_f32["width"].as_u64(), r_f32["height"].as_u64()), (Some(60), Some(40)));
+        assert_eq!(session.source_loads, 1, "bounded source reused");
+        let f32_bytes = std::fs::read(&preview_f32).unwrap();
+        let max_diff = rgba8_bytes.iter().zip(&f32_bytes).map(|(&a, &b)| a.abs_diff(b)).max().unwrap_or(0);
+        assert!(max_diff <= 1, "GPU RGBA8 preview diverged from CPU display_rgba by {max_diff}");
+
+        // 2. Full-resolution export with preview_path: None reloads full source
+        //    and skips writing any preview file, while still allowing Save.
+        let r_export = session.handle(Request {
+            id: 3,
+            command: Command::Render {
+                input: input.clone(),
+                source_generation: 1,
+                film: "kodak_portra_400".into(),
+                paper: "kodak_portra_endura".into(),
+                params: Box::new(params),
+                limit_preview: false,
+                preview_path: None,
+                interactive_scale: None,
+                crop: None,
+                max_source_pixels: Some(2400), // ignored when limit_preview == false
+                retain_output: None,
+            },
+        }, &data).unwrap();
+        assert_eq!(session.source_loads, 2, "limit_preview=false must reload full-resolution source");
+        assert_eq!((r_export["output_width"].as_u64(), r_export["output_height"].as_u64()), (Some(120), Some(80)));
+        assert_eq!(r_export["export_resolution"], true);
+        let saved = dir.join("export.jpg");
+        session.handle(Request {
+            id: 4,
+            command: Command::Save {
+                render_id: 3,
+                output: saved.clone(),
+                save_options: Default::default(),
+                crop_after_post: true,
+                border: None,
+                border_options: BorderOptions::default(),
+                instagram: false,
+                crop: None,
+                rotate_cw: 0,
+                flip: false,
+                fit: None,
+            },
+        }, &data).unwrap();
+        let img = image::open(&saved).unwrap();
+        assert_eq!((img.width(), img.height()), (120, 80));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

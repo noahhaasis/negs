@@ -1,7 +1,7 @@
 //! Experimental bounded Bayer development. No native/desktop caller opts in
 //! implicitly. The full sensor is still decoded; scaling and demosaic RGB
 //! are banded. This is NOT streaming JPEG decompression or export.
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use rawler::{
     RawImage,
     imgop::{
@@ -57,6 +57,106 @@ pub struct KeptRaw {
     pub bounded: bool,
     pub decode_ms: f64,
     pub develop_ms: f64,
+}
+
+/// Oriented, colour-calibrated bounded RAW result for native file loaders.
+pub(crate) struct KeptRawPath {
+    pub image: ImageBuf,
+    pub full_size: (u32, u32),
+    pub lens_correction_supported: bool,
+    pub decoder: &'static str,
+}
+
+/// Bounded RAW decode from a file path (no extra full-file byte copy in RAM).
+/// Supports LibRaw fallback, lens corrections (scaled to the kept image), and
+/// EXIF orientation applied to the small kept copy.
+pub(crate) fn load_raw_path_kept(
+    path: &std::path::Path,
+    wb: RawWhiteBalance,
+    lens: crate::LensCorrection,
+    max_dim: u32,
+    max_pixels: f64,
+    mode: Mode,
+) -> Result<KeptRawPath> {
+    wb.validate()?;
+    ensure!(max_pixels.is_finite() && max_pixels > 0.0, "bounded RAW requires a positive pixel cap");
+    let src = rawler::rawsource::RawSource::new(path)
+        .with_context(|| format!("opening RAW file: {}", path.display()))?;
+    let params = rawler::decoders::RawDecodeParams::default();
+    let (raw, libraw) = match rawler::decode(&src, &params) {
+        Ok(raw) => (raw, None),
+        #[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
+        Err(e) => match crate::libraw::unpack(&src, crate::libraw::Metadata::Best) {
+            Ok(unpacked) => (unpacked.raw, Some((unpacked.version, unpacked.orientation))),
+            Err(other) => anyhow::bail!("RAW decode failed: {e:?}; {other}"),
+        },
+        #[cfg(not(all(feature = "libraw", not(target_arch = "wasm32"))))]
+        Err(e) => anyhow::bail!("RAW decode failed: {e:?}"),
+    };
+    let profile = if libraw.is_none() { crate::lens::read_profile_from(&src) } else { None };
+    let (decoder, orientation) = match libraw {
+        #[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
+        Some((_, Some(orientation))) => (crate::libraw::NAME, orientation),
+        #[cfg(all(feature = "libraw", not(target_arch = "wasm32")))]
+        Some((_, None)) => (crate::libraw::NAME, crate::raw_exif_orientation(&src, &params)),
+        #[cfg(not(all(feature = "libraw", not(target_arch = "wasm32"))))]
+        Some(_) => unreachable!(),
+        None => ("rawler", crate::raw_exif_orientation(&src, &params)),
+    };
+    // Release the file source before allocating sensor/band buffers.
+    drop(src);
+    let area = crate::lens_area(&raw);
+    let estimate = raw.crop_area.or(raw.active_area).map(|r| r.d).unwrap_or(raw.dim());
+    let pixels = estimate.w.saturating_mul(estimate.h).max(raw.width.saturating_mul(raw.height));
+    let selected = match mode {
+        Mode::ForceBayer => true,
+        Mode::LargeBayer => pixels > LARGE_RAW_PIXELS,
+        Mode::AutoBayer => pixels > AUTO_BANDED_PIXELS && cfa_geometry(&raw).is_ok(),
+    };
+    let (mut image, full) = if selected {
+        let (_active, crop, is_xtrans) = if matches!(mode, Mode::AutoBayer) {
+            cfa_geometry(&raw)?
+        } else {
+            let (a, c) = geometry(&raw)?;
+            (a, c, false)
+        };
+        let full = (crop.d.w as u32, crop.d.h as u32);
+        let target = kept_size(full.0, full.1, max_dim, max_pixels);
+        let image = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            develop_bands_cfa(raw, wb, target, OUTPUT_BAND_ROWS, is_xtrans)
+        }))
+        .map_err(|p| anyhow::anyhow!("bounded RAW develop panicked: {}", crate::panic_message(&p)))??;
+        (image, full)
+    } else {
+        let xtrans = if matches!(mode, Mode::AutoBayer) && pixels > 30_000_000 {
+            crate::XTransDemosaic::Bilinear
+        } else {
+            crate::XTransDemosaic::Markesteijn
+        };
+        let image = crate::develop_decoded_with(raw, wb, xtrans)?;
+        let full = (image.width, image.height);
+        let target = kept_size(full.0, full.1, max_dim, max_pixels);
+        let image = if target == full { image } else { downsample_reference(&image, target) };
+        (image, full)
+    };
+    if lens.enabled && let Some(profile) = &profile {
+        let scaled_area = area
+            .filter(|a| a.developed == (full.0 as usize, full.1 as usize))
+            .map(|a| {
+                let sx = image.width as f64 / full.0 as f64;
+                let sy = image.height as f64 / full.1 as f64;
+                [a.area[0] * sx, a.area[1] * sy, a.area[2] * sx, a.area[3] * sy]
+            });
+        crate::lens::apply(&mut image, profile, scaled_area);
+    }
+    let image = image.oriented(orientation);
+    let full_size = if (5..=8).contains(&orientation) { (full.1, full.0) } else { full };
+    Ok(KeptRawPath {
+        image,
+        full_size,
+        lens_correction_supported: profile.is_some(),
+        decoder,
+    })
 }
 
 /// Explicit opt-in API, decoding the sensor only once even on the small-file
@@ -222,7 +322,7 @@ fn reduce_rows(image: &ImageBuf, x: usize, y_origin: usize, columns: &Spans, row
     });
 }
 
-fn downsample_reference(image: &ImageBuf, target: (u32, u32)) -> ImageBuf {
+pub(crate) fn downsample_reference(image: &ImageBuf, target: (u32, u32)) -> ImageBuf {
     let mut output = ImageBuf::from_data(target.0, target.1, vec![from_f32(0.0); target.0 as usize * target.1 as usize * 3]);
     reduce_rows(image, 0, 0, &spans(image.width as usize, target.0 as usize), &spans(image.height as usize, target.1 as usize), &mut output.data);
     output
