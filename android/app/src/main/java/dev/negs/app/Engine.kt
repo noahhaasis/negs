@@ -43,6 +43,7 @@ class Engine(
     private val context: Context,
     private val dataDir: File,
     private val policy: MemoryPolicy,
+    private val onStderr: ((String) -> Unit)? = null,
 ) {
     private var process: Process? = null
     private var stdin: BufferedWriter? = null
@@ -132,7 +133,12 @@ class Engine(
         Log.i(TAG, "engine started (${_starts.value}): ${policy.environment()}")
         Thread({ readAnswers(started) }, "engine-stdout").start()
         Thread({
-            started.errorStream.bufferedReader().forEachLine { Log.i(TAG, it) }
+            runCatching {
+                started.errorStream.bufferedReader().forEachLine { line ->
+                    Log.i(TAG, line)
+                    onStderr?.invoke(line)
+                }
+            }
         }, "engine-stderr").start()
         return writer
     }
@@ -174,6 +180,15 @@ class Engine(
     @Synchronized
     fun stop() {
         runCatching { stdin?.close() }
+        stdin = null
+        process = null
+    }
+
+    /** Force-kills a hung engine process (used by benchmark timeouts). */
+    @Synchronized
+    fun kill() {
+        runCatching { stdin?.close() }
+        runCatching { process?.destroyForcibly() }
         stdin = null
         process = null
     }

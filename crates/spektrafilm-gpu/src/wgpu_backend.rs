@@ -829,10 +829,26 @@ impl WgpuBackend {
         let film_cache_budget = film_cache_budget(&device, capacity.memory_budget);
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android", target_arch = "wasm32")))]
         let film_cache_budget = film_cache_budget(&device, None);
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android", target_arch = "wasm32"))]
+        tracing::info!(
+            adapter = adapter_info.name,
+            backend = ?adapter_info.backend,
+            driver = adapter_info.driver,
+            driver_info = adapter_info.driver_info,
+            max_workgroup_size,
+            max_storage_buffer_binding_size = capacity.max_binding,
+            max_buffer_size = capacity.max_buffer,
+            memory_budget_mib = capacity.memory_budget.map(|b| b >> 20),
+            film_cache_budget,
+            "wgpu backend initialized"
+        );
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android", target_arch = "wasm32")))]
         tracing::info!(
             adapter = adapter_info.name,
             backend = ?adapter_info.backend,
             max_workgroup_size,
+            max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size,
+            max_buffer_size = adapter_limits.max_buffer_size,
             film_cache_budget,
             "wgpu backend initialized"
         );
