@@ -1,16 +1,36 @@
 #!/usr/bin/env python3
-"""Verify committed Windows packages and prepare release assets."""
+"""Verify committed Windows packages and prepare release assets.
+
+  verify_package.py [--arch x64|arm64]
+"""
+import argparse
 import hashlib
 import io
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tomllib
 import zipfile
 
+# PE/COFF machine types: the packaged executables must all be built for --arch.
+MACHINES = {"x64": 0x8664, "arm64": 0xAA64}
+
+
+def pe_machine(data):
+    if data[:2] != b"MZ":
+        raise ValueError("Not a Windows executable")
+    offset = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[offset:offset + 4] != b"PE\0\0":
+        raise ValueError("Missing PE header")
+    return struct.unpack_from("<H", data, offset + 4)[0]
+
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--arch", choices=sorted(MACHINES), default="x64")
+    arch = parser.parse_args().arch
     root = Path(__file__).resolve().parents[1]
     git = ["git", "-c", f"safe.directory={root.as_posix()}", "-C", str(root)]
     commit = subprocess.check_output(git + ["rev-parse", "HEAD"], text=True).strip()
@@ -26,8 +46,11 @@ def main():
             raise ValueError("Portable archive CRC failure")
         for name in ["Negs.exe", "spektrafilm-native.exe", "spektrafilm.exe", "spektrafilm-f64.exe"]:
             built = root / ("windows/target/release" if name == "Negs.exe" else "target/release") / name
-            if sha(package.read(name)) != sha(built.read_bytes()):
+            data = package.read(name)
+            if sha(data) != sha(built.read_bytes()):
                 raise ValueError(f"Packaged executable differs from build: {name}")
+            if pe_machine(data) != MACHINES[arch]:
+                raise ValueError(f"{name} is built for machine {pe_machine(data):#06x}, not {arch}")
         if package.read("LICENSE") != (root / "LICENSE").read_bytes():
             raise ValueError("Packaged license differs from source")
         for name, source in [("OFL-Newsreader.txt", "macos/Fonts/OFL-Newsreader.txt"), ("OFL-BarlowCondensed.txt", "crates/spektrafilm-io/fonts/OFL-BarlowCondensed.txt"),
@@ -49,14 +72,16 @@ def main():
             raise ValueError("Installer is missing its executable header")
     output = root / "target/windows-release"
     output.mkdir(parents=True, exist_ok=True)
-    stem = f"Negs-{version}-windows-x64"
+    stem = f"Negs-{version}-windows-{arch}"
     checksums = []
     for original, suffix in [("Negs-Setup.exe", "-Setup.exe"), ("Negs-portable.zip", "-portable.zip")]:
         name = stem + suffix
         shutil.copy2(dist / original, output / name)
         checksums.append(f"{sha((output / name).read_bytes())}  {name}\n")
-    (output / "SHA256SUMS-windows.txt").write_text("".join(checksums), encoding="utf-8")
-    print(f"Verified Windows {version} packages from {commit}")
+    # x64 keeps the checksum file name earlier releases used.
+    sums = "SHA256SUMS-windows.txt" if arch == "x64" else f"SHA256SUMS-windows-{arch}.txt"
+    (output / sums).write_text("".join(checksums), encoding="utf-8")
+    print(f"Verified Windows {arch} {version} packages from {commit}")
 
 
 if __name__ == "__main__":
