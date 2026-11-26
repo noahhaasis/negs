@@ -1,5 +1,5 @@
 pkgname=negs
-pkgver=0.20.2
+pkgver=0.20.3
 pkgrel=1
 pkgdesc='Native GTK4 photographic film simulation editor using spektrafilm'
 arch=('x86_64')
