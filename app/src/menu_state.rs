@@ -52,6 +52,13 @@ pub fn state(app: &NegsApp, action: &dyn Action, window: &Window, _cx: &App) -> 
         let title = model.redo_title().map_or_else(|| "&Redo".to_string(), |t| format!("&Redo {t}"));
         return Some(State { enabled: model.redo_title().is_some() && !cropping, checked: false, title: Some(title) });
     }
+    if is!(EditCut) || is!(EditCopy) || is!(EditPaste) || is!(EditDelete) || is!(EditSelectAll) {
+        let editing_text = window.context_stack().iter().any(|c| c.contains("TextInput"));
+        if is!(EditSelectAll) {
+            return on(editing_text || app.grid.covers());
+        }
+        return on(editing_text);
+    }
     if is!(SavePreview) {
         return on(model.can_save());
     }

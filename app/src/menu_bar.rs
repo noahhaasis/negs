@@ -440,24 +440,42 @@ pub fn render_words(app: &NegsApp, window: &Window, cx: &mut Context<NegsApp>) -
         return None;
     }
     let theme = &app.theme;
+    let active = window.is_window_active();
     let cues = app.alt.down || app.menu_bar.is_some_and(|o| o.keys);
-    let mut row = div().flex().flex_none().items_center().gap(px(2.0)).ml(px(6.0));
+    let hover_bg = theme.paper.opacity(0.08);
+    let open_bg = theme.paper.opacity(0.14);
+    let paper = theme.paper;
+    let mut row = div().flex().flex_none().items_center().h_full().gap(px(2.0));
     for (i, menu) in all.iter().enumerate() {
         let name = menu.name.to_string();
         let open = app.menu_bar.filter(|o| o.menu == i);
         let lit = open.is_some();
+        let idle_ink = if lit {
+            theme.paper
+        } else if active {
+            theme.label
+        } else {
+            theme.dim
+        };
         let mut word = div()
             .id(("menu-bar", i))
             .relative()
-            .px(px(8.0))
-            .py(px(3.0))
-            .rounded(px(4.0))
-            .text_size(px(12.5))
-            .text_color(if lit { theme.paper } else { theme.label })
-            .when(lit, |d| d.bg(theme.subtle_active))
-            .hover(|s| s.bg(theme.subtle_hover))
-            .cursor_pointer()
-            .child(words(&name, cues))
+            .flex()
+            .items_center()
+            .h_full()
+            .child(
+                div()
+                    .px(px(8.0))
+                    .py(px(4.0))
+                    .rounded(px(4.0))
+                    .font(theme.ui_font(FontWeight::NORMAL))
+                    .text_size(px(crate::theme_gpui::scale::MENU_BAR))
+                    .text_color(idle_ink)
+                    .when(lit, |d| d.bg(open_bg))
+                    .hover(move |s| s.bg(if lit { open_bg } else { hover_bg }).text_color(paper))
+                    .cursor_pointer()
+                    .child(words(&name, cues)),
+            )
             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, _w, cx| {
                 this.menu_bar = if this.menu_bar.is_some_and(|o| o.menu == i && o.dropped) { None } else { Some(Open::mouse(i)) };
                 cx.stop_propagation();
@@ -488,7 +506,7 @@ fn render_rows(app: &NegsApp, rows: Vec<Row>, open: Open, parent: Option<usize>,
     let mut list = div()
         .id(if top { "menu-bar-items" } else { "menu-bar-sub" })
         .absolute()
-        .when(top, |d| d.top(px(26.0)).left(px(0.0)))
+        .when(top, |d| d.top(px(crate::titlebar::TITLEBAR_HEIGHT)).left(px(0.0)))
         .when(!top, |d| d.top(px(-5.0)).left(px(244.0)))
         .w(px(250.0))
         .py(px(4.0))

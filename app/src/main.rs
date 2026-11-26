@@ -75,8 +75,8 @@ use crate::presets::PresetsState;
 use crate::strip::StripState;
 use crate::thumbs::Thumbs;
 use crate::status::render_status_bar;
-use crate::theme_gpui::{GpuiTheme, initial_theme, next_theme, register_fonts};
-use crate::titlebar::{render_theme_menu, render_titlebar};
+use crate::theme_gpui::{GpuiTheme, initial_theme, next_theme, register_fonts, sync_window_appearance};
+use crate::titlebar::render_titlebar;
 use crate::tray::{TrayState, render_tray};
 
 actions!(
@@ -117,6 +117,13 @@ actions!(
         Recent9,
         UndoAction,
         RedoAction,
+        EditCut,
+        EditCopy,
+        EditPaste,
+        EditDelete,
+        EditSelectAll,
+        WindowMinimize,
+        WindowZoom,
         ToggleOriginal,
         ToggleSplit,
         ToggleZoomFit,
@@ -206,7 +213,12 @@ pub struct NegsApp {
     pub model: Model,
     pub host: Arc<GpuiHost>,
     pub theme: GpuiTheme,
-    pub theme_menu_open: bool,
+    /// Resizable inspector column width (`340..=440 DIP`, `L6`).
+    pub inspector_width: f32,
+    /// Active drag on the inspector's left splitter: `(start_x, start_width)`.
+    pub inspector_resize: Option<(f32, f32)>,
+    /// Last synced macOS `NSAppearance` dark flag so we only call AppKit on change.
+    last_appearance_dark: Option<bool>,
     pub canvas: CanvasState,
     pub inspector: InspectorState,
     pub presets: PresetsState,
@@ -268,9 +280,12 @@ impl NegsApp {
     ) -> Self {
         let prefs = Preferences::load();
         let initial_scope_height = prefs.scope_height;
+        let initial_inspector_width = (prefs.inspector_width as f32)
+            .clamp(inspector::INSPECTOR_MIN_WIDTH, inspector::INSPECTOR_MAX_WIDTH);
         let theme_name =
             initial_theme((!prefs.app_theme.is_empty()).then_some(prefs.app_theme.as_str()));
         let theme = GpuiTheme::from_name(theme_name);
+        sync_window_appearance(window, theme.tokens.dark);
         let focus_handle = cx.focus_handle();
 
         // Record native HWND on Windows so `negs_app::icc` & `platform` know the owner window.
@@ -378,17 +393,21 @@ impl NegsApp {
                 }
                 this.after_model_update(cx);
             }
+            cx.notify();
         })
         .detach();
 
         let inspector = InspectorState::new(initial_scope_height, cx);
         let presets = PresetsState::new(cx);
         let tray = TrayState::new(cx);
+        let appearance_dark = theme.tokens.dark;
         let mut app = Self {
             model,
             host,
             theme,
-            theme_menu_open: false,
+            inspector_width: initial_inspector_width,
+            inspector_resize: None,
+            last_appearance_dark: Some(appearance_dark),
             canvas: CanvasState::with_display_profile(display_profile),
             inspector,
             presets,
@@ -996,6 +1015,14 @@ impl gpui::Render for NegsApp {
         if std::mem::take(&mut self.resume_offer) && self.bench.is_none() {
             batch_view::offer_resume(self, window, cx);
         }
+        if self.last_appearance_dark != Some(self.theme.tokens.dark) {
+            sync_window_appearance(window, self.theme.tokens.dark);
+            self.last_appearance_dark = Some(self.theme.tokens.dark);
+        }
+        let viewport_w = f32::from(window.viewport_size().width);
+        if viewport_w > 0.0 {
+            self.inspector_width = inspector::clamp_inspector_width(self.inspector_width, viewport_w);
+        }
         self.sprites.begin_frame();
         let titlebar_el = render_titlebar(self, window, cx).into_any_element();
         // The grid first: a flight that ends shows the photograph view again.
@@ -1014,7 +1041,7 @@ impl gpui::Render for NegsApp {
         let strip_el = strip::render_strip(self, window, cx);
         let image_only = self.canvas.image_only && !covered;
         let inspector_el = if covered && self.model.inspector_visible {
-            Some(div().w(px(inspector::INSPECTOR_WIDTH)).h_full().flex_shrink_0().bg(self.theme.panel).into_any_element())
+            Some(div().w(px(self.inspector_width)).h_full().flex_shrink_0().bg(self.theme.panel).border_t_1().border_l_1().border_color(self.theme.line).into_any_element())
         } else if self.model.cropping() {
             crop_view::render_panel(self, window, cx)
         } else if image_only {
@@ -1035,7 +1062,6 @@ impl gpui::Render for NegsApp {
         self.stamp_startup("inspector_shown");
         let show_status = self.model.tray_shown().is_none() && !image_only;
         let status_el = show_status.then(|| render_status_bar(self, cx).into_any_element());
-        let theme_menu = render_theme_menu(self, cx);
         if let Some(bench) = self.bench.as_mut() {
             bench.frame_end();
         }
@@ -1085,6 +1111,19 @@ impl gpui::Render for NegsApp {
                 }
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if let Some((start_x, start_w)) = this.inspector_resize {
+                    if event.pressed_button == Some(MouseButton::Left) {
+                        let dx = f32::from(event.position.x) - start_x;
+                        let vw = f32::from(window.viewport_size().width);
+                        this.inspector_width = inspector::clamp_inspector_width(start_w - dx, vw);
+                        cx.notify();
+                        return;
+                    } else {
+                        this.inspector_resize = None;
+                        this.model.prefs.inspector_width = f64::from(this.inspector_width);
+                        this.model.prefs.save();
+                    }
+                }
                 if this.inspector.has_active_drag() {
                     let moved = Instant::now();
                     if handle_root_mouse_move(this, event, window, cx) && trace_ui::on() {
@@ -1115,6 +1154,10 @@ impl gpui::Render for NegsApp {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    if this.inspector_resize.take().is_some() {
+                        this.model.prefs.inspector_width = f64::from(this.inspector_width);
+                        this.model.prefs.save();
+                    }
                     if this.inspector.has_active_drag() {
                         handle_root_mouse_up(this, window, cx);
                     }
@@ -1124,6 +1167,10 @@ impl gpui::Render for NegsApp {
             .on_mouse_up_out(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    if this.inspector_resize.take().is_some() {
+                        this.model.prefs.inspector_width = f64::from(this.inspector_width);
+                        this.model.prefs.save();
+                    }
                     if this.inspector.has_active_drag() {
                         handle_root_mouse_up(this, window, cx);
                     }
@@ -1374,6 +1421,21 @@ impl gpui::Render for NegsApp {
                 this.after_model_update(cx);
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &EditSelectAll, _window, cx| {
+                if this.grid.covers() {
+                    let items = this.model.shown_items();
+                    this.model.shelf.selection.select_all(&items);
+                    this.model.dirty |= negs_app::model::dirty::STRIP | negs_app::model::dirty::CHROME;
+                    this.after_model_update(cx);
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|_this, _: &WindowMinimize, window, _cx| {
+                window.minimize_window();
+            }))
+            .on_action(cx.listener(|_this, _: &WindowZoom, window, _cx| {
+                window.zoom_window();
+            }))
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
                 this.request_quit(window, cx);
             }))
@@ -1402,11 +1464,43 @@ impl gpui::Render for NegsApp {
                             .when_some(strip_el, |el, strip| el.child(strip))
                             .when_some(tray_el, |el, tray| el.child(tray)),
                     )
-                    .when_some(inspector_el, |el, col| el.child(col)),
+                    .when_some(inspector_el, |el, col| {
+                        el.child(
+                            div()
+                                .relative()
+                                .h_full()
+                                .flex_shrink_0()
+                                .flex()
+                                .flex_row()
+                                .child(col)
+                                // 5 px invisible drag splitter straddling the inspector's left border (`L6`).
+                                .when(!covered, |d| {
+                                    d.child(
+                                        div()
+                                            .id("inspector-splitter")
+                                            .absolute()
+                                            .top_0()
+                                            .bottom_0()
+                                            .left(px(-2.0))
+                                            .w(px(5.0))
+                                            .cursor_col_resize()
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.inspector_resize = Some((
+                                                        f32::from(event.position.x),
+                                                        this.inspector_width,
+                                                    ));
+                                                    cx.stop_propagation();
+                                                }),
+                                            ),
+                                    )
+                                }),
+                        )
+                    }),
             )
             .when_some(status_el, |el, status| el.child(status))
             .when_some(grid_el, |el, grid| el.child(grid))
-            .when_some(theme_menu, |el, menu| el.child(menu))
             .when_some(menu_el, |el, menu| el.child(menu))
             .when_some(menu_scrim, |el, scrim| el.child(scrim))
             .when_some(batch_el, |el, popover| el.child(popover))
@@ -1426,6 +1520,8 @@ fn compare_note(app: &NegsApp, (original, number, place): (bool, String, String)
         .h(px(36.0))
         .px(px(22.0))
         .bg(theme.panel)
+        .border_t_1()
+        .border_l_1()
         .border_b_1()
         .border_color(theme.line)
         .when(original, |d| {
@@ -1572,6 +1668,7 @@ fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Men
             name: "Negs".into(),
             items: vec![
                 MenuItem::action("About Negs", AboutNegs),
+                MenuItem::action("Check for Updates…", CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action("Settings…", OpenSettings),
                 MenuItem::separator(),
@@ -1580,8 +1677,32 @@ fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Men
         });
     }
     out.push(Menu { name: "&File".into(), items: file });
-    out.push(Menu { name: "&Edit".into(), items: vec![MenuItem::action("&Undo", UndoAction), MenuItem::action("&Redo", RedoAction)] });
-    out.push(Menu {
+    let edit_items = if mac {
+        vec![
+            MenuItem::os_action("Undo", UndoAction, gpui::OsAction::Undo),
+            MenuItem::os_action("Redo", RedoAction, gpui::OsAction::Redo),
+            MenuItem::separator(),
+            MenuItem::os_action("Cut", EditCut, gpui::OsAction::Cut),
+            MenuItem::os_action("Copy", EditCopy, gpui::OsAction::Copy),
+            MenuItem::os_action("Paste", EditPaste, gpui::OsAction::Paste),
+            MenuItem::action("Delete", EditDelete),
+            MenuItem::os_action("Select All", EditSelectAll, gpui::OsAction::SelectAll),
+        ]
+    } else {
+        vec![
+            MenuItem::action("&Undo", UndoAction),
+            MenuItem::action("&Redo", RedoAction),
+            MenuItem::separator(),
+            MenuItem::action("Cu&t", EditCut),
+            MenuItem::action("&Copy", EditCopy),
+            MenuItem::action("&Paste", EditPaste),
+            MenuItem::action("De&lete", EditDelete),
+            MenuItem::separator(),
+            MenuItem::action("Select &All", EditSelectAll),
+        ]
+    };
+    out.push(Menu { name: "&Edit".into(), items: edit_items });
+    let photo_menu = Menu {
         name: "&Photo".into(),
         items: vec![
             MenuItem::action("Show &Original", ToggleOriginal),
@@ -1621,8 +1742,8 @@ fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Men
             MenuItem::submenu(Menu { name: menu_bar::FILTER.into(), items: vec![] }),
             MenuItem::action("C&lear Filter", ClearFilter),
         ],
-    });
-    out.push(Menu {
+    };
+    let view_menu = Menu {
         name: "&View".into(),
         items: vec![
             MenuItem::action("&Film Strip", ToggleFilmstrip),
@@ -1671,8 +1792,26 @@ fn menus(lightroom: &[negs_app::lightroom::Kind], recent: &[PathBuf]) -> Vec<Men
                 ],
             }),
         ],
-    });
-    if !mac {
+    };
+    // Platform menu bar order (`L12`): View before Photo on macOS (SwiftUI),
+    // Photo before View on Windows/Linux (Win32).
+    if mac {
+        out.push(view_menu);
+        out.push(photo_menu);
+        out.push(Menu {
+            name: "Window".into(),
+            items: vec![
+                MenuItem::action("Minimize", WindowMinimize),
+                MenuItem::action("Zoom", WindowZoom),
+            ],
+        });
+        out.push(Menu {
+            name: "Help".into(),
+            items: vec![MenuItem::action("About Negs", AboutNegs)],
+        });
+    } else {
+        out.push(photo_menu);
+        out.push(view_menu);
         out.push(Menu { name: "&Help".into(), items: vec![MenuItem::action("Check for &Updates…", CheckForUpdates), MenuItem::separator(), MenuItem::action("&About Negs", AboutNegs)] });
     }
     if mac {
@@ -1729,14 +1868,15 @@ fn main() {
         let saved = Preferences::load();
         let displays: Vec<_> = cx.displays().iter().map(|d| d.bounds()).collect();
         let bounds = place::from_prefs(saved.window, saved.window_pixels, &displays)
-            .unwrap_or_else(|| WindowBounds::centered(size(px(1280.0), px(840.0)), cx));
+            .unwrap_or_else(|| WindowBounds::centered(size(px(1320.0), px(860.0)), cx));
         let options = WindowOptions {
             window_bounds: Some(bounds),
-            window_min_size: Some(size(px(800.0), px(560.0))),
+            window_min_size: Some(size(px(inspector::CANVAS_MIN_WIDTH), px(560.0))),
             titlebar: Some(TitlebarOptions {
                 title: Some(SharedString::from("Negs")),
                 appears_transparent: true,
-                traffic_light_position: Some(Point::new(px(14.0), px(13.0))),
+                // Matches SwiftUI traffic lights (x=12, y=13 in the 38 pt band, `L6`).
+                traffic_light_position: Some(Point::new(px(12.0), px(13.0))),
             }),
             app_id: Some("negs".to_string()),
             ..Default::default()

@@ -8,11 +8,35 @@ use std::sync::{Arc, OnceLock};
 use gpui::{App, Font, FontFeatures, FontStyle, FontWeight, Hsla, SharedString, rgb};
 use negs_app::theme::{HIGHLIGHTER_INK, HIGHLIGHTER_OPACITY, ThemeName, Tokens, mix};
 
-const NEWSREADER_REGULAR: &[u8] = include_bytes!("../../macos/Fonts/Newsreader-Negs.ttf");
-const NEWSREADER_ITALIC: &[u8] = include_bytes!("../../macos/Fonts/Newsreader-Negs-Italic.ttf");
+// Static Newsreader optical-16pt weight instances generated with `hb-subset`
+// from `assets/fonts/newsreader/` (GPUI 0.2.2's font_kit/DirectWrite loaders
+// pick static faces by weight rather than varying the `wght` axis).
+const NEWSREADER_400: &[u8] = include_bytes!("../fonts/Newsreader-Negs-400.ttf");
+const NEWSREADER_500: &[u8] = include_bytes!("../fonts/Newsreader-Negs-500.ttf");
+const NEWSREADER_600: &[u8] = include_bytes!("../fonts/Newsreader-Negs-600.ttf");
+const NEWSREADER_700: &[u8] = include_bytes!("../fonts/Newsreader-Negs-700.ttf");
+const NEWSREADER_ITALIC_400: &[u8] = include_bytes!("../fonts/Newsreader-Negs-Italic-400.ttf");
+const NEWSREADER_ITALIC_700: &[u8] = include_bytes!("../fonts/Newsreader-Negs-Italic-700.ttf");
 
-/// Internal TTF family name of `macos/Fonts/Newsreader-Negs*.ttf`.
-pub const NEWSREADER_FAMILY: &str = "Newsreader 16pt";
+/// Distinct family names per static Newsreader weight so CoreText / DirectWrite
+/// never collide PostScript names across weights.
+pub const NEWSREADER_FAMILY: &str = "Newsreader Negs 400";
+pub const NEWSREADER_500_FAMILY: &str = "Newsreader Negs 500";
+pub const NEWSREADER_600_FAMILY: &str = "Newsreader Negs 600";
+pub const NEWSREADER_700_FAMILY: &str = "Newsreader Negs 700";
+
+/// Picks the static Newsreader family name matching `weight` (400/500/600/700).
+pub fn newsreader_family_for_weight(weight: f32) -> &'static str {
+    if weight >= 650.0 {
+        NEWSREADER_700_FAMILY
+    } else if weight >= 550.0 {
+        NEWSREADER_600_FAMILY
+    } else if weight >= 450.0 {
+        NEWSREADER_500_FAMILY
+    } else {
+        NEWSREADER_FAMILY
+    }
+}
 
 /// Plain-theme size multiplier for system UI sans replacing Newsreader (`L2`,
 /// matching SwiftUI `Theme.swift:192` and Win32 `d2d.rs:412`).
@@ -70,8 +94,12 @@ pub fn tabular_features() -> FontFeatures {
 /// system, and detects Windows 11's `Segoe UI Variable` when available (`L5`).
 pub fn register_fonts(cx: &App) -> anyhow::Result<()> {
     let res = cx.text_system().add_fonts(vec![
-        Cow::Borrowed(NEWSREADER_REGULAR),
-        Cow::Borrowed(NEWSREADER_ITALIC),
+        Cow::Borrowed(NEWSREADER_400),
+        Cow::Borrowed(NEWSREADER_500),
+        Cow::Borrowed(NEWSREADER_600),
+        Cow::Borrowed(NEWSREADER_700),
+        Cow::Borrowed(NEWSREADER_ITALIC_400),
+        Cow::Borrowed(NEWSREADER_ITALIC_700),
     ]);
     #[cfg(target_os = "windows")]
     {
@@ -159,8 +187,13 @@ pub fn serif_font_spec(
         };
         (font, size * PLAIN_SCALE)
     } else {
+        let family = if italic && weight < 650.0 {
+            NEWSREADER_FAMILY
+        } else {
+            newsreader_family_for_weight(weight)
+        };
         let font = Font {
-            family: SharedString::from(NEWSREADER_FAMILY),
+            family: SharedString::from(family),
             features,
             fallbacks: None,
             weight: FontWeight(weight.clamp(400.0, 700.0)),
