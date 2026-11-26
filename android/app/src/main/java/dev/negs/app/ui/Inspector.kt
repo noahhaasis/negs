@@ -429,9 +429,9 @@ object Inspector {
             val favorites = starred.mapNotNull { listed[it] }
             return listOf("★ Favorites" to favorites) + groups
         }
-        stockGrid("Film", withFavorites(catalog.filmGroups(editor.edit.film), editor.favoriteFilms), editor) { editor.chooseFilm(it.id) }
+        stockGrid("Film", withFavorites(catalog.filmGroups(editor.edit.film, editor.fotufilmFilms, editor.showNegsBuilt), editor.favoriteFilms), editor) { editor.chooseFilm(it.id) }
         if (editor.get("io.scan_film").bool() != true) {
-            stockGrid("Paper", withFavorites(catalog.paperGroups(editor.edit.paper), editor.favoritePapers), editor) { editor.choosePaper(it.id) }
+            stockGrid("Paper", withFavorites(catalog.paperGroups(editor.edit.paper, editor.showNegsBuilt), editor.favoritePapers), editor) { editor.choosePaper(it.id) }
         } else {
             item(key = "scanned") {
                 Text(
