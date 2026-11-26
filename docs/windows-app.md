@@ -864,9 +864,15 @@ source archive of HEAD. Package from a committed tree so source and binary
 match. Optionally pass `-Iscc` with an Inno Setup 6 compiler to build the
 per-user installer. Its Open With registration does not select a default app.
 Pass `-WinSparkleDll`, `-AppcastUrl` and `-EdPublicKey` for a configured release;
-place WinSparkle's COPYING license beside the supplied DLL.
+place WinSparkle's COPYING license beside the supplied DLL. `-Arch x64|arm64`
+(default: the build machine's) picks the installer's architecture.
 
-The GitHub Release workflow builds Windows x64 packages alongside macOS.
+The GitHub Release workflow builds Windows x64 and ARM64 packages alongside
+macOS: ARM64 builds and tests natively on `windows-11-arm`, and both are
+packaged on x64, where Inno Setup is installed. `verify_package.py --arch`
+refuses executables built for another architecture and names the assets
+`Negs-<v>-windows-<arch>-…`; x64 keeps `SHA256SUMS-windows.txt`, ARM64 gets
+`SHA256SUMS-windows-arm64.txt`.
 Main-branch pushes and manual runs provide a `negs-windows-experimental` artifact; tagged releases
 include those assets after both platform jobs pass. Python 3.11+ can run
 `windows/verify_package.py` after packaging to check archive integrity, bundled

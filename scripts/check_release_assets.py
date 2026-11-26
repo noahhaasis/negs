@@ -20,6 +20,7 @@ def expected(version):
         f'Negs-{v}-macos-universal-source.tar.gz',
         # Windows
         'SHA256SUMS-windows.txt', f'Negs-{v}-windows-x64-Setup.exe', f'Negs-{v}-windows-x64-portable.zip',
+        'SHA256SUMS-windows-arm64.txt', f'Negs-{v}-windows-arm64-Setup.exe', f'Negs-{v}-windows-arm64-portable.zip',
         # Linux: Arch package, per-user bundle, source and downstream recipes
         'SHA256SUMS-linux', f'negs-{v}-1-x86_64.pkg.tar.zst', f'negs-{v}-linux-x86_64.tar.gz',
         f'negs-{v}.tar.gz', f'negs-{v}-linux-recipes.tar.gz',
