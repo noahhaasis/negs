@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import dev.negs.app.Crop
 import dev.negs.app.CropSession
 import dev.negs.app.Editor
+import dev.negs.app.tr
 import dev.negs.app.Pt
 import kotlin.math.abs
 import kotlin.math.max
@@ -186,13 +187,13 @@ fun CropInspector(editor: Editor, session: CropSession, modifier: Modifier) {
     LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Aspect ratio", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(tr("Aspect ratio"), color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 var open by remember { mutableStateOf(false) }
                 Box {
-                    OutlinedButton(onClick = { open = true }) { Text(Crop.ASPECTS.first { it.first == s.aspect }.second, color = Palette.fg) }
+                    OutlinedButton(onClick = { open = true }) { Text(tr(Crop.ASPECTS.first { it.first == s.aspect }.second), color = Palette.fg) }
                     DropdownMenu(open, onDismissRequest = { open = false }) {
                         Crop.ASPECTS.forEach { (id, title) ->
-                            DropdownMenuItem(text = { Text(title) }, onClick = { session.choose(id); open = false })
+                            DropdownMenuItem(text = { Text(tr(title)) }, onClick = { session.choose(id); open = false })
                         }
                     }
                 }
@@ -200,16 +201,16 @@ fun CropInspector(editor: Editor, session: CropSession, modifier: Modifier) {
         }
         if (s.aspect == "custom") item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RatioField("Width", s.custom.first) { session.setCustom(0, it) }
+                RatioField(tr("Width"), s.custom.first) { session.setCustom(0, it) }
                 Text("×", color = Palette.muted)
-                RatioField("Height", s.custom.second) { session.setCustom(1, it) }
+                RatioField(tr("Height"), s.custom.second) { session.setCustom(1, it) }
             }
         }
         item {
             val fixed = s.aspect == "freeform" || s.aspect == "square"
             val portrait = if (s.aspect == "custom") s.custom.second > s.custom.first else session.portrait
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Landscape" to false, "Portrait" to true).forEach { (label, value) ->
+                listOf(tr("Landscape") to false, tr("Portrait") to true).forEach { (label, value) ->
                     val on = portrait == value && !fixed
                     OutlinedButton(
                         onClick = { session.orient(value) }, enabled = !fixed, modifier = Modifier.weight(1f),
@@ -222,14 +223,14 @@ fun CropInspector(editor: Editor, session: CropSession, modifier: Modifier) {
             Column {
                 // Fixed height and a kept Reset slot, as Inspector's SliderRow.
                 Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Straighten", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(tr("Straighten"), color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
                     Text(
                         "%.1f°".format(s.angle), color = Palette.muted, fontSize = 12.sp,
                         style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
                     )
                     val modified = s.angle != 0.0
                     Text(
-                        "Reset", color = Palette.faint, fontSize = 11.sp,
+                        tr("Reset"), color = Palette.faint, fontSize = 11.sp,
                         modifier = Modifier.alpha(if (modified) 1f else 0f)
                             .clickable(enabled = modified) { session.straighten(0.0); session.endStraighten() }
                             .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -247,14 +248,14 @@ fun CropInspector(editor: Editor, session: CropSession, modifier: Modifier) {
         item {
             val size = editor.sourceSize()?.let { (w, h) -> Crop.outputSize(s, session.rotation, w, h) }
             Row {
-                Text("Size", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(tr("Size"), color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Text(size?.let { "${it.first} × ${it.second} px" } ?: "", color = Palette.fg, fontSize = 13.sp)
             }
         }
-        item { OutlinedButton(onClick = session::reset, modifier = Modifier.fillMaxWidth()) { Text("Reset Crop", color = Palette.fg) } }
+        item { OutlinedButton(onClick = session::reset, modifier = Modifier.fillMaxWidth()) { Text(tr("Reset Crop"), color = Palette.fg) } }
         item {
             Text(
-                "Drag corners or edges to resize, or drag inside to move. Drag the dial below the photograph to level it. Borders are added after cropping.",
+                tr("Drag corners or edges to resize, or drag inside to move. Drag the dial below the photograph to level it. Borders are added after cropping."),
                 color = Palette.faint, fontSize = 12.sp,
             )
         }

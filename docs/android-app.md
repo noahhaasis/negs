@@ -110,9 +110,19 @@ Desktop sorts by dragging; here the tile menu has Move earlier/later.
 Not testable here: real phone GPUs (Mali/Adreno drivers, speed), memory
 behaviour on a real 4–8 GB phone. Needs one device or Firebase Test Lab.
 
+## Language
+
+Settings › Language: English or 简体中文, else the phone's language. As on
+the web, strings pass through `tr()` (I18n.kt) with their English as the
+key, against web/locales/zh-CN.js (copied into the assets at build time)
+and then `app/src/main/assets/locales/zh-CN.android.jsonc`, the app's own
+strings the web doesn't have. Switching redraws at once; messages already
+shown stay as they were. `node android/check-i18n.mjs` checks that every
+string the app shows has a translation and every app-own entry is used.
+
 ## Not done yet
 
-- Help texts, Chinese strings.
+- Help texts (the controls' `help` isn't shown, so isn't translated either).
 - Presets: drag to sort; negative scans' preset rules (the app has no
   negative scan).
 - The crop isn't kept per photo (the web app doesn't either); no flip.

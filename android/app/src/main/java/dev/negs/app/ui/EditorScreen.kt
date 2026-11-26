@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.sp
 import dev.negs.app.BorderSettings
 import dev.negs.app.BorderStyle
 import dev.negs.app.Editor
+import dev.negs.app.tr
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -139,9 +140,9 @@ private fun TopBar(editor: Editor, open: () -> Unit, exportLut: () -> Unit, modi
     var menu by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        ToolButton(onClick = open) { Icon(Icons.Default.FileOpen, "Open photo") }
+        ToolButton(onClick = open) { Icon(Icons.Default.FileOpen, tr("Open photo")) }
         if (editor.photo != null) {
-            ToolButton(onClick = editor::beginCrop) { Icon(Icons.Default.Crop, "Crop and straighten") }
+            ToolButton(onClick = editor::beginCrop) { Icon(Icons.Default.Crop, tr("Crop and straighten")) }
             // Show Original while held (macOS square.split.diagonal.fill).
             Box(
                 Modifier.padding(4.dp).size(40.dp).clip(CircleShape)
@@ -154,7 +155,7 @@ private fun TopBar(editor: Editor, open: () -> Unit, exportLut: () -> Unit, modi
                         })
                     },
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Default.Compare, "Show original", tint = if (editor.showingOriginal) Palette.accent else Palette.muted) }
+            ) { Icon(Icons.Default.Compare, tr("Show Original"), tint = if (editor.showingOriginal) Palette.accent else Palette.muted) }
         }
         Spacer(Modifier.weight(1f))
         // The wordmark while there's room: before a photograph's tools.
@@ -174,22 +175,22 @@ private fun TopBar(editor: Editor, open: () -> Unit, exportLut: () -> Unit, modi
                 if (editor.exporting) CircularProgressIndicator(Modifier.size(16.dp), color = Palette.bg, strokeWidth = 2.dp)
                 else Icon(Icons.Default.IosShare, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Export")
+                Text(tr("Export"))
             }
         }
         Box {
-            ToolButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
+            ToolButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, tr("More")) }
             DropdownMenu(menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text(if (editor.advanced) "Hide advanced controls" else "Show advanced controls") },
+                    text = { Text(tr(if (editor.advanced) "Hide advanced controls" else "Show advanced controls")) },
                     onClick = { editor.advanced = !editor.advanced; menu = false },
                 )
-                DropdownMenuItem(text = { Text("Reset adjustments") }, onClick = { editor.resetAdjustments(); menu = false })
+                DropdownMenuItem(text = { Text(tr("Reset adjustments")) }, onClick = { editor.resetAdjustments(); menu = false })
                 DropdownMenuItem(
-                    text = { Text("Export LUT…") }, enabled = editor.catalog != null,
+                    text = { Text(tr("Export LUT…")) }, enabled = editor.catalog != null,
                     onClick = { menu = false; exportLut() },
                 )
-                DropdownMenuItem(text = { Text("Settings…") }, onClick = { menu = false; settings = true })
+                DropdownMenuItem(text = { Text(tr("Settings…")) }, onClick = { menu = false; settings = true })
             }
         }
         if (settings) SettingsDialog(editor) { settings = false }
@@ -200,15 +201,15 @@ private fun TopBar(editor: Editor, open: () -> Unit, exportLut: () -> Unit, modi
 @Composable
 private fun CropBar(editor: Editor, modifier: Modifier) {
     Row(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(onClick = { editor.endCrop(false) }) { Text("Cancel", color = Palette.fg) }
+        OutlinedButton(onClick = { editor.endCrop(false) }) { Text(tr("Cancel"), color = Palette.fg) }
         Spacer(Modifier.weight(1f))
-        ToolButton(onClick = { editor.rotate(-1) }) { Icon(Icons.AutoMirrored.Filled.RotateLeft, "Rotate left") }
-        ToolButton(onClick = { editor.rotate(1) }) { Icon(Icons.AutoMirrored.Filled.RotateRight, "Rotate right") }
+        ToolButton(onClick = { editor.rotate(-1) }) { Icon(Icons.AutoMirrored.Filled.RotateLeft, tr("Rotate counterclockwise")) }
+        ToolButton(onClick = { editor.rotate(1) }) { Icon(Icons.AutoMirrored.Filled.RotateRight, tr("Rotate clockwise")) }
         Spacer(Modifier.weight(1f))
         Button(
             onClick = { editor.endCrop(true) },
             colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.bg),
-        ) { Text("Done") }
+        ) { Text(tr("Done")) }
     }
 }
 
@@ -226,7 +227,7 @@ private fun EmptyState(editor: Editor, open: () -> Unit, modifier: Modifier) {
         val error = editor.startupError
         when {
             error != null -> {
-                Text("The engine didn't start", color = Palette.danger, fontWeight = FontWeight.SemiBold)
+                Text(tr("The engine didn’t start"), color = Palette.danger, fontWeight = FontWeight.SemiBold)
                 Text(error, color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
             }
             editor.catalog == null -> {
@@ -234,16 +235,16 @@ private fun EmptyState(editor: Editor, open: () -> Unit, modifier: Modifier) {
                 Text(editor.status, color = Palette.muted, modifier = Modifier.padding(top = 12.dp))
             }
             else -> {
-                Text("Develop a photo on film", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(tr("Develop a photo on film"), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 Text(
-                    "Open a RAW, JPEG, PNG or TIFF. It stays on your phone.",
+                    tr("Open a RAW, JPEG, PNG or TIFF. It stays on your phone."),
                     color = Palette.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = open, colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.bg)) {
-                        Text("Open photo")
+                        Text(tr("Open photo"))
                     }
-                    OutlinedButton(onClick = editor::openSample) { Text("Try a sample") }
+                    OutlinedButton(onClick = editor::openSample) { Text(tr("Try a sample photo")) }
                 }
             }
         }
@@ -270,8 +271,8 @@ private fun MessageCard(message: Editor.Message, onDismiss: () -> Unit, onShare:
                 message.text, color = if (message.error) Palette.danger else Palette.fg, fontSize = 13.sp,
                 modifier = Modifier.weight(1f, fill = false).padding(vertical = 10.dp),
             )
-            message.share?.let { uri -> TextButton(onClick = { onShare(uri); onDismiss() }) { Text("Share…", color = Palette.accent) } }
-            TextButton(onClick = onDismiss) { Text("OK", color = Palette.muted) }
+            message.share?.let { uri -> TextButton(onClick = { onShare(uri); onDismiss() }) { Text(tr("Share…"), color = Palette.accent) } }
+            TextButton(onClick = onDismiss) { Text(tr("OK"), color = Palette.muted) }
         }
     }
 }
@@ -415,7 +416,7 @@ private fun Sheet(editor: Editor) {
                         Tab(
                             selected = t == tab,
                             onClick = { tab = t; if (snap == Snap.Low) snap = Snap.Mid },
-                            text = { Text(t, color = if (t == tab) Palette.fg else Palette.muted) },
+                            text = { Text(tr(t), color = if (t == tab) Palette.fg else Palette.muted) },
                         )
                     }
                 }

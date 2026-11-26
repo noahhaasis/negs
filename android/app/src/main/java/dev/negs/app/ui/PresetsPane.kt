@@ -68,6 +68,7 @@ import dev.negs.app.Editor
 import dev.negs.app.PresetFile
 import dev.negs.app.PresetName
 import dev.negs.app.PresetStatus
+import dev.negs.app.tr
 
 /**
  * The Presets tab (macOS PresetInspector): the presets as tiles in two
@@ -101,21 +102,20 @@ fun PresetsPane(editor: Editor, modifier: Modifier) {
                 ) {
                     Icon(Icons.Default.Add, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("New preset", color = if (enabled) Palette.fg else Palette.faint)
+                    Text(tr("New preset"), color = if (enabled) Palette.fg else Palette.faint)
                 }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = importFiles, enabled = enabled) {
                     Icon(Icons.Default.FileOpen, null, Modifier.size(18.dp), tint = Palette.muted)
                     Spacer(Modifier.width(6.dp))
-                    Text("Import…", color = if (enabled) Palette.muted else Palette.faint)
+                    Text(tr("Import…"), color = if (enabled) Palette.muted else Palette.faint)
                 }
             }
         }
         if (editor.presets.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    "A preset keeps a film, a paper and the Lab settings, to use again on other photos. " +
-                        "Save this look with New preset, or import presets made in Negs or spektrafilm.",
+                    tr("A preset keeps a film, a paper and the Lab settings, to use again on other photos. Save this look with New preset, or import presets made in Negs or spektrafilm."),
                     color = Palette.muted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 28.dp),
                 )
@@ -138,7 +138,7 @@ fun PresetsPane(editor: Editor, modifier: Modifier) {
         if (editor.presets.isNotEmpty()) {
             item(key = "foot") {
                 Text(
-                    "tap to apply · hold for more", color = Palette.faint, fontSize = 11.sp, textAlign = TextAlign.Center,
+                    tr("tap to apply · hold for more"), color = Palette.faint, fontSize = 11.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                 )
             }
@@ -147,9 +147,9 @@ fun PresetsPane(editor: Editor, modifier: Modifier) {
 
     naming?.let { n ->
         NameDialog(
-            title = if (n.preset == null) "New preset" else "Rename preset",
+            title = tr(if (n.preset == null) "New preset" else "Rename preset"),
             initial = n.name,
-            confirm = if (n.preset == null) "Save" else "Rename",
+            confirm = tr(if (n.preset == null) "Save" else "Rename"),
             problem = { editor.presetNameProblem(it, n.preset) },
             onDone = { name ->
                 if (n.preset == null) editor.newPreset(name)
@@ -162,10 +162,10 @@ fun PresetsPane(editor: Editor, modifier: Modifier) {
     deleting?.let { preset ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("Delete “${preset.name}”?") },
-            text = { Text("The preset is removed from Negs. The photo you’re editing keeps its settings.") },
-            confirmButton = { TextButton(onClick = { editor.deletePreset(preset); deleting = null }) { Text("Delete", color = Palette.danger) } },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel", color = Palette.fg) } },
+            title = { Text(tr("Delete “{name}”?", "name" to preset.name)) },
+            text = { Text(tr("The preset is removed from Negs. The photo you’re editing keeps its settings.")) },
+            confirmButton = { TextButton(onClick = { editor.deletePreset(preset); deleting = null }) { Text(tr("Delete"), color = Palette.danger) } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(tr("Cancel"), color = Palette.fg) } },
             containerColor = Palette.panel,
         )
     }
@@ -234,10 +234,15 @@ private fun PresetTile(
                     Text(
                         buildAnnotatedString {
                             if (valid.scan) {
-                                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("scanned directly") }
+                                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(tr("scanned directly")) }
                             } else {
-                                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("printed on ") }
-                                append(catalog?.stock(valid.paper)?.name ?: valid.paper)
+                                // The paper's name upright, the words around it in italics.
+                                val paper = catalog?.stock(valid.paper)?.name ?: valid.paper
+                                val line = tr("printed on {paper}", "paper" to paper)
+                                val at = line.indexOf(paper).takeIf { it >= 0 } ?: line.length
+                                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(line.substring(0, at)) }
+                                if (at < line.length) append(paper)
+                                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(line.substring(minOf(line.length, at + paper.length))) }
                             }
                         },
                         color = Palette.faint, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -246,21 +251,21 @@ private fun PresetTile(
             }
             Box {
                 Icon(
-                    Icons.Default.MoreVert, "More for ${preset.name}", tint = Palette.faint,
+                    Icons.Default.MoreVert, tr("More for {name}", "name" to preset.name), tint = Palette.faint,
                     modifier = Modifier.clickable(enabled = editor.canChangePresets) { menu = true }.padding(4.dp).size(18.dp),
                 )
                 DropdownMenu(menu, onDismissRequest = { menu = false }) {
                     if (valid != null) {
-                        DropdownMenuItem(text = { Text("Apply") }, onClick = { menu = false; editor.applyPreset(preset) })
+                        DropdownMenuItem(text = { Text(tr("Apply")) }, onClick = { menu = false; editor.applyPreset(preset) })
                     }
-                    DropdownMenuItem(text = { Text("Rename…") }, onClick = { menu = false; onRename() })
+                    DropdownMenuItem(text = { Text(tr("Rename…")) }, onClick = { menu = false; onRename() })
                     if (valid != null) {
-                        DropdownMenuItem(text = { Text("Share…") }, onClick = { menu = false; onShare() })
-                        DropdownMenuItem(text = { Text("Save as file…") }, onClick = { menu = false; onSave() })
+                        DropdownMenuItem(text = { Text(tr("Share…")) }, onClick = { menu = false; onShare() })
+                        DropdownMenuItem(text = { Text(tr("Save as file…")) }, onClick = { menu = false; onSave() })
                     }
-                    if (index > 0) DropdownMenuItem(text = { Text("Move earlier") }, onClick = { menu = false; editor.movePreset(preset, -1) })
-                    if (index in 0 until editor.presets.lastIndex) DropdownMenuItem(text = { Text("Move later") }, onClick = { menu = false; editor.movePreset(preset, 1) })
-                    DropdownMenuItem(text = { Text("Delete…", color = Palette.danger) }, onClick = { menu = false; onDelete() })
+                    if (index > 0) DropdownMenuItem(text = { Text(tr("Move earlier")) }, onClick = { menu = false; editor.movePreset(preset, -1) })
+                    if (index in 0 until editor.presets.lastIndex) DropdownMenuItem(text = { Text(tr("Move later")) }, onClick = { menu = false; editor.movePreset(preset, 1) })
+                    DropdownMenuItem(text = { Text(tr("Delete…"), color = Palette.danger) }, onClick = { menu = false; onDelete() })
                 }
             }
         }
@@ -296,7 +301,7 @@ private fun NameDialog(
                 Text(confirm, fontWeight = FontWeight.SemiBold, color = if (problem(field.text) == null) Palette.accent else Palette.faint)
             }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel", color = Palette.fg) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(tr("Cancel"), color = Palette.fg) } },
         containerColor = Palette.panel,
     )
 }

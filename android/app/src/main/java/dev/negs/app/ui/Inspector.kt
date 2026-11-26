@@ -83,6 +83,7 @@ import dev.negs.app.bool
 import dev.negs.app.json
 import dev.negs.app.number
 import dev.negs.app.text
+import dev.negs.app.tr
 
 /** The sheet's tabs and their contents (web/app.js TABS, buildControls). */
 object Inspector {
@@ -118,13 +119,13 @@ object Inspector {
         val skipped = section.print && editor.get("io.scan_film").bool() == true
         item(key = "h:${section.title}") {
             Text(
-                section.title.uppercase(), color = Palette.faint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                tr(section.title).uppercase(), color = Palette.faint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 letterSpacing = 0.7.sp, modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 6.dp),
             )
         }
         if (skipped && section.footer != null) {
             item(key = "f:${section.title}") {
-                Text(section.footer, color = Palette.muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+                Text(tr(section.footer), color = Palette.muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
             }
         }
         val loose = section.controls.filter { shows(editor, it, basic = !it.advanced) }
@@ -207,7 +208,7 @@ object Inspector {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = Palette.faint, modifier = Modifier.size(18.dp))
-            Text(group.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp).weight(1f))
+            Text(tr(group.title), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp).weight(1f))
             val enable = group.enable
             if (enable != null) {
                 Switch(
@@ -229,7 +230,7 @@ object Inspector {
     private fun ControlRow(editor: Editor, c: Control, enabled: Boolean) {
         when (c) {
             is Slider -> SliderRow(
-                c.label, editor.get(c.path).number() ?: editor.defaultValue(c.path).number() ?: c.min,
+                tr(c.label), editor.get(c.path).number() ?: editor.defaultValue(c.path).number() ?: c.min,
                 c.min, c.max, c.step, enabled, editor.isModified(c.path),
                 onReset = { editor.defaultValue(c.path)?.let { editor.set(c.path, it) } },
                 onChange = { v, moving -> editor.set(c.path, v.json(), moving) },
@@ -238,7 +239,7 @@ object Inspector {
             is StockLane -> {
                 val defaults = editor.stockDefaults(c.path)
                 SliderRow(
-                    if (editor.filmIsBW()) c.bw ?: c.label else c.label,
+                    tr(if (editor.filmIsBW()) c.bw ?: c.label else c.label),
                     editor.stockValues(c.path).getOrNull(c.index) ?: 0.0, c.min, c.max, c.step, enabled,
                     editor.get(c.path) != null,
                     onReset = { defaults.getOrNull(c.index)?.let { editor.setStock(c.path, c.index, it, false) } },
@@ -246,16 +247,16 @@ object Inspector {
                     onDone = editor::settle,
                 )
             }
-            is Toggle -> SwitchRow(c.label, editor.get(c.path).bool() == true, enabled) { editor.set(c.path, it.json()) }
-            is Choice -> ChoiceRow(c.label, editor.get(c.path).text() ?: "", c.options, enabled) { editor.set(c.path, it.json()) }
+            is Toggle -> SwitchRow(tr(c.label), editor.get(c.path).bool() == true, enabled) { editor.set(c.path, it.json()) }
+            is Choice -> ChoiceRow(tr(c.label), editor.get(c.path).text() ?: "", c.options, enabled) { editor.set(c.path, it.json()) }
             is Action -> OutlinedButton(onClick = editor::balancePrint, enabled = enabled && !editor.balancing) {
-                Text(if (editor.balancing) "Balancing…" else c.label, color = Palette.fg)
+                Text(if (editor.balancing) tr("Balancing…") else tr(c.label), color = Palette.fg)
             }
             is ColorFilters -> ColorFilterRow(editor, c.path, enabled)
             is BorderControl -> BorderRow(editor, c)
-            is MatchSwitch -> SwitchRow(c.label, editor.match != null, enabled) { editor.setMatch(it) }
+            is MatchSwitch -> SwitchRow(tr(c.label), editor.match != null, enabled) { editor.setMatch(it) }
             is ExposureOffset -> SliderRow(
-                c.label, editor.exposureOffset(), -3.0, 3.0, 0.05, enabled, modified(editor, c),
+                tr(c.label), editor.exposureOffset(), -3.0, 3.0, 0.05, enabled, modified(editor, c),
                 onReset = { editor.setExposureOffset(0.0, false) },
                 onChange = { v, moving -> editor.setExposureOffset(v, moving) },
                 onDone = editor::settle,
@@ -285,7 +286,7 @@ object Inspector {
                 )
                 if (resettable) {
                     Text(
-                        "Reset", color = Palette.faint, fontSize = 11.sp,
+                        tr("Reset"), color = Palette.faint, fontSize = 11.sp,
                         modifier = Modifier.alpha(if (modified) 1f else 0f)
                             .clickable(enabled = modified, onClick = onReset)
                             .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -318,10 +319,10 @@ object Inspector {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(label, color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
             Box {
-                OutlinedButton(onClick = { open = true }, enabled = enabled) { Text(Controls.optionTitle(value), color = Palette.fg) }
+                OutlinedButton(onClick = { open = true }, enabled = enabled) { Text(tr(Controls.optionTitle(value)), color = Palette.fg) }
                 DropdownMenu(open, onDismissRequest = { open = false }) {
                     options.forEach { option ->
-                        DropdownMenuItem(text = { Text(Controls.optionTitle(option)) }, onClick = { onChange(option); open = false })
+                        DropdownMenuItem(text = { Text(tr(Controls.optionTitle(option))) }, onClick = { onChange(option); open = false })
                     }
                 }
             }
@@ -335,11 +336,11 @@ object Inspector {
         val glasses = editor.catalog?.colorFilters.orEmpty()
         Column {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("None", current == "none", enabled, null) { editor.set(path, "none".json()) }
-                glasses.forEach { g -> Chip(g.name, current == g.key, enabled, Color(g.colour)) { editor.set(path, g.key.json()) } }
+                Chip(tr("None"), current == "none", enabled, null) { editor.set(path, "none".json()) }
+                glasses.forEach { g -> Chip(tr(g.name), current == g.key, enabled, Color(g.colour)) { editor.set(path, g.key.json()) } }
             }
             Text(
-                Controls.COLOR_FILTER_EFFECTS[current] ?: "", color = Palette.faint, fontSize = 12.sp,
+                Controls.COLOR_FILTER_EFFECTS[current]?.let { tr(it) } ?: "", color = Palette.faint, fontSize = 12.sp,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
@@ -368,23 +369,24 @@ object Inspector {
     private fun BorderRow(editor: Editor, c: BorderControl) {
         val b = editor.border
         val on = b.enabled
+        val label = tr(c.label)
         when (c.field) {
-            BorderField.Enabled -> SwitchRow(c.label, b.enabled, true) { v -> editor.updateBorder { it.copy(enabled = v) } }
+            BorderField.Enabled -> SwitchRow(label, b.enabled, true) { v -> editor.updateBorder { it.copy(enabled = v) } }
             BorderField.Style -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BorderStyle.entries.forEach { s -> Chip(s.title, b.style == s, on, null) { editor.updateBorder { it.copy(style = s) } } }
+                BorderStyle.entries.forEach { s -> Chip(tr(s.title), b.style == s, on, null) { editor.updateBorder { it.copy(style = s) } } }
             }
-            BorderField.Width -> PercentRow(c.label, b.width, 0.0, 15.0, on) { v -> editor.updateBorder { it.copy(width = v) } }
-            BorderField.FilmWidth -> PercentRow(c.label, b.filmWidth, 0.0, 15.0, on) { v -> editor.updateBorder { it.copy(filmWidth = v) } }
-            BorderField.Line -> PercentRow(c.label, b.line, 0.05, 2.0, on, step = 0.05) { v -> editor.updateBorder { it.copy(line = v) } }
-            BorderField.Color -> SwatchRow(c.label, b.color, on) { v -> editor.updateBorder { it.copy(color = v) } }
-            BorderField.LineColor -> SwatchRow(c.label, b.lineColor, on) { v -> editor.updateBorder { it.copy(lineColor = v) } }
-            BorderField.Instagram -> SwitchRow(c.label, b.instagram, on) { v -> editor.updateBorder { it.copy(instagram = v) } }
-            BorderField.Export -> SwitchRow(c.label, b.export, on) { v -> editor.updateBorder { it.copy(export = v) } }
+            BorderField.Width -> PercentRow(label, b.width, 0.0, 15.0, on) { v -> editor.updateBorder { it.copy(width = v) } }
+            BorderField.FilmWidth -> PercentRow(label, b.filmWidth, 0.0, 15.0, on) { v -> editor.updateBorder { it.copy(filmWidth = v) } }
+            BorderField.Line -> PercentRow(label, b.line, 0.05, 2.0, on, step = 0.05) { v -> editor.updateBorder { it.copy(line = v) } }
+            BorderField.Color -> SwatchRow(label, b.color, on) { v -> editor.updateBorder { it.copy(color = v) } }
+            BorderField.LineColor -> SwatchRow(label, b.lineColor, on) { v -> editor.updateBorder { it.copy(lineColor = v) } }
+            BorderField.Instagram -> SwitchRow(label, b.instagram, on) { v -> editor.updateBorder { it.copy(instagram = v) } }
+            BorderField.Export -> SwitchRow(label, b.export, on) { v -> editor.updateBorder { it.copy(export = v) } }
         }
         val size = editor.outputSize()
         if (c.field == BorderField.Style && on && size != null && !b.fits(size.first, size.second)) {
             Text(
-                "The 35mm strip needs a 3:2 or 3:4 photograph. Crop it to one of those to see it.",
+                tr("The 35mm strip needs a 3:2 or 3:4 photograph. Crop it to one of those to see it."),
                 color = Palette.faint, fontSize = 12.sp, modifier = Modifier.padding(top = 36.dp),
             )
         }
@@ -427,7 +429,7 @@ object Inspector {
             if (query.isNotEmpty()) return groups.map { it.first to matching(it.second) }
             val listed = groups.flatMap { it.second }.associateBy { it.id }
             val favorites = starred.mapNotNull { listed[it] }
-            return listOf("★ Favorites" to favorites) + groups
+            return listOf(FAVORITES to favorites) + groups
         }
         stockGrid("Film", withFavorites(catalog.filmGroups(editor.edit.film, editor.fotufilmFilms, editor.showNegsBuilt), editor.favoriteFilms), editor) { editor.chooseFilm(it.id) }
         if (editor.get("io.scan_film").bool() != true) {
@@ -435,7 +437,7 @@ object Inspector {
         } else {
             item(key = "scanned") {
                 Text(
-                    "Scanned directly: no paper.", color = Palette.faint, fontSize = 12.sp,
+                    tr("Scanned directly: no paper."), color = Palette.faint, fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 )
             }
@@ -446,7 +448,7 @@ object Inspector {
     private fun StockSearch(editor: Editor) {
         OutlinedTextField(
             value = editor.stockQuery, onValueChange = { editor.stockQuery = it },
-            placeholder = { Text("Search films and papers", color = Palette.faint, fontSize = 13.sp) },
+            placeholder = { Text(tr("Search films and papers"), color = Palette.faint, fontSize = 13.sp) },
             singleLine = true, keyboardOptions = KeyboardOptions.Default,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = Palette.fg),
@@ -454,13 +456,15 @@ object Inspector {
     }
 
     private const val COLUMNS = 3
+    /** The favourites' group, ahead of the others. */
+    private const val FAVORITES = "★ Favorites"
 
     private fun LazyListScope.stockGrid(title: String, groups: List<Pair<String, List<Stock>>>, editor: Editor, choose: (Stock) -> Unit) {
         if (groups.all { it.second.isEmpty() }) return
         item(key = "t:$title") {
             val current = if (title == "Film") editor.edit.film else editor.edit.paper
             Row(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(tr(title), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Spacer(Modifier.weight(1f))
                 Text(editor.catalog?.stock(current)?.name ?: current, color = Palette.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -469,16 +473,46 @@ object Inspector {
             if (stocks.isEmpty()) continue
             item(key = "gt:$title:$group") {
                 Text(
-                    group.uppercase(), color = Palette.faint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    (if (group == FAVORITES) "★ " + tr("Favorites") else tr(group)).uppercase(), color = Palette.faint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 14.dp, top = 12.dp, bottom = 6.dp),
                 )
             }
-            items(stocks.chunked(COLUMNS), key = { row -> "r:$title:$group:" + row.joinToString { it.id } }) { row ->
-                Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { stock -> StockTile(editor, stock, Modifier.weight(1f), choose) }
-                    repeat(COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
+            if (editor.stockPreviews) {
+                items(stocks.chunked(COLUMNS), key = { row -> "r:$title:$group:" + row.joinToString { it.id } }) { row ->
+                    Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { stock -> StockTile(editor, stock, Modifier.weight(1f), choose) }
+                        repeat(COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
+            } else {
+                items(stocks, key = { "s:$title:$group:${it.id}" }) { stock -> StockRow(editor, stock, choose) }
             }
+        }
+    }
+
+    /** Without previews (Settings › Film and paper previews): the stock by name, as the web's menus list it. */
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    @Composable
+    private fun StockRow(editor: Editor, stock: Stock, choose: (Stock) -> Unit) {
+        val selected = stock.id == (if (stock.paper) editor.edit.paper else editor.edit.film)
+        val favorite = editor.isFavorite(stock)
+        Row(
+            Modifier.fillMaxWidth().height(40.dp)
+                .combinedClickable(onClick = { choose(stock) }, onLongClick = { editor.toggleFavorite(stock) })
+                .background(if (selected) Palette.accent.copy(alpha = .15f) else Color.Transparent)
+                .padding(start = 14.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stock.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                color = if (selected) Palette.fg else Palette.muted, modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
+                tr(if (favorite) "Remove {name} from favorites" else "Add {name} to favorites", "name" to stock.name),
+                tint = if (favorite) Palette.accent else Palette.faint,
+                modifier = Modifier.clip(CircleShape).clickable { editor.toggleFavorite(stock) }.padding(8.dp).size(18.dp),
+            )
         }
     }
 
@@ -509,7 +543,7 @@ object Inspector {
                 }
                 Icon(
                     if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
-                    if (favorite) "Remove ${stock.name} from favorites" else "Add ${stock.name} to favorites",
+                    tr(if (favorite) "Remove {name} from favorites" else "Add {name} to favorites", "name" to stock.name),
                     tint = if (favorite) Palette.accent else Color.White.copy(alpha = .7f),
                     modifier = Modifier.align(Alignment.TopEnd).clickable { editor.toggleFavorite(stock) }
                         .padding(3.dp).size(18.dp),
