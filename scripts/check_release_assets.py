@@ -27,6 +27,8 @@ def expected(version):
         # Linux: Flatpak bundle and AppImage with its LGPL corresponding source
         'SHA256SUMS-flatpak', f'negs-{v}-linux-x86_64.flatpak',
         'SHA256SUMS-appimage', f'Negs-{v}-x86_64.AppImage', f'negs-{v}-appimage-sources.tar',
+        # Android
+        'SHA256SUMS-android.txt', f'Negs-{v}-android-arm64.apk',
     }
 
 

@@ -3,7 +3,7 @@
 #   cargo test --manifest-path windows/sheet-rules/Cargo.toml --target-dir target/sheet-rules
 [package]
 name = "negs-windows-sheet-rules"
-version = "0.20.1"
+version = "0.20.3"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false

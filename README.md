@@ -15,11 +15,13 @@ Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https:
 
 **[▶ Try it in your browser](https://getnegs.com/try/)** · nothing to install · your photos stay on your device
 
-**[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.20.1/Negs-0.20.1-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [install steps](#macos)
+**[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [install steps](#macos)
 
-**[Download for Windows](https://github.com/noahhaasis/negs/releases/download/v0.20.1/Negs-0.20.1-windows-x64-Setup.exe)** · Windows x64 · [portable version](https://github.com/noahhaasis/negs/releases/download/v0.20.1/Negs-0.20.1-windows-x64-portable.zip) · [install steps](#windows)
+**[Download for Windows](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-x64-Setup.exe)** · Windows x64 ([portable](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-x64-portable.zip)) · ARM64 ([installer](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-arm64-Setup.exe), [portable](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-arm64-portable.zip)) · [install steps](#windows)
 
-**Linux** · x86_64 · [Flatpak](https://github.com/noahhaasis/negs/releases/download/v0.20.1/negs-0.20.1-linux-x86_64.flatpak) · [AppImage](https://github.com/noahhaasis/negs/releases/download/v0.20.1/Negs-0.20.1-x86_64.AppImage) · [Arch and Omarchy](#arch-and-omarchy) · [install steps](#linux)
+**Linux** · x86_64 · [Flatpak](https://github.com/noahhaasis/negs/releases/download/v0.20.3/negs-0.20.3-linux-x86_64.flatpak) · [AppImage](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-x86_64.AppImage) · [Arch and Omarchy](#arch-and-omarchy) · [install steps](#linux)
+
+**[Download for Android](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-android-arm64.apk)** · Android 10 or later (arm64-v8a, Vulkan 1.1) · [install steps](#android)
 
 [getnegs.com](https://getnegs.com)
 
@@ -144,10 +146,10 @@ Native Windows app with the same film engine as the Mac app: GPU previews, crop 
 
 ![The Negs Windows app: a photo of Rome at dusk on Kodak Portra 800, with the film strip below and film and paper controls on the right](docs/readme/windows-app.webp)
 
-1. **Download** [`Negs-0.20.1-windows-x64-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.20.1/Negs-0.20.1-windows-x64-Setup.exe) and run it. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
+1. **Download** [`Negs-0.20.3-windows-x64-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-x64-Setup.exe) (or [`Negs-0.20.3-windows-arm64-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-arm64-Setup.exe) for Windows on Arm) and run it. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
 2. **If Windows SmartScreen warns you**, click **More info → Run anyway**. Negs isn't code-signed, which needs a paid certificate.
 
-Prefer no installer? Extract [`Negs-0.20.1-windows-x64-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.20.1/Negs-0.20.1-windows-x64-portable.zip) and run `Negs.exe`. Keep the included helper executables and `data` folder beside it.
+Prefer no installer? Extract [`Negs-0.20.3-windows-x64-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-x64-portable.zip) (or [`Negs-0.20.3-windows-arm64-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-windows-arm64-portable.zip)) and run `Negs.exe`. Keep the included helper executables and `data` folder beside it.
 
 Windows doesn't update itself yet: download the newer installer from the [releases page](https://github.com/noahhaasis/negs/releases) and run it over the old one. The editing panel and film strip start enabled, and F7/F6 toggle them during use.
 
@@ -159,10 +161,10 @@ Windows packages can be built from source with [`windows/package.ps1`](windows/p
 
 Native GTK4 app on the same film engine, for x86_64. There are three ways to install it; each needs a Vulkan driver for GPU acceleration (the engine falls back to the CPU without one).
 
-**Flatpak**, for any distribution with [Flatpak](https://flatpak.org/setup/). Download [`negs-0.20.1-linux-x86_64.flatpak`](https://github.com/noahhaasis/negs/releases/download/v0.20.1/negs-0.20.1-linux-x86_64.flatpak) and install it:
+**Flatpak**, for any distribution with [Flatpak](https://flatpak.org/setup/). Download [`negs-0.20.3-linux-x86_64.flatpak`](https://github.com/noahhaasis/negs/releases/download/v0.20.3/negs-0.20.3-linux-x86_64.flatpak) and install it:
 
 ```sh
-flatpak install --user negs-0.20.1-linux-x86_64.flatpak
+flatpak install --user negs-0.20.3-linux-x86_64.flatpak
 ```
 
 Flatpak fetches the GNOME runtime from Flathub if you don't have it. Negs runs sandboxed: it sees the photos and folders you open, and nothing else. Use **Open Folder…** to see a whole folder in the film strip. To update, install the newer bundle the same way.
@@ -170,11 +172,11 @@ Flatpak fetches the GNOME runtime from Flathub if you don't have it. Negs runs s
 **AppImage**, a single file that runs on Ubuntu 24.04 or newer, current Fedora, Arch and similar distributions, without installing anything:
 
 ```sh
-chmod +x Negs-0.20.1-x86_64.AppImage
-./Negs-0.20.1-x86_64.AppImage
+chmod +x Negs-0.20.3-x86_64.AppImage
+./Negs-0.20.3-x86_64.AppImage
 ```
 
-Download [`Negs-0.20.1-x86_64.AppImage`](https://github.com/noahhaasis/negs/releases/download/v0.20.1/Negs-0.20.1-x86_64.AppImage). If your system has no FUSE, run it with `--appimage-extract-and-run`. To update, download the newer AppImage. Settings and presets are kept in `~/.config/negs` either way.
+Download [`Negs-0.20.3-x86_64.AppImage`](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-x86_64.AppImage). If your system has no FUSE, run it with `--appimage-extract-and-run`. To update, download the newer AppImage. Settings and presets are kept in `~/.config/negs` either way.
 
 The AppImage prefers X11/XWayland when it's available, which avoids a GTK crash reported on some Wayland desktops. To use native Wayland anyway, run it with `GDK_BACKEND=wayland`.
 
@@ -195,6 +197,13 @@ sudo pacman -S --needed gtk4 libadwaita vulkan-icd-loader
 ```
 
 Run `negs` (or `~/.local/bin/negs` if `~/.local/bin` isn't on your `PATH`) or open it from your launcher. To update, run the command again; to remove it, run `python3 ~/.local/share/negs/install.py --uninstall`. Your settings and photos are kept.
+
+### Android
+
+Native Android app (arm64-v8a, Android 10 / Vulkan 1.1 or later) on the same film engine: live GPU previews, crop and straighten, borders, brightness match, presets, `.cube` LUT export, and full-resolution tiled GPU exports (up to 60 MP RAWs).
+
+1. **Download** [`Negs-0.20.3-android-arm64.apk`](https://github.com/noahhaasis/negs/releases/download/v0.20.3/Negs-0.20.3-android-arm64.apk) on your phone.
+2. **Install it.** Open the downloaded `.apk` and allow installing unknown apps from your browser or file manager if Android asks.
 
 ### Handy shortcuts
 

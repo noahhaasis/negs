@@ -57,6 +57,16 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.20.3" date="2026-11-26">
+      <description>
+        <p>A bugfix release: iPhone ProRAW DNGs no longer turn magenta at Daylight, Tungsten or Custom RAW white balance (issue #31).</p>
+      </description>
+    </release>
+    <release version="0.20.2" date="2026-11-26">
+      <description>
+        <p>Native Android app, Windows on Arm (ARM64) builds, DNG GainMap lens shading support across all RAW decode paths (issue #9), byte-identical shared tiled GPU export for Android and mobile Web, and a macOS canvas layout crash fix.</p>
+      </description>
+    </release>
     <release version="0.20.1" date="2026-11-25">
       <description>
         <p>A bugfix release for Windows: large folders no longer make the app sluggish.</p>
