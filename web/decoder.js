@@ -43,10 +43,13 @@ onmessage = async ({ data: { dispose, threads, bytes, maxDim, maxPixels, rawDeve
       message = [{ result: { pixels, width: made.width, height: made.height, ms: performance.now() - t } }, [pixels.buffer]];
       made.free();
     } else {
-      // Explicit benchmark switch only; the shipping/default route is unchanged.
+      // Use bounded banded Bayer develop automatically for >40 MP Bayer RAWs
+      // unless ?rawDevelop=legacy is explicitly requested.
       const decoded = rawDevelop === "bounded" || rawDevelop === "force"
         ? module.decodeBounded(bytes, maxDim, maxPixels, rawDevelop === "force", whiteBalance)
-        : module.decode(bytes, maxDim, maxPixels, whiteBalance);
+        : rawDevelop === "legacy"
+          ? module.decode(bytes, maxDim, maxPixels, whiteBalance)
+          : module.decodeAuto(bytes, maxDim, maxPixels, whiteBalance);
       const pixels = decoded.takePixels();
       message = [{ result: { pixels, width: decoded.width, height: decoded.height, fullWidth: decoded.fullWidth, fullHeight: decoded.fullHeight,
         colour: decoded.colour, bounded: decoded.bounded, decodeMs: performance.now() - t, readyMs, memoryMiB: Math.round(module.memoryBytes() / 2 ** 20) } }, [pixels.buffer]];

@@ -275,6 +275,9 @@ window.NEGS_I18N.dict = {
   "Film and paper previews": "胶片与相纸预览",
   "Show each film and paper on your photograph. They use about 100 MB, and turn off if Negs runs out of memory.":
     "在你的照片上预览每种胶片和相纸。大约占用 100 MB，内存不足时会自动关闭。",
+  "Full-resolution export": "全分辨率导出",
+  "Export every pixel of the photograph. Slower and uses more memory on phones; turns off if Negs runs out of memory.":
+    "导出照片的全部像素。在手机上速度较慢且占用更多内存，内存不足时会自动关闭。",
   "Fotufilm films": "Fotufilm 胶片",
   "All": "全部",
   "From datasheets": "仅限数据表",
@@ -429,7 +432,7 @@ window.NEGS_I18N.dict = {
   "shown at {percent}": "按 {percent} 显示",
   "The preview shows {percent} of these pixels. {note}; inspect grain in an exported file.\n{stages}":
     "预览显示了其中 {percent} 的像素。{note}；请在导出的文件中查看颗粒。\n{stages}",
-  "Exports here develop {width} × {height}; a desktop browser exports all of them": "此处导出以 {width} × {height} 显影，桌面浏览器会导出全部像素",
+  "Exports here develop {width} × {height}; enable Full-resolution export in Settings to export all of them": "此处导出以 {width} × {height} 显影，可在设置中开启全分辨率导出以导出全部像素",
   "Exports develop all of them": "导出会显影全部像素",
   "Matching…": "匹配中…",
   "Starts at {value} EV to match the camera.": "为匹配相机亮度，起始曝光为 {value} EV。",
@@ -453,6 +456,9 @@ window.NEGS_I18N.dict = {
   "Print balanced: magenta {m}, yellow {y}": "放印已平衡：品红 {m}，黄 {y}",
   "Couldn't open {name}": "无法打开 {name}",
   "Rendering {width}×{height} for export…": "正在以 {width}×{height} 渲染导出…",
+  "Decoding {width}×{height} for export…": "正在解码 {width}×{height} 准备导出…",
+  "Exporting {width}×{height} ({done}/{total})…": "正在导出 {width}×{height}（{done}/{total}）…",
+  "Encoding {width}×{height} JPEG…": "正在编码 {width}×{height} JPEG…",
   "Exported.": "已导出。",
   "Save or share…": "保存或分享…",
   "Apply or cancel the crop before exporting": "导出前请先应用或取消裁剪",
@@ -472,6 +478,8 @@ window.NEGS_I18N.dict = {
   "The border couldn't be downloaded: {message}": "边框下载失败：{message}",
   "Negs ran out of memory and reloaded. Film and paper previews are now off to save memory.":
     "Negs 内存不足，已重新加载。为节省内存，胶片与相纸预览已关闭。",
+  "Negs ran out of memory during a full-resolution export and reloaded. Exports are now limited to 4.4 MP to save memory.":
+    "Negs 在全分辨率导出时内存不足，已重新加载。为节省内存，导出已限制为 440 万像素。",
   "Couldn't load sample choices: {message}": "无法加载示例列表：{message}",
   "Sample {n}": "示例 {n}",
   "Open the next sample photo": "打开下一张示例照片",

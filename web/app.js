@@ -133,7 +133,6 @@ async function startEngine(engineKind) {
     const [side, pixels] = await host.call("limits");
     limits = side ? { side, pixels } : null;
     if (side && DIFFUSION_GRID_BUDGET) await host.call("setDiffusionGridBudget", DIFFUSION_GRID_BUDGET);
-    if (keptPixels()) decoder ??= startDecoder();
     sync(); // Commands that need the engine.
     await attachCanvas();
   } catch (e) {
@@ -1212,17 +1211,24 @@ async function pump() {
 // Touch screens stop at 4.4 MP (2560×1707): on the iPhone 13 Pro, 3072 px
 // frames and a 12 MP export after edits got the tab killed from 1.4 GB
 // (docs/web-prep-port-plan.md).
-const MAX_PIXELS = matchMedia("(pointer: coarse)").matches ? 4.4e6 : 40e6;
+const COARSE = matchMedia("(pointer: coarse)").matches;
+const MAX_PIXELS = COARSE ? 4.4e6 : 40e6;
 const CPU_PIXELS = 4e6;
 let limits = null;       // the WebGPU engine's: { side, pixels }
 
-// The pixels the engine keeps of a photograph, 0 for all. A phone or tablet,
-// whose tab iOS ends from about 1.5 GB, keeps no more than it ever renders,
-// and exports that copy: a full-size export there doesn't fit, so the desktop
-// exports every pixel. The same budget as renderSide's, so its largest frame
-// is this copy at 1:1.
+// On touch devices, exports can either develop every pixel in a dedicated
+// tiled export worker (`fullExportOn = true`, default) or export the smaller
+// 4.4 MP working copy (`fullExportOn = false`, fast and low-memory). A memory
+// kill during a full-resolution export turns it off automatically (`crashCheck`).
+let fullExportOn = remembered("fullExport", true);
+const fullExportActive = () => !COARSE || fullExportOn;
+
+// The pixels the engine keeps of a photograph while editing, 0 for all. A
+// phone or tablet, whose tab iOS ends from about 1.5 GB, keeps a working copy
+// no larger than it renders on screen; full-resolution exports develop the
+// original bytes in tiles inside a short-lived worker (`web/exporter.js`).
 const keptPixels = () => query.has("kept") ? Number(query.get("kept")) // measurement only: the working copy's size
-  : (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
+  : (COARSE ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
 // The engine's photograph from `bytes`, a RAW developed at `wb` (the edit's
 // io.raw_white_balance). Only through `source` (below). A decode made in
 // web/decoder.js is dropped instead of kept when `stale()` says by then it
@@ -1249,17 +1255,15 @@ async function loadPhoto(bytes, wb, { stale = () => false } = {}) {
   return { ...size, decodeMs: decoded.decodeMs };
 }
 
-// web/decoder.js on `bytes`, kept within `maxPixels`. Each decodes once;
-// the next starts after, so it has compiled by the next photograph.
-let decoder = null;
-function startDecoder() {
+// web/decoder.js on `bytes`, kept within `maxPixels`. Spawned on demand and
+// terminated immediately when done so no idle threaded WASM pool sits in
+// Safari's memory alongside the editor or full-resolution exporter.
+function startDecoder(useThreads = threads) {
   const worker = new Worker("decoder.js", { type: "module" });
-  worker.postMessage({ threads });
+  worker.postMessage({ threads: useThreads });
   return worker;
 }
-function decodeKept(bytes, maxPixels, whiteBalance) {
-  const worker = decoder ?? startDecoder();
-  decoder = null;
+function decodeKeptWith(bytes, maxPixels, whiteBalance, worker) {
   // A panic on one of its rayon threads says so here, as the engine's do;
   // its instance is 0, which no engine is.
   const panics = new BroadcastChannel("negs-engine-panic");
@@ -1271,17 +1275,31 @@ function decodeKept(bytes, maxPixels, whiteBalance) {
   }).finally(() => {
     panics.close();
     worker.terminate();
-    decoder ??= startDecoder();
   });
+}
+async function decodeKept(bytes, maxPixels, whiteBalance) {
+  try {
+    return await decodeKeptWith(bytes, maxPixels, whiteBalance, startDecoder());
+  } catch (e) {
+    // In long-lived Safari tabs, creating another 4 GiB shared WebAssembly.Memory
+    // for rayon can fail with Out of memory; retry once without shared memory.
+    if (!threads || !/out of memory/i.test(String(e?.message ?? e))) throw e;
+    console.warn("Threaded decoder hit Out of memory; retrying single-threaded.");
+    return decodeKeptWith(bytes, maxPixels, whiteBalance, startDecoder(false));
+  }
 }
 // A diffusion filter's FFT grid, several times the frame, may take this much
 // there, 0 for any: past it, the engine makes the glow from a copy of the
 // frame shrunk 2× or more (a 12 MP export's default diffusion halves, which
 // differs from the exact glow by at most 0.5 ΔE00). Previews fit as they are.
 const DIFFUSION_GRID_BUDGET = matchMedia("(pointer: coarse)").matches ? 160 * 2 ** 20 : 0;
-// The photograph as opened: its size as decoded, and as the engine keeps and
-// exports it.
-const opened = (name, bytes, size) => ({ name, bytes, width: size.width, height: size.height, exportWidth: size.kept, exportHeight: size.keptHeight });
+// The photograph as opened: its size as decoded, its kept working copy, and
+// the size an export will develop (full resolution unless limited on mobile).
+const opened = (name, bytes, size) => ({
+  name, bytes, width: size.width, height: size.height, keptWidth: size.kept, keptHeight: size.keptHeight,
+  get exportWidth() { return fullExportActive() ? this.width : this.keptWidth; },
+  get exportHeight() { return fullExportActive() ? this.height : this.keptHeight; },
+});
 function renderSide() {
   const long = Math.max(photo.width, photo.height), short = Math.min(photo.width, photo.height);
   const sideAt = (zoom) => Math.min(long, Math.round(long * zoom));
@@ -1868,7 +1886,9 @@ function setMatch(on) {
 // then ends, so the RAW's bytes and preview decode leave its memory.
 function cameraReference(target) {
   target.reference ??= new Promise((resolve, reject) => {
-    const worker = startDecoder();
+    // Embedded preview extraction is single-threaded; using the non-threaded
+    // module avoids an extra 4 GiB shared WebAssembly.Memory reservation in Safari.
+    const worker = startDecoder(false);
     worker.onmessage = ({ data: { result, error } }) => error ? reject(new Error(error)) : resolve(result);
     worker.onerror = (ev) => reject(new Error(ev.message || "the camera preview couldn't be read"));
     // It ends after its one answer (web/decoder.js).
@@ -2028,8 +2048,11 @@ function setPreviews(on) {
 // rarely opened again within the minute.
 const ALIVE = "alive";
 const lastLife = remembered(ALIVE, null);
+let exportingFull = false;
 function markAlive() {
-  if (document.visibilityState === "visible") remember(ALIVE, { previews: previewsOn, at: Date.now() });
+  if (document.visibilityState === "visible") {
+    remember(ALIVE, { previews: previewsOn, fullExport: fullExportOn, exportingFull, at: Date.now() });
+  }
 }
 setInterval(markAlive, 5000);
 const markGone = () => { try { localStorage.removeItem(`negs.${ALIVE}`); } catch {} };
@@ -2038,11 +2061,30 @@ addEventListener("pagehide", markGone);
 addEventListener("pageshow", markAlive);
 markAlive();
 
-// After a crash with the previews on, they go off (the tiles' memory is the
-// part of the tab that can go), and a note says so.
+function setFullExport(on) {
+  fullExportOn = !!on;
+  remember("fullExport", fullExportOn);
+  markAlive();
+  $("full-export").checked = fullExportOn;
+  if (photo) {
+    $("export").title = photo.exportWidth < photo.width ? `${exportNote()}.` : "";
+    if (lastHud) hud(...lastHud);
+  }
+}
+
+// After a memory crash: if it happened during a full-resolution mobile export,
+// fall back to the 4.4 MP working-copy export size; otherwise, if previews
+// were on, turn them off. Either way, tell the user and link to Settings.
 function crashCheck() {
   const fresh = Date.now() - (lastLife?.at ?? 0) < 60_000;
-  if (!lastLife?.previews || !fresh || !previewsOn) return;
+  if (!fresh) return;
+  if (COARSE && lastLife?.exportingFull && fullExportOn) {
+    setFullExport(false);
+    showMessage(tr("Negs ran out of memory during a full-resolution export and reloaded. Exports are now limited to 4.4 MP to save memory."), false, 20_000,
+      { label: tr("Settings"), run: () => openSettings() });
+    return;
+  }
+  if (!lastLife?.previews || !previewsOn) return;
   setPreviews(false);
   showMessage(tr("Negs ran out of memory and reloaded. Film and paper previews are now off to save memory."), false, 20_000,
     { label: tr("Settings"), run: () => openSettings() });
@@ -2050,11 +2092,13 @@ function crashCheck() {
 
 // ---- Settings ------------------------------------------------------------------
 
-// The gear's sheet: the previews (above), the Fotufilm films, new RAWs'
-// brightness match (the Prep switch also sets it) and the engine (its change
-// handler is below).
+// The gear's sheet: the previews (above), full-resolution export (on touch
+// devices), the Fotufilm films, new RAWs' brightness match (the Prep switch
+// also sets it) and the engine (its change handler is below).
 function openSettings() {
   $("previews").checked = previewsOn;
+  $("full-export-setting").hidden = !COARSE;
+  $("full-export").checked = fullExportOn;
   $("fotufilm-films").value = fotufilmFilms;
   $("negs-built-films").checked = showNegsBuilt;
   $("match-new-raws").checked = matchNewRaws();
@@ -2062,6 +2106,8 @@ function openSettings() {
   $("lang").value = lang;
   $("settings-dialog").showModal();
 }
+$("full-export-setting").hidden = !COARSE;
+$("full-export").addEventListener("change", () => setFullExport($("full-export").checked));
 $("advanced").addEventListener("change", () => {
   advanced = $("advanced").checked;
   remember("advanced", advanced);
@@ -2341,7 +2387,7 @@ function tutorialAdapter() {
 
 // What an export of the photograph develops.
 const exportNote = () => photo.exportWidth < photo.width
-  ? tr("Exports here develop {width} × {height}; a desktop browser exports all of them", { width: photo.exportWidth, height: photo.exportHeight })
+  ? tr("Exports here develop {width} × {height}; enable Full-resolution export in Settings to export all of them", { width: photo.exportWidth, height: photo.exportHeight })
   : tr("Exports develop all of them");
 
 // Opens `name`, whose bytes `data` resolves to. Until its first frame, a
@@ -2577,26 +2623,105 @@ async function failed(e, what) {
   }
 }
 
+let lastFullExport = null;
+
+// Full-resolution tiled export in a short-lived worker (`web/exporter.js`):
+// used on touch devices when exporting larger than the 4.4 MP working copy.
+async function exportFullTiled() {
+  if (cropSession) throw new Error(tr("Apply or cancel the crop before exporting"));
+  do await sourceReady(); while (!sourceCurrent());
+  const settings = structuredClone(crop), turn = rotation();
+  const paramsJson = params();
+  const whiteBalance = JSON.stringify(photo.wb ?? {});
+  const autoexposureEv = await host.call("autoexposureEv", state.film, paramsJson).catch(() => null);
+  const croppedSize = Crop.presentation(settings, turn, photo.width, photo.height);
+  const b = Border.exported(border, croppedSize.width, croppedSize.height);
+  const borderSpec = b ? { style: b.style, options: Border.options(b), instagram: b.instagram } : null;
+
+  // Release editing transient buffers before spawning the export worker so the
+  // tab stays well below iOS's per-process memory limit.
+  await host.call("releaseRenderBuffers").catch(() => {});
+  if (previewsOn) await host.call("releaseThumbnails").catch(() => {});
+
+  const worker = new Worker("exporter.js", { type: "module" });
+  const panics = new BroadcastChannel("negs-engine-panic");
+  return new Promise((resolve, reject) => {
+    worker.onmessage = ({ data: { progress, result, error } }) => {
+      if (progress) {
+        markAlive();
+        if (progress.stage === "decode") {
+          showMessage(tr("Decoding {width}×{height} for export…", { width: photo.width, height: photo.height }));
+        } else if (progress.stage === "render") {
+          showMessage(tr("Exporting {width}×{height} ({done}/{total})…", { width: progress.width, height: progress.height, done: progress.done, total: progress.total }));
+        } else if (progress.stage === "encode") {
+          showMessage(tr("Encoding {width}×{height} JPEG…", { width: progress.width, height: progress.height }));
+        }
+        return;
+      }
+      if (error) reject(new Error(error));
+      else resolve(result);
+    };
+    worker.onerror = (ev) => reject(new Error(ev.message || tr("the engine stopped")));
+    panics.onmessage = ({ data }) => data.instance === 0 && reject(new Error(tr("the engine crashed: {message}", { message: data.message })));
+    worker.postMessage({
+      // On WebGPU the film chain runs on the GPU, while RAW decompression and
+      // JPEG encoding are single-threaded; using the non-threaded module avoids
+      // a 4 GiB shared WebAssembly.Memory reservation and 4 rayon workers in
+      // Safari (which otherwise exhausts iOS Safari's WASM address space across
+      // repeated opens/exports). CPU exports still use threads when available.
+      threads: kind !== "gpu" && threads,
+      useGpu: kind === "gpu",
+      bytes: photo.bytes,
+      film: state.film,
+      paper: state.paper,
+      params: paramsJson,
+      whiteBalance,
+      autoexposureEv,
+      crop: settings,
+      rotation: turn,
+      border: borderSpec,
+      quality: 92,
+    });
+  }).finally(() => {
+    panics.close();
+    worker.terminate();
+  });
+}
+
 async function exportJpeg() {
   if (!photo || exporting || cropSession) return;
   exporting = true;
   const edit = editKey();
+  const useTiledFull = fullExportActive() && (photo.keptWidth < photo.width || photo.keptHeight < photo.height);
   $("export").disabled = true;
   showMessage(tr("Rendering {width}×{height} for export…", { width: photo.exportWidth, height: photo.exportHeight }));
   $("busy").classList.add("on");
   try {
     while (running || previewing) await new Promise((r) => setTimeout(r, 20));
     await matchSettled();
-    const r = await exportRender();
-    const canvas = new OffscreenCanvas(r.width, r.height);
     let blob;
-    try {
-      canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
-      blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
-    } finally {
-      // The JPEG owns its encoded bytes now. Release the full export-sized
-      // backing store even if encoding failed, rather than wait for page GC.
-      canvas.width = canvas.height = 1;
+    if (useTiledFull) {
+      exportingFull = true;
+      markAlive();
+      const res = await exportFullTiled();
+      lastFullExport = {
+        width: res.width, height: res.height, bytes: res.jpeg.length, backend: res.backend,
+        sourceKind: res.sourceKind, totalTiles: res.totalTiles, tileWidth: res.tileWidth,
+        tileHeight: res.tileHeight, halo: res.halo, memoryMiB: res.memoryMiB, elapsedMs: res.elapsedMs,
+      };
+      console.log(`exported full ${res.width}×${res.height} (${res.sourceKind}, ${res.totalTiles} tiles ${res.tileWidth}×${res.tileHeight} halo ${res.halo}, ${res.backend}) in ${res.elapsedMs.toFixed(0)} ms, ${res.memoryMiB} MiB, ${(res.jpeg.length / 2 ** 20).toFixed(2)} MiB JPEG`);
+      blob = new Blob([res.jpeg], { type: "image/jpeg" });
+    } else {
+      const r = await exportRender();
+      const canvas = new OffscreenCanvas(r.width, r.height);
+      try {
+        canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
+        blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+      } finally {
+        // The JPEG owns its encoded bytes now. Release the full export-sized
+        // backing store even if encoding failed, rather than wait for page GC.
+        canvas.width = canvas.height = 1;
+      }
     }
     const name = `${photo.name.replace(/\.[^.]+$/, "")}-${state.film}.jpg`;
     const file = new File([blob], name, { type: "image/jpeg" });
@@ -2614,6 +2739,8 @@ async function exportJpeg() {
   } catch (e) {
     await failed(e, tr("Export failed"));
   } finally {
+    exportingFull = false;
+    markAlive();
     exporting = false;
     $("export").disabled = !photo;
     $("busy").classList.remove("on");
@@ -2886,8 +3013,6 @@ addEventListener("beforeunload", (e) => {
 // back to starts a new engine when it's shown again.
 addEventListener("pagehide", () => {
   host?.kill();
-  decoder?.postMessage({ dispose: true });
-  decoder = null;
 });
 addEventListener("pageshow", (e) => {
   if (e.persisted) starting = startEngine(kind).catch((e) => showMessage(tr("The engine didn't start: {message}", { message: e.message }), true));
@@ -2963,6 +3088,8 @@ globalThis.negs = {
       failed: tiles.filter(({ tile, request }) => tile.failed === request.key).length, previewing, stats: previewStats.slice() };
   },
   setPreviews: (on) => setPreviews(!!on),
+  fullExport: () => ({ on: fullExportOn, active: fullExportActive(), last: lastFullExport }),
+  setFullExport: (on) => setFullExport(!!on),
   // One preview of the whole frame within `side`, for measurements.
   thumbnail: (side, film = state.film, paper = state.paper) => host.call("thumbnail", film, paper, params(), side, PREVIEW_PIPELINES, Crop.defaults(), 0),
   // Opens or folds the Film and Paper foldouts.

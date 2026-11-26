@@ -184,6 +184,191 @@ pub fn extend_for_instagram(
     centered(bordered, w, h, fill.values(encoding))
 }
 
+/// Compact sRGB RGB8 counterpart of [`extend_for_instagram`], avoiding the
+/// 12 B/px f32 `ImageBuf` allocation on large mobile browser exports.
+pub fn extend_for_instagram_rgb8(
+    bordered: &[u8],
+    width: u32,
+    height: u32,
+    style: BorderStyle,
+    options: &BorderOptions,
+) -> (Vec<u8>, u32, u32) {
+    let (cw, ch) = instagram_canvas(width, height, style);
+    let fill = match style {
+        BorderStyle::Solid | BorderStyle::Keyline => options.color.0,
+        BorderStyle::Film | BorderStyle::Film35 => Rgb::WHITE.0,
+    };
+    (centered_rgb8(bordered, width, height, cw, ch, fill), cw, ch)
+}
+
+/// Compact sRGB RGB8 counterpart of [`add_border_with`], keeping 3 B/px
+/// throughout so 60 MP bordered exports fit within mobile browser memory.
+pub fn add_border_rgb8_with(
+    rgb: &[u8],
+    w: u32,
+    h: u32,
+    style: BorderStyle,
+    options: &BorderOptions,
+    film: &str,
+    load: &dyn Fn(&str) -> Result<image::DynamicImage>,
+) -> Result<(Vec<u8>, u32, u32)> {
+    ensure!(
+        rgb.len() == (w as usize) * (h as usize) * 3,
+        "the bytes aren't width × height RGB8"
+    );
+    let width = options.width(style);
+    ensure!(
+        (0.0..=1.0).contains(&width) && (0.0..=1.0).contains(&options.line),
+        "Border widths are fractions of the long edge, from 0 to 1"
+    );
+    let color = options.color.0;
+    let line_color = options.line_color.0;
+    Ok(match style {
+        BorderStyle::Solid => framed_rgb8(rgb, w, h, margin(w, h, width), 0, color, line_color),
+        BorderStyle::Keyline => framed_rgb8(
+            rgb,
+            w,
+            h,
+            margin(w, h, width),
+            keyline_width(w, h, options.line),
+            color,
+            line_color,
+        ),
+        BorderStyle::Film => {
+            let mut texture = load(FILM_TEXTURE)?.to_rgba8();
+            if h > w {
+                texture = imageops::rotate270(&texture);
+            }
+            let (inset, pad) = film_geometry(w, h);
+            let black = Rgb::BLACK.0;
+            let (mut out, mut ow, mut oh) = framed_rgb8(rgb, w, h, inset, 0, black, black);
+            overlay_nine_patch_rgb8(&mut out, ow, oh, texture, pad);
+            let extra = margin(w, h, width);
+            if extra > 0 {
+                let (cw, ch) = (ow + 2 * extra, oh + 2 * extra);
+                out = centered_rgb8(&out, ow, oh, cw, ch, black);
+                ow = cw;
+                oh = ch;
+            }
+            (out, ow, oh)
+        }
+        BorderStyle::Film35 => {
+            let format = FilmFormat::of(w, h).with_context(|| {
+                format!("The 35mm border needs a 3:2 or 3:4 photograph, not {w} × {h}")
+            })?;
+            let strip = Strip::load_with(load, film, format)?;
+            let (cw, ch) = strip.canvas(w, h);
+            let mut out = centered_rgb8(rgb, w, h, cw, ch, Rgb::BLACK.0);
+            overlay_strip_rgb8(&mut out, cw, ch, &strip.renderer(cw, ch, strip.turned(w, h)));
+            (out, cw, ch)
+        }
+    })
+}
+
+fn centered_rgb8(src: &[u8], w: u32, h: u32, cw: u32, ch: u32, fill: [u8; 3]) -> Vec<u8> {
+    let (w, h, cw, ch) = (w as usize, h as usize, cw as usize, ch as usize);
+    let (x0, y0) = ((cw - w) / 2, (ch - h) / 2);
+    let mut data = vec![0u8; cw * ch * 3];
+    data.par_chunks_exact_mut(cw * 3).enumerate().for_each(|(y, row)| {
+        for p in row.chunks_exact_mut(3) {
+            p.copy_from_slice(&fill);
+        }
+        if y >= y0 && y < y0 + h {
+            let s = &src[(y - y0) * w * 3..][..w * 3];
+            row[x0 * 3..(x0 + w) * 3].copy_from_slice(s);
+        }
+    });
+    data
+}
+
+fn framed_rgb8(
+    src: &[u8],
+    w: u32,
+    h: u32,
+    margin: u32,
+    line: u32,
+    fill: [u8; 3],
+    line_color: [u8; 3],
+) -> (Vec<u8>, u32, u32) {
+    let offset = (margin + line) as usize;
+    let (w, h) = (w as usize, h as usize);
+    let (cw, ch) = (w + 2 * offset, h + 2 * offset);
+    let mut data = vec![0u8; cw * ch * 3];
+    let ring = margin as usize..ch - margin as usize;
+    data.par_chunks_exact_mut(cw * 3).enumerate().for_each(|(y, row)| {
+        for p in row.chunks_exact_mut(3) {
+            p.copy_from_slice(&fill);
+        }
+        if line > 0 && ring.contains(&y) {
+            for p in row[margin as usize * 3..(cw - margin as usize) * 3].chunks_exact_mut(3) {
+                p.copy_from_slice(&line_color);
+            }
+        }
+        if (offset..offset + h).contains(&y) {
+            let s = &src[(y - offset) * w * 3..][..w * 3];
+            row[offset * 3..(offset + w) * 3].copy_from_slice(s);
+        }
+    });
+    (data, cw as u32, ch as u32)
+}
+
+fn overlay_nine_patch_rgb8(out: &mut [u8], dw: u32, dh: u32, mut texture: RgbaImage, pad: u32) {
+    let scale = dw.min(dh) as f64 / texture.width().min(texture.height()) as f64;
+    if scale < 1.0 {
+        let size = |v: u32| ((v as f64 * scale).round() as u32).max(2 * pad + 1);
+        texture = imageops::resize(
+            &texture,
+            size(texture.width()),
+            size(texture.height()),
+            imageops::FilterType::Triangle,
+        );
+    }
+    let scale = dw.min(dh) as f64 / texture.width().min(texture.height()) as f64;
+    let xs = axis(dw, texture.width(), scale, pad);
+    let ys = axis(dh, texture.height(), scale, pad);
+    let (tw, texels) = (texture.width() as usize, texture.as_raw());
+    out.par_chunks_exact_mut(dw as usize * 3)
+        .zip(ys.par_iter())
+        .for_each(|(row, &(y0, y1, fy))| {
+            for (pixel, &(x0, x1, fx)) in row.chunks_exact_mut(3).zip(&xs) {
+                let taps = [
+                    ((y0 * tw + x0) * 4, (1.0 - fx) * (1.0 - fy)),
+                    ((y0 * tw + x1) * 4, fx * (1.0 - fy)),
+                    ((y1 * tw + x0) * 4, (1.0 - fx) * fy),
+                    ((y1 * tw + x1) * 4, fx * fy),
+                ];
+                let alpha: f32 = taps.iter().map(|&(i, k)| texels[i + 3] as f32 * k).sum::<f32>() / 255.0;
+                if alpha <= 0.0 {
+                    continue;
+                }
+                for c in 0..3 {
+                    let tex: f32 = taps.iter().map(|&(i, k)| texels[i + c] as f32 * k).sum::<f32>() / 255.0;
+                    let dst = pixel[c] as f32 / 255.0;
+                    pixel[c] = ((tex * alpha + dst * (1.0 - alpha)).clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
+            }
+        });
+}
+
+fn overlay_strip_rgb8(out: &mut [u8], width: u32, _height: u32, renderer: &Renderer) {
+    let encoding = Encoding::new("sRGB", true);
+    let w = width as usize;
+    out.par_chunks_exact_mut(w * 3).enumerate().for_each(|(y, row)| {
+        let mut strip = vec![[0.0; 4]; w];
+        renderer.row(y as u32, &mut strip);
+        for (pixel, &[r, g, b, alpha]) in row.chunks_exact_mut(3).zip(&strip) {
+            if alpha <= 0.0 {
+                continue;
+            }
+            let colour = encoding.from_linear_srgb([r, g, b]);
+            for (value, c) in pixel.iter_mut().zip(colour) {
+                let dst = *value as f32 / 255.0;
+                *value = ((c * alpha + dst * (1.0 - alpha)).clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
+    });
+}
+
 /// The 120 film frame's texture, in the data directory.
 pub const FILM_TEXTURE: &str = "borders/film.png";
 
@@ -469,6 +654,44 @@ mod tests {
         assert_eq!(out.get(0, 0), [from_f32(1.0); 3]);
         assert_eq!(out.get(6, 6), [from_f32(0.5); 3]);
         assert_eq!(out.get(5, 6), [from_f32(1.0); 3]);
+    }
+
+    #[test]
+    fn rgb8_borders_match_f32_borders() {
+        let (w, h) = (150u32, 100u32);
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
+        let mut f32_data = Vec::with_capacity((w * h * 3) as usize);
+        for i in 0..(w * h) as usize {
+            let p = [(i % 251) as u8, ((i * 7) % 251) as u8, ((i * 13) % 251) as u8];
+            rgb.extend_from_slice(&p);
+            for v in p {
+                f32_data.push(from_f32(v as f32 / 255.0));
+            }
+        }
+        let img = ImageBuf::from_data(w, h, f32_data);
+        let dir = data_dir();
+        let load = |name: &str| image::open(dir.join(name)).map_err(anyhow::Error::from);
+        let enc = Encoding::new("sRGB", true);
+        let opts = BorderOptions::default();
+        for style in [BorderStyle::Solid, BorderStyle::Keyline, BorderStyle::Film, BorderStyle::Film35] {
+            let f32_out = add_border_with(&img, style, &opts, "kodak_portra_400", enc, &load).unwrap();
+            let (u8_out, uw, uh) = add_border_rgb8_with(&rgb, w, h, style, &opts, "kodak_portra_400", &load).unwrap();
+            assert_eq!((uw, uh), (f32_out.width, f32_out.height), "{style:?}");
+            let max_diff = f32_out
+                .data
+                .iter()
+                .zip(&u8_out)
+                .map(|(&f, &u)| {
+                    let q = (to_f32(f).clamp(0.0, 1.0) * 255.0).round() as i32;
+                    (q - u as i32).abs()
+                })
+                .max()
+                .unwrap_or(0);
+            assert!(max_diff <= 1, "{style:?}: max_diff={max_diff}");
+            let f32_ig = extend_for_instagram(&f32_out, style, &opts, enc);
+            let (_u8_ig, igw, igh) = extend_for_instagram_rgb8(&u8_out, uw, uh, style, &opts);
+            assert_eq!((igw, igh), (f32_ig.width, f32_ig.height), "{style:?} ig");
+        }
     }
 
     #[test]

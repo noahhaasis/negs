@@ -13,7 +13,13 @@ struct Params {
     monochrome: u32,
     // ln(1 + sigma²) of the lognormal.
     sigma2: f32,
-    _pad: vec3<f32>,
+    tile_width: u32,
+    tile_origin_x: u32,
+    tile_origin_y: u32,
+    full_width: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -53,14 +59,17 @@ fn main(
 ) {
     let idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     if idx >= params.n_pixels { return; }
+    let lx = idx % params.tile_width;
+    let ly = idx / params.tile_width;
+    let gidx = (ly + params.tile_origin_y) * params.full_width + (lx + params.tile_origin_x);
     for (var ch: u32 = 0u; ch < 3u; ch++) {
         let i = idx * 3u + ch;
         if params.mode == 0u {
-            noise[i] = clump(idx, ch);
+            noise[i] = clump(gidx, ch);
         } else if params.mode == 1u {
             acc[i] = acc[i] * noise[i];
         } else {
-            acc[i] = acc[i] * clump(idx, ch);
+            acc[i] = acc[i] * clump(gidx, ch);
         }
     }
 }

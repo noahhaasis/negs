@@ -13,6 +13,10 @@ struct Params {
     base_seed: u32,
     mu: f32,
     sigma: f32,
+    tile_width: u32,
+    tile_origin_x: u32,
+    tile_origin_y: u32,
+    full_width: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -47,7 +51,10 @@ fn main(
     // 2D grid above 65535 workgroups (see `linear_dispatch_grid`).
     let idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     if idx >= params.n_pixels { return; }
-    var rng = splitmix32(params.base_seed) ^ splitmix32(idx);
+    let lx = idx % params.tile_width;
+    let ly = idx / params.tile_width;
+    let gidx = (ly + params.tile_origin_y) * params.full_width + (lx + params.tile_origin_x);
+    var rng = splitmix32(params.base_seed) ^ splitmix32(gidx);
     rng = pcg(rng);
     let u1 = unit_f32(rng);
     rng = pcg(rng);

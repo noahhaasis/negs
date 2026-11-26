@@ -420,6 +420,7 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
         // How the input is uploaded, not what it is.
         image_key: _,
         film_cache: _,
+        tile_origin,
         front,
         film_log_exposure,
         film_density_curves_normalized,
@@ -461,6 +462,12 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
     s.u64(image.width as u64);
     s.u64(image.height as u64);
     s.u64(image.data.len() as u64);
+    s.bool(tile_origin.is_some());
+    if let Some((ox, oy, fw)) = tile_origin {
+        s.u64(*ox as u64);
+        s.u64(*oy as u64);
+        s.u64(*fw as u64);
+    }
     match front {
         crate::FrontPass::Hanatos2025 { tc_lut, rgb_to_adapted_xyz, guard } => {
             let spektrafilm_math::spectral::TcLut { size, channels, data } = tc_lut;
@@ -1189,7 +1196,7 @@ impl WgpuBackend {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let state = build_grain_state(&self.device, gp, w, h, &den, &scratch[0], &scratch[1], &scratch[2], self);
+        let state = build_grain_state(&self.device, gp, w, h, None, &den, &scratch[0], &scratch[1], &scratch[2], self);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         state.encode_passes(&mut encoder);
         encoder.copy_buffer_to_buffer(&den, 0, &readback, 0, bytes);
@@ -1981,6 +1988,7 @@ impl WgpuBackend {
                 gp,
                 image.width,
                 image.height,
+                p.tile_origin,
                 &buf_a,
                 &buf_b,
                 &scratch,
@@ -2028,6 +2036,7 @@ impl WgpuBackend {
                 gp,
                 image.width,
                 image.height,
+                p.tile_origin,
                 &buf_a,
                 &buf_b,
                 &scratch[0],
@@ -3145,6 +3154,13 @@ impl WgpuBackend {
                 shown.texture.destroy();
             }
         }
+    }
+
+    /// Tear down the underlying WebGPU device immediately (used by short-lived
+    /// export workers so Safari releases Metal heaps before the worker exits).
+    pub fn destroy_device(&self) {
+        self.forget_photograph();
+        self.device.destroy();
     }
 
     /// The largest frame this GPU renders and shows: the longest side a
@@ -6366,17 +6382,20 @@ struct GlareState {
 }
 
 #[cfg(feature = "wgpu-backend")]
+#[allow(clippy::too_many_arguments)]
 fn build_glare_state(
     device: &wgpu::Device,
     gp: &crate::GlareGpuParams,
     width: u32,
     height: u32,
+    tile_origin: Option<(u32, u32, u32)>,
     buf_a: &wgpu::Buffer,
     buf_b: &wgpu::Buffer,
     scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> GlareState {
     let n_pixels = (width as usize) * (height as usize);
+    let (tile_origin_x, tile_origin_y, full_width) = tile_origin.unwrap_or((0, 0, width));
     let scratch = scratch[0].clone();
 
     // ── Noise generation ──────────────────────────────────────────────
@@ -6394,6 +6413,10 @@ fn build_glare_state(
         base_seed: u32,
         mu: f32,
         sigma: f32,
+        tile_width: u32,
+        tile_origin_x: u32,
+        tile_origin_y: u32,
+        full_width: u32,
     }
     let gen_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("glare_gen_params"),
@@ -6402,6 +6425,10 @@ fn build_glare_state(
             base_seed: gp.base_seed,
             mu: gp.mu,
             sigma: gp.sigma,
+            tile_width: width,
+            tile_origin_x,
+            tile_origin_y,
+            full_width,
         }),
         usage: wgpu::BufferUsages::UNIFORM,
     });
@@ -6695,6 +6722,7 @@ fn build_grain_state(
     gp: &crate::GrainGpuParams,
     width: u32,
     height: u32,
+    tile_origin: Option<(u32, u32, u32)>,
     den: &wgpu::Buffer,
     layer_buf: &wgpu::Buffer,
     mid: &wgpu::Buffer,
@@ -6702,6 +6730,7 @@ fn build_grain_state(
     backend: &WgpuBackend,
 ) -> GrainState {
     let n_pixels = width * height;
+    let (tile_origin_x, tile_origin_y, full_width) = tile_origin.unwrap_or((0, 0, width));
     let n_layers = gp.n_layers();
     let n_samples = gp.interp_x.len();
     let storage = |read_only| wgpu::BufferBindingType::Storage { read_only };
@@ -6756,6 +6785,10 @@ fn build_grain_state(
         density_max: [f32; 4],
         n_particles_per_pixel: [f32; 4],
         grain_uniformity: [f32; 4],
+        tile_width: u32,
+        tile_origin_x: u32,
+        tile_origin_y: u32,
+        full_width: u32,
     }
     for l in 0..n_layers {
         let sigma = gp.dye_cloud_sigma_px[l];
@@ -6773,6 +6806,10 @@ fn build_grain_state(
             density_max: vec4(gp.density_max_layers[l]),
             n_particles_per_pixel: vec4(gp.n_particles_per_pixel[l]),
             grain_uniformity: vec4(gp.grain_uniformity),
+            tile_width: width,
+            tile_origin_x,
+            tile_origin_y,
+            full_width,
         };
         let out = if blurred { layer_buf } else { acc };
         passes.push(GrainPass::Linear(
@@ -6801,7 +6838,11 @@ fn build_grain_state(
             mode: u32,
             monochrome: u32,
             sigma2: f32,
-            _pad: [f32; 3],
+            tile_width: u32,
+            tile_origin_x: u32,
+            tile_origin_y: u32,
+            full_width: u32,
+            _pad: [u32; 3],
         }
         let params = |mode| MicroParams {
             n_pixels,
@@ -6809,7 +6850,11 @@ fn build_grain_state(
             mode,
             monochrome: gp.monochrome as u32,
             sigma2,
-            _pad: [0.0; 3],
+            tile_width: width,
+            tile_origin_x,
+            tile_origin_y,
+            full_width,
+            _pad: [0; 3],
         };
         if blur_px > 0.0 {
             passes.push(GrainPass::Linear(job(&pipe, "grain_micro", bytemuck::bytes_of(&params(0)), &[acc, layer_buf]), n_pixels));
@@ -7844,6 +7889,7 @@ mod film_cache_tests {
             image: leak(ImageBuf::new(4, 2)),
             image_key: None,
             film_cache: None,
+            tile_origin: None,
             front: crate::FrontPass::Hanatos2025 {
                 tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25; 12] }),
                 rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
