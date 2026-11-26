@@ -1,18 +1,35 @@
-//! Scopes widget (`ScopesView`): Histogram & RGB Waveform with mode switcher,
-//! cached BGRA8 `RenderImage` waveform rasterization (VRAM-safe via `drop_image`),
-//! and bottom drag-to-resize handle constrained to `negs_app::session::SCOPE_HEIGHTS`.
+//! Scopes widget (`ScopesView`, `L16`): Histogram & RGB Waveform with mode
+//! switcher, cached BGRA8 `RenderImage` waveform rasterization (VRAM-safe via
+//! `drop_image`), and bottom drag-to-resize handle constrained to
+//! `negs_app::session::SCOPE_HEIGHTS`.
 
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Context, Corners, Hsla, IntoElement, MouseButton, MouseDownEvent, PathBuilder, Pixels,
-    RenderImage, Window, canvas, div, fill, point, prelude::*, px, size,
+    Bounds, Context, Corners, FontWeight, Hsla, IntoElement, MouseButton, MouseDownEvent,
+    PathBuilder, Pixels, RenderImage, Window, canvas, div, fill, point, prelude::*, px, size,
 };
 use negs_app::histogram::{Histogram, Waveform};
 use negs_app::session::SCOPE_HEIGHTS;
 
 use crate::color_display::bgra_to_render_image;
-use crate::theme_gpui::{GpuiTheme, hex_alpha};
+use crate::theme_gpui::{GpuiTheme, hex_alpha, scale};
+use crate::widgets::controls::GUTTER;
+
+/// Fixed height of the `Histogram · Waveform ··· RGB` header row.
+pub const SCOPE_HEADER_HEIGHT: f32 = 16.0;
+/// Fixed height of the bottom resize grip hit area.
+pub const SCOPE_GRIP_HEIGHT: f32 = 8.0;
+/// Vertical gap between header, plot, and grip (`6 px` each).
+const SCOPE_GAP: f32 = 6.0;
+/// Bottom padding under the scopes panel before the tab bar (`10 px`).
+const SCOPE_BOTTOM_PAD: f32 = 10.0;
+
+/// Total height of the Scopes section (header + plot + grip + gaps + bottom pad),
+/// used to anchor the Tab Edits popover cleanly under the tab bar (`L17`).
+pub fn scopes_total_height(scope_height: f64) -> f32 {
+    SCOPE_HEADER_HEIGHT + SCOPE_GAP + scope_height as f32 + SCOPE_GAP + SCOPE_GRIP_HEIGHT + SCOPE_BOTTOM_PAD
+}
 
 /// Active vertical drag of the bottom scope height handle.
 #[derive(Clone, Copy, Debug)]
@@ -69,8 +86,6 @@ impl ScopesCache {
 }
 
 fn waveform_fingerprint(wf: &Waveform) -> u64 {
-    // Fast sampled FNV-1a across all 3 channels to catch tone changes even when
-    // picture_id/width/samples are unchanged.
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let step = (wf.red.len() / 512).max(1);
     for channel in [&wf.red, &wf.green, &wf.blue] {
@@ -110,7 +125,7 @@ fn paint_histogram_channel(
     let bottom = y0 + h;
 
     let mut fill_path = PathBuilder::fill();
-    let mut stroke_path = PathBuilder::stroke(px(1.15));
+    let mut stroke_path = PathBuilder::stroke(px(1.0));
 
     fill_path.move_to(point(px(x0), px(bottom)));
     for (i, &count) in bins.iter().enumerate() {
@@ -135,39 +150,8 @@ fn paint_histogram_channel(
     }
 }
 
-fn paint_histogram_luma(
-    window: &mut Window,
-    hist: &Histogram,
-    peak: f32,
-    bounds: Bounds<Pixels>,
-    color: Hsla,
-) {
-    let x0 = f32::from(bounds.origin.x);
-    let y0 = f32::from(bounds.origin.y);
-    let w = f32::from(bounds.size.width).max(1.0);
-    let h = f32::from(bounds.size.height).max(1.0);
-    let bottom = y0 + h;
-
-    let mut stroke = PathBuilder::stroke(px(1.0));
-    for i in 0..256 {
-        let luma = 0.2126 * hist.red[i] as f32
-            + 0.7152 * hist.green[i] as f32
-            + 0.0722 * hist.blue[i] as f32;
-        let fx = i as f32 / 255.0;
-        let fy = (luma / peak).min(1.0);
-        let pt = point(px(x0 + fx * w), px(bottom - fy * h));
-        if i == 0 {
-            stroke.move_to(pt);
-        } else {
-            stroke.line_to(pt);
-        }
-    }
-    if let Ok(path) = stroke.build() {
-        window.paint_path(path, color);
-    }
-}
-
-/// Renders the Scopes header (`Histogram` · `Waveform`), plot well, and height resize grip.
+/// Renders the Scopes header (`Histogram` · `Waveform` + right `RGB`),
+/// borderless `bg` plot well, and bottom height resize grip (`L16`).
 #[allow(clippy::too_many_arguments)]
 pub fn render_scopes<V: 'static>(
     is_waveform: bool,
@@ -182,23 +166,22 @@ pub fn render_scopes<V: 'static>(
     on_grip_down: impl Fn(&mut V, &MouseDownEvent, &mut Window, &mut Context<V>) + 'static,
 ) -> gpui::AnyElement {
     let grid_line = theme.line;
-    let luma_color = theme.paper.opacity(0.45);
     let on_hist = on_select_mode.clone();
     let on_wave = on_select_mode;
+    let show_empty = !has_photo || histogram.is_none();
 
     let plot_element = if is_waveform {
         let wave_canvas = canvas(
             |_bounds, _window, _cx| {},
             move |bounds: Bounds<Pixels>, (), window, _cx| {
-                // Horizontal 25% / 50% / 75% reference lines.
                 for frac in [0.25f32, 0.5, 0.75] {
-                    let y = bounds.origin.y + bounds.size.height * frac;
+                    let y = bounds.origin.y + px((f32::from(bounds.size.height) * frac).floor());
                     window.paint_quad(fill(
                         Bounds {
                             origin: point(bounds.origin.x, y),
                             size: size(bounds.size.width, px(1.0)),
                         },
-                        grid_line.opacity(0.55),
+                        grid_line,
                     ));
                 }
                 if let Some(img) = &waveform_img {
@@ -218,8 +201,7 @@ pub fn render_scopes<V: 'static>(
         div()
             .flex()
             .size_full()
-            .px(px(4.0))
-            .py(px(4.0))
+            .p(px(6.0))
             .gap(px(4.0))
             .child(
                 div()
@@ -229,10 +211,14 @@ pub fn render_scopes<V: 'static>(
                     .flex_col()
                     .justify_between()
                     .items_end()
+                    .font(theme.ui_font(FontWeight::NORMAL))
                     .text_size(px(9.0))
+                    .line_height(px(10.0))
                     .text_color(theme.dim)
                     .child("100")
+                    .child("75")
                     .child("50")
+                    .child("25")
                     .child("0"),
             )
             .child(wave_canvas)
@@ -241,14 +227,21 @@ pub fn render_scopes<V: 'static>(
         let hist_canvas = canvas(
             |_bounds, _window, _cx| {},
             move |bounds: Bounds<Pixels>, (), window, _cx| {
+                let inset = Bounds {
+                    origin: point(bounds.origin.x + px(4.0), bounds.origin.y + px(6.0)),
+                    size: size(
+                        (bounds.size.width - px(8.0)).max(px(1.0)),
+                        (bounds.size.height - px(6.0)).max(px(1.0)),
+                    ),
+                };
                 for frac in [0.25f32, 0.5, 0.75] {
-                    let y = bounds.origin.y + bounds.size.height * frac;
+                    let y = inset.origin.y + px((f32::from(inset.size.height) * frac).floor());
                     window.paint_quad(fill(
                         Bounds {
-                            origin: point(bounds.origin.x, y),
-                            size: size(bounds.size.width, px(1.0)),
+                            origin: point(inset.origin.x, y),
+                            size: size(inset.size.width, px(1.0)),
                         },
-                        grid_line.opacity(0.55),
+                        grid_line,
                     ));
                 }
                 let Some(hist) = &histogram else { return };
@@ -256,38 +249,30 @@ pub fn render_scopes<V: 'static>(
                 if peak <= 0.0 {
                     return;
                 }
-                let inset = Bounds {
-                    origin: point(bounds.origin.x + px(3.0), bounds.origin.y + px(5.0)),
-                    size: size(
-                        (bounds.size.width - px(6.0)).max(px(1.0)),
-                        (bounds.size.height - px(5.0)).max(px(1.0)),
-                    ),
-                };
                 paint_histogram_channel(
                     window,
                     &hist.red,
                     peak,
                     inset,
-                    hex_alpha(0xff6b6b, 0.34),
-                    hex_alpha(0xff6b6b, 0.85),
+                    hex_alpha(0xff6b6b, 0.40),
+                    hex_alpha(0xff6b6b, 0.90),
                 );
                 paint_histogram_channel(
                     window,
                     &hist.green,
                     peak,
                     inset,
-                    hex_alpha(0x6bcc78, 0.34),
-                    hex_alpha(0x6bcc78, 0.85),
+                    hex_alpha(0x6bcc78, 0.40),
+                    hex_alpha(0x6bcc78, 0.90),
                 );
                 paint_histogram_channel(
                     window,
                     &hist.blue,
                     peak,
                     inset,
-                    hex_alpha(0x4d96ff, 0.34),
-                    hex_alpha(0x4d96ff, 0.85),
+                    hex_alpha(0x4d96ff, 0.40),
+                    hex_alpha(0x4d96ff, 0.90),
                 );
-                paint_histogram_luma(window, hist, peak, inset, luma_color);
             },
         )
         .size_full();
@@ -296,62 +281,80 @@ pub fn render_scopes<V: 'static>(
     };
 
     let grip_color = if dragging_height {
-        theme.accent
+        theme.dim
     } else {
         theme.track
     };
     let grip_hover = theme.dim;
+    let word_font = theme.ui_font(FontWeight::MEDIUM);
+    let note_font = theme.ui_font(FontWeight::NORMAL);
+    let (empty_font, empty_size) = theme.serif_spec(scale::HINT, 400.0, true);
 
     div()
         .w_full()
-        .px(px(16.0))
-        .pt(px(8.0))
-        .pb(px(2.0))
+        .px(px(GUTTER))
+        .pb(px(SCOPE_BOTTOM_PAD))
         .flex()
         .flex_col()
-        .gap(px(5.0))
-        // Header switcher: Histogram · Waveform
+        .gap(px(SCOPE_GAP))
+        // Header switcher: Histogram · Waveform ... RGB
         .child(
             div()
+                .h(px(SCOPE_HEADER_HEIGHT))
                 .flex()
                 .items_center()
-                .gap(px(12.0))
+                .justify_between()
                 .child(
                     div()
-                        .id("scope-mode-histogram")
-                        .cursor_pointer()
-                        .text_size(px(11.0))
-                        .text_color(if !is_waveform { theme.paper } else { theme.dim })
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            on_hist(this, "Histogram", window, cx);
-                        }))
-                        .child("Histogram"),
+                        .flex()
+                        .items_center()
+                        .gap(px(14.0))
+                        .child(
+                            div()
+                                .id("scope-mode-histogram")
+                                .cursor_pointer()
+                                .font(word_font.clone())
+                                .text_size(px(scale::SCOPE_WORD))
+                                .text_color(if !is_waveform { theme.paper } else { theme.dim })
+                                .active(|s| s.opacity(0.62))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    on_hist(this, "Histogram", window, cx);
+                                }))
+                                .child("Histogram"),
+                        )
+                        .child(
+                            div()
+                                .id("scope-mode-waveform")
+                                .cursor_pointer()
+                                .font(word_font)
+                                .text_size(px(scale::SCOPE_WORD))
+                                .text_color(if is_waveform { theme.paper } else { theme.dim })
+                                .active(|s| s.opacity(0.62))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    on_wave(this, "Waveform", window, cx);
+                                }))
+                                .child("Waveform"),
+                        ),
                 )
                 .child(
                     div()
-                        .id("scope-mode-waveform")
-                        .cursor_pointer()
-                        .text_size(px(11.0))
-                        .text_color(if is_waveform { theme.paper } else { theme.dim })
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            on_wave(this, "Waveform", window, cx);
-                        }))
-                        .child("Waveform"),
+                        .font(note_font)
+                        .text_size(px(scale::SCOPE_NOTE))
+                        .text_color(theme.dim)
+                        .child("RGB"),
                 ),
         )
-        // Plot frame
+        // Borderless plot well in `bg`
         .child(
             div()
                 .relative()
                 .w_full()
                 .h(px(scope_height as f32))
-                .rounded(px(4.0))
+                .rounded(px(3.0))
                 .bg(theme.canvas)
-                .border_1()
-                .border_color(theme.line)
                 .overflow_hidden()
                 .child(plot_element)
-                .when(!has_photo, |el| {
+                .when(show_empty, |el| {
                     el.child(
                         div()
                             .absolute()
@@ -359,11 +362,10 @@ pub fn render_scopes<V: 'static>(
                             .flex()
                             .items_center()
                             .justify_center()
-                            .font_family(theme.serif_family.clone())
-                            .italic()
-                            .text_size(px(11.5))
+                            .font(empty_font)
+                            .text_size(px(empty_size))
                             .text_color(theme.dim)
-                            .child("No photograph"),
+                            .child("No developed photograph"),
                     )
                 }),
         )
@@ -372,7 +374,7 @@ pub fn render_scopes<V: 'static>(
             div()
                 .id("scope-resize-grip")
                 .w_full()
-                .h(px(10.0))
+                .h(px(SCOPE_GRIP_HEIGHT))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -412,6 +414,12 @@ mod tests {
         assert_eq!(drag.height_for_y(20.0), SCOPE_HEIGHTS.0);
         assert_eq!(drag.height_for_y(200.0), SCOPE_HEIGHTS.0 + 100.0);
         assert_eq!(drag.height_for_y(900.0), SCOPE_HEIGHTS.1);
+    }
+
+    #[test]
+    fn scopes_total_height_tracks_plot_height() {
+        assert_eq!(scopes_total_height(88.0), 134.0);
+        assert_eq!(scopes_total_height(188.0), 234.0);
     }
 
     #[test]
