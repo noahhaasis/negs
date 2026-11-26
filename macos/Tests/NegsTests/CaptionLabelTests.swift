@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -155,6 +156,76 @@ import XCTest
         scroll.contentView.scroll(to: NSPoint(x: 200, y: 100))
         scroll.reflectScrolledClipView(scroll.contentView)
         XCTAssertEqual(geometry.print, CGRect(x: 0, y: 0, width: 1000, height: 600))
+    }
+
+    /// The develop's canvas replacing the stand-in's: SwiftUI keeps the old
+    /// scroll view in the window for a while, and its reports don't count.
+    func testOnlyTheCanvasOnScreenReportsTheGeometry() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        window.contentView = root
+        func canvas(_ document: CGSize) -> ImageScrollView {
+            let scroll = ImageScrollView(frame: root.bounds)
+            scroll.contentView = CenteringClipView()
+            scroll.allowsMagnification = true; scroll.minMagnification = 0.005; scroll.maxMagnification = 16
+            scroll.documentView = NSView(frame: NSRect(origin: .zero, size: document))
+            root.addSubview(scroll)
+            return scroll
+        }
+        let geometry = CanvasGeometry()
+        let standIn = canvas(CGSize(width: 3000, height: 1000)), develop = canvas(CGSize(width: 1000, height: 1500))
+        standIn.geometry = geometry
+        standIn.applyZoom()
+        let standInPrint = geometry.print
+        XCTAssertEqual(standInPrint.width, 904, accuracy: 1.5, "Nothing else reports: the stand-in's print")
+
+        geometry.reporter = develop
+        develop.geometry = geometry
+        develop.applyZoom()
+        let developPrint = geometry.print
+        XCTAssertEqual(developPrint.height, 600, accuracy: 1.5)
+        XCTAssertNotEqual(developPrint, standInPrint)
+        for _ in 0..<3 {
+            standIn.needsLayout = true
+            root.layoutSubtreeIfNeeded()
+            standIn.reportGeometry()
+            XCTAssertEqual(geometry.print, developPrint, "The stand-in's scroll view, still in the window, changes nothing")
+        }
+    }
+
+    /// Two canvases in the window reporting prints a point or more apart
+    /// took turns until AppKit raised "more Update Constraints passes than
+    /// there are views in the window" (0.20.1's crash on a RAW opened while
+    /// a menu was up). Before the fix, this test crashed the test run.
+    func testTwoCanvasesInTheWindowSettle() throws {
+        struct TwoCanvases: View {
+            static let first = UUID(), second = UUID()
+            let image: CGImage
+            let geometry: CanvasGeometry
+            var body: some View {
+                ZStack {
+                    PreviewCanvas(image: image, size: CGSize(width: 1364, height: 2048), rotation: 0, crop: CropSettings(), border: nil,
+                                  filmTexture: nil, filmStrip: nil, zoomCommand: Self.first, fit: true, geometry: geometry)
+                    PreviewCanvas(image: image, size: CGSize(width: 6048, height: 4032), rotation: 0, crop: CropSettings(), border: nil,
+                                  filmTexture: nil, filmStrip: nil, zoomCommand: Self.second, fit: true, geometry: geometry)
+                }
+                // The caption reads the geometry, so each change updates the canvases.
+                .overlay(alignment: .topLeading) { Color.clear.frame(width: max(geometry.print.width, 1), height: 40).offset(x: geometry.print.minX) }
+            }
+        }
+        let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let geometry = CanvasGeometry()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 950, height: 511), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: TwoCanvases(image: context.makeImage()!, geometry: geometry))
+        window.orderFront(nil)
+        defer { window.close() }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let settled = geometry.print
+        XCTAssertGreaterThan(settled.width, 0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertEqual(geometry.print, settled, "One canvas's print, kept")
     }
 
     // MARK: Development time, moved from beside the stocks to the Lab
