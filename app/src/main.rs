@@ -254,6 +254,8 @@ pub struct NegsApp {
     pub settings_window: Option<gpui::WindowHandle<settings_window::SettingsView>>,
     /// The library's context or filter menu, when open.
     pub menu: Option<MenuState>,
+    /// Status-bar `Original ⌄` upward mode/reference menu (`L27`).
+    pub original_menu_open: bool,
     /// `NEGS_FRAME_BENCH`: the app driving itself and timing its frames.
     bench: Option<bench::Bench>,
     pub startup: StartupReport,
@@ -432,6 +434,7 @@ impl NegsApp {
             menu_lightroom: Vec::new(),
             menu_recent: Vec::new(),
             menu: None,
+            original_menu_open: false,
             bench: bench::Bench::from_env(),
             startup,
             focus_handle,
@@ -643,6 +646,39 @@ impl NegsApp {
         self.presets.close_context_menu();
         self.model.toggle_pane(pane);
         self.after_model_update(cx);
+        cx.notify();
+    }
+
+    pub fn set_hold_original(&mut self, held: bool, cx: &mut Context<Self>) {
+        if held && !self.model.can_show_original() {
+            return;
+        }
+        if self.canvas.before_after == held && !self.canvas.split_mode {
+            return;
+        }
+        self.canvas.split_mode = false;
+        self.canvas.before_after = held;
+        self.model.hold_original(held);
+        cx.notify();
+    }
+
+    pub fn set_zoom_fit(&mut self, fit: bool, cx: &mut Context<Self>) {
+        if self.model.source.is_none() || self.model.cropping() {
+            return;
+        }
+        if self.model.comparison().is_some() {
+            self.model.zoom(fit);
+            self.after_model_update(cx);
+            cx.notify();
+            return;
+        }
+        if fit {
+            self.canvas.reset_fit();
+            self.model.fit_image = true;
+        } else {
+            self.canvas.set_actual_size();
+            self.model.fit_image = false;
+        }
         cx.notify();
     }
 
@@ -927,6 +963,11 @@ impl NegsApp {
             cx.notify();
             return true;
         }
+        if self.original_menu_open && key == "escape" {
+            self.original_menu_open = false;
+            cx.notify();
+            return true;
+        }
         if self.menu.is_some() && key == "escape" {
             self.close_menu();
             cx.notify();
@@ -1061,7 +1102,9 @@ impl gpui::Render for NegsApp {
         let batch_el = batch_view::render_popover(self, cx);
         self.stamp_startup("inspector_shown");
         let show_status = self.model.tray_shown().is_none() && !image_only;
-        let status_el = show_status.then(|| render_status_bar(self, cx).into_any_element());
+        let status_el = if show_status { render_status_bar(self, cx) } else { None };
+        let strip_leader_el = strip::render_strip_leader(self, cx);
+        let original_menu_el = if show_status { status::render_original_menu(self, cx) } else { None };
         if let Some(bench) = self.bench.as_mut() {
             bench.frame_end();
         }
@@ -1455,14 +1498,27 @@ impl gpui::Render for NegsApp {
                     .flex_row()
                     .child(
                         div()
+                            .relative()
                             .flex_1()
                             .min_w_0()
                             .h_full()
                             .flex()
                             .flex_col()
-                            .child(canvas_el)
+                            .child(
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .w_full()
+                                    .min_h_0()
+                                    .flex()
+                                    .flex_col()
+                                    .child(canvas_el)
+                                    .when_some(strip_leader_el, |el, leader| el.child(leader)),
+                            )
                             .when_some(strip_el, |el, strip| el.child(strip))
-                            .when_some(tray_el, |el, tray| el.child(tray)),
+                            .when_some(tray_el, |el, tray| el.child(tray))
+                            .when_some(status_el, |el, status| el.child(status))
+                            .when_some(original_menu_el, |el, menu| el.child(menu)),
                     )
                     .when_some(inspector_el, |el, col| {
                         el.child(
@@ -1499,7 +1555,6 @@ impl gpui::Render for NegsApp {
                         )
                     }),
             )
-            .when_some(status_el, |el, status| el.child(status))
             .when_some(grid_el, |el, grid| el.child(grid))
             .when_some(menu_el, |el, menu| el.child(menu))
             .when_some(menu_scrim, |el, scrim| el.child(scrim))

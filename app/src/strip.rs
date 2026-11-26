@@ -21,19 +21,26 @@ use std::time::Instant;
 
 use gpui::{
     AnyElement, App, Bounds, ContentMask, Context, Font, FontWeight, Hsla, InteractiveElement, IntoElement, Modifiers,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollDelta, ScrollWheelEvent,
-    SharedString, StatefulInteractiveElement, Styled, TextRun, Window, canvas, div, fill, font, point, px, size,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, PathBuilder, Pixels, Point, ScrollDelta,
+    ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled, TextRun, Window, canvas, div, fill, font, point,
+    px, size,
 };
 use negs_app::model::{Model, dirty, is_photo};
 use negs_app::sheet_rules::{self as rules, StripLayout, ThumbSize};
 use negs_library::{Flag, Item, Selection, Summary};
 
 use crate::NegsApp;
-use crate::marks_gpui::{BoxInk, paint_box, paint_cross, paint_dot, paint_pencil, paint_star};
+use crate::marks_gpui::{BoxInk, paint_box, paint_cross, paint_dot, paint_highlighter, paint_pencil, paint_star};
 use crate::marks_raster::{MarkSprites, Sprite};
 use crate::theme_gpui::{GpuiTheme, hex};
 use crate::thumbs::{self, Thumb, Thumbs, Want};
 use crate::tile_cache::cover_bounds;
+
+/// Dimensions of the slanted film-leader fold tab (`PhotoBrowser.swift:688-692`, `L25`).
+pub const LEADER_WIDTH: f32 = 92.0;
+pub const LEADER_HEIGHT: f32 = 24.0;
+pub const LEADER_RAISED: f32 = 30.0;
+pub const LEADER_SLANT: f32 = 28.0;
 
 const STAR: f32 = negs_marks::STAR_SIZE as f32;
 const STAR_GAP: f32 = negs_marks::STAR_GAP as f32;
@@ -67,6 +74,12 @@ pub struct StripState {
     open: Option<Item>,
     /// The strip's bounds in the window as last painted (the canvas sets it).
     pub bounds: Rc<StdCell<Bounds<Pixels>>>,
+    /// True when the open frame still needs initial centring once real bounds arrive (`L25`).
+    pub needs_centre: bool,
+    /// Last viewport width seen by `sync_width`, to re-centre cleanly on window/inspector resize (`L25`).
+    pub last_width: f64,
+    /// Pointer is hovering over the bottom-right `StripLeader` fold tab (`L25`).
+    pub leader_hovered: bool,
     /// `Thumbs::revision` when last painted, and when last synced.
     pub painted: u64,
     pub synced: u64,
@@ -86,6 +99,9 @@ impl Default for StripState {
             pressed: None,
             open: None,
             bounds: Rc::new(StdCell::new(Bounds::default())),
+            needs_centre: false,
+            last_width: 0.0,
+            leader_hovered: false,
             painted: 0,
             synced: u64::MAX,
         }
@@ -93,6 +109,28 @@ impl Default for StripState {
 }
 
 impl StripState {
+    /// Applies a real painted strip width: finishes deferred initial centring
+    /// (when `relist` ran before the first layout) and re-centres the open
+    /// frame when the window or inspector column resizes (`L25`).
+    pub fn sync_width(&mut self, visible: f64) -> bool {
+        if visible <= 0.5 {
+            return false;
+        }
+        let width_changed = self.last_width > 0.5 && (visible - self.last_width).abs() > 0.5;
+        let should_centre = self.needs_centre || (width_changed && self.glide.is_none());
+        self.last_width = visible;
+        if should_centre {
+            self.needs_centre = false;
+            if let Some(i) = self.open_index() {
+                self.glide = None;
+                self.scroll = rules::centred(self.layout.middle(i), visible, self.layout.width);
+                self.clamp();
+                return true;
+            }
+        }
+        self.clamp();
+        false
+    }
     /// The width the strip shows, DIPs (an estimate before its first paint).
     pub fn visible_width(&self) -> f64 {
         f32::from(self.bounds.get().size.width) as f64
@@ -263,12 +301,20 @@ fn relist(app: &mut NegsApp) {
     let same_list = strip.cells.len() == cells.len() && strip.cells.iter().zip(&cells).all(|(a, b)| a.want.item == b.want.item);
     if open_item != strip.open {
         // Another photograph opened: it glides to the middle (at once the
-        // first time, or when it's far away).
-        let target = open_index.map_or(0.0, |i| rules::centred(layout.middle(i), visible, layout.width));
-        let near = strip.open.is_some() && (target - strip.scroll).abs() < visible * 1.5 && visible > 0.0;
-        strip.glide = near.then(|| (strip.scroll, target, Instant::now()));
-        if !near {
-            strip.scroll = target;
+        // first time, or when it's far away). If real bounds haven't arrived
+        // yet (`visible <= 0.5`), defer centring until the first paint (`L25`).
+        if visible <= 0.5 {
+            strip.needs_centre = open_index.is_some();
+            strip.glide = None;
+            strip.scroll = 0.0;
+        } else {
+            let target = open_index.map_or(0.0, |i| rules::centred(layout.middle(i), visible, layout.width));
+            let near = strip.open.is_some() && (target - strip.scroll).abs() < visible * 1.5;
+            strip.glide = near.then(|| (strip.scroll, target, Instant::now()));
+            if !near {
+                strip.scroll = target;
+            }
+            strip.needs_centre = false;
         }
         strip.open = open_item;
     } else if same_list && strip.layout != layout && visible > 0.0 {
@@ -399,6 +445,8 @@ pub struct Inks {
     pub accent: Hsla,
     pub selection: Hsla,
     pub plain: bool,
+    pub highlighter: bool,
+    pub highlighter_ink: Hsla,
 }
 
 impl Inks {
@@ -412,6 +460,8 @@ impl Inks {
             accent: hex(f.accent),
             selection: theme.accent,
             plain: theme.tokens.plain,
+            highlighter: theme.tokens.highlighter,
+            highlighter_ink: theme.highlighter_ink,
         }
     }
 }
@@ -561,12 +611,119 @@ pub fn paint_strip_frame(window: &mut Window, cx: &mut App, f: &FramePaint, r: B
     paint_marks(window, cx, f, r, inks, ui, true);
     let under_y = r.origin.y + r.size.height + px(rules::PENCIL_DROP as f32);
     if f.open {
-        // The 6 DIP box under the frame (`PENCIL_WIDTH + 2`), stroked 2.1 wide.
+        // 4.0 pt pencil under the open frame (`PhotoBrowser.swift:238`, `L25`),
+        // or Light Table yellow highlighter (`lift: 0`).
         let pencil = Bounds { origin: point(r.origin.x, under_y), size: size(r.size.width, px(rules::PENCIL_WIDTH as f32 + 2.0)) };
-        paint_pencil(window, pencil, inks.plain, negs_marks::PENCIL_WIDTH as f32, inks.accent);
+        if inks.highlighter {
+            paint_highlighter(window, pencil, inks.plain, 0.0, inks.highlighter_ink);
+        } else {
+            paint_pencil(window, pencil, inks.plain, rules::PENCIL_WIDTH as f32, inks.accent);
+        }
     } else if f.selected {
         window.paint_quad(fill(Bounds { origin: point(r.origin.x, under_y), size: size(r.size.width, px(1.5)) }, inks.label));
     }
+}
+
+/// Renders the slanted film-leader fold tab (`StripLeader`, `L25`) anchored at
+/// the bottom-right corner of the canvas column directly above the film strip
+/// (or directly above the status line when the strip is hidden).
+pub fn render_strip_leader(app: &NegsApp, cx: &mut Context<NegsApp>) -> Option<AnyElement> {
+    if app.model.source.is_none()
+        || app.model.tray_shown().is_some()
+        || app.model.cropping()
+        || app.canvas.image_only
+        || app.grid.covers()
+    {
+        return None;
+    }
+    let strip_open = app.model.prefs.filmstrip_visible;
+    let hovered = app.strip.leader_hovered;
+    let h = if hovered { LEADER_RAISED } else { LEADER_HEIGHT };
+    let film_bg = app.theme.film;
+    let arrow_col = if hovered {
+        app.theme.film_paper
+    } else {
+        app.theme.film_label
+    };
+    let tip = if strip_open {
+        if cfg!(target_os = "macos") {
+            "Hide Film Strip (⌥⌘F)"
+        } else {
+            "Hide Film Strip (F6)"
+        }
+    } else if cfg!(target_os = "macos") {
+        "Show Film Strip (⌥⌘F)"
+    } else {
+        "Show Film Strip (F6)"
+    };
+
+    let leader_canvas = canvas(
+        |_b, _w, _cx| {},
+        move |bounds: Bounds<Pixels>, (), window, _cx| {
+            let x0 = f32::from(bounds.origin.x);
+            let y0 = f32::from(bounds.origin.y) + (LEADER_RAISED - h);
+            let w = LEADER_WIDTH;
+            let bottom = y0 + h;
+
+            // Slanted tongue polygon: (0, h), (28, 0), (92, 0), (92, h)
+            let mut poly = PathBuilder::fill();
+            poly.move_to(point(px(x0), px(bottom)));
+            poly.line_to(point(px(x0 + LEADER_SLANT), px(y0)));
+            poly.line_to(point(px(x0 + w), px(y0)));
+            poly.line_to(point(px(x0 + w), px(bottom)));
+            poly.close();
+            if let Ok(path) = poly.build() {
+                window.paint_path(path, film_bg);
+            }
+
+            // 2 px miter chevron (`12.7 × 6.4`), 22 pt from right, 10 pt from top
+            let cx_p = x0 + w - 22.0 - 4.5;
+            let cy_p = y0 + 10.0 + 4.5 - if hovered { 1.0 } else { 0.0 };
+            let hw = 6.35f32;
+            let hh = 3.2f32;
+            let mut chev = PathBuilder::stroke(px(2.0));
+            if strip_open {
+                // Pointing down
+                chev.move_to(point(px(cx_p - hw), px(cy_p - hh)));
+                chev.line_to(point(px(cx_p), px(cy_p + hh)));
+                chev.line_to(point(px(cx_p + hw), px(cy_p - hh)));
+            } else {
+                // Pointing up
+                chev.move_to(point(px(cx_p - hw), px(cy_p + hh)));
+                chev.line_to(point(px(cx_p), px(cy_p - hh)));
+                chev.line_to(point(px(cx_p + hw), px(cy_p + hh)));
+            }
+            if let Ok(path) = chev.build() {
+                window.paint_path(path, arrow_col);
+            }
+        },
+    )
+    .w(px(LEADER_WIDTH))
+    .h(px(LEADER_RAISED));
+
+    Some(
+        div()
+            .id("strip-leader-tab")
+            .tooltip(crate::tooltip::tip(tip, &app.theme))
+            .absolute()
+            .bottom_0()
+            .right_0()
+            .w(px(LEADER_WIDTH))
+            .h(px(LEADER_RAISED))
+            .cursor_pointer()
+            .on_hover(cx.listener(|this, &inside, _window, cx| {
+                if this.strip.leader_hovered != inside {
+                    this.strip.leader_hovered = inside;
+                    cx.notify();
+                }
+            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, _window, cx| {
+                this.toggle_filmstrip(cx);
+            }))
+            .child(leader_canvas)
+            .into_any_element(),
+    )
 }
 
 /// The strip's opacity for a frame (`rules::strip_opacity`).
@@ -584,9 +741,12 @@ pub fn render_strip(app: &mut NegsApp, window: &mut Window, cx: &mut Context<Neg
     if app.strip.synced != app.thumbs.revision || app.model.dirty != 0 || app.strip.cells.is_empty() {
         sync(app);
     }
-    let width = app.strip.visible_width();
+    let real_width = app.strip.visible_width();
+    if real_width > 0.5 && app.strip.sync_width(real_width) {
+        request(app);
+    }
     // Before the first paint, the window's width (the canvas column is at most that).
-    let width = if width > 0.0 { width } else { f32::from(window.viewport_size().width) as f64 };
+    let width = if real_width > 0.0 { real_width } else { f32::from(window.viewport_size().width) as f64 };
     let scale = window.scale_factor();
     let inks = Inks::of(&app.theme);
     let NegsApp { strip, thumbs, sprites, .. } = app;
@@ -778,5 +938,38 @@ mod tests {
         strip.glide = Some((0.0, 1000.0, Instant::now() - std::time::Duration::from_millis(rules::GLIDE_MS as u64 + 10)));
         assert!(!step_glide(&mut strip));
         assert!((strip.scroll - 1000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn launch_and_resize_centre_the_open_frame() {
+        let mut strip = StripState::default();
+        strip.cells = (0..10)
+            .map(|i| Cell {
+                want: Want { item: Item::photo(format!("/roll/DSC_{i:04}.NEF")), key: None, loose: None },
+                name: format!("DSC_{i:04}.NEF"),
+                summary: Summary::default(),
+                open: i == 5,
+                selected: i == 5,
+                pair: false,
+            })
+            .collect();
+        strip.layout = StripLayout::new(vec![180.0; 10]);
+        // First relist happened before bounds were measured (`visible_width == 0`).
+        strip.needs_centre = true;
+        assert!(!strip.sync_width(0.0));
+        assert!(strip.needs_centre);
+
+        // Once the strip paints with real width 600 px, open frame #5 centres immediately.
+        strip.bounds.set(Bounds { origin: point(px(0.0), px(0.0)), size: size(px(600.0), px(158.0)) });
+        assert!(strip.sync_width(600.0));
+        assert!(!strip.needs_centre);
+        let expected_600 = rules::centred(strip.layout.middle(5), 600.0, strip.layout.width);
+        assert!((strip.scroll - expected_600).abs() < 1e-6);
+
+        // Window/inspector resize to 800 px re-centres cleanly.
+        strip.bounds.set(Bounds { origin: point(px(0.0), px(0.0)), size: size(px(800.0), px(158.0)) });
+        assert!(strip.sync_width(800.0));
+        let expected_800 = rules::centred(strip.layout.middle(5), 800.0, strip.layout.width);
+        assert!((strip.scroll - expected_800).abs() < 1e-6);
     }
 }
