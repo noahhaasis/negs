@@ -56,17 +56,26 @@ fn raw_fixture() -> RawImage {
 }
 
 fn write_fixture() -> TempFile {
+    write_dng(&raw_fixture(), None)
+}
+
+fn write_dng(raw: &RawImage, analog_balance: Option<[f64; 3]>) -> TempFile {
     let file = TempFile::new("DNG");
-    let raw = raw_fixture();
     let mut writer = DngWriter::new(std::fs::File::create(&file.0).unwrap(), [1, 4, 0, 0]).unwrap();
-    writer.load_base_tags(&raw).unwrap();
+    writer.load_base_tags(raw).unwrap();
+    if let Some(balance) = analog_balance {
+        let balance = balance.map(|v| rawler::formats::tiff::Rational::new_f64(v, 1000));
+        writer
+            .root_ifd_mut()
+            .add_tag(rawler::tags::DngTag::AnalogBalance, &balance[..]);
+    }
     writer
         .root_ifd_mut()
         .add_tag(rawler::tags::TiffCommonTag::Orientation, 6_u16);
     let mut frame = writer.subframe_on_root(0);
     frame
         .raw_image(
-            &raw,
+            raw,
             CropMode::None,
             DngCompression::Uncompressed,
             DngPhotometricConversion::Original,
@@ -191,6 +200,36 @@ fn byte_loaders_apply_the_same_wb_as_path_loaders() {
     // Inactive custom values are kept but not validated or applied.
     let inactive = RawWhiteBalance { mode: RawWhiteBalanceMode::Daylight, temperature: f64::NAN, tint: -1.0 };
     assert_eq!(load_raw_bytes(&bytes, inactive).unwrap().data, daylight);
+}
+
+/// Issue #31: iPhone 18 ProRAW stores values already scaled by AnalogBalance
+/// (AsShotNeutral 1, 1, 1). A WB worked out from ColorMatrix must take that
+/// scaling out, or it applies it twice (a strong magenta cast). The same
+/// scene stored pre-balanced develops like the unbalanced one, in every mode,
+/// with the iPhone's own (non-diagonal) D65 matrix.
+#[test]
+fn daylight_undoes_analog_balance() {
+    let iphone_d65 = vec![0.9964, -0.4368, -0.0925, -0.3132, 1.1573, 0.1753, -0.0161, 0.1066, 0.4823];
+    let balance = [2.0, 1.0, 0.5];
+    let mut plain = raw_fixture();
+    plain.camera.color_matrix.insert(Illuminant::D65, iphone_d65.clone());
+    plain.color_matrix.insert(Illuminant::D65, iphone_d65);
+    let mut balanced = plain.clone();
+    balanced.data = rawler::rawimage::RawImageData::Integer([12000, 9000, 3500].repeat(12));
+    balanced.wb_coeffs = [1.1, 1.0, 2.8, 1.0];
+    let plain = write_dng(&plain, None);
+    let balanced = write_dng(&balanced, Some(balance));
+    let bytes = std::fs::read(&balanced.0).unwrap();
+    for mode in RawWhiteBalanceMode::ALL {
+        let wb = RawWhiteBalance { mode, temperature: 3200.0, tint: 0.85 };
+        let expected = load_raw_with_wb(&plain.0, wb).unwrap().data;
+        for actual in [load_raw_with_wb(&balanced.0, wb).unwrap().data, load_raw_bytes(&bytes, wb).unwrap().data] {
+            assert_eq!(actual.len(), expected.len());
+            for (a, e) in actual.iter().zip(&expected) {
+                assert!((a - e).abs() <= 1e-5 * e.abs().max(1.0), "{mode:?}: {a} != {e}");
+            }
+        }
+    }
 }
 
 #[test]
