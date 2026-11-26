@@ -70,6 +70,12 @@ impl<'a> Decoder for DngDecoder<'a> {
     let wb_coeffs = self.get_wb(&cam)?;
     let mut image = RawImage::new_with_data(cam, raw_data, width * cpp, height, cpp, wb_coeffs, photometric, blacklevel, whitelevel, dummy);
     image.orientation = orientation;
+    // Negs: keep AnalogBalance, which the stored values already carry
+    // (iPhone 18 ProRAW stores pre-balanced data with AsShotNeutral 1,1,1).
+    // A white balance computed from ColorMatrix must include it.
+    if let Some(balance) = self.tiff.get_entry(DngTag::AnalogBalance) {
+      image.add_dng_tag(DngTag::AnalogBalance, balance.value.clone());
+    }
     Ok(image)
   }
 

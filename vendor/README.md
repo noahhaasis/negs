@@ -5,7 +5,7 @@
 [rawler](https://github.com/dnglab/dnglab) (LGPL-2.1, see `rawler/LICENSE`)
 from crates.io, patched in through `[patch.crates-io]` in the workspace
 `Cargo.toml` and in `windows/Cargo.toml` (the Windows app's own workspace
-builds `spektrafilm-io` too). Five changes:
+builds `spektrafilm-io` too). Six changes:
 
 - `std::time::Instant` is `web_time::Instant` in
   `imgop/sensor/bayer/ppg.rs`, `imgop/sensor/xtrans/{bilinear,markesteijn}.rs`,
@@ -40,6 +40,12 @@ builds `spektrafilm-io` too). Five changes:
   of Nikon HE/HE★ files, which it can't decompress, so `spektrafilm-io` can
   develop LibRaw's sensor data with rawler's metadata for the camera. A real
   decode of those files still fails as before.
+
+- The DNG decoder (`decoders/dng.rs`) keeps the file's AnalogBalance in the
+  decoded image's `dng_tags`. iPhone 18 ProRAW stores values already scaled
+  by it (AsShotNeutral 1, 1, 1), and `spektrafilm-io`'s Daylight, Tungsten
+  and Custom white balance need it to work out the camera's neutral (issue
+  #31). As shot is unchanged.
 
 Tests, benches and `data/testdata` are left out. Remove this directory and
 the patches once upstream rawler takes these changes.

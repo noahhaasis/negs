@@ -127,8 +127,39 @@ pub(crate) fn prepare(raw: &mut RawImage, settings: RawWhiteBalance) -> Result<(
             .as_flattened()
             .to_vec();
     }
-    raw.wb_coeffs = daylight_coefficients(&matrix)?;
+    let tag = u16::from(rawler::tags::DngTag::AnalogBalance);
+    let balance = analog_balance(raw.dng_tags.get(&tag), matrix.len() / 3);
+    raw.wb_coeffs = daylight_coefficients(&matrix, balance)?;
     Ok(())
+}
+
+/// The DNG's AnalogBalance, which the stored values already carry (DNG
+/// spec: camera neutral = AnalogBalance · CameraCalibration · ColorMatrix ·
+/// XYZ white). iPhone 18 ProRAW stores pre-balanced values (AnalogBalance
+/// about 2.5, 1, 1.7 with AsShotNeutral 1, 1, 1); without it the daylight
+/// coefficients apply that balance a second time and the photograph turns
+/// magenta. All ones without the tag, and for a malformed one: a value per
+/// colour plane of the matrix (`channels`), each finite and positive. A
+/// 3-plane camera's fourth (second green) entry follows green.
+fn analog_balance(tag: Option<&rawler::formats::tiff::Value>, channels: usize) -> [f64; 4] {
+    let ones = [1.0; 4];
+    let Some(value) = tag else {
+        return ones;
+    };
+    if !matches!(channels, 3 | 4) || value.count() != channels {
+        return ones;
+    }
+    let mut balance = ones;
+    for (i, v) in balance.iter_mut().take(channels).enumerate() {
+        match value.get_f32(i) {
+            Ok(Some(x)) if x.is_finite() && x > 0.0 => *v = f64::from(x),
+            _ => return ones,
+        }
+    }
+    if channels == 3 {
+        balance[3] = balance[1];
+    }
+    balance
 }
 
 pub(crate) fn is_monochrome(raw: &RawImage) -> bool {
@@ -142,7 +173,7 @@ pub(crate) fn is_monochrome(raw: &RawImage) -> bool {
             ))
 }
 
-fn daylight_coefficients(matrix: &[f32]) -> Result<[f32; 4]> {
+fn daylight_coefficients(matrix: &[f32], analog_balance: [f64; 4]) -> Result<[f32; 4]> {
     ensure!(
         matches!(matrix.len(), 9 | 12),
         "RAW WB requires a 3- or 4-channel XYZ-to-camera matrix"
@@ -162,6 +193,9 @@ fn daylight_coefficients(matrix: &[f32]) -> Result<[f32; 4]> {
     }
     if matrix.len() == 9 {
         response[3] = response[1];
+    }
+    for (r, balance) in response.iter_mut().zip(analog_balance) {
+        *r *= balance;
     }
     let wb = response.map(|v| (response[1] / v) as f32);
     ensure!(
@@ -358,7 +392,7 @@ mod tests {
     #[test]
     fn daylight_coefficients_project_white_and_normalize_green() {
         let m = [0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.75];
-        let wb = daylight_coefficients(&m).unwrap();
+        let wb = daylight_coefficients(&m, [1.0; 4]).unwrap();
         let white = whitepoint(6504.0);
         assert!((f64::from(wb[0]) * 0.5 * white[0] - 1.0).abs() < 1e-7);
         assert_eq!(wb[1], 1.0);
@@ -366,10 +400,37 @@ mod tests {
         assert_eq!(wb[3], wb[1]);
         let mut four = m.to_vec();
         four.extend_from_slice(&[0.0, 0.5, 0.0]);
-        assert_eq!(daylight_coefficients(&four).unwrap()[3], 2.0);
-        assert!(daylight_coefficients(&[0.0; 9]).is_err());
-        assert!(daylight_coefficients(&[f32::NAN; 9]).is_err());
-        assert!(daylight_coefficients(&[1.0; 6]).is_err());
+        assert_eq!(daylight_coefficients(&four, [1.0; 4]).unwrap()[3], 2.0);
+        // Stored values already carry AnalogBalance: undo it, not twice.
+        let balanced = daylight_coefficients(&m, [2.0, 1.0, 0.5, 1.0]).unwrap();
+        assert!((balanced[0] - wb[0] / 2.0).abs() < 1e-6);
+        assert!((balanced[2] - wb[2] * 2.0).abs() < 1e-6);
+        assert_eq!(balanced[1], 1.0);
+        assert!(daylight_coefficients(&[0.0; 9], [1.0; 4]).is_err());
+        assert!(daylight_coefficients(&[f32::NAN; 9], [1.0; 4]).is_err());
+        assert!(daylight_coefficients(&[1.0; 6], [1.0; 4]).is_err());
+    }
+
+    #[test]
+    fn analog_balance_needs_one_valid_value_per_plane() {
+        use rawler::formats::tiff::{Rational, SRational, Value};
+        let r = |v: &[(u32, u32)]| Value::Rational(v.iter().map(|&(n, d)| Rational::new(n, d)).collect());
+        assert_eq!(analog_balance(None, 3), [1.0; 4]);
+        let three = r(&[(5, 2), (3, 2), (7, 4)]);
+        assert_eq!(analog_balance(Some(&three), 3), [2.5, 1.5, 1.75, 1.5]);
+        let four = r(&[(5, 2), (3, 2), (7, 4), (1, 2)]);
+        assert_eq!(analog_balance(Some(&four), 4), [2.5, 1.5, 1.75, 0.5]);
+        // The count must match the matrix's planes.
+        assert_eq!(analog_balance(Some(&three), 4), [1.0; 4]);
+        assert_eq!(analog_balance(Some(&four), 3), [1.0; 4]);
+        assert_eq!(analog_balance(Some(&r(&[(1, 1); 2])), 3), [1.0; 4]);
+        // Zero, infinite, NaN, negative and non-numeric values are ignored.
+        for bad in [(0, 1), (1, 0), (0, 0)] {
+            assert_eq!(analog_balance(Some(&r(&[(1, 1), bad, (1, 1)])), 3), [1.0; 4], "{bad:?}");
+        }
+        let negative = Value::SRational(vec![SRational::new(1, 1), SRational::new(-1, 1), SRational::new(1, 1)]);
+        assert_eq!(analog_balance(Some(&negative), 3), [1.0; 4]);
+        assert_eq!(analog_balance(Some(&Value::Undefined(vec![1, 1, 1])), 3), [1.0; 4]);
     }
 
     #[test]
