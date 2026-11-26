@@ -289,6 +289,37 @@ pub fn paint_pencil(window: &mut Window, rect: Bounds<Pixels>, plain: bool, widt
     }
 }
 
+/// Light Table's yellow highlighter swipe (`#ffd23f @ 0.85`, 8.5 pt wide,
+/// outset horizontally by half its width, lifted `lift` DIPs behind the word).
+/// Paint BEFORE the text so the dark ink sits cleanly on top (`L3`).
+pub fn paint_highlighter(window: &mut Window, rect: Bounds<Pixels>, plain: bool, lift: f32, color: Hsla) {
+    let w = negs_marks::HIGHLIGHTER_WIDTH as f32;
+    let reach = w / 2.0;
+    let shifted = Bounds {
+        origin: point(rect.origin.x - px(reach * 0.35), rect.origin.y - px(lift)),
+        size: gpui::size(rect.size.width + px(reach * 0.7), rect.size.height),
+    };
+    paint_pencil(window, shifted, plain, w, color);
+}
+
+/// Active word underline: Light Table yellow highlighter (lifted behind the
+/// word's lower half) or standard grease-pencil / Plain straight bar (`L3`).
+pub fn paint_word_underline(
+    window: &mut Window,
+    rect: Bounds<Pixels>,
+    plain: bool,
+    highlighter: bool,
+    accent: Hsla,
+    highlighter_ink: Hsla,
+    lift: f32,
+) {
+    if highlighter {
+        paint_highlighter(window, rect, plain, lift, highlighter_ink);
+    } else {
+        paint_pencil(window, rect, plain, negs_marks::PENCIL_WIDTH as f32, accent);
+    }
+}
+
 /// The mark's dark halo where there's no blur (`halo_on` on Windows): two
 /// soft outlines under it.
 fn halo_strokes(window: &mut Window, outline: &[negs_marks::Pt], at: &impl Fn(negs_marks::Pt) -> Point<Pixels>) {

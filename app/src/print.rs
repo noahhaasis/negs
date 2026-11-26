@@ -10,7 +10,7 @@
 //! records where each name, the lock, the marks and the turn arrows are, for
 //! the canvas's clicks.
 
-use gpui::{App, Bounds, FontStyle, FontWeight, Hsla, PathBuilder, Pixels, SharedString, TextRun, Window, fill, font, point, px, size};
+use gpui::{App, Bounds, Hsla, PathBuilder, Pixels, SharedString, TextRun, Window, fill, point, px, size};
 use negs_app::crop::{Handle, Point, Rect, Size};
 use negs_marks::{Path, Pt, Seg};
 
@@ -239,13 +239,15 @@ pub struct Painter<'a> {
 
 impl Painter<'_> {
     fn shape(&mut self, text: &str, style: &TextStyle, color: Hsla) -> gpui::ShapedLine {
-        let f = gpui::Font {
-            style: if style.italic { FontStyle::Italic } else { FontStyle::Normal },
-            weight: FontWeight(style.weight),
-            ..font(self.serif.clone())
-        };
+        let (f, effective_size) = crate::theme_gpui::serif_font_spec(
+            self.plain,
+            &self.serif,
+            style.size,
+            style.weight,
+            style.italic,
+        );
         let run = TextRun { len: text.len(), font: f, color, background_color: None, underline: None, strikethrough: None };
-        self.window.text_system().shape_line(SharedString::from(text.to_string()), px(style.size), &[run], None)
+        self.window.text_system().shape_line(SharedString::from(text.to_string()), px(effective_size), &[run], None)
     }
 
     pub fn measure(&mut self, text: &str, style: &TextStyle) -> Metrics {
@@ -388,14 +390,12 @@ pub fn paint_caption(p: &mut Painter, canvas: Rect, print: Rect, portrait: bool,
 }
 
 /// The pencil under a name whose tray is open (`StockName`'s underline);
-/// Light table's highlighter, lifted behind the name's foot.
+/// Light table's highlighter, lifted behind the name's foot (`L3`).
 pub fn open_mark(p: &mut Painter, x: f64, foot: f64, width: f64, ink: &SheetInk) {
     if ink.highlighter {
-        let reach = negs_marks::HIGHLIGHTER_WIDTH / 2.0;
         let color = hex_alpha(negs_app::theme::HIGHLIGHTER_INK, negs_app::theme::HIGHLIGHTER_OPACITY);
-        let r = Rect::new(x, foot - 5.0, width.max(1.0), 6.0);
-        paint_pencil(p.window, bounds(r), p.plain, negs_marks::HIGHLIGHTER_WIDTH as f32, color);
-        let _ = reach;
+        let r = Rect::new(x, foot - 1.0, width.max(1.0), 6.0);
+        crate::marks_gpui::paint_highlighter(p.window, bounds(r), p.plain, 5.0, color);
     } else {
         p.strike_mark(x, foot - 1.0, width, hex(ink.accent));
     }
@@ -456,14 +456,18 @@ pub fn paint_label(p: &mut Painter, canvas: Rect, print: Rect, words: &PrintWord
     let film_color = if original { ink.dim } else { ink.paper };
     let film_room = if one_row { width } else { canvas_width } - INNER - caret;
     let film = if words.negative { negs_app::negative::NAME.to_string() } else { p.fitted(&words.film, &FILM, film_room) };
+    if opens && ink.highlighter && words.tray == Some(false) {
+        let fm_pre = p.measure(&film, &FILM);
+        open_mark(p, left, film_baseline - fm_pre.baseline + fm_pre.height, fm_pre.width, ink);
+    }
     let fm = p.word(&film, FILM, hex(film_color), left, film_baseline);
     let film_rect = Rect::new(left, film_baseline - fm.baseline, fm.width + INNER + caret, fm.height + 5.0);
     if opens {
         paint_caret(p.window, left + fm.width + INNER + 1.0, film_baseline - 6.0, hex(ink.dim));
         targets.push((Target::Film, film_rect));
-        if words.tray == Some(false) {
+        if words.tray == Some(false) && !ink.highlighter {
             open_mark(p, left, film_baseline - fm.baseline + fm.height, fm.width, ink);
-        } else if hot == Some(Target::Film) {
+        } else if words.tray != Some(false) && hot == Some(Target::Film) {
             p.fill(Rect::new(left, film_baseline - fm.baseline + fm.height + 4.0, fm.width, 1.5), hex(ink.track));
         }
     }
@@ -477,14 +481,18 @@ pub fn paint_label(p: &mut Painter, canvas: Rect, print: Rect, words: &PrintWord
         let x = x + km.width + INNER;
         let room = (canvas.max_x() - MARGIN - x - INNER - caret).max(20.0);
         let name = p.fitted(&words.film, &PAPER, room);
+        if opens && ink.highlighter && words.read_as_open {
+            let nm_pre = p.measure(&name, &PAPER);
+            open_mark(p, x, film_baseline - nm_pre.baseline + nm_pre.height, nm_pre.width, ink);
+        }
         let nm = p.word(&name, PAPER, hex(film_color), x, film_baseline);
         let name_top = film_baseline - nm.baseline;
         if opens {
             paint_caret(p.window, x + nm.width + INNER + 1.0, film_baseline - 6.0, hex(ink.dim));
             targets.push((Target::ReadAs, Rect::new(x, name_top, nm.width + INNER + caret, nm.height + 5.0)));
-            if words.read_as_open {
+            if words.read_as_open && !ink.highlighter {
                 open_mark(p, x, name_top + nm.height, nm.width, ink);
-            } else if hot == Some(Target::ReadAs) {
+            } else if !words.read_as_open && hot == Some(Target::ReadAs) {
                 p.fill(Rect::new(x, name_top + nm.height + 4.0, nm.width, 1.5), hex(ink.track));
             }
         }
@@ -519,13 +527,17 @@ pub fn paint_label(p: &mut Painter, canvas: Rect, print: Rect, words: &PrintWord
     let room = (canvas.max_x() - MARGIN - x - INNER - caret - original_width).max(20.0);
     let paper = p.fitted(&words.paper, &PAPER, room);
     let paper_color = if original || scanning { ink.dim } else { ink.paper };
+    if paper_opens && ink.highlighter && words.tray == Some(true) {
+        let pm_pre = p.measure(&paper, &PAPER);
+        open_mark(p, x, paper_baseline - pm_pre.baseline + pm_pre.height, pm_pre.width, ink);
+    }
     let pm = p.word(&paper, PAPER, hex(paper_color), x, paper_baseline);
     if paper_opens {
         paint_caret(p.window, x + pm.width + INNER + 1.0, paper_baseline - 6.0, hex(ink.dim));
         targets.push((Target::Paper, Rect::new(x, paper_baseline - pm.baseline, pm.width + INNER + caret, pm.height + 5.0)));
-        if words.tray == Some(true) {
+        if words.tray == Some(true) && !ink.highlighter {
             open_mark(p, x, paper_baseline - pm.baseline + pm.height, pm.width, ink);
-        } else if hot == Some(Target::Paper) {
+        } else if words.tray != Some(true) && hot == Some(Target::Paper) {
             p.fill(Rect::new(x, paper_baseline - pm.baseline + pm.height + 4.0, pm.width, 1.5), hex(ink.track));
         }
     }
