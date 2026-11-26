@@ -6,7 +6,7 @@
 #   cargo test --manifest-path windows/library-map/Cargo.toml --target-dir target/library-map
 [package]
 name = "negs-windows-library-map"
-version = "0.20.1"
+version = "0.20.2"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false

@@ -41,6 +41,7 @@ jobs:
       linux: ${{ github.event_name != 'push' || (github.ref_type == 'tag' && steps.reuse.outputs.run == '') || steps.filter.outputs.linux == 'true' }}
       windows: ${{ github.event_name != 'push' || (github.ref_type == 'tag' && steps.reuse.outputs.run == '') || steps.filter.outputs.windows == 'true' }}
       macos: ${{ github.event_name != 'push' || (github.ref_type == 'tag' && steps.reuse.outputs.run == '') || steps.filter.outputs.macos == 'true' }}
+      android: ${{ github.event_name != 'push' || (github.ref_type == 'tag' && steps.reuse.outputs.run == '') || steps.filter.outputs.android == 'true' }}
     steps:
       - name: Find main's green run of this commit
         id: reuse
@@ -57,7 +58,7 @@ jobs:
             [ "$pending" = 0 ] && break
             echo "Waiting for main's run of $SHA"; sleep 30
           done
-          need='["build-macos-aarch64-apple-darwin","build-macos-x86_64-apple-darwin","negs-windows","negs-windows-arm64","negs-linux","negs-linux-flatpak","negs-linux-appimage"]'
+          need='["build-macos-aarch64-apple-darwin","build-macos-x86_64-apple-darwin","negs-windows","negs-windows-arm64","negs-linux","negs-linux-flatpak","negs-linux-appimage","negs-android"]'
           for id in $(gh api "$runs" --jq '.workflow_runs[] | select(.conclusion == "success") | .id'); do
             have=$(gh api "repos/$REPO/actions/runs/$id/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name]')
             if jq -e --argjson need "$need" '. as $have | $need - $have | length == 0' <<<"$have" > /dev/null; then
@@ -92,6 +93,11 @@ jobs:
               - "core/**"
               - "macos/**"
               - "scripts/**"
+            android:
+              - *shared
+              - "android/**"
+              - "web/locales/**"
+              - "web/sample/DSC_6377.dng"
 
   linux:
     name: Linux x86_64
@@ -363,11 +369,93 @@ jobs:
         with:
           path: dist/update-site/
 
+  android:
+    name: Android arm64
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.1
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64-linux-android
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
+      - name: Ensure Android NDK 28 and SDK 35 are installed
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ndk="$sdk/ndk/28.2.13676358"
+          if [ ! -d "$ndk" ] || [ ! -d "$sdk/platforms/android-35" ] || [ ! -d "$sdk/build-tools/35.0.0" ]; then
+            set +o pipefail
+            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          fi
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+      - name: Check Android translations
+        run: node android/check-i18n.mjs
+      - name: Build Android engine (aarch64-linux-android)
+        run: bash android/build-engine.sh --locked
+      - name: Build and sign release APK
+        env:
+          IS_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ks=""
+          cleanup() { [ -n "$ks" ] && rm -f "$ks"; }
+          trap cleanup EXIT
+          if [ -n "${ANDROID_KEYSTORE_B64:-}" ]; then
+            ks="$(mktemp "${RUNNER_TEMP:-/tmp}/negs-android.XXXXXX.keystore")"
+            printf '%s' "$ANDROID_KEYSTORE_B64" | base64 --decode > "$ks"
+            export ANDROID_KEYSTORE_PATH="$ks"
+          fi
+          if [ "$IS_TAG" = "true" ]; then
+            export NEGS_REQUIRE_RELEASE_SIGNING=1
+          fi
+          (cd android && ./gradlew assembleRelease --no-daemon)
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$apk"
+          version=$(python3 -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("Cargo.toml").read_text())["workspace"]["package"]["version"])')
+          out="target/android-release"
+          mkdir -p "$out"
+          asset="Negs-${version}-android-arm64.apk"
+          cp "$apk" "$out/$asset"
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          apksigner="$sdk/build-tools/35.0.0/apksigner"
+          certs=$("$apksigner" verify --print-certs "$out/$asset")
+          printf '%s\n' "$certs"
+          if [ "$IS_TAG" = "true" ]; then
+            if printf '%s\n' "$certs" | grep -q "CN=Android Debug"; then
+              echo "Refusing to ship a debug-signed APK on a release tag" >&2
+              exit 1
+            fi
+          fi
+          (cd "$out" && sha256sum "$asset" > SHA256SUMS-android.txt)
+          ls -lh "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negs-android
+          path: target/android-release/
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Publish complete release
     # Windows and Linux are skipped when reused; any failure stops the release.
     if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && needs.macos.result == 'success' && !contains(needs.*.result, 'failure') }}
-    needs: [changes, macos, windows, windows-test, linux]
+    needs: [changes, macos, windows, windows-test, linux, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -376,13 +464,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: negs-{macos,windows,windows-arm64,linux,linux-flatpak,linux-appimage}
+          pattern: negs-{macos,windows,windows-arm64,linux,linux-flatpak,linux-appimage,android}
           path: release-assets
           merge-multiple: true
       - uses: actions/download-artifact@v4
         if: needs.changes.outputs.reuse != ''
         with:
-          pattern: negs-{windows,windows-arm64,linux,linux-flatpak,linux-appimage}
+          pattern: negs-{windows,windows-arm64,linux,linux-flatpak,linux-appimage,android}
           path: release-assets
           merge-multiple: true
           run-id: ${{ needs.changes.outputs.reuse }}

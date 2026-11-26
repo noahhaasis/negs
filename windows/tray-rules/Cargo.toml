@@ -3,7 +3,7 @@
 #   cargo test --manifest-path windows/tray-rules/Cargo.toml --target-dir target/tray-rules
 [package]
 name = "negs-windows-tray-rules"
-version = "0.20.1"
+version = "0.20.2"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false

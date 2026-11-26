@@ -35,6 +35,22 @@ val syncLargeRaw by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/testSamples/samples"))
 }
 
+val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+val releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+val hasReleaseSigning = !releaseKeystorePath.isNullOrBlank() &&
+    !releaseKeystorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+if (System.getenv("NEGS_REQUIRE_RELEASE_SIGNING") == "1" && !hasReleaseSigning) {
+    throw GradleException(
+        "NEGS_REQUIRE_RELEASE_SIGNING=1 requires ANDROID_KEYSTORE_PATH, " +
+            "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD"
+    )
+}
+val releaseBuildNumber = rootProject.file("../release/build-number").readText().trim().toInt()
+
 android {
     namespace = "dev.negs.app"
     compileSdk = 35
@@ -44,16 +60,31 @@ android {
         // Vulkan 1.1 is required from Android 10.
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.20.1"
+        versionCode = releaseBuildNumber
+        versionName = "0.20.2"
         ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {

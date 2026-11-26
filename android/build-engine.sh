@@ -9,7 +9,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-sdk="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
 ndk="${ANDROID_NDK_HOME:-$(ls -d "$sdk"/ndk/* 2>/dev/null | sort -V | tail -1)}"
 [ -d "$ndk" ] || { echo "No Android NDK under $sdk/ndk (sdkmanager \"ndk;28.2.13676358\")" >&2; exit 1; }
 api=29
