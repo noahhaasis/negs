@@ -4,11 +4,15 @@
 
 use std::path::{Path, PathBuf};
 
+/// The newest SDK's rc.exe for the build machine (arm64 on Windows on Arm),
+/// else its x64 one, which Windows on Arm runs emulated. Its .res output is
+/// the same for either target.
 fn rc_exe() -> Option<PathBuf> {
     let kits = Path::new(r"C:\Program Files (x86)\Windows Kits\10\bin");
-    let mut versions: Vec<PathBuf> = std::fs::read_dir(kits).ok()?.flatten().map(|e| e.path()).filter(|p| p.join("x64").join("rc.exe").exists()).collect();
+    let mut versions: Vec<PathBuf> = std::fs::read_dir(kits).ok()?.flatten().map(|e| e.path()).collect();
     versions.sort();
-    versions.pop().map(|v| v.join("x64").join("rc.exe"))
+    let host = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+    [host, "x64"].iter().find_map(|arch| versions.iter().rev().map(|v| v.join(arch).join("rc.exe")).find(|rc| rc.exists()))
 }
 
 fn main() {

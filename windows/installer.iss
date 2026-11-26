@@ -6,6 +6,13 @@
 #ifndef OutputDir
   #error OutputDir is required
 #endif
+; x64 (the default) or arm64: the architecture of the staged executables.
+#ifndef Arch
+  #define Arch "x64"
+#endif
+#if Arch != "x64" && Arch != "arm64"
+  #error Arch must be x64 or arm64
+#endif
 [Setup]
 AppId=dev.negs.app
 AppName=Negs
@@ -13,8 +20,13 @@ AppVersion=0.20.1
 AppPublisher=Negs
 DefaultDirName={localappdata}\Programs\Negs
 PrivilegesRequired=lowest
+#if Arch == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 OutputDir={#OutputDir}
 OutputBaseFilename=Negs-Setup
 Compression=lzma2

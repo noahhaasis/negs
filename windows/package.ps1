@@ -3,6 +3,9 @@ param(
     [string]$AppcastUrl,
     [string]$EdPublicKey,
     [string]$Iscc,
+    # The architecture of the executables: the build machine's unless given.
+    [ValidateSet('x64', 'arm64')]
+    [string]$Arch = $(if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }),
     # CI builds the engine and app in parallel jobs and places them first.
     [switch]$Prebuilt
 )
@@ -64,8 +67,8 @@ $output = Join-Path $root 'target/windows-dist'
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath (Join-Path $output 'Negs-portable.zip') -Force
 if ($Iscc) {
-    & $Iscc "/DStageDir=$stage" "/DOutputDir=$output" (Join-Path $PSScriptRoot 'installer.iss')
+    & $Iscc "/DStageDir=$stage" "/DOutputDir=$output" "/DArch=$Arch" (Join-Path $PSScriptRoot 'installer.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 }
-Write-Output "Package: $output"
+Write-Output "Package ($Arch): $output"
 Write-Output "Staging: $stage"

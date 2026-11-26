@@ -57,7 +57,7 @@ jobs:
             [ "$pending" = 0 ] && break
             echo "Waiting for main's run of $SHA"; sleep 30
           done
-          need='["build-macos-aarch64-apple-darwin","build-macos-x86_64-apple-darwin","negs-windows","negs-linux","negs-linux-flatpak","negs-linux-appimage"]'
+          need='["build-macos-aarch64-apple-darwin","build-macos-x86_64-apple-darwin","negs-windows","negs-windows-arm64","negs-linux","negs-linux-flatpak","negs-linux-appimage"]'
           for id in $(gh api "$runs" --jq '.workflow_runs[] | select(.conclusion == "success") | .id'); do
             have=$(gh api "repos/$REPO/actions/runs/$id/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name]')
             if jq -e --argjson need "$need" '. as $have | $need - $have | length == 0' <<<"$have" > /dev/null; then
@@ -100,10 +100,19 @@ jobs:
     uses: ./.github/workflows/linux.yml
 
   windows-test:
-    name: Windows tests
+    name: Windows tests ${{ matrix.arch }}
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          # Native Windows on Arm, so ARM64 is built and tested without cross-compiling.
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.93.1
@@ -125,10 +134,19 @@ jobs:
           done
 
   windows-engine:
-    name: Windows engine
+    name: Windows engine ${{ matrix.arch }}
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          # Native Windows on Arm, so ARM64 is built and tested without cross-compiling.
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.93.1
@@ -143,7 +161,7 @@ jobs:
           cargo build --release --locked -p spektrafilm-cli --features precision-f64 --bin spektrafilm-f64
       - uses: actions/upload-artifact@v4
         with:
-          name: build-windows-engine
+          name: build-windows-engine-${{ matrix.arch }}
           path: |
             target/release/spektrafilm-native.exe
             target/release/spektrafilm.exe
@@ -152,10 +170,19 @@ jobs:
           retention-days: 1
 
   windows-app:
-    name: Windows app
+    name: Windows app ${{ matrix.arch }}
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          # Native Windows on Arm, so ARM64 is built and tested without cross-compiling.
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.93.1
@@ -167,14 +194,25 @@ jobs:
         run: cargo build --release --locked --manifest-path windows/Cargo.toml
       - uses: actions/upload-artifact@v4
         with:
-          name: build-windows-app
+          name: build-windows-app-${{ matrix.arch }}
           path: windows/target/release/Negs.exe
           if-no-files-found: error
           retention-days: 1
 
   windows:
-    name: Windows x64
+    name: Windows ${{ matrix.arch }}
     needs: [windows-engine, windows-app]
+    # Both on x64, where Inno Setup is installed: packaging only copies,
+    # compresses and checks the executables' architecture. x64 keeps the
+    # artifact name tag runs reuse and earlier releases used.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            artifact: negs-windows
+          - arch: arm64
+            artifact: negs-windows-arm64
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -183,23 +221,23 @@ jobs:
           python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
-          name: build-windows-engine
+          name: build-windows-engine-${{ matrix.arch }}
           path: target/release
       - uses: actions/download-artifact@v4
         with:
-          name: build-windows-app
+          name: build-windows-app-${{ matrix.arch }}
           path: windows/target/release
       - name: Build installer and portable package
         shell: pwsh
         run: |
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
           if (!(Test-Path -LiteralPath $iscc)) { throw 'Inno Setup 6 compiler is missing from the runner.' }
-          ./windows/package.ps1 -Iscc $iscc -Prebuilt
+          ./windows/package.ps1 -Iscc $iscc -Prebuilt -Arch ${{ matrix.arch }}
       - name: Verify and name release assets
-        run: python windows/verify_package.py
+        run: python windows/verify_package.py --arch ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
-          name: negs-windows
+          name: ${{ matrix.artifact }}
           path: target/windows-release/
           if-no-files-found: error
 
@@ -338,13 +376,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: negs-{macos,windows,linux,linux-flatpak,linux-appimage}
+          pattern: negs-{macos,windows,windows-arm64,linux,linux-flatpak,linux-appimage}
           path: release-assets
           merge-multiple: true
       - uses: actions/download-artifact@v4
         if: needs.changes.outputs.reuse != ''
         with:
-          pattern: negs-{windows,linux,linux-flatpak,linux-appimage}
+          pattern: negs-{windows,windows-arm64,linux,linux-flatpak,linux-appimage}
           path: release-assets
           merge-multiple: true
           run-id: ${{ needs.changes.outputs.reuse }}
