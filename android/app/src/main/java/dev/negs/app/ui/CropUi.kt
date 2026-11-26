@@ -5,6 +5,7 @@ import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -31,7 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +41,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -218,14 +220,20 @@ fun CropInspector(editor: Editor, session: CropSession, modifier: Modifier) {
         }
         item {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Fixed height and a kept Reset slot, as Inspector's SliderRow.
+                Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Straighten", color = Palette.muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text("%.1f°".format(s.angle), color = Palette.muted, fontSize = 12.sp)
-                    if (s.angle != 0.0) {
-                        TextButton(onClick = { session.straighten(0.0); session.endStraighten() }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                            Text("Reset", color = Palette.faint, fontSize = 11.sp)
-                        }
-                    }
+                    Text(
+                        "%.1f°".format(s.angle), color = Palette.muted, fontSize = 12.sp,
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
+                    )
+                    val modified = s.angle != 0.0
+                    Text(
+                        "Reset", color = Palette.faint, fontSize = 11.sp,
+                        modifier = Modifier.alpha(if (modified) 1f else 0f)
+                            .clickable(enabled = modified) { session.straighten(0.0); session.endStraighten() }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
                 }
                 Slider(
                     value = s.angle.toFloat(), valueRange = -45f..45f,
