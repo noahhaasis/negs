@@ -12,6 +12,8 @@ use crate::RawWhiteBalance;
 
 mod dng;
 pub use dng::is_dng;
+#[cfg(not(target_arch = "wasm32"))]
+pub use dng::is_dng_file;
 
 #[cfg(all(target_os = "macos", feature = "apple-raw"))]
 mod apple;

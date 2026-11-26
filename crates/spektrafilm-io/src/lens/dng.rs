@@ -3,8 +3,8 @@
 //! so also lateral chromatic aberration) and `FixVignetteRadial` (opcode 3).
 //! Both are defined on the linear reference image (the active area) with
 //! radii normalised to the distance from the optical centre to the farthest
-//! corner. `GainMap` (`OpcodeList2`, applied to sensor data before
-//! demosaicing) is not handled.
+//! corner. `GainMap` (`OpcodeList2` / `OpcodeList3`) is applied unconditionally
+//! as part of sensor linearization in [`crate::gain_map`].
 
 use rawler::decoders::WellKnownIFD;
 use rawler::formats::tiff::Value;

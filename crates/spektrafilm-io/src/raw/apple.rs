@@ -81,6 +81,17 @@ impl RawDecoder for AppleRawDecoder {
     /// `decode_compatible(&[9, 8])`: a RAW 9 decode that fails later is tried
     /// with 8, fatal errors stop, and the failures read the same.
     fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
+        options.white_balance.validate()?;
+        // Apple's CIRAWFilter silently drops Android per-CFA GainMaps in
+        // OpcodeList2 ("mismatch in green channels"), leaving phone DNGs with
+        // dark, yellow-tinted corners. Defer those files to rawler, which
+        // applies DNG GainMaps before demosaicing.
+        if crate::gain_map::has_cfa_gain_maps(path) {
+            return Err(UnsupportedRaw(
+                "DNG carries CFA GainMap opcodes (OpcodeList2); deferring to rawler".into(),
+            )
+            .into());
+        }
         let mut attempt = Attempt::default();
         let first = decode_generation(0, path, options, &mut attempt);
         let mut failures = Vec::new();
