@@ -121,6 +121,147 @@ pub fn metering_preview(image: &ImageBuf) -> ImageBuf {
     ImageBuf::from_data(out_w as u32, out_h as u32, data)
 }
 
+/// Streaming, memory-bounded version of [`metering_preview`] that produces
+/// **bit-identical** results without holding a full-resolution `ImageBuf` in
+/// memory. `extract_rows(y0, rows)` must return upright linear RGB for rows
+/// `y0 .. y0 + rows` across the full width `w`.
+pub fn metering_preview_streaming<E>(
+    w: u32,
+    h: u32,
+    mut extract_rows: impl FnMut(u32, u32) -> Result<ImageBuf, E>,
+) -> Result<ImageBuf, E> {
+    const MAX_SIZE: f64 = 256.0;
+    const STRIP_ROWS: usize = 128;
+    let (w_us, h_us) = (w as usize, h as usize);
+    let max_dim = w_us.max(h_us);
+    if max_dim as f64 <= MAX_SIZE {
+        return extract_rows(0, h);
+    }
+    let scale = MAX_SIZE / max_dim as f64;
+    let out_dim = |dim: usize| ((scale * dim as f64).round_ties_even() as usize).max(1);
+    let (out_w, out_h) = (out_dim(w_us), out_dim(h_us));
+    let axis = |out: usize, dim: usize| -> (Vec<usize>, Vec<f64>) {
+        let zoom = dim as f64 / out as f64;
+        let index = (0..out)
+            .map(|o| {
+                let cc = (o as f64 + 0.5) * zoom - 0.5;
+                mirror_index((cc + 0.5).floor() as isize, dim)
+            })
+            .collect();
+        (index, gaussian_kernel(((zoom - 1.0) / 2.0).max(0.0)))
+    };
+    let (rows, row_kernel) = axis(out_h, h_us);
+    let (cols, col_kernel) = axis(out_w, w_us);
+    let row_r = row_kernel.len() / 2;
+    if 2 * row_r + 1 >= h_us {
+        let full = extract_rows(0, h)?;
+        return Ok(metering_preview(&full));
+    }
+
+    // For each sampled output row, compute the exact [min_row, max_row] source
+    // row span touched by `mirror_index(y ± j, h)`.
+    let row_spans: Vec<(usize, usize)> = rows
+        .iter()
+        .map(|&y| {
+            let mut mn = y;
+            let mut mx = y;
+            for j in 1..=row_r {
+                let a = mirror_index(y as isize - j as isize, h_us);
+                let b = mirror_index(y as isize + j as isize, h_us);
+                mn = mn.min(a).min(b);
+                mx = mx.max(a).max(b);
+            }
+            (mn, mx)
+        })
+        .collect();
+
+    // Suffix minimum of `min_row` so we know when older source strips can be dropped.
+    let mut suffix_min = vec![usize::MAX; out_h + 1];
+    for i in (0..out_h).rev() {
+        suffix_min[i] = suffix_min[i + 1].min(row_spans[i].0);
+    }
+
+    let correlate = |kernel: &[f64], at: usize, dim: usize, sample: &dyn Fn(usize) -> f64| {
+        let r = kernel.len() / 2;
+        let mut acc = sample(at) * kernel[r];
+        for j in (1..=r).rev() {
+            let lo = mirror_index(at as isize - j as isize, dim);
+            let hi = mirror_index(at as isize + j as isize, dim);
+            acc += (sample(lo) + sample(hi)) * kernel[r - j];
+        }
+        acc
+    };
+
+    let mut window: std::collections::VecDeque<(usize, ImageBuf)> = std::collections::VecDeque::new();
+    let mut unclamped = vec![0.0f64; out_h * out_w * 3];
+    let mut next_out = 0usize;
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut loaded_y = 0usize;
+
+    while loaded_y < h_us {
+        let chunk = STRIP_ROWS.min(h_us - loaded_y);
+        let strip = extract_rows(loaded_y as u32, chunk as u32)?;
+        for &v in &strip.data {
+            let f = to_f64(v);
+            if f < lo { lo = f; }
+            if f > hi { hi = f; }
+        }
+        window.push_back((loaded_y, strip));
+        loaded_y += chunk;
+
+        // Evaluate every output row whose source support is now loaded.
+        let ready_start = next_out;
+        while next_out < out_h && row_spans[next_out].1 < loaded_y {
+            next_out += 1;
+        }
+        if next_out > ready_start {
+            // Snapshot references into the rolling window for parallel row work.
+            let strips: Vec<(usize, &ImageBuf)> = window.iter().map(|(y0, b)| (*y0, b)).collect();
+            let pixel = |yy: usize, x: usize, c: usize| -> f64 {
+                for &(y0, buf) in &strips {
+                    if yy >= y0 && yy < y0 + buf.height as usize {
+                        return to_f64(buf.data[((yy - y0) * w_us + x) * 3 + c]);
+                    }
+                }
+                unreachable!("row {yy} missing from metering window")
+            };
+            unclamped[ready_start * out_w * 3..next_out * out_w * 3]
+                .par_chunks_exact_mut(out_w * 3)
+                .enumerate()
+                .for_each(|(di, out_row)| {
+                    let y = rows[ready_start + di];
+                    let mut filtered_row = vec![0.0f64; w_us * 3];
+                    for x in 0..w_us {
+                        for c in 0..3 {
+                            filtered_row[x * 3 + c] =
+                                correlate(&row_kernel, y, h_us, &|yy| pixel(yy, x, c));
+                        }
+                    }
+                    for (ox, &x) in cols.iter().enumerate() {
+                        for c in 0..3 {
+                            out_row[ox * 3 + c] =
+                                correlate(&col_kernel, x, w_us, &|xx| filtered_row[xx * 3 + c]);
+                        }
+                    }
+                });
+        }
+
+        let keep_from = suffix_min[next_out];
+        while let Some((y0, buf)) = window.front() {
+            if y0 + buf.height as usize <= keep_from {
+                window.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    let data: Vec<spektrafilm_math::precision::Scalar> =
+        unclamped.into_iter().map(|v| from_f64(v.clamp(lo, hi))).collect();
+    Ok(ImageBuf::from_data(out_w as u32, out_h as u32, data))
+}
+
 /// `scipy.ndimage` "mirror" extension (`d c b | a b c d | c b a`).
 fn mirror_index(i: isize, dim: usize) -> usize {
     if dim == 1 {
@@ -442,7 +583,7 @@ pub(crate) fn prepare_input_from(
 #[allow(clippy::too_many_arguments)]
 pub fn expose(
     image: ImageBuf,
-    _film: &Profile,
+    film: &Profile,
     params: &RuntimeParams,
     backend: &dyn ComputeBackend,
     tc_lut: Option<&TcLut>,
@@ -450,12 +591,44 @@ pub fn expose(
     bw_filming_correction: f64,
     autoexposure_ev: f64,
 ) -> ImageBuf {
-    let pix_um = pixel_size_um(params.camera.film_format_mm, image.width, image.height);
+    expose_tiled(
+        image,
+        film,
+        params,
+        backend,
+        tc_lut,
+        front_illuminant,
+        bw_filming_correction,
+        autoexposure_ev,
+        None,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expose_tiled(
+    image: ImageBuf,
+    _film: &Profile,
+    params: &RuntimeParams,
+    backend: &dyn ComputeBackend,
+    tc_lut: Option<&TcLut>,
+    front_illuminant: &[f32],
+    bw_filming_correction: f64,
+    autoexposure_ev: f64,
+    phys_size: Option<(u32, u32)>,
+    prep_applied: bool,
+) -> ImageBuf {
+    let (phys_w, phys_h) = phys_size.unwrap_or((image.width, image.height));
+    let pix_um = pixel_size_um(params.camera.film_format_mm, phys_w, phys_h);
 
     let mut raw = {
         // Consume the input so optical scratch does not overlap an RGB copy.
-        let rgb = prepare_input(image, params, autoexposure_ev)
-            .expect("Invalid Prep settings or pixels");
+        let rgb = if prep_applied {
+            image
+        } else {
+            prepare_input(image, params, autoexposure_ev)
+                .expect("Invalid Prep settings or pixels")
+        };
 
         // RGB → film raw exposure; the simplified fallback treats RGB values
         // as proportional to raw exposure.
@@ -584,23 +757,28 @@ pub fn develop(
     params: &RuntimeParams,
     backend: &dyn ComputeBackend,
 ) -> ImageBuf {
+    develop_tiled(log_raw, film, params, backend, None, None)
+}
+
+pub(crate) fn develop_pre_grain_tiled(
+    log_raw: ImageBuf,
+    film: &Profile,
+    params: &RuntimeParams,
+    backend: &dyn ComputeBackend,
+    phys_size: Option<(u32, u32)>,
+) -> ImageBuf {
     let stage_timings = stage_timings_enabled();
-    let pix_um = pixel_size_um(params.camera.film_format_mm, log_raw.width, log_raw.height);
-    // f64 chain for Python parity — curves are f64 in the profile JSON.
+    let (phys_w, phys_h) = phys_size.unwrap_or((log_raw.width, log_raw.height));
+    let pix_um = pixel_size_um(params.camera.film_format_mm, phys_w, phys_h);
     let log_exposure_f64 = film.log_exposure_f64();
     let density_curves_f64 = film.density_curves_f64();
-
-    // Filming.develop uses NORMALIZED curves (Python `develop` subtracts nanmin).
     let norm_curves_f64 =
         spektrafilm_model::density_curves::normalize_density_curves_f64(&density_curves_f64);
     let t = Instant::now();
-    // Unit gamma: the Film Curves morph is baked into the curves
-    // (`Pipeline::apply_film_curves_morph`), as upstream experimental does.
     let mut density_cmy =
         backend.density_curve_interp(&log_raw, &log_exposure_f64, &norm_curves_f64, 1.0);
     print_stage_timing(stage_timings, "filming_develop.density_interp", t);
 
-    // DIR couplers
     let dir = &params.film_render.dir_couplers;
     if dir.active {
         let t = Instant::now();
@@ -622,23 +800,49 @@ pub fn develop(
     } else {
         drop(log_raw);
     }
+    density_cmy
+}
+
+pub(crate) fn develop_tiled(
+    log_raw: ImageBuf,
+    film: &Profile,
+    params: &RuntimeParams,
+    backend: &dyn ComputeBackend,
+    tile: Option<(u32, u32, u32, u32)>,
+    grain_usm_sums: Option<[f32; 6]>,
+) -> ImageBuf {
+    let stage_timings = stage_timings_enabled();
+    let phys_size = tile.map(|(fw, fh, _, _)| (fw, fh));
+    let (phys_w, phys_h) = phys_size.unwrap_or((log_raw.width, log_raw.height));
+    let mut density_cmy = develop_pre_grain_tiled(log_raw, film, params, backend, phys_size);
 
     // Log exposure has been consumed/released before allocating grain scratch.
     crate::pipeline::dump_if_env("SPEKTRAFILM_DUMP_FILM_PRE_GRAIN", &density_cmy);
-    // Grain: upstream experimental's multilayer model on the per-sub-layer
-    // curves (`crate::grain` resolves the stock preset and the curves).
     if crate::grain::grain_active(params) {
         let t = Instant::now();
-        let pixel_size_um = grain_pixel_size_um(params, density_cmy.width, density_cmy.height);
-        density_cmy = spektrafilm_model::grain::apply_grain(
-            density_cmy,
-            pixel_size_um,
-            &crate::grain::grain_settings(film, &params.film_render.grain),
-            &crate::grain::grain_curves(film),
-            film.is_positive(),
-            params.film_render.grain.monochrome,
-            params.settings.serial_grain,
-        );
+        let pixel_size_um = grain_pixel_size_um(params, phys_w, phys_h);
+        if let Some((fw, _, ox, oy)) = tile {
+            density_cmy = spektrafilm_model::grain::apply_grain_tiled(
+                density_cmy,
+                pixel_size_um,
+                &crate::grain::grain_settings(film, &params.film_render.grain),
+                &crate::grain::grain_curves(film),
+                film.is_positive(),
+                params.film_render.grain.monochrome,
+                (ox, oy, fw),
+                grain_usm_sums,
+            );
+        } else {
+            density_cmy = spektrafilm_model::grain::apply_grain(
+                density_cmy,
+                pixel_size_um,
+                &crate::grain::grain_settings(film, &params.film_render.grain),
+                &crate::grain::grain_curves(film),
+                film.is_positive(),
+                params.film_render.grain.monochrome,
+                params.settings.serial_grain,
+            );
+        }
         print_stage_timing(stage_timings, "filming_develop.grain", t);
     }
 
@@ -685,5 +889,34 @@ mod tests {
             assert!(meter_field(&field, 2, 2, method).is_some(), "{method}");
         }
         assert!(meter_field(&field, 2, 2, "spot").is_none());
+    }
+
+    #[test]
+    fn metering_preview_streaming_is_bit_identical() {
+        for (w, h) in [(64u32, 48u32), (600, 400), (401, 603), (1000, 20)] {
+            let mut data = Vec::with_capacity((w * h * 3) as usize);
+            for y in 0..h {
+                for x in 0..w {
+                    let r = ((x as f64 * 0.37 + y as f64 * 0.19).sin() * 0.5 + 0.5) * 1.3;
+                    let g = ((x as f64 * 0.13 - y as f64 * 0.41).cos() * 0.5 + 0.5) * 0.9;
+                    let b = ((x ^ y) as f64 % 97.0) / 97.0;
+                    data.extend_from_slice(&[from_f64(r), from_f64(g), from_f64(b)]);
+                }
+            }
+            let img = ImageBuf::from_data(w, h, data);
+            let want = metering_preview(&img);
+            let got = metering_preview_streaming(w, h, |y0, rows| -> Result<ImageBuf, ()> {
+                let start = y0 as usize * w as usize * 3;
+                let end = (y0 + rows) as usize * w as usize * 3;
+                Ok(ImageBuf::from_data(w, rows, img.data[start..end].to_vec()))
+            })
+            .unwrap();
+            assert_eq!((got.width, got.height), (want.width, want.height), "{w}x{h}");
+            assert_eq!(
+                got.data.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                want.data.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                "bit mismatch for {w}x{h}"
+            );
+        }
     }
 }

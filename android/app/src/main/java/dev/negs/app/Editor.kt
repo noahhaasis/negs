@@ -600,25 +600,16 @@ class Editor(app: Application) : AndroidViewModel(app) {
             val name = "${photo.name.substringBeforeLast('.')}-${asked.film}.jpg"
             val out = File(dir, name)
             try {
+                val (w, h) = photoSize?.let { (pw, ph) -> Crop.outputSize(cut, turns, pw, ph) } ?: (0 to 0)
                 engine.exclusive {
-                    val rendered = send("render", buildJsonObject {
+                    // Memory-bounded tiled full-resolution GPU export: keeps large
+                    // RAWs compact in RAM and renders fixed-size padded tiles on
+                    // GPU with two-pass global grain USM sums, EXIF, and ICC.
+                    send("export_tiled", buildJsonObject {
                         put("input", photo.file.path)
-                        put("source_generation", photo.generation)
                         put("film", asked.film)
                         put("paper", asked.paper)
                         put("params", asked.params)
-                        // The whole photograph: the preview's cap is for the screen.
-                        // Omit preview_path to skip writing an unused 90-170 MiB RGBA file.
-                        put("limit_preview", false)
-                    })
-                    val renderId = rendered["request_id"].number()!!.toLong()
-                    val (w, h) = Crop.outputSize(
-                        cut, turns, rendered["output_width"].number()?.toInt() ?: 0, rendered["output_height"].number()?.toInt() ?: 0,
-                    )
-                    send("save", buildJsonObject {
-                        // The engine keeps its last render for Save; its
-                        // request id names it.
-                        put("render_id", renderId)
                         put("output", out.path)
                         put("save_options", buildJsonObject {
                             put("jpeg_quality", 92)
@@ -632,6 +623,8 @@ class Editor(app: Application) : AndroidViewModel(app) {
                             put("border_options", border.options())
                             put("instagram", border.instagram)
                         }
+                        put("target_tile_pixels", memory.exportTilePixels)
+                        put("max_halo", memory.exportMaxHalo)
                     })
                 }
                 val uri = withContext(Dispatchers.IO) { publish(out) }

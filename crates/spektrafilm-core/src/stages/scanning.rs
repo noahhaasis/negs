@@ -226,6 +226,18 @@ pub fn scan(
     color_ref: &crate::color_reference::ColorReference,
     gamut: &crate::gamut_compression::OutputGamutCompress,
 ) -> ImageBuf {
+    scan_tiled(density_cmy, profile, params, backend, color_ref, gamut, None)
+}
+
+pub(crate) fn scan_tiled(
+    density_cmy: ImageBuf,
+    profile: &Profile,
+    params: &RuntimeParams,
+    backend: &dyn ComputeBackend,
+    color_ref: &crate::color_reference::ColorReference,
+    gamut: &crate::gamut_compression::OutputGamutCompress,
+    tile: Option<(u32, u32, u32, u32)>,
+) -> ImageBuf {
     // Python parity — channel_density / base_density are f64 in the JSON profile.
     let channel_density: Vec<[f64; 3]> = profile
         .data
@@ -362,14 +374,26 @@ pub fn scan(
                     + base_xyz_to_rgb[2][2] * xyz_adapt[2],
             ),
         ];
-        let glare_amount = spektrafilm_model::glare::compute_random_glare_amount(
-            rgb.width,
-            rgb.height,
-            glare.percent,
-            glare.roughness,
-            glare.blur,
-            42, // fixed seed for reproducible parity tests; Python uses np.random which differs
-        );
+        let glare_amount = if let Some((fw, _, ox, oy)) = tile {
+            spektrafilm_model::glare::compute_random_glare_amount_tiled(
+                rgb.width,
+                rgb.height,
+                glare.percent,
+                glare.roughness,
+                glare.blur,
+                42,
+                (ox, oy, fw),
+            )
+        } else {
+            spektrafilm_model::glare::compute_random_glare_amount(
+                rgb.width,
+                rgb.height,
+                glare.percent,
+                glare.roughness,
+                glare.blur,
+                42, // fixed seed for reproducible parity tests; Python uses np.random which differs
+            )
+        };
         spektrafilm_model::glare::add_glare_with_amount(&mut rgb, &glare_amount, glare_rgb_offset);
     }
 
@@ -390,7 +414,8 @@ pub fn scan(
     }
 
     // Colour noise reduction: the scanner software's, before it sharpens.
-    if let Some(chroma) = chroma_denoise_params(params, rgb.width, rgb.height) {
+    let (phys_w, phys_h) = tile.map_or((rgb.width, rgb.height), |(fw, fh, _, _)| (fw, fh));
+    if let Some(chroma) = chroma_denoise_params(params, phys_w, phys_h) {
         spektrafilm_gpu::chroma_denoise::apply(&mut rgb, &chroma);
     }
 

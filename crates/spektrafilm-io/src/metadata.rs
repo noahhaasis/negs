@@ -197,6 +197,54 @@ pub fn read_metadata(path: &Path) -> Option<ImageMetadata> {
         .filter(|m| !m.is_empty())
 }
 
+/// Read camera metadata from an in-memory file buffer (e.g. browser/WASM
+/// exports). Best effort and panic-safe, matching [`read_metadata`].
+pub fn read_metadata_bytes(bytes: &[u8]) -> Option<ImageMetadata> {
+    std::panic::catch_unwind(|| read_metadata_bytes_impl(bytes))
+        .ok()
+        .flatten()
+        .filter(|m| !m.is_empty())
+}
+
+fn read_metadata_bytes_impl(bytes: &[u8]) -> Option<ImageMetadata> {
+    if !crate::raw::is_dng(bytes) {
+        if let Ok(reader) = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format() {
+            if let Some(fmt) = reader.format() {
+                if fmt == image::ImageFormat::Tiff {
+                    return parse_tiff_metadata(&mut Cursor::new(bytes));
+                }
+                if let Ok(mut decoder) = reader.into_decoder() {
+                    if let Ok(Some(blob)) = image::ImageDecoder::exif_metadata(&mut decoder) {
+                        return parse_tiff_metadata(&mut Cursor::new(blob));
+                    }
+                }
+            }
+        }
+    }
+    let src = rawler::rawsource::RawSource::new_from_slice(bytes);
+    if let Ok(raw) = rawler::get_decoder(&src)
+        .and_then(|d| d.raw_metadata(&src, &RawDecodeParams::default()))
+    {
+        let container = raw_container_metadata(bytes).unwrap_or_default();
+        let non_empty = |s: String| Some(s).filter(|s| !s.trim().is_empty());
+        let (make, model) = match container {
+            ImageMetadata {
+                make: Some(make),
+                model: Some(model),
+                ..
+            } => (Some(make), Some(model)),
+            _ => (non_empty(raw.make), non_empty(raw.model)),
+        };
+        return Some(ImageMetadata {
+            make,
+            model,
+            exif: raw.exif,
+            extra: container.extra,
+        });
+    }
+    raw_container_metadata(bytes)
+}
+
 fn read_metadata_impl(path: &Path) -> Option<ImageMetadata> {
     let ext = extension(path);
     if is_raw_extension(&ext) {

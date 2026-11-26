@@ -31,3 +31,4 @@ pub mod stages;
 pub mod tone_curve;
 
 pub mod preview;
+pub mod tiled_export;

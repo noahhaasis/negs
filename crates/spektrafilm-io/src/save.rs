@@ -88,7 +88,110 @@ pub fn save_image_with_options(
     }
 }
 
+/// Save pre-quantized 8-bit RGB bytes (`width × height × 3`) as JPEG, PNG, or
+/// 8-bit TIFF with the exact same EXIF metadata and ICC profile embedding as
+/// [`save_image_with_options`], without allocating a full-frame `f32` `ImageBuf`.
+pub fn save_rgb8_with_options(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    options: &SaveOptions,
+) -> Result<()> {
+    ensure!(
+        rgb.len() == (width as usize) * (height as usize) * 3,
+        "RGB8 buffer size mismatch for {width}x{height}"
+    );
+    let (format, depth, space) = options.plan(path)?;
+    ensure!(depth == 8, "save_rgb8_with_options requires 8-bit output, got {depth}-bit");
+    let icc = crate::icc::profile(space, options.linear);
+    let metadata = if options.copy_metadata { metadata } else { None };
+    match format {
+        Format::Tiff => {
+            let mut file = create(path)?;
+            let tiff = TiffWriter::new(&mut file).map_err(tiff_err)?;
+            write_tiff_image(tiff, rgb, width, height, metadata, icc)
+                .and_then(|()| Ok(file.flush()?))
+                .with_context(|| format!("saving TIFF: {}", path.display()))
+        }
+        Format::Png => write_png_bytes(rgb, width, height, image::ExtendedColorType::Rgb8, path, metadata, icc),
+        Format::Jpeg(quality) => write_jpeg_bytes(rgb, width, height, path, metadata, quality, icc),
+    }
+}
+
+/// Save pre-quantized 16-bit RGB samples (`width × height × 3`) as 16-bit PNG
+/// or 16-bit TIFF with EXIF metadata and ICC profile embedding.
+pub fn save_rgb16_with_options(
+    rgb: &[u16],
+    width: u32,
+    height: u32,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    options: &SaveOptions,
+) -> Result<()> {
+    ensure!(
+        rgb.len() == (width as usize) * (height as usize) * 3,
+        "RGB16 buffer size mismatch for {width}x{height}"
+    );
+    let (format, depth, space) = options.plan(path)?;
+    ensure!(depth == 16, "save_rgb16_with_options requires 16-bit output, got {depth}-bit");
+    let icc = crate::icc::profile(space, options.linear);
+    let metadata = if options.copy_metadata { metadata } else { None };
+    match format {
+        Format::Tiff => {
+            let mut file = create(path)?;
+            let tiff = TiffWriter::new(&mut file).map_err(tiff_err)?;
+            write_tiff_image(tiff, rgb, width, height, metadata, icc)
+                .and_then(|()| Ok(file.flush()?))
+                .with_context(|| format!("saving TIFF: {}", path.display()))
+        }
+        Format::Png => {
+            let bytes: Vec<u8> = rgb.iter().flat_map(|v| v.to_ne_bytes()).collect();
+            write_png_bytes(&bytes, width, height, image::ExtendedColorType::Rgb16, path, metadata, icc)
+        }
+        Format::Jpeg(_) => bail!("JPEG is 8-bit only; save 16 bits as PNG or TIFF"),
+    }
+}
+
+/// Encode pre-quantized 8-bit RGB bytes into an in-memory JPEG carrying EXIF
+/// metadata and the output colour space's ICC profile (used by browser exports).
+pub fn encode_jpeg_rgb8(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    metadata: Option<&ImageMetadata>,
+    options: &SaveOptions,
+) -> Result<Vec<u8>> {
+    ensure!(
+        rgb.len() == (width as usize) * (height as usize) * 3,
+        "RGB8 buffer size mismatch for {width}x{height}"
+    );
+    ensure!(
+        (1..=100).contains(&options.jpeg_quality),
+        "JPEG quality must be between 1 and 100"
+    );
+    let space = RgbColourspace::find(&options.color_space)
+        .with_context(|| format!("unknown colour space: {}", options.color_space))?;
+    let icc = crate::icc::profile(space, options.linear);
+    let metadata = if options.copy_metadata { metadata } else { None };
+    let mut out = Vec::with_capacity(((width as usize * height as usize) / 6).max(64 * 1024));
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, options.jpeg_quality);
+    enc.set_exif_metadata(exif_blob_dims(width, height, metadata)?)
+        .map_err(|e| anyhow!("JPEG EXIF: {e}"))?;
+    enc.set_icc_profile(icc)
+        .map_err(|e| anyhow!("JPEG ICC profile: {e}"))?;
+    enc.write_image(rgb, width, height, image::ExtendedColorType::Rgb8)
+        .context("encoding JPEG")?;
+    Ok(out)
+}
+
 impl SaveOptions {
+    /// Output bit depth chosen by [`SaveOptions`] for `path` (8 or 16).
+    pub fn resolved_bit_depth(&self, path: &Path) -> Result<u8> {
+        Ok(self.plan(path)?.1)
+    }
+
     /// Fails if these options can't save to `path`, before anything renders.
     pub fn check(&self, path: &Path) -> Result<()> {
         self.plan(path).map(|_| ())
@@ -146,11 +249,55 @@ fn create(path: &Path) -> Result<BufWriter<File>> {
 
 /// EXIF block for PNG/JPEG. Written even without source metadata, so
 /// the file at least records the software that made it.
-fn exif_blob(img: &ImageBuf, metadata: Option<&ImageMetadata>) -> Result<Vec<u8>> {
+fn exif_blob_dims(width: u32, height: u32, metadata: Option<&ImageMetadata>) -> Result<Vec<u8>> {
     metadata
         .cloned()
         .unwrap_or_default()
-        .to_exif_blob(img.width, img.height)
+        .to_exif_blob(width, height)
+}
+
+fn write_png_bytes(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color: image::ExtendedColorType,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    icc: Vec<u8>,
+) -> Result<()> {
+    let mut file = create(path)?;
+    let mut enc = image::codecs::png::PngEncoder::new(&mut file);
+    enc.set_exif_metadata(exif_blob_dims(width, height, metadata)?)
+        .map_err(|e| anyhow!("PNG EXIF: {e}"))?;
+    enc.set_icc_profile(icc)
+        .map_err(|e| anyhow!("PNG ICC profile: {e}"))?;
+    enc.write_image(data, width, height, color)
+        .with_context(|| format!("saving PNG: {}", path.display()))?;
+    file.flush()
+        .with_context(|| format!("saving PNG: {}", path.display()))?;
+    Ok(())
+}
+
+fn write_jpeg_bytes(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    quality: u8,
+    icc: Vec<u8>,
+) -> Result<()> {
+    let mut file = create(path)?;
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality);
+    enc.set_exif_metadata(exif_blob_dims(width, height, metadata)?)
+        .map_err(|e| anyhow!("JPEG EXIF: {e}"))?;
+    enc.set_icc_profile(icc)
+        .map_err(|e| anyhow!("JPEG ICC profile: {e}"))?;
+    enc.write_image(data, width, height, image::ExtendedColorType::Rgb8)
+        .with_context(|| format!("saving JPEG: {}", path.display()))?;
+    file.flush()
+        .with_context(|| format!("saving JPEG: {}", path.display()))?;
+    Ok(())
 }
 
 fn save_png(
@@ -167,17 +314,7 @@ fn save_png(
     } else {
         (quantize_u8(img), image::ExtendedColorType::Rgb8)
     };
-    let mut file = create(path)?;
-    let mut enc = image::codecs::png::PngEncoder::new(&mut file);
-    enc.set_exif_metadata(exif_blob(img, metadata)?)
-        .map_err(|e| anyhow!("PNG EXIF: {e}"))?;
-    enc.set_icc_profile(icc)
-        .map_err(|e| anyhow!("PNG ICC profile: {e}"))?;
-    enc.write_image(&data, img.width, img.height, color)
-        .with_context(|| format!("saving PNG: {}", path.display()))?;
-    file.flush()
-        .with_context(|| format!("saving PNG: {}", path.display()))?;
-    Ok(())
+    write_png_bytes(&data, img.width, img.height, color, path, metadata, icc)
 }
 
 fn save_jpeg(
@@ -188,17 +325,7 @@ fn save_jpeg(
     icc: Vec<u8>,
 ) -> Result<()> {
     let data = quantize_u8(img);
-    let mut file = create(path)?;
-    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality);
-    enc.set_exif_metadata(exif_blob(img, metadata)?)
-        .map_err(|e| anyhow!("JPEG EXIF: {e}"))?;
-    enc.set_icc_profile(icc)
-        .map_err(|e| anyhow!("JPEG ICC profile: {e}"))?;
-    enc.write_image(&data, img.width, img.height, image::ExtendedColorType::Rgb8)
-        .with_context(|| format!("saving JPEG: {}", path.display()))?;
-    file.flush()
-        .with_context(|| format!("saving JPEG: {}", path.display()))?;
-    Ok(())
+    write_jpeg_bytes(&data, img.width, img.height, path, metadata, quality, icc)
 }
 
 /// Baseline RGB TIFF, uncompressed, in strips. Written with rawler's TIFF

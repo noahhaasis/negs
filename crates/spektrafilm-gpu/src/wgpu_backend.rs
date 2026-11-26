@@ -598,6 +598,7 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
         micro_structure,
         blur_px,
         mult_usm,
+        mult_usm_sums_override,
         base_seed,
         monochrome,
     }) = grain
@@ -613,6 +614,10 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
             if let Some(pair) = pair {
                 s.f32s(pair);
             }
+        }
+        s.bool(mult_usm_sums_override.is_some());
+        if let Some(r) = mult_usm_sums_override {
+            s.f32s(r);
         }
         s.f32s(&[*blur_px]);
         s.u64(*base_seed as u64);
@@ -1258,7 +1263,7 @@ impl WgpuBackend {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let state = build_grain_state(&self.device, gp, w, h, None, &den, &scratch[0], &scratch[1], &scratch[2], self);
+        let state = build_grain_state(&self.device, gp, w, h, None, None, &den, &scratch[0], &scratch[1], &scratch[2], self);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         state.encode_passes(&mut encoder);
         encoder.copy_buffer_to_buffer(&den, 0, &readback, 0, bytes);
@@ -2011,12 +2016,20 @@ impl WgpuBackend {
             })
         });
 
+        let usm_sums_crop = match output {
+            crate::ChainOutput::GrainUsmSums { crop_x, crop_y, crop_w, crop_h } => {
+                Some((crop_x, crop_y, crop_w, crop_h))
+            }
+            _ => None,
+        };
+        let sums_only = usm_sums_crop.is_some();
+
         // ── Unsharp mask state ───────────────────────────────────────────
         // Last pass before readback. Blurs buf_b → buf_c (via buf_a mid),
         // then combines: buf_b_out = (1+amount)*buf_b - amount*buf_c.
         // Since the combine writes back to buf_b in-place we need to
         // route via a temporary buffer to satisfy wgpu aliasing rules.
-        let unsharp_state = p.unsharp.as_ref().map(|up| {
+        let unsharp_state = p.unsharp.as_ref().filter(|_| !sums_only).map(|up| {
             build_unsharp_state(
                 &self.device,
                 up,
@@ -2036,6 +2049,7 @@ impl WgpuBackend {
         let gamut_state = p
             .gamut
             .as_ref()
+            .filter(|_| !sums_only)
             .map(|gp| build_gamut_state(&self.device, gp, &buf_b, n_pixels, self));
 
         // ── Glare state ──────────────────────────────────────────────────
@@ -2044,7 +2058,7 @@ impl WgpuBackend {
         // buffer, optionally blurs it, then adds `g * rgb_offset[c]` to
         // the image. Uses buf_a (free after scan_spectral consumed
         // density_cmy) and one shared scratch buffer.
-        let glare_state = p.glare.as_ref().map(|gp| {
+        let glare_state = p.glare.as_ref().filter(|_| !sums_only).map(|gp| {
             build_glare_state(
                 &self.device,
                 gp,
@@ -2058,7 +2072,7 @@ impl WgpuBackend {
             )
         });
 
-        let scanner_lens_blur_state = p.scanner_lens_blur_px.and_then(|sigma| {
+        let scanner_lens_blur_state = p.scanner_lens_blur_px.filter(|_| !sums_only).and_then(|sigma| {
             (sigma > 0.0).then(|| {
                 build_simple_blur_state(
                     &self.device,
@@ -2076,7 +2090,7 @@ impl WgpuBackend {
         // ── Colour noise reduction state ─────────────────────────────────
         // In place on buf_b after the scanner lens blur, before unsharp.
         // Its two grids are a fraction of the image (see ChromaDenoiseParams).
-        let chroma_denoise_state = p.chroma_denoise.as_ref().map(|cp| {
+        let chroma_denoise_state = p.chroma_denoise.as_ref().filter(|_| !sums_only).map(|cp| {
             build_chroma_denoise_state(
                 &self.device,
                 cp,
@@ -2099,6 +2113,7 @@ impl WgpuBackend {
                 image.width,
                 image.height,
                 p.tile_origin,
+                usm_sums_crop,
                 &buf_a,
                 &buf_b,
                 &scratch[0],
@@ -2128,13 +2143,13 @@ impl WgpuBackend {
             )
         });
 
-        let enlarger_log_to_linear_state = p.enlarger_diffusion.as_ref().map(|_| {
+        let enlarger_log_to_linear_state = p.enlarger_diffusion.as_ref().filter(|_| !sums_only).map(|_| {
             build_log_to_linear_state(&self.device, n_pixels, print_exposure_scale, &buf_b, self)
         });
         let enlarger_diffusion_state =
             p.enlarger_diffusion
                 .as_ref()
-                .filter(|_| !p.scan_film)
+                .filter(|_| !sums_only && !p.scan_film)
                 .map(|plan| {
                     build_diffusion_state(
                         &self.device,
@@ -2150,8 +2165,9 @@ impl WgpuBackend {
         let enlarger_linear_to_log_state = p
             .enlarger_diffusion
             .as_ref()
+            .filter(|_| !sums_only)
             .map(|_| build_linear_to_log_state(&self.device, n_pixels, &buf_b, self));
-        let post_scan_state = p.output_cctf_encoding.then(|| {
+        let post_scan_state = (!sums_only && p.output_cctf_encoding).then(|| {
             build_post_scan_state(
                 &self.device,
                 n_pixels,
@@ -2276,7 +2292,8 @@ impl WgpuBackend {
         // 4 + 5. Printing: print_spectral (buf_a → buf_b) then the print
         //     density curve (buf_b → buf_a). Skipped for scan_film — the
         //     scan pass consumes the film density already in buf_a.
-        if !p.scan_film {
+        //     Also skipped when `sums_only` (tiled export Pass 1).
+        if !sums_only && !p.scan_film {
             // 4. Print spectral: buf_a → buf_b (log_raw_print)
             dispatch(&mut encoder, &print_pipe, &bg_print, n_pixels);
             profiler.mark("print_spectral", &mut encoder);
@@ -2308,51 +2325,53 @@ impl WgpuBackend {
             );
             profiler.mark("print_density", &mut encoder);
         }
-        // 6. Scan spectral: buf_a → buf_b (linear rgb, unclamped)
-        dispatch(&mut encoder, &scan_pipe, &bg_scan, n_pixels);
-        profiler.mark("scan_spectral", &mut encoder);
-        #[cfg(target_os = "android")]
-        if n_pixels >= 256 * 256 {
-            let finished = std::mem::replace(
-                &mut encoder,
-                self.device.create_command_encoder(&Default::default()),
-            )
-            .finish();
-            self.queue.submit(Some(finished));
-        }
-        // 6b. Glare (in place on buf_b).
-        if let Some(gs) = glare_state.as_ref() {
-            gs.encode_passes(&mut encoder, n_pixels);
-            profiler.mark("glare", &mut encoder);
-        }
-        // 6c. Output gamut compression (in place on buf_b) — after glare,
-        //     before unsharp, mirroring the CPU scanning order.
-        if let Some(gs) = gamut_state.as_ref() {
-            gs.encode_passes(&mut encoder, n_pixels);
-            profiler.mark("gamut", &mut encoder);
-        }
-        // 6d. Scanner lens blur — after glare/gamut, before unsharp.
-        if let Some(bs) = scanner_lens_blur_state.as_ref() {
-            bs.encode_passes(&mut encoder);
-            profiler.mark("scanner_lens_blur", &mut encoder);
-        }
-        // 6d. Colour noise reduction (in place on buf_b), before unsharp.
-        if let Some(cs) = chroma_denoise_state.as_ref() {
-            cs.encode_passes(&mut encoder);
-            profiler.mark("chroma_denoise", &mut encoder);
-        }
-        // 6d. Unsharp mask — last in-flight pass. Writes the final image
-        //     back to buf_b so the readback path below is unchanged.
-        if let Some(us) = unsharp_state.as_ref() {
-            us.encode_passes(&mut encoder, n_pixels, &buf_b, img_bytes as u64);
-            profiler.mark("unsharp", &mut encoder);
-        }
-        // 6e. The sRGB encoding, unclipped, when the output is encoded. This
-        // mirrors Pipeline::apply_post_scan so the resident WGSL path needs no
-        // CPU full-frame post pass.
-        if let Some(ps) = post_scan_state.as_ref() {
-            ps.encode_passes(&mut encoder, n_pixels);
-            profiler.mark("post_scan", &mut encoder);
+        if !sums_only {
+            // 6. Scan spectral: buf_a → buf_b (linear rgb, unclamped)
+            dispatch(&mut encoder, &scan_pipe, &bg_scan, n_pixels);
+            profiler.mark("scan_spectral", &mut encoder);
+            #[cfg(target_os = "android")]
+            if n_pixels >= 256 * 256 {
+                let finished = std::mem::replace(
+                    &mut encoder,
+                    self.device.create_command_encoder(&Default::default()),
+                )
+                .finish();
+                self.queue.submit(Some(finished));
+            }
+            // 6b. Glare (in place on buf_b).
+            if let Some(gs) = glare_state.as_ref() {
+                gs.encode_passes(&mut encoder, n_pixels);
+                profiler.mark("glare", &mut encoder);
+            }
+            // 6c. Output gamut compression (in place on buf_b) — after glare,
+            //     before unsharp, mirroring the CPU scanning order.
+            if let Some(gs) = gamut_state.as_ref() {
+                gs.encode_passes(&mut encoder, n_pixels);
+                profiler.mark("gamut", &mut encoder);
+            }
+            // 6d. Scanner lens blur — after glare/gamut, before unsharp.
+            if let Some(bs) = scanner_lens_blur_state.as_ref() {
+                bs.encode_passes(&mut encoder);
+                profiler.mark("scanner_lens_blur", &mut encoder);
+            }
+            // 6d. Colour noise reduction (in place on buf_b), before unsharp.
+            if let Some(cs) = chroma_denoise_state.as_ref() {
+                cs.encode_passes(&mut encoder);
+                profiler.mark("chroma_denoise", &mut encoder);
+            }
+            // 6d. Unsharp mask — last in-flight pass. Writes the final image
+            //     back to buf_b so the readback path below is unchanged.
+            if let Some(us) = unsharp_state.as_ref() {
+                us.encode_passes(&mut encoder, n_pixels, &buf_b, img_bytes as u64);
+                profiler.mark("unsharp", &mut encoder);
+            }
+            // 6e. The sRGB encoding, unclipped, when the output is encoded. This
+            // mirrors Pipeline::apply_post_scan so the resident WGSL path needs no
+            // CPU full-frame post pass.
+            if let Some(ps) = post_scan_state.as_ref() {
+                ps.encode_passes(&mut encoder, n_pixels);
+                profiler.mark("post_scan", &mut encoder);
+            }
         }
 
         // Zero-copy path: when buf_b is mappable, skip the blit and map it
@@ -2388,6 +2407,18 @@ impl WgpuBackend {
                 self.encode_display_rgba8(&mut encoder, &buf_b, &rgba, n_pixels, encoded, post.as_deref());
                 encoder.copy_buffer_to_buffer(&rgba, 0, &rgba_readback, 0, bytes);
                 Some(rgba_readback)
+            }
+            crate::ChainOutput::GrainUsmSums { .. } => {
+                let sums_rb = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("grain_usm_sums_readback"),
+                    size: 48,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                if let Some(src) = grain_state.as_ref().and_then(|g| g.sums_buf.as_ref()) {
+                    encoder.copy_buffer_to_buffer(src, 0, &sums_rb, 0, 48);
+                }
+                Some(sums_rb)
             }
             _ => None,
         };
@@ -3619,6 +3650,14 @@ impl FilmChainReadback {
             }
             crate::ChainOutput::Rgba8 { .. } => crate::ChainResult::Rgba8 { width, height, rgba: data.to_vec() },
             crate::ChainOutput::Present { .. } => crate::ChainResult::Presented { width, height },
+            crate::ChainOutput::GrainUsmSums { .. } => {
+                let vals: &[u32] = bytemuck::cast_slice(&data);
+                let mut sums = [0u64; 6];
+                for c in 0..6 {
+                    sums[c] = (vals[c] as u64) | ((vals[c + 6] as u64) << 32);
+                }
+                crate::ChainResult::GrainUsmSums(sums)
+            }
         };
         drop(data);
         buffer.unmap();
@@ -3686,6 +3725,7 @@ impl ImagePool {
 
     /// Explicitly destroy buffers rather than waiting for worker-side JS GC.
     /// Includes unused buffers defensively, even though put() drains those.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn clear(&self) {
         for set in self.0.lock().unwrap().drain(..) {
             for (_, buffer) in set.used.iter().chain(&set.free) {
@@ -6881,6 +6921,9 @@ impl GamutState {
 struct GrainState {
     _buffers: Vec<wgpu::Buffer>,
     passes: Vec<GrainPass>,
+    /// Final 6-f32 USM `(sum_before_rgb, sum_after_rgb)` buffer when
+    /// `usm_sums_crop` was requested (allocated with `COPY_SRC`).
+    sums_buf: Option<wgpu::Buffer>,
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -6900,6 +6943,7 @@ fn build_grain_state(
     width: u32,
     height: u32,
     tile_origin: Option<(u32, u32, u32)>,
+    usm_sums_crop: Option<(u32, u32, u32, u32)>,
     den: &wgpu::Buffer,
     layer_buf: &wgpu::Buffer,
     mid: &wgpu::Buffer,
@@ -7076,6 +7120,7 @@ fn build_grain_state(
         };
         GrainPass::Linear(job(&finalize_pipe, "grain_finalize", bytemuck::bytes_of(&params), &[src, sums, den]), n_pixels)
     };
+    let mut sums_buf = None;
     if let Some([sigma, amount]) = gp.mult_usm {
         let usm_pipe = backend.cached_pipeline(
             include_str!("../../spektrafilm-shaders/wgsl/grain_usm.wgsl"),
@@ -7096,46 +7141,88 @@ fn build_grain_state(
         )));
         passes.push(GrainPass::Linear(job(&usm_pipe, "grain_usm_combine", bytemuck::bytes_of(&usm(1)), &[cur, other]), n_pixels));
 
-        // Sums of `cur` (before) and `other` (after), level by level.
-        let reduce_pipe = backend.cached_pipeline(
-            include_str!("../../spektrafilm-shaders/wgsl/grain_sum_reduce.wgsl"),
-            &[uniform, storage(true), storage(true), storage(false)],
-        );
-        #[repr(C)]
-        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-        struct ReduceParams {
-            n_values: u32,
-            mode: u32,
-            _pad: [u32; 2],
-        }
-        let mut values = n_pixels;
-        let mut level = 0;
-        loop {
-            let blocks = values.div_ceil(2048).max(1);
-            let out = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("grain_sums_{level}")),
-                size: blocks as u64 * 6 * 4,
+        if let (None, Some(sums_override)) = (usm_sums_crop, gp.mult_usm_sums_override) {
+            // Tiled export Pass 2: pass the exact whole-frame [Σbefore, Σafter]
+            // f32 sums so `grain_finalize.wgsl` divides `sums[ch] / sums[3+ch]`
+            // identically to whole-frame.
+            let ratio_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("grain_usm_sums_override"),
+                contents: bytemuck::cast_slice(&sums_override),
                 usage: wgpu::BufferUsages::STORAGE,
-                mapped_at_creation: false,
-            }));
-            let params = ReduceParams { n_values: values, mode: (level > 0) as u32, _pad: [0; 2] };
-            let reduce = if level == 0 {
-                job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[cur, other, &out])
-            } else {
-                let prev = buffers.last().expect("previous level");
-                job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[prev, prev, &out])
-            };
-            passes.push(GrainPass::Blocks(reduce, blocks));
-            buffers.push(out);
-            if blocks == 1 {
-                break;
+            });
+            passes.push(finalize(true, other, &ratio_buf));
+            buffers.push(ratio_buf);
+        } else {
+            // Sums of `cur` (before) and `other` (after), level by level.
+            let reduce_pipe = backend.cached_pipeline(
+                include_str!("../../spektrafilm-shaders/wgsl/grain_sum_reduce.wgsl"),
+                &[uniform, storage(true), storage(true), storage(false)],
+            );
+            #[repr(C)]
+            #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+            struct ReduceParams {
+                n_values: u32,
+                mode: u32,
+                tile_width: u32,
+                crop_x: u32,
+                crop_y: u32,
+                crop_w: u32,
+                final_to_f32: u32,
+                _pad1: u32,
             }
-            values = blocks;
-            level += 1;
+            let (mut values, crop_x, crop_y, crop_w) = match usm_sums_crop {
+                Some((cx, cy, cw, ch)) => (cw * ch, cx, cy, cw),
+                None => (n_pixels, 0, 0, 0),
+            };
+            let mut level = 0;
+            loop {
+                let blocks = values.div_ceil(2048).max(1);
+                let is_last = blocks == 1;
+                let final_to_f32 = is_last && usm_sums_crop.is_none();
+                let usage = if is_last && usm_sums_crop.is_some() {
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC
+                } else {
+                    wgpu::BufferUsages::STORAGE
+                };
+                let out = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("grain_sums_{level}")),
+                    size: blocks as u64 * 12 * 4,
+                    usage,
+                    mapped_at_creation: false,
+                }));
+                let params = ReduceParams {
+                    n_values: values,
+                    mode: (level > 0) as u32,
+                    tile_width: width,
+                    crop_x: if level == 0 { crop_x } else { 0 },
+                    crop_y: if level == 0 { crop_y } else { 0 },
+                    crop_w: if level == 0 { crop_w } else { 0 },
+                    final_to_f32: final_to_f32 as u32,
+                    _pad1: 0,
+                };
+                let reduce = if level == 0 {
+                    job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[cur, other, &out])
+                } else {
+                    let prev = buffers.last().expect("previous level");
+                    job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[prev, prev, &out])
+                };
+                passes.push(GrainPass::Blocks(reduce, blocks));
+                if is_last && usm_sums_crop.is_some() {
+                    sums_buf = Some(out.clone());
+                }
+                buffers.push(out);
+                if is_last {
+                    break;
+                }
+                values = blocks;
+                level += 1;
+            }
+            // 5. Renormalize and remove the floor (skipped in Pass 1 sums-only).
+            if usm_sums_crop.is_none() {
+                passes.push(finalize(true, other, buffers.last().expect("sums")));
+            }
         }
-        // 5. Renormalize and remove the floor.
-        passes.push(finalize(true, other, buffers.last().expect("sums")));
-    } else {
+    } else if usm_sums_crop.is_none() {
         let unused = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("grain_sums_unused"),
             size: 32,
@@ -7146,7 +7233,7 @@ fn build_grain_state(
         buffers.push(unused);
     }
 
-    GrainState { _buffers: buffers, passes }
+    GrainState { _buffers: buffers, passes, sums_buf }
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -8016,6 +8103,7 @@ mod grain_tests {
             micro_structure: None,
             blur_px: 0.0,
             mult_usm: None,
+            mult_usm_sums_override: None,
             base_seed: 0,
             monochrome: false,
         };
@@ -8127,6 +8215,7 @@ mod film_cache_tests {
                 micro_structure: Some([0.1, 0.5]),
                 blur_px: 0.6,
                 mult_usm: None,
+                mult_usm_sums_override: None,
                 base_seed: 7,
                 monochrome: false,
             }),

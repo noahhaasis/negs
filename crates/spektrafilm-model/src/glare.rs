@@ -54,6 +54,67 @@ pub fn compute_random_glare_amount(
     glare
 }
 
+/// Tiled CPU counterpart of [`compute_random_glare_amount`] using per-pixel
+/// PCG-hashed Box-Muller indexed by global coordinate
+/// `gidx = (ly + origin_y) * full_width + (lx + origin_x)` — matching
+/// `glare_gen.wgsl` so CPU fallback tiles are seamless across tile boundaries.
+pub fn compute_random_glare_amount_tiled(
+    width: u32,
+    height: u32,
+    percent: f32,
+    roughness: f32,
+    blur: f32,
+    base_seed: u32,
+    tile_origin: (u32, u32, u32),
+) -> Vec<Scalar> {
+    let n_pixels = (width as usize) * (height as usize);
+    if percent <= 0.0 {
+        return vec![Scalar::default(); n_pixels];
+    }
+    let (ox, oy, full_w) = tile_origin;
+    let m = percent as f64;
+    let s = (roughness * percent) as f64;
+    let sigma2 = (1.0 + (s * s) / (m * m)).ln();
+    let sigma = sigma2.sqrt() as f32;
+    let mu = (m.ln() - sigma2 / 2.0) as f32;
+
+    let splitmix32 = |mut z: u32| -> u32 {
+        z = (z ^ (z >> 16)).wrapping_mul(0x85eb_ca6b);
+        z = (z ^ (z >> 13)).wrapping_mul(0xc2b2_ae35);
+        z ^ (z >> 16)
+    };
+    let pcg = |state: u32| -> u32 {
+        let s = state.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+        let word = ((s >> ((s >> 28) + 4)) ^ s).wrapping_mul(277_803_737);
+        (word >> 22) ^ word
+    };
+
+    let seed_mix = splitmix32(base_seed);
+    let mut glare: Vec<Scalar> = (0..n_pixels)
+        .map(|idx| {
+            let lx = (idx as u32) % width;
+            let ly = (idx as u32) / width;
+            let gidx = (ly + oy).wrapping_mul(full_w).wrapping_add(lx + ox);
+            let mut rng = seed_mix ^ splitmix32(gidx);
+            rng = pcg(rng);
+            let u1 = (rng as f32) * (1.0 / 4_294_967_296.0);
+            rng = pcg(rng);
+            let u2 = (rng as f32) * (1.0 / 4_294_967_296.0);
+            let z = (-2.0f32 * u1.max(1e-7).ln()).sqrt() * (std::f32::consts::TAU * u2).cos();
+            from_f32((mu + sigma * z).exp())
+        })
+        .collect();
+
+    if blur > 0.0 {
+        glare = gaussian::gaussian_blur_channel(&glare, width, height, blur);
+    }
+    let inv100 = from_f64(1.0 / 100.0);
+    for v in &mut glare {
+        *v *= inv100;
+    }
+    glare
+}
+
 /// Add glare in any 3-channel image space — XYZ or RGB.
 ///
 /// `space_per_pixel_offset` is the per-color constant offset vector. For XYZ-space glare
