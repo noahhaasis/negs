@@ -55,7 +55,7 @@ impl CapacityLimits {
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
 pub(crate) fn vulkan_limits(adapter: &wgpu::Adapter) -> CapacityLimits {
     let limits = adapter.limits();
     // A static heap-size estimate deliberately leaves 20% for the desktop,
