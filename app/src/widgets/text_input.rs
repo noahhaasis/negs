@@ -399,6 +399,11 @@ pub struct TextInputStyle {
     pub align_right: bool,
     pub error: bool,
     pub disabled: bool,
+    /// Borderless editorial input sitting on a `1 px` bottom rule (`track`,
+    /// `paper` while focused, `warn` on error) with a `paper` caret (`L18`, `L23`).
+    pub ruled: bool,
+    /// Render text in the editorial serif (`theme.serif_spec`) instead of UI sans.
+    pub serif: bool,
 }
 
 impl Default for TextInputStyle {
@@ -411,6 +416,8 @@ impl Default for TextInputStyle {
             align_right: false,
             error: false,
             disabled: false,
+            ruled: false,
+            serif: false,
         }
     }
 }
@@ -431,7 +438,11 @@ pub fn render_text_input<V: 'static>(
     let border_color = if style.error {
         theme.warn
     } else if focused {
-        theme.accent
+        if style.ruled {
+            theme.paper
+        } else {
+            theme.accent
+        }
     } else {
         theme.track
     };
@@ -446,6 +457,13 @@ pub fn render_text_input<V: 'static>(
         theme.dim.opacity(0.55)
     } else {
         theme.paper
+    };
+
+    let caret_color = if style.ruled { theme.paper } else { theme.accent };
+    let (font, eff_size) = if style.serif {
+        theme.serif_spec(style.font_size, 400.0, false)
+    } else {
+        (theme.ui_font(gpui::FontWeight::NORMAL), style.font_size)
     };
 
     let text = &state.buffer.text;
@@ -493,7 +511,7 @@ pub fn render_text_input<V: 'static>(
             .when(!before.is_empty(), |el| {
                 el.child(div().text_color(text_color).child(before))
             })
-            .child(div().w(px(1.5)).h(px(style.font_size + 2.0)).bg(theme.accent))
+            .child(div().w(px(1.5)).h(px(eff_size + 1.0)).bg(caret_color))
             .when(!after.is_empty(), |el| {
                 el.child(div().text_color(text_color).child(after))
             })
@@ -508,14 +526,19 @@ pub fn render_text_input<V: 'static>(
         .when(style.align_right, |el| el.justify_end())
         .w(px(style.width))
         .h(px(style.height))
-        .px(px(6.0))
-        .rounded(px(4.0))
-        .bg(bg)
-        .border_1()
-        .border_color(border_color)
+        .when(style.ruled, |el| {
+            el.border_b_1().border_color(border_color)
+        })
+        .when(!style.ruled, |el| {
+            el.px(px(6.0))
+                .rounded(px(4.0))
+                .bg(bg)
+                .border_1()
+                .border_color(border_color)
+        })
         .overflow_hidden()
-        .font_family(theme.ui_family.clone())
-        .text_size(px(style.font_size))
+        .font(font)
+        .text_size(px(eff_size))
         .cursor_text()
         .on_mouse_down(
             MouseButton::Left,

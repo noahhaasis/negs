@@ -159,9 +159,111 @@ Live inventory of every visible difference between **Win32** (`windows/src/ui/`)
 
 ---
 
-## Upcoming Batches (audited or queued)
-- **Batch 2 — Area 3 (Inspector):** Pane header, Film/Paper strip removal, Scopes, Prep/Lab/Output tabs, single-line Slider rows & Win32 modified-slider bug, Section/Group headers, TickBox switches, borderless Choices, Italic notes, `RevealedRows` indent, Tone Graph (SwiftUI vs Win32/GPUI), Color Filter `PencilRing`, Border Style swatches, Color Well order, Outlined pills, Output ExportFoot. *(Audit complete; Lab/Output/ToneGraph/Border screenshots next.)*
-- **Batch 3 — Area 4 (Film Strip, Status Line & Print Caption/Label):** Strip 4 pt active pencil vs Win32/GPUI 2.1 pt bug, `StripLeader` fold tab, GPUI launch-centring bug, Status line placement/surface/contents (`Original ⌄ | Fit | 100%` vs ICC profile), Print caption `40 mm` fact-popping, Print label tracking & Light Table highlighter offset. *(Audit complete.)*
-- **Batch 4 — Areas 5 & 6:** Film/Paper Tray & Presets Sidebar.
-- **Batch 5 — Areas 7 & 8:** Contact-Sheet Grid, SheetFlight, Compare & Crop.
-- **Batch 6 — Areas 9 & 10:** Settings, Export & Batch dialogs, Alerts, Menus/Tooltips, Empty & Small states.
+## Batch 2 — Area 3 (Inspector) + Area 4 (Film Strip, Status Line & Print Caption/Label)
+
+### L13 — Inspector column gutter (`22 pt` vs `16 px`) & empty-window state
+- **Win32 & SwiftUI:** `22 pt` gutter; empty window shows top rule + italic Newsreader sentence.
+- **GPUI:** `16 px` gutter; shows full empty inspector chrome when empty.
+- **Options:** A (Recommended: Match Win32 & SwiftUI) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L14 — Pane header (`Adjustments` · `Presets`, Edit count, `Reset` / `New` / `Import…`)
+- **SwiftUI & Win32:** `42 pt` tall, no bottom border, UI `12 pt` w500 `Adjustments`/`Presets`, Newsreader `14 pt` italic bold edit count + underlined `WordButton` `Reset`/`New`/`Import…`.
+- **GPUI:** `40 px`, bottom border, Newsreader `14 px` `Adjustments`/`Presets`, `11.5 px` plain sans `Reset`.
+- **Options:** A (Recommended: Match SwiftUI & Win32, hidden when empty) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L15 — Film & Paper selector boxes inside the Inspector
+- **Win32 & SwiftUI:** Not present in inspector (live on canvas `PrintLabel`).
+- **GPUI:** Two boxed dropdowns (~`84 px`) pinned above Scopes.
+- **Options:** A (Recommended: Remove from inspector) / B (Keep in inspector).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L16 — Scopes (Histogram / Waveform)
+- **SwiftUI & Win32:** UI `11 pt` w500 + right `RGB`, borderless `bg` well (`radius: 3`), additive RGB (no white luma stroke), 5 waveform labels (`100/75/50/25/0`), Newsreader italic empty text, `track`/`dim` grip.
+- **GPUI:** Missing `RGB`, bordered well (`radius: 4`), extra white luma stroke, only 3 waveform labels, sans empty text, `accent` dragging grip.
+- **Options:** A (Recommended: Match SwiftUI & Win32) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L17 — `Prep · Lab · Output` tab bar & Tab Edits popover
+- **SwiftUI & Win32:** `50 pt` tall, left-aligned `21 pt` Newsreader (`700`/`500`, matched tracking), `PencilStroke` / Light Table highlighter, bare `5 pt` yellow dot + `10.5 pt` count; SwiftUI anchored `300 pt` popover.
+- **GPUI:** `34 px`, centered `12 px` sans, flat `2 px` bar, pill count badge, hardcoded `top: 120` popover overlapping tall scopes.
+- **Options:** A (Recommended: Match SwiftUI + fix popover anchor) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L18 — Slider row layout, track/knob geometry & value alignment
+- **SwiftUI:** Single-line `29 pt` row, hollow→`accent`→`paper` knob, `2 pt` modified-only fill, Newsreader `14.5 pt` bold+pencil modified value, borderless bottom-rule editor, far-right `↺`. *(Originals' bugs: `0` sits `~10 pt` left of `☒`; `Negative exposure (EV)` clips at `132 pt`.)*
+- **Win32:** Same layout, bug: missing `set_changed` on trackbar HWND (no yellow fill/knob).
+- **GPUI:** Two-line `~46 px` stacked slider, permanent fill, always-solid dot, left `↺`, `11.5 px` sans value, boxed editor.
+- **Options:** A (Recommended: Match SwiftUI + fix right-edge alignment & `144 px` label room) / B (Match SwiftUI literally) / C (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L19 — Section headers & Lab Group headers
+- **SwiftUI & Win32:** `34 pt` Newsreader `11 pt` `700` uppercase `0.13 em` tracking + full-width bottom divider + `PencilStroke` strike `"— skipped"`; `37 pt` Lab group headers with top rule, chevron, Newsreader `16 pt` `600`/`400`, italic `14 pt` summary + `TickBox`.
+- **GPUI:** `10.5 px` regular dim sans headers, inset rule above; `14 px` group titles, no rules, `11.5 px` sans summary, pill switch.
+- **Options:** A (Recommended: Match SwiftUI & Win32) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L20 — Switches (`TickBox`), Choices (borderless inline) & Notes (italic serif)
+- **SwiftUI & Win32:** `13 × 13` square `TickBox` with diagonal `×`; borderless inline Newsreader `14.5 pt` choice + `⌄`; Newsreader `13 pt` italic notes. *(Win32 bug: missing label brightening on some modified controls.)*
+- **GPUI:** Pill switches, boxed `11.5 px` sans dropdowns, `11 px` upright sans notes.
+- **Options:** A (Recommended: Match SwiftUI & Win32 + fix Win32 label brightening) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L21 — Revealed sub-controls indentation (`RevealedRows`)
+- **SwiftUI:** `12 pt` left indent + `1 pt` vertical `track` rule.
+- **Win32 & GPUI:** Flush, no indent or vertical rule.
+- **Options:** A (Recommended: Match SwiftUI) / B (Match Win32 / GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L22 — Tone Graph (Print Curves)
+- **SwiftUI:** Inline `RGB · R · G · B` words, `170 pt` `bg` well, dashed diagonal, 3 circular ink knobs, `shadows / midtones / highlights` italic labels.
+- **Win32 & GPUI:** Boxed channel buttons, `#1a1a1a` well, square yellow center handle, no diagonal or axis captions.
+- **Options:** A (Recommended: Match SwiftUI) / B (Keep Win32 / GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L23 — Color Filter picker, Border Style swatches & Color Well row
+- **SwiftUI:** Tilted `PencilRing` on Color Filter & 4 visual `66×46` Border Style swatches; borderless circle-left-of-Newsreader-name Color Well.
+- **Win32:** Matches Color Filter; plain rounded rect on Border Styles; name-left-of-circle Color Well.
+- **GPUI:** Plain circle on Color Filter, text-only Border buttons, boxed square-swatch Color Well.
+- **Options:** A (Recommended: Match SwiftUI) / B (Match Win32) / C (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L24 — Outlined action buttons & Output `ExportFoot`
+- **SwiftUI & Win32:** Right-aligned capsule `OutlinedButton` (`h: 23`, Newsreader `13.5`); Output foot centered Newsreader `14` italic summary + `36 pt` `fill` `"Export Photograph…"` (`18 pt` bold) + centered italic Lightroom `WordButton`s.
+- **GPUI:** Left-aligned rectangular sans buttons; left `11 px` summary, `12.5 px` `"Export…"`, no Lightroom links.
+- **Options:** A (Recommended: Match SwiftUI & Win32) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L25 — Film strip active underline (`4.0 pt`), `StripLeader` fold tab & centring bug
+- **SwiftUI:** `4.0 pt` active underline (Light Table `lift: 0`), `92 × 24` `StripLeader` fold tab, centred on launch/resize.
+- **Win32:** `StripLeader` & centring; bug: `2.1 pt` underline & Light Table `-5` lift.
+- **GPUI:** `2.1 pt` underline, missing `StripLeader`, bug: clips open photo off left edge on launch (`visible_width == 0`).
+- **Options:** A (Recommended: Match SwiftUI + fix centring) / B (Keep `2.1 pt` underline).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L26 — Status line placement, surface & top border
+- **SwiftUI & Win32:** Canvas column only, `28 pt`, `18 pt` padding, `bg`, no top border, hidden when empty.
+- **GPUI:** Full window width, `12 px` padding, `panel`, top border, shown when empty.
+- **Options:** A (Recommended: Match SwiftUI & Win32) / B (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L27 — Status line contents
+- **SwiftUI & Win32:** Left: active status / `dims · time`; Right: interactive `Original ⌄ | Fit | 100%`.
+- **GPUI:** Left: `{film} on {paper} · dims · time`; Right: non-interactive `ICC: ... | Fit · N%`.
+- **Options:** A (Recommended: Match SwiftUI & Win32) / B (Match + ICC in tooltip/Settings) / C (Keep GPUI).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+### L28 — Print caption EXIF fact-popping & `-0.01 em` film tracking
+- **SwiftUI:** Never drops portrait EXIF facts (`40 mm`); `-0.01 em` film tracking.
+- **Win32:** Pops trailing facts when wider than print; `-0.01 em` film tracking.
+- **GPUI:** Pops trailing facts; no tracking.
+- **Options:** A (Recommended: Match SwiftUI) / B (Keep Win32 fact-popping).
+- **Decision:** **A** (Noah, 2026-11-26).
+
+---
+
+## Upcoming Batches
+- **Batch 3 — Areas 5 & 6:** Film/Paper Tray & Presets Sidebar.
+- **Batch 4 — Areas 7 & 8:** Contact-Sheet Grid, SheetFlight, Compare & Crop.
+- **Batch 5 — Areas 9 & 10:** Settings, Export & Batch dialogs, Alerts, Menus/Tooltips, Empty & Small states.

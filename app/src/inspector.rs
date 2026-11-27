@@ -5,32 +5,36 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, Bounds, Context, Focusable, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, PathPromptOptions, Pixels, ScrollHandle, SharedString, Window, div, point,
-    prelude::*, px,
+    AnyElement, Bounds, Context, Focusable, FontWeight, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, ScrollHandle, SharedString,
+    TextRun, Window, canvas, div, point, prelude::*, px, size,
 };
 use negs_app::border::BorderColor;
 use negs_app::edits::{self, MoreAction, Tab};
 use negs_app::inspector_view::{
     self, EditChoice, Effect, Expanded, InspectorUi, InspectorView, Kind, NegativeAction,
-    RowAction, RowId, RowView, SliderValue, Track,
+    RowAction, RowId, RowView, SliderValue, Track, When, schema,
 };
-use negs_app::json;
 use negs_app::model::{Model, Pane, dirty};
 use negs_app::negative::Pick;
 use negs_app::session::SCOPE_HEIGHTS;
 use negs_app::state;
+use negs_app::theme::DISABLED_OPACITY;
 
 use crate::NegsApp;
-use crate::theme_gpui::GpuiTheme;
+use crate::marks_gpui::{paint_highlighter, paint_pencil};
+use crate::theme_gpui::{GpuiTheme, scale, tab_tracking};
 use crate::widgets::color_filter::render_color_filter;
 use crate::widgets::controls::{
-    BORDER_COLOR_PRESETS, border_color_hsla, render_actions_row, render_balance_print_row,
-    render_border_styles_row, render_choice_row, render_color_row, render_flat_field_row,
-    render_group_header, render_longest_side_row, render_more_row, render_note_row,
-    render_photograph_row, render_section_header, render_toggle_row,
+    BORDER_COLOR_PRESETS, GUTTER, border_color_hsla, render_actions_row,
+    render_balance_print_row, render_border_styles_row, render_choice_row, render_color_row,
+    render_edit_dot, render_flat_field_row, render_group_header, render_longest_side_row,
+    render_more_row, render_note_row, render_photograph_row, render_section_header,
+    render_toggle_row, render_word_button,
 };
-use crate::widgets::scopes::{ScopeHeightDrag, ScopesCache, render_scopes};
+use crate::widgets::scopes::{
+    ScopeHeightDrag, ScopesCache, render_scopes, scopes_total_height,
+};
 use crate::widgets::slider::{SliderCallbacks, SliderDrag, render_ink_slider};
 use crate::widgets::text_input::{
     InlineTextState, TextInputOutcome, TextInputStyle, parse_number, parse_pixels,
@@ -41,6 +45,39 @@ use crate::widgets::tone_graph::{ToneGraphState, render_tone_graph};
 pub const INSPECTOR_MIN_WIDTH: f32 = 340.0;
 pub const INSPECTOR_MAX_WIDTH: f32 = 440.0;
 pub const CANVAS_MIN_WIDTH: f32 = 640.0;
+pub const PANE_HEADER_HEIGHT: f32 = 42.0;
+pub const TAB_ROW_HEIGHT: f32 = 50.0;
+
+/// Y coordinate (column-local DIPs) where the Tab Edits popover anchors directly
+/// beneath the `Prep · Lab · Output` tab bar (`L17`).
+pub fn tab_edits_anchor_y(scope_height: f64) -> f32 {
+    PANE_HEADER_HEIGHT + scopes_total_height(scope_height) + TAB_ROW_HEIGHT + 4.0
+}
+
+/// Returns true when `row_id` belongs inside an indented `RevealedRows` group
+/// with a `1 px` `track` vertical rule (`L21`, matching `Inspector.swift:244-254`).
+pub fn is_revealed_row(row_id: RowId) -> bool {
+    schema::rows().get(row_id).is_some_and(|r| {
+        matches!(
+            r.when,
+            When::CustomWhiteBalance
+                | When::MeterAuto
+                | When::CustomFormat
+                | When::LongestSide
+                | When::AssumeInput
+                | When::ManualInput
+        )
+    })
+}
+
+/// Returns true when a `Kind::Group` header draws a `1 px` `line` divider above it (`L19`).
+pub fn group_is_ruled(prev_visible_kind: Option<Kind>) -> bool {
+    match prev_visible_kind {
+        None | Some(Kind::Section(_)) => false,
+        Some(Kind::Footer(text)) if text.starts_with("Your negative is read") => false,
+        _ => true,
+    }
+}
 
 /// Clamps the resizable inspector column width (`340..=440 DIP`, `L6`),
 /// leaving at least `CANVAS_MIN_WIDTH` for the canvas whenever the window can.
@@ -71,6 +108,7 @@ pub struct InspectorState {
     pub scopes_cache: ScopesCache,
     pub tone_graph: ToneGraphState,
     pub active_slider_drag: Option<SliderDrag>,
+    pub hovered_slider: Option<RowId>,
     pub active_scope_drag: Option<ScopeHeightDrag>,
     pub slider_bounds: HashMap<RowId, Bounds<Pixels>>,
     pub editing_slider: Option<(RowId, InlineTextState)>,
@@ -90,6 +128,7 @@ impl InspectorState {
             scopes_cache: ScopesCache::default(),
             tone_graph: ToneGraphState::default(),
             active_slider_drag: None,
+            hovered_slider: None,
             active_scope_drag: None,
             slider_bounds: HashMap::new(),
             editing_slider: None,
@@ -451,10 +490,12 @@ fn options_for_row(row: &RowView) -> Vec<String> {
 }
 
 /// Renders a single visible `RowView`, matching every `Kind` variant exhaustively.
+#[allow(clippy::too_many_arguments)]
 fn render_row(
     app: &NegsApp,
     row: &RowView,
     is_first_visible: bool,
+    prev_visible_kind: Option<Kind>,
     theme: &GpuiTheme,
     window: &Window,
     cx: &mut Context<NegsApp>,
@@ -465,13 +506,14 @@ fn render_row(
     let row_id = row.id;
 
     match kind {
-        Kind::Section(_) => render_section_header(row, is_first_visible, theme).into_any_element(),
+        Kind::Section(_) => render_section_header(row, is_first_visible, theme, window),
 
         Kind::Footer(_) | Kind::Note(_) => render_note_row(row, theme).into_any_element(),
 
         Kind::Group { enable, .. } => render_group_header(
             row,
             enable.is_some(),
+            group_is_ruled(prev_visible_kind),
             theme,
             cx,
             move |this, window, cx| dispatch_row(this, row_id, RowAction::Press(0), window, cx),
@@ -490,6 +532,7 @@ fn render_row(
                 .active_slider_drag
                 .as_ref()
                 .is_some_and(|d| d.row_id == row_id);
+            let hovered = app.inspector.hovered_slider == Some(row_id);
             let editing_state = app
                 .inspector
                 .editing_slider
@@ -501,6 +544,7 @@ fn render_row(
                 row,
                 slider,
                 dragging,
+                hovered,
                 editing_state,
                 theme,
                 window,
@@ -524,6 +568,19 @@ fn render_row(
                     on_edit_focus: Box::new(|this, win, _cx| {
                         if let Some((_, st)) = &this.inspector.editing_slider {
                             win.focus(&st.focus_handle);
+                        }
+                    }),
+                    on_hover: Box::new(|this, id, inside, cx| {
+                        let next = if inside {
+                            Some(id)
+                        } else if this.inspector.hovered_slider == Some(id) {
+                            None
+                        } else {
+                            return;
+                        };
+                        if this.inspector.hovered_slider != next {
+                            this.inspector.hovered_slider = next;
+                            cx.notify();
                         }
                     }),
                 },
@@ -687,9 +744,18 @@ fn render_row(
 
         Kind::BorderStyles => {
             let options = options_for_row(row);
-            render_border_styles_row(row, &options, theme, cx, move |this, idx, window, cx| {
-                dispatch_row(this, row_id, RowAction::Press(idx), window, cx);
-            })
+            let border = &app.model.state.border;
+            render_border_styles_row(
+                row,
+                &options,
+                border.color,
+                border.line_color,
+                theme,
+                cx,
+                move |this, idx, window, cx| {
+                    dispatch_row(this, row_id, RowAction::Press(idx), window, cx);
+                },
+            )
             .into_any_element()
         }
 
@@ -737,7 +803,10 @@ fn render_row(
     }
 }
 
-/// Top header bar of the Inspector column: `Adjustments` · `Presets` + right actions.
+/// Top header bar of the Inspector column (`PaneHeader`, `L14`):
+/// `42 px` tall, `pt: 13`, `px: 22`, NO bottom border; `Adjustments` · `Presets`
+/// in UI `12 pt` w500 (`gap: 16`), right side italic Newsreader `14 pt` edit
+/// count + `WordButton`s (`Reset`, or `New` + `Import…`).
 fn render_pane_header(
     app: &NegsApp,
     view: &InspectorView,
@@ -746,42 +815,38 @@ fn render_pane_header(
 ) -> AnyElement {
     let pane = app.model.pane();
     let is_presets = pane == Pane::Presets;
-    let can_reset = app.model.source.is_some() && view.total > 0;
+    let has_photo = app.model.source.is_some();
+    let can_reset = has_photo && !app.model.stocks.is_empty() && !app.model.cropping();
     let can_presets = app.model.can_change_presets();
     let hover_paper = theme.paper;
-
-    let count_label = if view.total == 0 {
-        None
-    } else if view.total == 1 {
-        Some("1 edit".to_string())
-    } else {
-        Some(format!("{} edits", view.total))
-    };
+    let word_font = theme.ui_font(FontWeight::MEDIUM);
+    let (count_num_font, count_size) = theme.serif_spec(scale::EDIT_COUNT, 700.0, true);
+    let (count_word_font, _) = theme.serif_spec(scale::EDIT_COUNT, 400.0, true);
 
     div()
         .flex()
-        .items_center()
+        .items_baseline()
         .justify_between()
         .w_full()
-        .h(px(40.0))
-        .px(px(16.0))
-        .border_b_1()
-        .border_color(theme.line)
+        .h(px(PANE_HEADER_HEIGHT))
+        .pt(px(13.0))
+        .px(px(GUTTER))
         // Left: Adjustments · Presets
         .child(
             div()
                 .flex()
-                .items_center()
-                .gap(px(14.0))
+                .items_baseline()
+                .gap(px(16.0))
                 .child(
                     div()
                         .id("pane-tab-adjustments")
                         .tooltip(crate::tooltip::tip("Show the adjustments (F7)", theme))
                         .cursor_pointer()
-                        .font_family(theme.serif_family.clone())
-                        .text_size(px(14.0))
+                        .font(word_font.clone())
+                        .text_size(px(scale::PANE_HEADER))
                         .text_color(if !is_presets { theme.paper } else { theme.dim })
                         .hover(move |s| s.text_color(hover_paper))
+                        .active(|s| s.opacity(0.62))
                         .on_click(cx.listener(|this, _, _window, cx| {
                             this.inspector.close_popovers();
                             this.model.show_pane(Pane::Adjustments);
@@ -795,10 +860,11 @@ fn render_pane_header(
                         .id("pane-tab-presets")
                         .tooltip(crate::tooltip::tip("Show the presets (F8)", theme))
                         .cursor_pointer()
-                        .font_family(theme.serif_family.clone())
-                        .text_size(px(14.0))
+                        .font(word_font)
+                        .text_size(px(scale::PANE_HEADER))
                         .text_color(if is_presets { theme.paper } else { theme.dim })
                         .hover(move |s| s.text_color(hover_paper))
+                        .active(|s| s.opacity(0.62))
                         .on_click(cx.listener(|this, _, _window, cx| {
                             this.inspector.close_popovers();
                             this.model.show_pane(Pane::Presets);
@@ -808,288 +874,280 @@ fn render_pane_header(
                         .child("Presets"),
                 ),
         )
-        // Right: edit count + Reset, or New + Import…
-        .child(if !is_presets {
+        // Right: edit count + Reset (only when a photo is open), or New + Import…
+        .child(if is_presets {
             div()
                 .flex()
-                .items_center()
-                .gap(px(10.0))
-                .when_some(count_label, |el, label| {
-                    el.child(div().text_size(px(11.0)).text_color(theme.dim).child(label))
+                .items_baseline()
+                .gap(px(16.0))
+                .child(render_word_button(
+                    "pane-presets-new",
+                    "New",
+                    scale::WORD_BUTTON,
+                    can_presets,
+                    Some(SharedString::from(
+                        "Save the film, paper and Lab settings as a preset (Ctrl+Shift+S)",
+                    )),
+                    theme,
+                    cx,
+                    |this, _window, cx| {
+                        this.model.new_preset();
+                        this.after_model_update(cx);
+                        cx.notify();
+                    },
+                ))
+                .child(render_word_button(
+                    "pane-presets-import",
+                    "Import…",
+                    scale::WORD_BUTTON,
+                    can_presets,
+                    Some(SharedString::from("Import presets (Ctrl+Shift+O)")),
+                    theme,
+                    cx,
+                    |_this, window, cx| {
+                        crate::presets::PresetsState::prompt_import_presets(window, cx);
+                    },
+                ))
+                .into_any_element()
+        } else if has_photo {
+            div()
+                .flex()
+                .items_baseline()
+                .gap(px(14.0))
+                .when(view.total > 0, |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .child(
+                                div()
+                                    .font(count_num_font)
+                                    .text_size(px(count_size))
+                                    .text_color(theme.paper)
+                                    .child(view.total.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .font(count_word_font)
+                                    .text_size(px(count_size))
+                                    .text_color(theme.dim)
+                                    .child(if view.total == 1 { " edit" } else { " edits" }),
+                            ),
+                    )
                 })
-                .child(
-                    div()
-                        .id("pane-reset-all")
-                        .tooltip(crate::tooltip::tip("Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.", theme))
-                        .text_size(px(11.5))
-                        .text_color(if can_reset {
-                            theme.label
-                        } else {
-                            theme.dim.opacity(0.45)
-                        })
-                        .when(can_reset, |el| {
-                            el.cursor_pointer()
-                                .hover(move |s| s.text_color(hover_paper))
-                                .on_click(cx.listener(|this, _, _window, cx| {
-                                    this.inspector.close_popovers();
-                                    this.model.reset();
-                                    this.after_model_update(cx);
-                                    cx.notify();
-                                }))
-                        })
-                        .child("Reset"),
-                )
+                .child(render_word_button(
+                    "pane-reset-all",
+                    "Reset",
+                    scale::WORD_BUTTON,
+                    can_reset,
+                    Some(SharedString::from(
+                        "Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.",
+                    )),
+                    theme,
+                    cx,
+                    |this, _window, cx| {
+                        this.inspector.close_popovers();
+                        this.model.reset();
+                        this.after_model_update(cx);
+                        cx.notify();
+                    },
+                ))
                 .into_any_element()
         } else {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .child(
-                    div()
-                        .id("pane-presets-new")
-                        .tooltip(crate::tooltip::tip("Save the film, paper and Lab settings as a preset (Ctrl+Shift+S)", theme))
-                        .text_size(px(11.5))
-                        .text_color(if can_presets {
-                            theme.label
-                        } else {
-                            theme.dim.opacity(0.45)
-                        })
-                        .when(can_presets, |el| {
-                            el.cursor_pointer()
-                                .hover(move |s| s.text_color(hover_paper))
-                                .on_click(cx.listener(|this, _, _window, cx| {
-                                    this.model.new_preset();
-                                    this.after_model_update(cx);
-                                    cx.notify();
-                                }))
-                        })
-                        .child("New"),
-                )
-                .child(
-                    div()
-                        .id("pane-presets-import")
-                        .tooltip(crate::tooltip::tip("Import presets (Ctrl+Shift+O)", theme))
-                        .text_size(px(11.5))
-                        .text_color(if can_presets {
-                            theme.label
-                        } else {
-                            theme.dim.opacity(0.45)
-                        })
-                        .when(can_presets, |el| {
-                            el.cursor_pointer()
-                                .hover(move |s| s.text_color(hover_paper))
-                                .on_click(cx.listener(|_this, _, window, cx| {
-                                    crate::presets::PresetsState::prompt_import_presets(window, cx);
-                                }))
-                        })
-                        .child("Import…"),
-                )
-                .into_any_element()
+            div().into_any_element()
         })
         .into_any_element()
 }
 
-/// Pinned Film & Paper stock selector strip at the top of Adjustments.
-/// Clicking Film calls `model.toggle_tray(false)` and clicking Paper calls
-/// `model.toggle_tray(true)` so Phase 3b's Stock Tray opens seamlessly.
-fn render_stock_strip(
-    app: &NegsApp,
+/// Renders one editorial tab word (`Prep`, `Lab`, `Output`) at Newsreader
+/// `21 pt` (`700 paper` chosen / `500 dim` inactive) with `tab_tracking` so
+/// switching tabs never shifts neighbors, and `6 px` `PencilStroke` / Light
+/// Table highlighter painted behind/under the chosen word (`L17`).
+fn render_tab_word(
+    title: &'static str,
+    chosen: bool,
     theme: &GpuiTheme,
-    cx: &mut Context<NegsApp>,
+    window: &Window,
 ) -> AnyElement {
-    let film_name = app.model.film_name();
-    let paper_name = app.model.paper_name();
-    let scanning = json::boolean(app.model.value("io.scan_film"));
-    let tray_shown = app.model.tray_shown();
-    let film_open = tray_shown == Some(false);
-    let paper_open = tray_shown == Some(true);
-    let hover = theme.subtle_hover;
+    let (bold_font, sz) = theme.serif_spec(scale::TAB, 700.0, false);
+    let (med_font, _) = theme.serif_spec(scale::TAB, 500.0, false);
+    let color = if chosen { theme.paper } else { theme.dim };
+    let plain = theme.tokens.plain;
+    let highlighter = theme.tokens.highlighter;
+    let accent = theme.accent;
+    let highlighter_ink = theme.highlighter_ink;
 
-    div()
-        .w_full()
-        .px(px(16.0))
-        .pt(px(10.0))
-        .pb(px(6.0))
-        .flex()
-        .flex_col()
-        .gap(px(5.0))
-        .border_b_1()
-        .border_color(theme.line)
-        // Film row
-        .child(
-            div()
-                .id("stock-strip-film")
-                .flex()
-                .items_center()
-                .justify_between()
-                .px(px(9.0))
-                .py(px(6.0))
-                .rounded(px(4.0))
-                .bg(if film_open {
-                    theme.accent.opacity(0.14)
-                } else {
-                    theme.canvas
-                })
-                .border_1()
-                .border_color(if film_open { theme.accent } else { theme.line })
-                .cursor_pointer()
-                .hover(move |s| s.bg(hover))
-                .on_click(cx.listener(|this, event: &gpui::ClickEvent, _window, cx| {
-                    this.inspector.close_popovers();
-                    if !this.model.can_open_tray(false) {
-                        this.open_stock_menu(false, false, event.position(), cx);
-                        return;
-                    }
-                    this.model.toggle_tray(false);
-                    this.after_model_update(cx);
-                    cx.notify();
-                }))
-                .child(
-                    div()
-                        .flex()
-                        .items_baseline()
-                        .gap(px(8.0))
-                        .min_w_0()
-                        .child(div().text_size(px(10.5)).text_color(theme.dim).child("Film"))
-                        .child(
-                            div()
-                                .font_family(theme.serif_family.clone())
-                                .text_size(px(13.5))
-                                .text_color(theme.paper)
-                                .truncate()
-                                .child(if film_name.is_empty() {
-                                    "Loading catalog…".to_string()
-                                } else {
-                                    film_name
-                                }),
-                        ),
+    let measure = |font: &gpui::Font| -> f32 {
+        let run = TextRun {
+            len: title.len(),
+            font: font.clone(),
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let shaped =
+            window
+                .text_system()
+                .shape_line(SharedString::from(title), px(sz), &[run], None);
+        f32::from(shaped.width)
+    };
+    let bold_w = measure(&bold_font);
+    let med_w = measure(&med_font);
+    let word_w = bold_w.max(med_w);
+    let chars: Vec<String> = title.chars().map(|c| c.to_string()).collect();
+    let track = if chosen {
+        0.0
+    } else {
+        tab_tracking(bold_w, med_w, chars.len())
+    };
+    let active_font = if chosen { bold_font } else { med_font };
+    let char_widths: Vec<f32> = if track > 0.01 {
+        chars
+            .iter()
+            .map(|ch| {
+                let run = TextRun {
+                    len: ch.len(),
+                    font: active_font.clone(),
+                    color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                f32::from(
+                    window
+                        .text_system()
+                        .shape_line(SharedString::from(ch.clone()), px(sz), &[run], None)
+                        .width,
                 )
-                .child(
-                    div()
-                        .text_size(px(10.5))
-                        .text_color(if film_open { theme.accent } else { theme.dim })
-                        .child(if film_open { "▴" } else { "▾" }),
-                ),
-        )
-        // Paper row
-        .child(
-            div()
-                .id("stock-strip-paper")
-                .flex()
-                .items_center()
-                .justify_between()
-                .px(px(9.0))
-                .py(px(6.0))
-                .rounded(px(4.0))
-                .bg(if paper_open {
-                    theme.accent.opacity(0.14)
-                } else {
-                    theme.canvas
-                })
-                .border_1()
-                .border_color(if paper_open { theme.accent } else { theme.line })
-                .when(!scanning, |el| {
-                    el.cursor_pointer()
-                        .hover(move |s| s.bg(hover))
-                        .on_click(cx.listener(|this, event: &gpui::ClickEvent, _window, cx| {
-                            this.inspector.close_popovers();
-                            if !this.model.can_open_tray(true) {
-                        this.open_stock_menu(true, false, event.position(), cx);
-                        return;
-                    }
-                    this.model.toggle_tray(true);
-                            this.after_model_update(cx);
-                            cx.notify();
-                        }))
-                })
-                .when(scanning, |el| el.opacity(0.5))
-                .child(
-                    div()
-                        .flex()
-                        .items_baseline()
-                        .gap(px(8.0))
-                        .min_w_0()
-                        .child(div().text_size(px(10.5)).text_color(theme.dim).child("Paper"))
-                        .child(
-                            div()
-                                .font_family(theme.serif_family.clone())
-                                .text_size(px(13.5))
-                                .text_color(if scanning { theme.dim } else { theme.paper })
-                                .when(scanning, |el| el.line_through())
-                                .truncate()
-                                .child(if paper_name.is_empty() {
-                                    "—".to_string()
-                                } else {
-                                    paper_name
-                                }),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_size(px(10.5))
-                        .text_color(if paper_open { theme.accent } else { theme.dim })
-                        .child(if paper_open { "▴" } else { "▾" }),
-                ),
-        )
-        .into_any_element()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let text_h = (sz + 6.0).ceil();
+    let total_h = text_h + 6.0;
+
+    canvas(
+        |_b, _w, _cx| {},
+        move |bounds: Bounds<Pixels>, (), window, cx| {
+            // Paint Light Table highlighter BEFORE text so dark ink sits on top (`L3`).
+            let mark_rect = Bounds {
+                origin: point(bounds.origin.x, bounds.origin.y + px(text_h - 1.0)),
+                size: size(bounds.size.width, px(negs_marks::PENCIL_HEIGHT as f32)),
+            };
+            if chosen && highlighter {
+                paint_highlighter(window, mark_rect, plain, 6.0, highlighter_ink);
+            }
+
+            if track > 0.01 {
+                let mut x = f32::from(bounds.origin.x);
+                for (i, ch) in chars.iter().enumerate() {
+                    let run = TextRun {
+                        len: ch.len(),
+                        font: active_font.clone(),
+                        color,
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    };
+                    let shaped = window.text_system().shape_line(
+                        SharedString::from(ch.clone()),
+                        px(sz),
+                        &[run],
+                        None,
+                    );
+                    let _ = shaped.paint(point(px(x), bounds.origin.y), px(text_h), window, cx);
+                    x += char_widths[i] + track;
+                }
+            } else {
+                let run = TextRun {
+                    len: title.len(),
+                    font: active_font.clone(),
+                    color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let shaped = window.text_system().shape_line(
+                    SharedString::from(title),
+                    px(sz),
+                    &[run],
+                    None,
+                );
+                let _ = shaped.paint(bounds.origin, px(text_h), window, cx);
+            }
+
+            if chosen && !highlighter {
+                paint_pencil(
+                    window,
+                    mark_rect,
+                    plain,
+                    negs_marks::PENCIL_WIDTH as f32,
+                    accent,
+                );
+            }
+        },
+    )
+    .w(px(word_w.ceil().max(1.0)))
+    .h(px(total_h))
+    .into_any_element()
 }
 
-/// Tab bar (`Prep` · `Lab` · `Output`) with per-tab edit count badges.
+/// Editorial tab bar (`Prep` · `Lab` · `Output`, `L17`):
+/// `50 px` tall, top & bottom `1 px` `line` rules, left-aligned from `22 px`
+/// (`24 px` gap), Newsreader `21 pt` words with grease-pencil underline / Light
+/// Table highlighter, and bare `5 px` yellow dot + `10.5 pt` semibold `label`
+/// edit count.
 fn render_tab_bar(
-    app: &NegsApp,
+    _app: &NegsApp,
     view: &InspectorView,
     theme: &GpuiTheme,
+    window: &Window,
     cx: &mut Context<NegsApp>,
 ) -> AnyElement {
-    let hover = theme.subtle_hover;
     let active_tab = view.tab;
+    let count_font = theme.ui_font(FontWeight::SEMIBOLD);
 
     div()
         .flex()
-        .items_center()
+        .items_start()
         .w_full()
-        .h(px(34.0))
-        .px(px(12.0))
-        .gap(px(4.0))
+        .h(px(TAB_ROW_HEIGHT))
+        .px(px(GUTTER))
+        .pt(px(12.0))
+        .gap(px(24.0))
         .border_t_1()
         .border_b_1()
         .border_color(theme.line)
         .children(Tab::ALL.into_iter().enumerate().map(|(i, tab)| {
             let active = tab == active_tab;
             let count = view.counts[i];
-            let popover_open = app.inspector.open_tab_edits == Some(tab);
             div()
-                .id(SharedString::from(format!("insp-tab-{}", tab.title())))
-                .relative()
-                .flex_1()
-                .h_full()
                 .flex()
-                .items_center()
-                .justify_center()
-                .gap(px(5.0))
-                .cursor_pointer()
-                .hover(move |s| s.bg(hover))
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    this.inspector.close_popovers();
-                    if this.model.prefs.tab() != tab.title()
-                        || !this.model.prefs.inspector_tab_chosen
-                    {
-                        this.model.prefs.choose_tab(tab.title());
-                        this.model.prefs.save();
-                        this.inspector
-                            .scroll_handle
-                            .set_offset(point(px(0.0), px(0.0)));
-                        this.model.dirty |= dirty::STRUCTURE;
-                    }
-                    this.after_model_update(cx);
-                    cx.notify();
-                }))
+                .items_start()
                 .child(
                     div()
-                        .text_size(px(12.0))
-                        .text_color(if active { theme.paper } else { theme.dim })
-                        .child(tab.title()),
+                        .id(SharedString::from(format!("insp-tab-{}", tab.title())))
+                        .cursor_pointer()
+                        .active(|s| s.opacity(0.62))
+                        .on_click(cx.listener(move |this, _, _window, cx| {
+                            this.inspector.close_popovers();
+                            if this.model.prefs.tab() != tab.title()
+                                || !this.model.prefs.inspector_tab_chosen
+                            {
+                                this.model.prefs.choose_tab(tab.title());
+                                this.model.prefs.save();
+                                this.inspector
+                                    .scroll_handle
+                                    .set_offset(point(px(0.0), px(0.0)));
+                                this.model.dirty |= dirty::STRUCTURE;
+                            }
+                            this.after_model_update(cx);
+                            cx.notify();
+                        }))
+                        .child(render_tab_word(tab.title(), active, theme, window)),
                 )
                 .when(count > 0, |el| {
                     el.child(
@@ -1098,21 +1156,18 @@ fn render_tab_bar(
                                 "insp-tab-count-{}",
                                 tab.title()
                             )))
-                            .px(px(5.0))
-                            .py(px(1.0))
-                            .rounded_full()
-                            .bg(if popover_open {
-                                theme.accent
-                            } else {
-                                theme.accent.opacity(0.22)
-                            })
-                            .text_size(px(10.0))
-                            .text_color(if popover_open {
-                                theme.on_fill
-                            } else {
-                                theme.paper
-                            })
+                            .tooltip(crate::tooltip::tip(
+                                format!(
+                                    "Show the {} on {}",
+                                    if count == 1 { "edit" } else { "edits" },
+                                    tab.title()
+                                ),
+                                theme,
+                            ))
+                            .flex()
+                            .items_start()
                             .cursor_pointer()
+                            .active(|s| s.opacity(0.62))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
@@ -1127,77 +1182,144 @@ fn render_tab_bar(
                                     cx.notify();
                                 }),
                             )
-                            .child(count.to_string()),
-                    )
-                })
-                .when(active, |el| {
-                    el.child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left(px(8.0))
-                            .right(px(8.0))
-                            .h(px(2.0))
-                            .bg(theme.accent),
+                            .child(
+                                div()
+                                    .pl(px(5.0))
+                                    .pr(px(3.0))
+                                    .pt(px(6.0))
+                                    .child(render_edit_dot(theme)),
+                            )
+                            .child(
+                                div()
+                                    .pt(px(1.0))
+                                    .font(count_font.clone())
+                                    .text_size(px(scale::TAB_COUNT))
+                                    .text_color(theme.label)
+                                    .child(count.to_string()),
+                            ),
                     )
                 })
         }))
         .into_any_element()
 }
 
-/// Output tab footer with `view.export_summary` and primary Export button.
+/// Output tab footer (`ExportFoot`, `L24`): top `1 px` `line` rule, centered
+/// Newsreader `14 pt` italic summary, `36 px` `r = 3` `fill` button
+/// `"Export Photograph…"` in Newsreader `18 pt` `700` `on_fill` with `1 px`
+/// press sink, plus centered italic Lightroom `WordButton`s when installed.
 fn render_output_foot(
+    app: &NegsApp,
     view: &InspectorView,
     theme: &GpuiTheme,
     cx: &mut Context<NegsApp>,
 ) -> AnyElement {
-    let can_export = view.can_export;
+    let can_export = view.can_export && !app.model.cropping();
+    let export_title = app.model.export_title();
+    let export_tip = if export_title == "Export Photograph…" {
+        "Export photograph (Ctrl+Shift+E)"
+    } else {
+        "Export the selected photographs (Ctrl+Shift+E)"
+    };
+    let (sum_font, sum_size) = theme.serif_spec(scale::EXPORT_SUMMARY, 400.0, true);
+    let (btn_font, btn_size) = theme.serif_spec(scale::EXPORT_BUTTON, 700.0, false);
+    let lightroom_kinds = app.model.lightroom_kinds();
+    let targets = app.model.export_targets().len();
+
     div()
         .w_full()
-        .px(px(16.0))
-        .py(px(12.0))
+        .px(px(GUTTER))
+        .pt(px(11.0))
+        .pb(px(16.0))
         .border_t_1()
         .border_color(theme.line)
         .flex()
         .flex_col()
+        .items_center()
         .gap(px(8.0))
         .when(!view.export_summary.is_empty(), |el| {
             el.child(
                 div()
-                    .text_size(px(11.0))
-                    .text_color(theme.dim)
+                    .font(sum_font)
+                    .text_size(px(sum_size))
+                    .text_color(theme.label)
+                    .truncate()
                     .child(view.export_summary.clone()),
             )
         })
         .child(
             div()
                 .id("inspector-export-btn")
-                .tooltip(crate::tooltip::tip("Export photograph (Ctrl+Shift+E)", theme))
+                .tooltip(crate::tooltip::tip(export_tip, theme))
                 .w_full()
-                .py(px(7.0))
-                .rounded(px(4.0))
+                .h(px(36.0))
+                .pb(px(2.0))
+                .rounded(px(3.0))
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(if can_export { theme.fill } else { theme.track })
-                .text_size(px(12.5))
-                .text_color(if can_export {
-                    theme.on_fill
-                } else {
-                    theme.dim
-                })
+                .bg(theme.fill)
+                .font(btn_font)
+                .text_size(px(btn_size))
+                .text_color(theme.on_fill)
+                .when(!can_export, |el| el.opacity(DISABLED_OPACITY as f32))
                 .when(can_export, |el| {
-                    el.cursor_pointer().on_click(cx.listener(|this, _, _window, cx| {
-                        crate::export_card::open(this, true, cx);
-                    }))
+                    el.cursor_pointer()
+                        .hover(|s| s.opacity(0.94))
+                        .active(|s| s.opacity(0.84).mt(px(1.0)))
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            crate::export_card::open(this, true, cx);
+                        }))
                 })
-                .child("Export…"),
+                .child(export_title),
         )
+        .when(!lightroom_kinds.is_empty(), |el| {
+            el.child(
+                div()
+                    .pt(px(2.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(14.0))
+                    .children(lightroom_kinds.into_iter().map(|kind| {
+                        let enabled = app.model.can_open_in_lightroom(kind);
+                        let what = if targets > 1 {
+                            format!("the {targets} selected photographs")
+                        } else {
+                            "the photograph".to_string()
+                        };
+                        let shortcut = if kind == negs_app::lightroom::Kind::Cloud {
+                            " (Alt+Ctrl+E)"
+                        } else {
+                            ""
+                        };
+                        let tip = format!(
+                            "Open {what} in {} as full-size 16-bit TIFFs{shortcut}",
+                            kind.title()
+                        );
+                        render_word_button(
+                            SharedString::from(format!("insp-lr-{}", kind.title())),
+                            format!("Open in {}", kind.title()),
+                            13.5,
+                            enabled,
+                            Some(SharedString::from(tip)),
+                            theme,
+                            cx,
+                            move |this, _window, cx| {
+                                this.model.open_in_lightroom(kind);
+                                this.after_model_update(cx);
+                                cx.notify();
+                            },
+                        )
+                    })),
+            )
+        })
         .into_any_element()
 }
 
-/// Floating Tab Edits popover showing every modified edit in `tab` with
-/// per-edit reset and `"Reset <Tab>"`.
+/// Floating Tab Edits popover (`TabEditsList`, `L17`): `300 px` wide, anchored
+/// dynamically directly below the tab bar, Newsreader `15 pt` `600` italic
+/// header, `1 px` `line` rules, `label` `↺` per edit (never `accent` text),
+/// and left-aligned `WordButton("Reset <Tab>")`.
 fn render_tab_edits_popover(
     app: &NegsApp,
     tab: Tab,
@@ -1211,15 +1333,20 @@ fn render_tab_edits_popover(
     }
     let head = inspector_view::edits_head(tab, edits_list.len());
     let edits_rc = Rc::new(edits_list);
-    let hover = theme.subtle_hover;
+    let anchor_y = tab_edits_anchor_y(app.inspector.scope_height);
+    let (head_font, head_size) = theme.serif_spec(15.0, 600.0, true);
+    let (reset_font, reset_size) = theme.serif_spec(15.0, 400.0, false);
+    let ui_font = theme.ui_font(FontWeight::NORMAL);
+    let paper_hover = theme.paper;
 
     Some(
         div()
             .id("tab-edits-popover")
             .absolute()
-            .top(px(120.0))
-            .left(px(12.0))
-            .right(px(12.0))
+            .top(px(anchor_y))
+            .left(px(GUTTER - 6.0))
+            .w(px(300.0))
+            .p(px(14.0))
             .rounded(px(6.0))
             .bg(theme.panel)
             .border_1()
@@ -1227,130 +1354,130 @@ fn render_tab_edits_popover(
             .shadow_md()
             .flex()
             .flex_col()
-            .overflow_hidden()
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })
             // Header
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .border_b_1()
-                    .border_color(theme.line)
-                    .child(
-                        div()
-                            .font_family(theme.serif_family.clone())
-                            .text_size(px(13.0))
-                            .text_color(theme.paper)
-                            .child(head),
-                    )
-                    .child(
-                        div()
-                            .id("tab-edits-close")
-                            .cursor_pointer()
-                            .px(px(4.0))
-                            .text_size(px(12.0))
-                            .text_color(theme.dim)
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                this.inspector.open_tab_edits = None;
-                                cx.notify();
-                            }))
-                            .child("✕"),
-                    ),
+                    .pb(px(8.0))
+                    .font(head_font)
+                    .text_size(px(head_size))
+                    .text_color(theme.paper)
+                    .child(head),
             )
             // Individual edits list
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .max_h(px(260.0))
-                    .py(px(4.0))
+                    .max_h(px(320.0))
                     .children(edits_rc.iter().enumerate().map(|(i, edit)| {
                         let edits_for_click = edits_rc.clone();
+                        let reset_tip = SharedString::from(format!("Reset {}", edit.title));
                         div()
                             .id(SharedString::from(format!("tab-edit-item-{i}")))
                             .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            .px(px(12.0))
-                            .py(px(5.0))
-                            .hover(move |s| s.bg(hover))
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .text_color(theme.label)
-                                    .truncate()
-                                    .child(edit.title.clone()),
-                            )
+                            .flex_col()
+                            .child(div().w_full().h(px(1.0)).bg(theme.line))
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
+                                    .justify_between()
                                     .gap(px(8.0))
+                                    .py(px(5.0))
                                     .child(
                                         div()
-                                            .text_size(px(11.0))
-                                            .text_color(theme.dim)
-                                            .child(edit.value.clone()),
+                                            .font(ui_font.clone())
+                                            .text_size(px(scale::ROW_LABEL))
+                                            .text_color(theme.label)
+                                            .truncate()
+                                            .min_w_0()
+                                            .child(edit.title.clone()),
                                     )
                                     .child(
                                         div()
-                                            .id(SharedString::from(format!("tab-edit-reset-{i}")))
-                                            .cursor_pointer()
-                                            .px(px(4.0))
-                                            .py(px(1.0))
-                                            .rounded(px(3.0))
-                                            .text_size(px(11.0))
-                                            .text_color(theme.accent)
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                if let Some(effect) = inspector_view::edit_list(
-                                                    tab,
-                                                    &edits_for_click,
-                                                    EditChoice::One(i),
-                                                ) {
-                                                    apply_effects(this, vec![effect], window, cx);
-                                                }
-                                            }))
-                                            .child("↺"),
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .flex_shrink_0()
+                                            .child(
+                                                div()
+                                                    .font(ui_font.clone())
+                                                    .text_size(px(scale::ROW_LABEL))
+                                                    .text_color(theme.dim)
+                                                    .child(edit.value.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id(SharedString::from(format!(
+                                                        "tab-edit-reset-{i}"
+                                                    )))
+                                                    .tooltip(crate::tooltip::tip(reset_tip, theme))
+                                                    .cursor_pointer()
+                                                    .w(px(18.0))
+                                                    .h(px(18.0))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .font(reset_font.clone())
+                                                    .text_size(px(reset_size))
+                                                    .text_color(theme.label)
+                                                    .hover(move |s| s.text_color(paper_hover))
+                                                    .active(|s| s.opacity(0.62))
+                                                    .on_click(cx.listener(
+                                                        move |this, _, window, cx| {
+                                                            if let Some(effect) =
+                                                                inspector_view::edit_list(
+                                                                    tab,
+                                                                    &edits_for_click,
+                                                                    EditChoice::One(i),
+                                                                )
+                                                            {
+                                                                apply_effects(
+                                                                    this,
+                                                                    vec![effect],
+                                                                    window,
+                                                                    cx,
+                                                                );
+                                                            }
+                                                        },
+                                                    ))
+                                                    .child("↺"),
+                                            ),
                                     ),
                             )
                     })),
             )
-            // Footer: Reset <Tab>
+            // Bottom rule + left-aligned WordButton("Reset <Tab>")
+            .child(div().w_full().h(px(1.0)).bg(theme.line))
             .child({
                 let edits_for_all = edits_rc.clone();
                 div()
-                    .border_t_1()
-                    .border_color(theme.line)
-                    .px(px(12.0))
-                    .py(px(7.0))
+                    .pt(px(8.0))
                     .flex()
-                    .justify_end()
-                    .child(
-                        div()
-                            .id("tab-edits-reset-all")
-                            .cursor_pointer()
-                            .px(px(8.0))
-                            .py(px(3.0))
-                            .rounded(px(4.0))
-                            .text_size(px(11.5))
-                            .text_color(theme.warn)
-                            .hover(move |s| s.bg(hover))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.inspector.open_tab_edits = None;
-                                if let Some(effect) =
-                                    inspector_view::edit_list(tab, &edits_for_all, EditChoice::All)
-                                {
-                                    apply_effects(this, vec![effect], window, cx);
-                                }
-                            }))
-                            .child(format!("Reset {}", tab.title())),
-                    )
+                    .items_center()
+                    .child(render_word_button(
+                        "tab-edits-reset-all",
+                        format!("Reset {}", tab.title()),
+                        scale::WORD_BUTTON,
+                        true,
+                        Some(SharedString::from(format!(
+                            "Put every control on {} back to its default. You can undo this.",
+                            tab.title()
+                        ))),
+                        theme,
+                        cx,
+                        move |this, window, cx| {
+                            this.inspector.open_tab_edits = None;
+                            if let Some(effect) =
+                                inspector_view::edit_list(tab, &edits_for_all, EditChoice::All)
+                            {
+                                apply_effects(this, vec![effect], window, cx);
+                            }
+                        },
+                    ))
             })
             .into_any_element(),
     )
@@ -1463,15 +1590,16 @@ fn render_color_picker_popover(
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
             cx.stop_propagation();
         })
-        .child(
+        .child({
+            let (title_font, title_size) = theme.serif_spec(14.0, 600.0, false);
             div()
                 .flex()
                 .items_center()
                 .justify_between()
                 .child(
                     div()
-                        .font_family(theme.serif_family.clone())
-                        .text_size(px(13.0))
+                        .font(title_font)
+                        .text_size(px(title_size))
                         .text_color(theme.paper)
                         .child(title),
                 )
@@ -1486,8 +1614,8 @@ fn render_color_picker_popover(
                             cx.notify();
                         }))
                         .child("✕"),
-                ),
-        )
+                )
+        })
         // Preset swatches: White, Black, Warm, Cream
         .child(
             div()
@@ -1550,6 +1678,8 @@ fn render_color_picker_popover(
                         align_right: false,
                         error: picker.hex_error,
                         disabled: false,
+                        ruled: false,
+                        serif: false,
                     },
                     theme,
                     window,
@@ -1672,8 +1802,29 @@ pub fn render_inspector_column(
 
     let body = if is_presets {
         crate::presets::render_presets(app, window, cx).into_any_element()
+    } else if app.model.source.is_none() {
+        // Empty inspector (`InspectorEmptyLine`, `L13`): top rule + italic serif sentence.
+        let (empty_font, empty_size) = theme.serif_spec(14.0, 400.0, true);
+        div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(div().w_full().h(px(1.0)).bg(theme.line))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px(px(GUTTER))
+                    .pt(px(18.0))
+                    .font(empty_font)
+                    .text_size(px(empty_size))
+                    .line_height(px(20.0))
+                    .text_color(theme.dim)
+                    .child("The film, the paper and every setting appear here once a photograph is open."),
+            )
+            .into_any_element()
     } else {
-        let stock_strip = render_stock_strip(app, &theme, cx);
         let scopes = render_scopes(
             is_waveform,
             app.inspector.scope_height,
@@ -1706,29 +1857,72 @@ pub fn render_inspector_column(
                 }
             },
         );
-        let tab_bar = render_tab_bar(app, &view, &theme, cx);
+        let tab_bar = render_tab_bar(app, &view, &theme, window, cx);
 
-        let visible_rows: Vec<AnyElement> = view
-            .rows
-            .iter()
-            .filter(|r| r.visible)
-            .enumerate()
-            .map(|(idx, row)| {
-                let el = render_row(app, row, idx == 0, &theme, window, cx);
-                // The row's help, as the Windows app's tooltips on its label and
-                // control. `RowView::help` is Match brightness's, or a slider's
-                // reset ("Reset to 0", on its ↺).
-                let help = match row.kind {
-                    Some(Kind::MatchBrightness) => row.help.clone().map(SharedString::from),
-                    Some(kind) => kind.help().map(SharedString::from),
-                    None => None,
-                };
-                match help {
-                    Some(help) if !help.is_empty() => div().id(("row-tip", row.id)).tooltip(crate::tooltip::tip(help, &theme)).child(el).into_any_element(),
-                    _ => el,
-                }
-            })
-            .collect();
+        // Render visible rows, grouping consecutive revealed sub-rows into `RevealedRows` (`L21`).
+        let mut visible_elements: Vec<AnyElement> = Vec::new();
+        let mut revealed_batch: Vec<AnyElement> = Vec::new();
+        let mut prev_visible_kind: Option<Kind> = None;
+        let flush_revealed = |batch: &mut Vec<AnyElement>, out: &mut Vec<AnyElement>, track: gpui::Hsla| {
+            if batch.is_empty() {
+                return;
+            }
+            let items = std::mem::take(batch);
+            out.push(
+                div()
+                    .relative()
+                    .w_full()
+                    .pl(px(12.0))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(GUTTER))
+                            .top(px(4.0))
+                            .bottom(px(4.0))
+                            .w(px(1.0))
+                            .bg(track),
+                    )
+                    .children(items)
+                    .into_any_element(),
+            );
+        };
+
+        for (idx, row) in view.rows.iter().filter(|r| r.visible).enumerate() {
+            let el = render_row(app, row, idx == 0, prev_visible_kind, &theme, window, cx);
+            prev_visible_kind = row.kind;
+            let help = match row.kind {
+                Some(Kind::MatchBrightness) => row.help.clone().map(SharedString::from),
+                Some(kind) => kind.help().map(SharedString::from),
+                None => None,
+            };
+            let wrapped = match help {
+                Some(help) if !help.is_empty() => div()
+                    .id(("row-tip", row.id))
+                    .tooltip(crate::tooltip::tip(help, &theme))
+                    .child(el)
+                    .into_any_element(),
+                _ => el,
+            };
+            if is_revealed_row(row.id) {
+                revealed_batch.push(wrapped);
+            } else {
+                flush_revealed(&mut revealed_batch, &mut visible_elements, theme.track);
+                visible_elements.push(wrapped);
+            }
+        }
+        flush_revealed(&mut revealed_batch, &mut visible_elements, theme.track);
+        // Close the final section with `9 px` bottom padding + `1 px` `line` rule (`L19`).
+        if !visible_elements.is_empty() {
+            visible_elements.push(
+                div()
+                    .w_full()
+                    .pt(px(9.0))
+                    .child(div().w_full().h(px(1.0)).bg(theme.line))
+                    .into_any_element(),
+            );
+        }
 
         let scroll_area = div()
             .id("inspector-rows-scroll")
@@ -1740,9 +1934,10 @@ pub fn render_inspector_column(
             .pb(px(16.0))
             .flex()
             .flex_col()
-            .children(visible_rows);
+            .children(visible_elements);
 
-        let output_foot = (view.tab == Tab::Output).then(|| render_output_foot(&view, &theme, cx));
+        let output_foot =
+            (view.tab == Tab::Output).then(|| render_output_foot(app, &view, &theme, cx));
 
         div()
             .flex_1()
@@ -1750,7 +1945,6 @@ pub fn render_inspector_column(
             .min_h_0()
             .flex()
             .flex_col()
-            .child(stock_strip)
             .child(scopes)
             .child(tab_bar)
             .child(scroll_area)
@@ -1840,9 +2034,53 @@ mod tests {
         // Narrow window: never goes below minimum 340 px.
         assert_eq!(clamp_inspector_width(420.0, 900.0), INSPECTOR_MIN_WIDTH);
     }
+
+    #[test]
+    fn tab_edits_anchor_tracks_scope_height() {
+        let base = tab_edits_anchor_y(88.0);
+        assert_eq!(base, 42.0 + 134.0 + 50.0 + 4.0);
+        assert_eq!(tab_edits_anchor_y(188.0), base + 100.0);
+    }
+
+    #[test]
+    fn revealed_rows_and_group_rules_match_swiftui() {
+        let all = schema::rows();
+        let wb_temp = all
+            .iter()
+            .position(|r| r.when == When::CustomWhiteBalance)
+            .expect("custom WB row");
+        assert!(is_revealed_row(wb_temp));
+        let metering = all
+            .iter()
+            .position(|r| r.when == When::MeterAuto)
+            .expect("metering row");
+        assert!(is_revealed_row(metering));
+        let long_side = all
+            .iter()
+            .position(|r| r.when == When::LongestSide)
+            .expect("longest side row");
+        assert!(is_revealed_row(long_side));
+        let brightness_sec = all
+            .iter()
+            .position(|r| r.kind == Kind::Section("Brightness"))
+            .expect("brightness section");
+        assert!(!is_revealed_row(brightness_sec));
+
+        assert!(!group_is_ruled(None));
+        assert!(!group_is_ruled(Some(Kind::Section("Film"))));
+        assert!(!group_is_ruled(Some(Kind::Footer(
+            "Your negative is read through the film's curves and base."
+        ))));
+        assert!(group_is_ruled(Some(Kind::Toggle("Scan film directly", "io.scan_film"))));
+        assert!(group_is_ruled(Some(Kind::Group {
+            title: "Grain",
+            enable: Some("film_render.grain.active")
+        })));
+    }
     use negs_app::border::{BorderSettings, BorderStyle};
     use negs_app::inspector_view::output::BorderWidth;
     use negs_app::inspector_view::schema::rows;
+    use negs_app::json;
     use negs_app::session::Preferences;
     use negs_app::state::{ColorFilter, EditState, FilterLink, SizeMode, Stock};
     use serde_json::{Value, json};
