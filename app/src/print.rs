@@ -195,27 +195,32 @@ pub fn label_kind(words: &PrintWords) -> &'static str {
 
 // MARK: Painting
 
-/// A text style: size, weight, italic, in the serif (Newsreader, or the
+/// A text style: size, weight, italic, optional tracking, in the serif (Newsreader, or the
 /// system font in Plain).
 #[derive(Clone, Copy, Debug)]
 pub struct TextStyle {
     pub size: f32,
     pub weight: f32,
     pub italic: bool,
+    /// Inter-character tracking in DIPs (e.g. `-0.24` = `-0.01 em` on `24 pt` film name, `L28`).
+    pub tracking: f32,
 }
 
 impl TextStyle {
     pub const fn serif(size: f32, weight: f32) -> Self {
-        Self { size, weight, italic: false }
+        Self { size, weight, italic: false, tracking: 0.0 }
     }
     pub const fn italic(self) -> Self {
         Self { italic: true, ..self }
+    }
+    pub const fn tracked(self, tracking: f32) -> Self {
+        Self { tracking, ..self }
     }
 }
 
 pub const CAPTION: TextStyle = TextStyle::serif(15.0, 400.0).italic();
 pub const CAPTION_UPRIGHT: TextStyle = TextStyle::serif(15.0, 400.0);
-pub const FILM: TextStyle = TextStyle::serif(24.0, 600.0);
+pub const FILM: TextStyle = TextStyle::serif(24.0, 600.0).tracked(-0.24);
 pub const KIND: TextStyle = TextStyle::serif(14.0, 400.0).italic();
 pub const PAPER: TextStyle = TextStyle::serif(17.5, 400.0);
 const THE_ORIGINAL: TextStyle = TextStyle::serif(16.0, 400.0).italic();
@@ -253,11 +258,36 @@ impl Painter<'_> {
     pub fn measure(&mut self, text: &str, style: &TextStyle) -> Metrics {
         let line = self.shape(text, style, gpui::black());
         let (ascent, descent) = (f32::from(line.ascent) as f64, f32::from(line.descent) as f64);
-        Metrics { width: f32::from(line.width) as f64, height: ascent + descent, baseline: ascent }
+        let tracking_extra = if !self.plain && style.tracking.abs() > 1e-4 {
+            text.chars().count().saturating_sub(1) as f64 * style.tracking as f64
+        } else {
+            0.0
+        };
+        Metrics { width: (f32::from(line.width) as f64 + tracking_extra).max(0.0), height: ascent + descent, baseline: ascent }
     }
 
     /// Words with their baseline at `baseline` and their left at `x`.
     pub fn word(&mut self, text: &str, style: TextStyle, color: Hsla, x: f64, baseline: f64) -> Metrics {
+        if !self.plain && style.tracking.abs() > 1e-4 && text.chars().count() > 1 {
+            let whole = self.shape(text, &style, color);
+            let (ascent, descent) = (f32::from(whole.ascent), f32::from(whole.descent));
+            let mut cursor = x;
+            let mut buf = [0u8; 4];
+            let count = text.chars().count();
+            for (i, ch) in text.chars().enumerate() {
+                let s = ch.encode_utf8(&mut buf);
+                let glyph = self.shape(s, &style, color);
+                let gw = f32::from(glyph.width) as f64;
+                if gw > 0.0 {
+                    let _ = glyph.paint(point(px(cursor as f32), px(baseline as f32 - ascent)), px(ascent + descent), self.window, self.cx);
+                }
+                cursor += gw;
+                if i + 1 < count {
+                    cursor += style.tracking as f64;
+                }
+            }
+            return Metrics { width: (cursor - x).max(0.0), height: (ascent + descent) as f64, baseline: ascent as f64 };
+        }
         let line = self.shape(text, &style, color);
         let (ascent, descent) = (f32::from(line.ascent), f32::from(line.descent));
         let m = Metrics { width: f32::from(line.width) as f64, height: (ascent + descent) as f64, baseline: ascent as f64 };
@@ -353,14 +383,29 @@ fn paint_turn(window: &mut Window, clockwise: bool, x: f64, y: f64, color: Hsla)
     paint_marks_path(window, &head, origin, None, color);
 }
 
+/// Computes the caption's horizontal origin and maximum fact width (`L28`).
+/// Landscape captions span `print`'s edges; portrait captions centre over
+/// `print` and may use the canvas margin width so all EXIF facts (e.g. `40 mm`)
+/// stay visible instead of dropping off on narrow vertical frames.
+pub fn caption_span(canvas: Rect, print: Rect, portrait: bool) -> (f64, f64, f64) {
+    let margin_left = canvas.x + MARGIN;
+    let margin_right = canvas.max_x() - MARGIN;
+    if portrait {
+        let avail = (margin_right - margin_left).max(1.0);
+        (margin_left, margin_right, avail)
+    } else {
+        let left = print.x.max(margin_left);
+        let right = print.max_x().min(margin_right);
+        (left, right, (right - left).max(1.0))
+    }
+}
+
 /// The caption over `print`: the facts in italic `label`, `·` between them
 /// in `track`, the file name at the right in `dim`, its line's foot 10 DIPs
 /// above the print. The file name goes first when they don't fit; a
-/// portrait's caption is centred and has none.
+/// portrait's caption is centred over `print` within the canvas margin and has none.
 pub fn paint_caption(p: &mut Painter, canvas: Rect, print: Rect, portrait: bool, words: &PrintWords, ink: &SheetInk) {
-    let left = print.x.max(canvas.x + MARGIN);
-    let right = print.max_x().min(canvas.max_x() - MARGIN);
-    let width = (right - left).max(1.0);
+    let (left, right, width) = caption_span(canvas, print, portrait);
     let dot = p.measure("·", &CAPTION_UPRIGHT).width;
     let widths: Vec<f64> = words.facts.iter().map(|f| p.measure(f, &CAPTION).width).collect();
     let line = |n: usize| widths[..n].iter().sum::<f64>() + n.saturating_sub(1) as f64 * (2.0 * GAP + dot);
@@ -375,7 +420,12 @@ pub fn paint_caption(p: &mut Painter, canvas: Rect, print: Rect, portrait: bool,
         return;
     }
     let baseline = print.y - 10.0 - (m.height - m.baseline);
-    let mut x = if portrait { left + (width - line(n)) / 2.0 } else { left };
+    let line_w = line(n);
+    let mut x = if portrait {
+        (print.mid_x() - line_w / 2.0).clamp(left, (right - line_w).max(left))
+    } else {
+        left
+    };
     for (i, fact) in words.facts[..n].iter().enumerate() {
         if i > 0 {
             x += GAP;
@@ -659,5 +709,15 @@ mod tests {
         assert_eq!(label_kind(&w), "printed on");
         w.scanning = true;
         assert_eq!(label_kind(&w), "not printed — scanning the film");
+    }
+
+    #[test]
+    fn portrait_caption_uses_canvas_margin_width() {
+        let canvas = Rect::new(0.0, 38.0, 940.0, 620.0);
+        let narrow_portrait = Rect::new(330.0, 92.0, 280.0, 420.0);
+        let (l, r, w) = caption_span(canvas, narrow_portrait, true);
+        assert_eq!((l, r, w), (48.0, 892.0, 844.0));
+        let (ll, lr, lw) = caption_span(canvas, narrow_portrait, false);
+        assert_eq!((ll, lr, lw), (330.0, 610.0, 280.0));
     }
 }

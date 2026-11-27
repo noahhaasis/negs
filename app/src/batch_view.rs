@@ -118,10 +118,22 @@ pub fn render_words(app: &NegsApp, words: Words, cx: &mut Context<NegsApp>) -> A
             el.child(div().w(px(90.0)).h(px(3.0)).rounded(px(2.0)).bg(theme.track).child(div().h_full().rounded(px(2.0)).bg(accent).w(relative(f.clamp(0.0, 1.0) as f32))))
         })
         .when(words.show, |el| {
-            el.child(div().id("batch-show").cursor_pointer().text_color(accent).hover(move |s| s.text_color(paper)).child("Show").on_click(cx.listener(|this, _, _w, cx| {
-                toggle(this);
-                cx.notify();
-            })))
+            let track = theme.track;
+            let label = theme.label;
+            el.child(
+                div()
+                    .id("batch-show")
+                    .cursor_pointer()
+                    .border_b_1()
+                    .border_color(track)
+                    .text_color(dim)
+                    .hover(move |s| s.text_color(label))
+                    .child("Show")
+                    .on_click(cx.listener(|this, _, _w, cx| {
+                        toggle(this);
+                        cx.notify();
+                    })),
+            )
         })
         .when(words.cancel_export, |el| {
             el.child(div().id("export-cancel-status").cursor_pointer().px(px(6.0)).rounded(px(3.0)).border_1().border_color(theme.track).text_color(theme.label).hover(move |s| s.text_color(paper)).child("Cancel").on_click(cx.listener(|this, _, _w, cx| {
