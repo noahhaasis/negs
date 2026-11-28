@@ -279,3 +279,24 @@ and (c) Konica Minolta Photo Imaging, Inc.):
   datasheet compilations). Existing sections unchanged.
 - borders/35mm/: edge-print strips for the 2 new films,
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-28: one Agfa colour print film prepared from Agfa's datasheet
+(CC BY-SA 4.0; method from spektrafilm by Andrea Volpato; measurement data
+(c) Agfa-Gevaert N.V. / AG):
+
+- profiles/: agfa_print_cp30 (Agfa Print CP30), built by tools/film_profiles
+  (build_print.py) from AGFA Motion Picture Division Technical Data CP30
+  (18/10/2003, PDF page 5), using spektrafilm's public-era steps for papers
+  and print films, the neutral pre-alignment before unmixing, and the #557
+  print normalisation (TH-KG3 through Y50 M50 and Vision3 250D's mid-scale
+  neutral gives raw 1). Per-dye curves are plotted at D=3.00 over 380-780 nm
+  (C + M + Y = Neutral, pure net dyes without base) and scaled by 1/3 to
+  enter status-A unmixing at D=1.0; sensitivity tails past the drawn ends
+  follow Kodak 2383's shape (<= 0.7 % of raw exposure). Document, page,
+  SHA-256 and every choice in the profile's datasource and in
+  profile-sources/agfa-print/. No existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for every film in the
+  2383 table on agfa_print_cp30, from solve_neutral_filters (the twelve films
+  2383 stores at C0 M50 Y50 keep the same). Existing entries unchanged.
+- borders/35mm/: edge-print strips for agfa_print_cp30,
+  crates/spektrafilm-io/src/film35.rs.

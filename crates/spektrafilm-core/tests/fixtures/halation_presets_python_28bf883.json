@@ -1,7 +1,7 @@
 {
  "reference": {
-  "commit": null,
-  "status": null,
+  "commit": "28bf883e1672e884307edc75852549376e13644e",
+  "status": "M src/spektrafilm_gui/widget_editors.py\n?? DEFAULTS.md\n?? spektrafilm-user-discoveries.md",
   "tree_sha256": "d03e1807ecfa9b23e7537c26ff25407aab14369cf7767b076206cccf4afe4a53"
  },
  "table": [
@@ -156,6 +156,23 @@
    "halation_strength": [
     0.08,
     0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "agfa_print_cp30",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
     0.0
    ]
   },
