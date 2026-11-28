@@ -168,11 +168,12 @@ def create_profile(stock_dir, recipe, tails):
     le_shift = (np.max(curves["g"][0]) + np.min(curves["g"][0])) / 2
     dc = np.array([up.interpolate_to_common_axis(curves[ch], le + le_shift) for ch in "rgb"]).T
     dd = np.zeros((WL.size, 5))
+    dye_scale = float(recipe.get("dye_chart_density", 1.0))
     for i, ch in enumerate("cmy"):
-        dd[:, i] = up.interpolate_to_common_axis(csv(stock_dir / f"dye_density_{ch}.csv"), WL)
+        dd[:, i] = up.interpolate_to_common_axis(csv(stock_dir / f"dye_density_{ch}.csv"), WL) / dye_scale
     gray = None
     if (stock_dir / "dye_density_gray.csv").exists():
-        gray = up.interpolate_to_common_axis(csv(stock_dir / "dye_density_gray.csv"), WL)
+        gray = up.interpolate_to_common_axis(csv(stock_dir / "dye_density_gray.csv"), WL) / dye_scale
     p = DotMap()
     p.info.stock = recipe["stock"]
     p.info.name = recipe["name"]
@@ -420,8 +421,11 @@ def main():
             "metameric_scaled_to_gray_green": (sa_mid * sa_gray[1] / sa_mid[1]).round(4).tolist(),
             "shape_max_abs_after_scaling": float(np.max(np.abs(mid[ok] * np.nanmean(gray[ok]) / np.nanmean(mid[ok]) - gray[ok])))}
     sa = status_a(p8.data.dye_density[:, 4])
+    aim_key = "manufacturer_aim_rgb" if "aim_rgb" in recipe else "fujifilm_aim_rgb"
     rep["aim_ratio_check"] = {"metameric_status_a_scaled_to_g_1_05": (sa / sa[1] * 1.05).round(3).tolist(),
-                              "fujifilm_aim_rgb": [1.10, 1.05, 1.05]}
+                              aim_key: recipe.get("aim_rgb", [1.10, 1.05, 1.05])}
+    if recipe.get("dye_chart_density", 1.0) != 1.0:
+        rep["dye_chart_density"] = float(recipe["dye_chart_density"])
 
     # step 7: the author's print normalisation (#557)
     light = spectra[f"light_{recipe['print_reference_film']}"]

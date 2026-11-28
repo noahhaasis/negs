@@ -1,0 +1,297 @@
+{
+ "about": "Agfa Print CP30 colour print film (ECP-2B/D) from Agfa Motion Picture Division Technical Data CP30 (18/10/2003, cp30_en.pdf). Procedure: docs/adding-film-stocks.md D12; tools/film_profiles/build_print.py.",
+ "stocks": {
+  "agfa_print_cp30": {
+   "stock": "agfa_print_cp30",
+   "name": "Agfa Print CP30",
+   "type": "negative",
+   "support": "film",
+   "stage": "printing",
+   "use": "cine",
+   "antihalation": "strong",
+   "target_print": null,
+   "channel_model": "color",
+   "densitometer": "status_A",
+   "log_sensitivity_density_over_min": 1.0,
+   "reference_illuminant": "TH-KG3",
+   "viewing_illuminant": "K75P",
+   "print_reference_film": "kodak_vision3_250d",
+   "sensitivity_tails": {
+    "donor": "kodak_2383"
+   },
+   "plot_shift_log_h": {
+    "r": 0.0,
+    "g": 0.0,
+    "b": 0.0
+   },
+   "dye_chart_density": 3.0,
+   "aim_rgb": [
+    1.15,
+    1.05,
+    1.05
+   ],
+   "ships": true,
+   "product_code": "CP30",
+   "edge_print": "CP30 AGFA",
+   "data_owner": "Agfa-Gevaert N.V. / AG",
+   "exposure_as_printed": "3200 K tungsten (Wratten 2B + heat absorbing filter)",
+   "process": "ECP-2B/D",
+   "densitometry_as_printed": "status A (LAD for xenon light: R 1.15, G 1.05, B 1.05)",
+   "sensitivity_as_printed": "log sensitivity vs wavelength (density criterion not printed; 1.0 recorded as standard for ECP-2 print films)",
+   "notes": [
+    "Agfa plots sensitometric density scaled by 100 (0..450 for 0.00..4.50 D); the y-axis calibration maps directly to density units.",
+    "Per-dye spectral density curves (C, M, Y and neutral at D=3.00) span the full 380-780 nm range and satisfy C + M + Y = Neutral within 0.012 D across the spectrum (pure net dye densities without base; no base subtraction or donor fill needed).",
+    "Spectral sensitivity is drawn continuously over 376-770 nm (R), 376-600 nm (G), and 376-548 nm (B), reaching 2.2-2.6 decades below peak; Kodak 2383 tail shape only fills the far-out-of-band ends (<= 0.7% of raw exposure).",
+    "CP30 has genuine far-red sensitivity peaking at 701 nm (35% of red exposure above 700 nm, matching Agfa's page 3 warning on far-red absorption in optical glass). On cine negatives whose base density reaches 780 nm (Vision3) it matches Kodak 2383 within 0.5-2.2 CC; on negatives whose published base density stops at 700 nm (null = opaque above 700 nm) it requires higher M/Y compensation."
+   ],
+   "gate_exceptions": [
+    {
+     "check": "curve fit",
+     "gate": 0.035,
+     "reason": "Agfa's sensitometric curves are 37-41-point piecewise-linear polylines with a small kink around Relative Log Exposure 1.45-1.55 (D ~ 2.0-2.6); three norm_cdfs per channel miss blue by up to 0.0326 D and green by 0.0229 D there (red within 0.0168 D), while status-A remix stays within 0.027-0.034 D up to D 2.0."
+    }
+   ]
+  }
+ },
+ "extraction": {
+  "agfa_print_cp30": {
+   "info": "Agfa Print CP30 Technical Data 18/10/2003, PDF page 5",
+   "source": {
+    "file": "cp30_en.pdf",
+    "sha256": "efa02cf2648bf4906453c9a11741af3f325a2bf7142d63abab0f624cb00f60a4",
+    "document": "AGFA Motion Picture Division Technical Data: CP30 Colour print film",
+    "edition": "18/10/2003"
+   },
+   "panels": {
+    "characteristic": {
+     "page": 4,
+     "frame": [
+      382.85,
+      72.21,
+      515.57,
+      259.41
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        0.5,
+        1.0,
+        1.5,
+        2.0
+       ],
+       "frame": [
+        0.0,
+        2.5
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        4.0,
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.5,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "density_curve_b": {
+       "color": [
+        0.201,
+        0.401,
+        1.0
+       ],
+       "width": 0.96,
+       "polyline": true
+      },
+      "density_curve_g": {
+       "color": [
+        0.002,
+        1.0,
+        0.0
+       ],
+       "width": 0.96,
+       "polyline": true
+      },
+      "density_curve_r": {
+       "color": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "width": 0.96,
+       "polyline": true
+      }
+     }
+    },
+    "spectral_density": {
+     "page": 4,
+     "frame": [
+      137.21,
+      571.41,
+      473.33,
+      729.69
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700,
+        750
+       ],
+       "frame": [
+        350,
+        800
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        3.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.5
+       ],
+       "frame": [
+        4.0,
+        0.0
+       ]
+      }
+     },
+     "curves": {
+      "dye_density_gray": {
+       "color": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "width": 0.72,
+       "polyline": true
+      },
+      "dye_density_c": {
+       "color": [
+        0.002,
+        1.0,
+        1.0
+       ],
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_m": {
+       "color": [
+        1.0,
+        0.0,
+        1.0
+       ],
+       "width": 0.72,
+       "polyline": true,
+       "select": {
+        "sort": "x_mid",
+        "index": 0,
+        "of": 2
+       }
+      },
+      "dye_density_y": {
+       "color": [
+        1.0,
+        1.0,
+        0.0
+       ],
+       "width": 0.72,
+       "polyline": true
+      }
+     }
+    },
+    "sensitivity": {
+     "page": 4,
+     "frame": [
+      103.25,
+      292.17,
+      320.45,
+      436.89
+     ],
+     "axes": {
+      "x": {
+       "pdf": "x",
+       "gridlines": [
+        400,
+        500,
+        600,
+        700
+       ],
+       "frame": [
+        300,
+        800
+       ]
+      },
+      "y": {
+       "pdf": "y",
+       "gridlines": [
+        0.0,
+        -1.0,
+        -2.0,
+        -3.0
+       ],
+       "frame": [
+        1.0,
+        -4.0
+       ]
+      }
+     },
+     "curves": {
+      "log_sensitivity_b": {
+       "color": [
+        0.001,
+        0.0,
+        1.0
+       ],
+       "width": 1.92,
+       "polyline": true
+      },
+      "log_sensitivity_g": {
+       "color": [
+        0.0,
+        0.503,
+        0.0
+       ],
+       "width": 1.92,
+       "polyline": true
+      },
+      "log_sensitivity_r": {
+       "color": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "width": 1.92,
+       "polyline": true
+      }
+     }
+    }
+   }
+  }
+ }
+}

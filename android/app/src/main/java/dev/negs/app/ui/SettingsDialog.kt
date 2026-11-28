@@ -51,7 +51,7 @@ fun SettingsDialog(editor: Editor, onDismiss: () -> Unit) {
                 }
                 Column {
                     SwitchSetting(tr("Show Negs-built films"), editor.showNegsBuilt, editor::chooseShowNegsBuilt)
-                    Hint(tr("Films Negs prepared itself from manufacturers’ datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC, 400VC and EXR 100T; Agfa Portrait XPS 160 and Konica Minolta Professional 160; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP print films. Photos already using one keep it."))
+                    Hint(tr("Films Negs prepared itself from manufacturers’ datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600, True Definition 400 and Reala Ace; Kodak Portra 400NC, 400VC and EXR 100T; Agfa Portrait XPS 160 and Konica Minolta Professional 160; the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides; and the Eterna-CP and Agfa Print CP30 print films. Photos already using one keep it."))
                 }
                 Column {
                     Text(tr("Language"), color = Palette.fg, fontSize = 15.sp)

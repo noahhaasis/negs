@@ -53,6 +53,8 @@ def dye_line(prep, rep):
 
 def metadata(recipe, extraction, report, stock, created, packet, sheet_shift):
     src = extraction["source"]
+    owner = recipe.get("data_owner", "FUJIFILM Corporation")
+    is_fuji = owner == "FUJIFILM Corporation"
     pages = sorted({p["page"] for p in extraction["panels"].values()})
     page = ", ".join(f"PDF page {i + 1}" for i in pages)
     dev = report["datasheet_deviation_status_a"]
@@ -60,14 +62,54 @@ def metadata(recipe, extraction, report, stock, created, packet, sheet_shift):
     worst_gt2 = max(v["max_D_gt2"] for v in dev.values())
     tails = recipe["sensitivity_tails"]
     share = report["share_of_raw_from_extrapolated_tails"]
+    if is_fuji:
+        specifics = (
+            "Brochure specifics: the characteristic curves' log H axis is unlabelled (one square is 0.5 log H), and "
+            "green and blue are plotted " + " and ".join(f"{sheet_shift[c]:.1f}" for c in "gb")
+            + " log H to the left of red; the shift is undone, and the pre-alignment fixes each channel's position "
+            "anyway. " + dye_line(recipe["dye_prep"], {**report["dye_prep"], "stock": stock})
+            + " Sensitivity is drawn only near each peak (red in two pieces, "
+            + " and ".join(f"{s['nm'][0]:.0f}-{s['nm'][1]:.0f} nm" for s in sorted(report["sensitivity_segments"]["r"], key=lambda s: s["nm"][0]))
+            + "): beyond "
+            f"each drawn end it continues with the shape of {tails['donor']} (Kodak's ECP-2 print film, the "
+            "calibration stock), joined at the end and only falling away from it. Share of the normalisation's raw "
+            f"exposure from these tails: R {share[0]:.0%}, G {share[1]:.0%}, B {share[2]:.0%} (red: mostly 600-640 nm, "
+            "where an orange-masked negative passes the most light)."
+        )
+        dye_range_note = "spectra left empty (null) outside 400-695 nm for the dyes"
+        own_dyes_owner = "Fujifilm's own"
+    else:
+        dye_scale = recipe.get("dye_chart_density", 1.0)
+        dye_scale_note = (
+            f"The datasheet plots per-dye spectral densities for a neutral subject at D={dye_scale:.2f} over 380-780 nm "
+            f"(C + M + Y = Neutral, pure net dyes without base); they are divided by {dye_scale:.1f} to enter "
+            "status-A unmixing at the standard D=1.0 scale. "
+            if dye_scale != 1.0 else ""
+        )
+        segs_desc = ", ".join(
+            f"{ch.upper()} " + " and ".join(
+                f"{s['nm'][0]:.0f}-{s['nm'][1]:.0f} nm"
+                for s in sorted(report["sensitivity_segments"][ch], key=lambda s: s["nm"][0])
+            )
+            for ch in "rgb"
+        )
+        specifics = (
+            "Datasheet specifics: " + dye_scale_note
+            + f"Spectral sensitivity is drawn over {segs_desc}; beyond each drawn end it continues with the shape of "
+            f"{tails['donor']} (Kodak's ECP-2 print film, the calibration stock), joined at the end and only falling "
+            f"away from it. Share of the normalisation's raw exposure from these tails: "
+            f"R {share[0]:.2%}, G {share[1]:.2%}, B {share[2]:.2%}."
+        )
+        dye_range_note = "per-dye spectra cover the full 380-780 nm range"
+        own_dyes_owner = "the manufacturer's own"
     lines = [
         f"Prepared for Negs from the manufacturer's brochure: {src['document']}, {src['edition']}, {page} "
         f"(spectral sensitivity, per-dye spectral density, characteristic curves). PDF sha256 {src['sha256']}. "
-        "Data (c) FUJIFILM Corporation. The curves were read from the PDF's vector paths "
+        f"Data (c) {owner}. The curves were read from the PDF's vector paths "
         f"(tools/film_profiles/extract_pdf.py); the points and axis calibration are in {packet}/{stock}/.",
         "Method: spektrafilm's public-era profile creator by Andrea Volpato (commit b2c7fe6), its steps for "
         "papers and print films: D-min removed (base synthesised from the curves' D-min), log E zero where green "
-        "is 0.735 over D-min, Fujifilm's own per-dye spectra scaled so equal amounts view as an 18.4 % neutral "
+        f"is 0.735 over D-min, {own_dyes_owner} per-dye spectra scaled so equal amounts view as an 18.4 % neutral "
         f"under the viewing illuminant ({recipe['viewing_illuminant']}), status-A unmixing, a 3 norm_cdfs curve "
         "fit, densitometer normalisation. Then the author's print normalisation (spektrafilm #557): sensitivities "
         f"scaled so the {recipe['reference_illuminant']} enlarger lamp through Y50 M50 and the mid-scale neutral "
@@ -75,27 +117,17 @@ def metadata(recipe, extraction, report, stock, created, packet, sheet_shift):
         "each status-A curve moved along log E so log E 0 develops the metameric neutral's status-A density (the "
         "private creator's preliminary neutral shift; "
         + ", ".join(f"{c} {s:+.3f}" for c, s in zip("RGB", report["pre_align"]["log_exposure_shift"]))
-        + " log E). " + CALIBRATION + f" ({packet}/calibration/). Tools and procedure: tools/film_profiles, "
-        "docs/adding-film-stocks.md D12.",
-        "Brochure specifics: the characteristic curves' log H axis is unlabelled (one square is 0.5 log H), and "
-        "green and blue are plotted " + " and ".join(f"{sheet_shift[c]:.1f}" for c in "gb")
-        + " log H to the left of red; the shift is undone, and the pre-alignment fixes each channel's position "
-        "anyway. " + dye_line(recipe["dye_prep"], {**report["dye_prep"], "stock": stock})
-        + " Sensitivity is drawn only near each peak (red in two pieces, "
-        + " and ".join(f"{s['nm'][0]:.0f}-{s['nm'][1]:.0f} nm" for s in sorted(report["sensitivity_segments"]["r"], key=lambda s: s["nm"][0]))
-        + "): beyond "
-        f"each drawn end it continues with the shape of {tails['donor']} (Kodak's ECP-2 print film, the "
-        "calibration stock), joined at the end and only falling away from it. Share of the normalisation's raw "
-        f"exposure from these tails: R {share[0]:.0%}, G {share[1]:.0%}, B {share[2]:.0%} (red: mostly 600-640 nm, "
-        "where an orange-masked negative passes the most light).",
+        + " log E). " + CALIBRATION + f" (data/profile-sources/fujifilm-print/calibration/). Tools and procedure: "
+        "tools/film_profiles, docs/adding-film-stocks.md D12.",
+        specifics,
         f"Checks: curve fit within {report['check4_curve_fit_max_D']:.3f} D; status-A remix within "
         f"{worst_le2:.3f} D of the brochure's curves up to D 2.0 and {worst_gt2:.3f} D above; raw exposure "
         "1 per channel through the reference film.",
         f"Negs choices: reference illuminant {recipe['reference_illuminant']} and viewing illuminant "
         f"{recipe['viewing_illuminant']}, use '{recipe['use']}' and antihalation '{recipe['antihalation']}', as the "
         "shipped spektrafilm Kodak 2383; log_sensitivity_density_over_min "
-        f"{recipe['log_sensitivity_density_over_min']} as printed ({recipe['sensitivity_as_printed']}); spectra "
-        "left empty (null) outside 400-695 nm for the dyes; characteristic curves in log10 H. Printed as "
+        f"{recipe['log_sensitivity_density_over_min']} as printed ({recipe['sensitivity_as_printed']}); "
+        f"{dye_range_note}; characteristic curves in log10 H. Printed as "
         f"{recipe['exposure_as_printed']}; {recipe['process']}.",
     ]
     lines += [f"Note: {n}" for n in recipe.get("notes", [])]
@@ -107,7 +139,7 @@ def metadata(recipe, extraction, report, stock, created, packet, sheet_shift):
     return {
         "version": "negs-datasheet-1",
         "copyright": "Copyright (c) 2026 Noah Haasis (Negs preparation). Method by Andrea Volpato (spektrafilm). "
-                     "Measurement data (c) FUJIFILM Corporation.",
+                     f"Measurement data (c) {owner}.",
         "created": created,
         "license": "Negs film profile, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). "
                    "Prepared with the profile-creation method of spektrafilm by Andrea Volpato "

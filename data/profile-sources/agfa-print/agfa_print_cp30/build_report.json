@@ -1,0 +1,146 @@
+{
+    "stock": "agfa_print_cp30",
+    "tails": {
+        "donor": "kodak_2383"
+    },
+    "pre_align": {
+        "status_a_target": [
+            0.6957,
+            0.6704,
+            0.6314
+        ],
+        "log_exposure_shift": [
+            -0.0679,
+            -0.0297,
+            -0.0806
+        ]
+    },
+    "sensitivity_segments": {
+        "r": [
+            {
+                "nm": [
+                    376.3829792483529,
+                    770.0623511677758
+                ],
+                "log_S_peak": -1.0446859011111354
+            }
+        ],
+        "g": [
+            {
+                "nm": [
+                    376.3829792483529,
+                    600.315774617473
+                ],
+                "log_S_peak": -0.31396998651150554
+            }
+        ],
+        "b": [
+            {
+                "nm": [
+                    376.3829792483529,
+                    547.788320110213
+                ],
+                "log_S_peak": 0.4208986109366055
+            }
+        ]
+    },
+    "metameric_neutral_amounts_green": 0.6380952680346536,
+    "check4_curve_fit_max_D": 0.03255327331342461,
+    "check4_pass": false,
+    "densitometer_normalisation_coefficients": [
+        0.9321937304612657,
+        0.7733241543833709,
+        0.6691985791007724
+    ],
+    "crosstalk_matrix": [
+        [
+            0.9962,
+            0.1182,
+            0.0507
+        ],
+        [
+            0.1731,
+            0.9875,
+            0.1368
+        ],
+        [
+            0.1762,
+            0.1489,
+            0.9591
+        ]
+    ],
+    "density_max": [
+        3.5956,
+        3.0988,
+        2.8159
+    ],
+    "density_at_log_exposure_0": [
+        0.6308,
+        0.5084,
+        0.4615
+    ],
+    "datasheet_deviation_status_a": {
+        "r": {
+            "max_D_le2": 0.027314868341945908,
+            "max_D_gt2": 0.49042573950622703,
+            "at_sheet_dmax": -0.48875229215179994
+        },
+        "g": {
+            "max_D_le2": 0.034229323267291445,
+            "max_D_gt2": 0.3436105357343697,
+            "at_sheet_dmax": -0.3436105357343697
+        },
+        "b": {
+            "max_D_le2": 0.02784196498800684,
+            "max_D_gt2": 0.4771503552675602,
+            "at_sheet_dmax": -0.4771503552675602
+        }
+    },
+    "metameric_neutral_vs_gray": {
+        "status_a_metameric": [
+            0.7878,
+            0.7669,
+            0.7547
+        ],
+        "status_a_gray": [
+            1.0655,
+            1.0465,
+            1.0056
+        ],
+        "metameric_scaled_to_gray_green": [
+            1.0749,
+            1.0465,
+            1.0297
+        ],
+        "shape_max_abs_after_scaling": 0.09540133950123575
+    },
+    "aim_ratio_check": {
+        "metameric_status_a_scaled_to_g_1_05": [
+            1.079,
+            1.05,
+            1.033
+        ],
+        "manufacturer_aim_rgb": [
+            1.15,
+            1.05,
+            1.05
+        ]
+    },
+    "dye_chart_density": 3.0,
+    "normalisation_raw_before": [
+        0.2294442530411171,
+        0.10787296119285615,
+        0.2212712687780395
+    ],
+    "check5_raw": [
+        1.0000000000000002,
+        1.0000000000000004,
+        1.0
+    ],
+    "check5_pass": true,
+    "share_of_raw_from_extrapolated_tails": [
+        0.0006,
+        0.007,
+        0.0015
+    ]
+}
