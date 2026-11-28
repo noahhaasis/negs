@@ -48,6 +48,9 @@ final class EdgeSplitView: NSSplitView {
     private var becomingKey: NSObjectProtocol?
     private var keyMonitor: Any?
     private var mouseMonitor: Any?
+    private var scrollMonitor: Any?
+    /// Hold Q, W, E, A, S, D, F, Z or X and scroll to adjust (`SpeedEdit`).
+    private lazy var speedEdit = SpeedEdit(model: model)
     private var menuTracking: NSObjectProtocol?
     /// The split view's container, which the grid's sheet covers.
     private let root: NSView
@@ -175,6 +178,9 @@ final class EdgeSplitView: NSSplitView {
         menuTracking = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.endTray(keep: true) }
         }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            MainActor.assumeIsolated { self?.speedEditScroll(event) == true } ? nil : event
+        }
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             MainActor.assumeIsolated { self?.clickOutsideTray(event) }
             return event
@@ -226,15 +232,26 @@ final class EdgeSplitView: NSSplitView {
     /// The window's own keys, before the menus and the views see them. True
     /// if the event was handled.
     func handleKey(_ event: NSEvent) -> Bool {
-        alertKeys(event) || holdOriginal(event) || holdUpsideDown(event) || trayKeys(event) || cropKeys(event)
+        alertKeys(event) || speedEditKeys(event) || holdOriginal(event) || holdUpsideDown(event) || trayKeys(event) || cropKeys(event)
             || enterInspector(event) || escapeToGrid(event) || compareKeys(event) || arrowsToStep(event)
     }
 
     /// A key let go in another window never reaches this one, so held keys
     /// end when it stops being the key window.
     func releaseHeldKeys() {
+        speedEdit.cancel()
         if originalKey != nil { originalKey = nil; model.holdOriginal(false) }
         if turnKey != nil { turnKey = nil; model.holdUpsideDown(false) }
+    }
+
+    /// Speed edit: hold an adjustment's key and scroll, or press ↑ ↓.
+    private func speedEditKeys(_ event: NSEvent) -> Bool {
+        speedEdit.handleKey(event, in: window)
+    }
+
+    /// Scrolling with a speed-edit key held adjusts instead of scrolling.
+    private func speedEditScroll(_ event: NSEvent) -> Bool {
+        speedEdit.handleScroll(event, in: window)
     }
 
     /// Holding \ shows the original, as in Lightroom, unless text is being

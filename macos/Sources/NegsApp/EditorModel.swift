@@ -770,9 +770,80 @@ import UserNotifications
         return current != original
     }
     func set(_ path: String, _ value: JSONValue) {
+        // Custom white balance starts from the camera's own.
+        if path == Self.whiteBalanceModePath, value == .string("custom"), isRaw, self.value(path).string != "custom" {
+            Task { await chooseCustomWhiteBalance() }
+            return
+        }
         var next = state; next.params[path] = value
         apply(next, action: "Change Adjustment")
     }
+
+    // MARK: Custom white balance
+
+    static let whiteBalanceModePath = "io.raw_white_balance.mode"
+    static let temperaturePath = "io.raw_white_balance.temperature"
+    static let tintPath = "io.raw_white_balance.tint"
+    static let temperatureRange: ClosedRange<Double> = 1667...25000
+    static let tintRange: ClosedRange<Double> = 0.01...4
+    /// The Custom temperature and tint that develop each RAW like As shot,
+    /// by file (nil: the engine found none), and the reads under way.
+    @ObservationIgnored private var asShotWhiteBalances: [URL: AsShotWhiteBalance?] = [:]
+    @ObservationIgnored private var asShotWhiteBalanceReads: [URL: Task<AsShotWhiteBalance?, Never>] = [:]
+
+    struct AsShotWhiteBalance: Equatable, Sendable {
+        let temperature: Double
+        let tint: Double
+    }
+
+    /// The open RAW's As shot white balance as Custom settings, read by the
+    /// engine once per file.
+    func asShotWhiteBalance() async -> AsShotWhiteBalance? {
+        guard isRaw, let source, let engine else { return nil }
+        if let known = asShotWhiteBalances[source] { return known }
+        let read: Task<AsShotWhiteBalance?, Never>
+        if let running = asShotWhiteBalanceReads[source] {
+            read = running
+        } else {
+            read = Task.detached(priority: .userInitiated) {
+                guard let reply = try? await engine.request(["command": .string("as_shot_white_balance"), "input": .string(source.path)]),
+                      case .number(let temperature) = reply.1["temperature"], case .number(let tint) = reply.1["tint"] else { return nil }
+                return AsShotWhiteBalance(temperature: temperature, tint: tint)
+            }
+            asShotWhiteBalanceReads[source] = read
+        }
+        let found = await read.value
+        asShotWhiteBalanceReads[source] = nil
+        asShotWhiteBalances[source] = .some(found)
+        return found
+    }
+
+    /// Switches the RAW to Custom white balance at its As shot temperature
+    /// and tint, so it looks the same until they're changed; with none read,
+    /// Custom keeps the values it has. True once the photograph is on Custom.
+    @discardableResult
+    func chooseCustomWhiteBalance() async -> Bool {
+        guard isRaw, let opened = source else { return false }
+        if value(Self.whiteBalanceModePath).string == "custom" { return true }
+        let found = await asShotWhiteBalance()
+        // Another photograph opened, or Custom was chosen meanwhile.
+        guard source == opened, isRaw else { return false }
+        if value(Self.whiteBalanceModePath).string == "custom" { return true }
+        var next = state
+        next.params[Self.whiteBalanceModePath] = .string("custom")
+        if let found {
+            next.params[Self.temperaturePath] = .number(Self.snap(found.temperature, to: Self.temperatureRange, step: 1))
+            next.params[Self.tintPath] = .number(Self.snap(found.tint, to: Self.tintRange, step: 0.01))
+        }
+        apply(next, action: "Change White Balance")
+        return true
+    }
+
+    // MARK: Speed edit
+
+    /// What the speed-edit readout on the canvas says while a key is held
+    /// (`SpeedEdit`): the adjustment and its value.
+    var speedEditReadout: String?
     /// A control's ↺. On a negative, its base and balance are found again.
     func resetValue(_ path: String) {
         let before = state, since = negativeRequest

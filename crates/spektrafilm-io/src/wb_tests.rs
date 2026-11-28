@@ -409,3 +409,43 @@ fn xtrans_demosaic_is_markesteijn_unless_asked() {
     assert_ne!(rgb(XTransDemosaic::Markesteijn), rgb(XTransDemosaic::Bilinear));
     assert_eq!(rgb(XTransDemosaic::Markesteijn), rgb(XTransDemosaic::default()));
 }
+
+/// Custom at the temperature and tint read from a camera RAW develops it as
+/// As shot does, near enough to switch without a visible jump: the web's
+/// sample DNGs, through the platform's decoder.
+#[test]
+fn custom_at_the_as_shot_reading_develops_like_as_shot() {
+    let samples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web/sample");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&samples).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("dng") {
+            continue;
+        }
+        let Some(custom) = as_shot_white_balance(&path).unwrap() else { continue };
+        assert_eq!(custom.mode, RawWhiteBalanceMode::Custom);
+        assert!(custom.validate().is_ok(), "{}: {custom:?}", path.display());
+        let as_shot = load_raw_with_wb(&path, RawWhiteBalance::default()).unwrap();
+        let developed = load_raw_with_wb(&path, custom).unwrap();
+        // Each channel's mean, over the pixels clipped in neither.
+        let mut sums = [[0.0f64; 3]; 2];
+        for (a, c) in as_shot.data.chunks_exact(3).zip(developed.data.chunks_exact(3)) {
+            if a.iter().chain(c).any(|v| !(0.0..0.9).contains(&(*v as f64))) {
+                continue;
+            }
+            for i in 0..3 {
+                sums[0][i] += a[i] as f64;
+                sums[1][i] += c[i] as f64;
+            }
+        }
+        // The balance between channels, not overall brightness.
+        let ratios = sums.map(|s| [s[0] / s[1], s[2] / s[1]]);
+        for k in 0..2 {
+            let drift = (ratios[1][k] / ratios[0][k]).ln().abs();
+            assert!(drift < 0.02, "{}: {custom:?}, channel ratio off by {drift}", path.display());
+        }
+        checked += 1;
+    }
+    assert!(checked > 0, "no colour sample DNGs in {}", samples.display());
+}
+

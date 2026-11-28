@@ -41,7 +41,7 @@ pub use white_balance::{RawWhiteBalance, RawWhiteBalanceMode};
 
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use rayon::prelude::*;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{Scalar, from_f32};
@@ -262,6 +262,38 @@ fn decode_no_limits(path: &Path) -> Result<(image::DynamicImage, colour::FileCol
     info.float = matches!(img, image::DynamicImage::ImageRgb32F(_) | image::DynamicImage::ImageRgba32F(_));
     info.gray = !img.color().has_color();
     Ok((img, info, format))
+}
+
+/// The Custom white balance that develops `path` like As shot: its
+/// temperature and tint, read by developing a small copy both As shot and
+/// Daylight ([`white_balance::as_shot_fit`], [`white_balance::custom_for_fit`]). None for a monochrome RAW,
+/// or a camera setting no Custom one comes close to.
+pub fn as_shot_white_balance(path: &Path) -> Result<Option<RawWhiteBalance>> {
+    let decode = |mode| {
+        raw::decode_raw(
+            path,
+            raw::RawDecodeOptions {
+                white_balance: RawWhiteBalance { mode, ..RawWhiteBalance::default() },
+                apply_orientation: false,
+                lens_correction: LensCorrection::default(),
+                max_long_side: 1024,
+            },
+            raw::RawDecoderPreference::Auto,
+        )
+    };
+    let (as_shot, daylight) = (decode(RawWhiteBalanceMode::AsShot)?, decode(RawWhiteBalanceMode::Daylight)?);
+    ensure!(
+        (as_shot.image.width, as_shot.image.height) == (daylight.image.width, daylight.image.height),
+        "The RAW developed at two sizes"
+    );
+    let samples = |image: &ImageBuf| image.data.iter().map(|&v| v as f32).collect::<Vec<f32>>();
+    let (as_shot, daylight) = (samples(&as_shot.image), samples(&daylight.image));
+    if as_shot == daylight {
+        return Ok(None); // monochrome: no balance to read
+    }
+    Ok(white_balance::as_shot_fit(&as_shot, &daylight)
+        .and_then(|fit| white_balance::custom_for_fit(&fit))
+        .map(|(temperature, tint)| RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature, tint }))
 }
 
 /// Decode a camera RAW file to **linear** sRGB primaries, with its EXIF

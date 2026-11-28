@@ -302,6 +302,167 @@ fn adjustment_matrix(temperature: f64, tint: f64) -> Matrix {
     )
 }
 
+/// The Custom temperature and tint that turn `neutral`, a colour in the
+/// Daylight development, into a neutral grey: what As shot shows as grey,
+/// read off the Daylight development, gives the Custom settings that develop
+/// like As shot. Solved in mireds and log tint, within the controls' ranges;
+/// None if no setting comes close.
+pub fn custom_for_neutral(neutral: [f64; 3]) -> Option<(f64, f64)> {
+    if !neutral.iter().all(|v| v.is_finite() && *v > 0.0) {
+        return None;
+    }
+    let (mired_range, tint_range) = ((1e6 / 25000.0, 1e6 / 1667.0), (0.01f64.ln(), 4f64.ln()));
+    let residual = |mired: f64, log_tint: f64| -> Option<[f64; 2]> {
+        let out = mv(adjustment_matrix(1e6 / mired, log_tint.exp()), neutral);
+        out.iter().all(|v| *v > 0.0).then(|| [(out[0] / out[1]).ln(), (out[2] / out[1]).ln()])
+    };
+    let (mut mired, mut log_tint) = (1e6 / 6504.0, 0.0);
+    for _ in 0..40 {
+        let r = residual(mired, log_tint)?;
+        if r[0].abs().max(r[1].abs()) < 1e-9 {
+            break;
+        }
+        let h = (1e-3, 1e-5);
+        let rm = residual(mired + h.0, log_tint)?;
+        let rt = residual(mired, log_tint + h.1)?;
+        let j = [[(rm[0] - r[0]) / h.0, (rt[0] - r[0]) / h.1], [(rm[1] - r[1]) / h.0, (rt[1] - r[1]) / h.1]];
+        let det = j[0][0] * j[1][1] - j[0][1] * j[1][0];
+        if !det.is_finite() || det.abs() < 1e-30 {
+            return None;
+        }
+        let dm = (j[1][1] * r[0] - j[0][1] * r[1]) / det;
+        let dt = (j[0][0] * r[1] - j[1][0] * r[0]) / det;
+        mired = (mired - dm).clamp(mired_range.0, mired_range.1);
+        log_tint = (log_tint - dt).clamp(tint_range.0, tint_range.1);
+    }
+    let r = residual(mired, log_tint)?;
+    // At either end of a range a camera setting past it can't be met: keep
+    // the nearest setting while it's close, else give up.
+    (r[0].abs().max(r[1].abs()) < 0.05).then(|| (1e6 / mired, log_tint.exp()))
+}
+
+/// How `as_shot` relates to `daylight`, the same photograph developed alike
+/// but for white balance (interleaved RGB): the linear map `b` with
+/// as_shot ≈ b · daylight, fitted over the pixels well clear of clipping, and
+/// those pixels' second moments in Daylight (Σ d dᵀ), which weigh colours
+/// by how much of the photograph is in them.
+pub struct AsShotFit {
+    pub b: [[f64; 3]; 3],
+    pub moments: [[f64; 3]; 3],
+}
+
+pub fn as_shot_fit(as_shot: &[f32], daylight: &[f32]) -> Option<AsShotFit> {
+    if as_shot.len() != daylight.len() || as_shot.len() < 3 {
+        return None;
+    }
+    let peak = |data: &[f32]| data.iter().copied().filter(|v| v.is_finite()).fold(0f32, f32::max) as f64;
+    // Well below the top: a channel the white balance pushed past the
+    // sensor's clip is clipped before the camera matrix mixes it, so a pixel
+    // can be clipped without any of its RGB values reaching the top
+    // (measured on the web's sample DNGs: at 0.9 the fit missed by up to 6%).
+    let (top_a, top_d) = (peak(as_shot) * 0.2, peak(daylight) * 0.2);
+    // Normal equations of as_shot = b · daylight: Σ d dᵀ and Σ d aᵀ.
+    let (mut dd, mut da) = ([[0.0f64; 3]; 3], [[0.0f64; 3]; 3]);
+    let mut count = 0usize;
+    for (a, d) in as_shot.chunks_exact(3).zip(daylight.chunks_exact(3)) {
+        let a = [a[0] as f64, a[1] as f64, a[2] as f64];
+        let d = [d[0] as f64, d[1] as f64, d[2] as f64];
+        if !a.iter().chain(&d).all(|v| v.is_finite()) || a.iter().any(|v| *v >= top_a) || d.iter().any(|v| *v >= top_d)
+            || d.iter().sum::<f64>() <= 0.0 {
+            continue;
+        }
+        for i in 0..3 {
+            for j in 0..3 {
+                dd[i][j] += d[i] * d[j];
+                da[i][j] += d[i] * a[j];
+            }
+        }
+        count += 1;
+    }
+    if count < 64 {
+        return None;
+    }
+    let det = dd[0][0] * (dd[1][1] * dd[2][2] - dd[1][2] * dd[2][1]) - dd[0][1] * (dd[1][0] * dd[2][2] - dd[1][2] * dd[2][0])
+        + dd[0][2] * (dd[1][0] * dd[2][1] - dd[1][1] * dd[2][0]);
+    let scale = dd[0][0].max(dd[1][1]).max(dd[2][2]);
+    let b = if det.is_finite() && det.abs() > 1e-9 * scale.powi(3) {
+        // bᵀ = (Σ d dᵀ)⁻¹ Σ d aᵀ.
+        let bt = mm(inverse(dd), da);
+        std::array::from_fn(|i| std::array::from_fn(|j| bt[j][i]))
+    } else {
+        // Too little colour to fit a full map (a near-grey frame): each
+        // channel's gain alone.
+        let mut b = [[0.0; 3]; 3];
+        for i in 0..3 {
+            b[i][i] = da[i][i] / dd[i][i];
+        }
+        b
+    };
+    b.iter().flatten().all(|v| v.is_finite()).then_some(AsShotFit { b, moments: dd })
+}
+
+/// The Custom temperature and tint that develop like As shot, given how As
+/// shot relates to Daylight. Custom's adaptation isn't the camera's, so no
+/// setting matches every colour: this one comes closest over the
+/// photograph's own colours (least squares, brightness aside), starting
+/// from the one that makes As shot's grey grey.
+pub fn custom_for_fit(fit: &AsShotFit) -> Option<(f64, f64)> {
+    let neutral = mv(inverse(fit.b), [1.0; 3]);
+    let start = custom_for_neutral(neutral).unwrap_or((6504.0, 1.0));
+    let (mired_range, tint_range) = ((1e6 / 25000.0, 1e6 / 1667.0), (0.01f64.ln(), 4f64.ln()));
+    let total: f64 = (0..3).map(|i| (0..3).map(|j| fit.b[i][j] * (0..3).map(|k| fit.moments[j][k] * fit.b[i][k]).sum::<f64>()).sum::<f64>()).sum();
+    let cost = |p: [f64; 2]| -> f64 {
+        let (mired, log_tint) = (p[0].clamp(mired_range.0, mired_range.1), p[1].clamp(tint_range.0, tint_range.1));
+        let adj = adjustment_matrix(1e6 / mired, log_tint.exp());
+        // tr(X S Yᵀ) for the matrices X, Y.
+        let inner = |x: &Matrix, y: &Matrix| -> f64 {
+            (0..3).map(|i| (0..3).map(|j| x[i][j] * (0..3).map(|k| fit.moments[j][k] * y[i][k]).sum::<f64>()).sum::<f64>()).sum()
+        };
+        let (aa, ab) = (inner(&adj, &adj), inner(&adj, &fit.b));
+        if aa <= 0.0 {
+            return f64::INFINITY;
+        }
+        // The best brightness scale k leaves |k·adj − b|² = |b|² − ab²/aa.
+        (total - ab * ab / aa) / total
+    };
+    // Nelder–Mead in mireds and log tint.
+    let mut simplex = [[1e6 / start.0, start.1.ln()], [1e6 / start.0 + 5.0, start.1.ln()], [1e6 / start.0, start.1.ln() + 0.02]];
+    let mut values = simplex.map(cost);
+    for _ in 0..200 {
+        let mut order = [0, 1, 2];
+        order.sort_by(|&x, &y| values[x].total_cmp(&values[y]));
+        let (best, mid, worst) = (order[0], order[1], order[2]);
+        if (values[worst] - values[best]).abs() < 1e-14 {
+            break;
+        }
+        let centre = [(simplex[best][0] + simplex[mid][0]) / 2.0, (simplex[best][1] + simplex[mid][1]) / 2.0];
+        let at = |t: f64| [centre[0] + t * (simplex[worst][0] - centre[0]), centre[1] + t * (simplex[worst][1] - centre[1])];
+        let reflected = at(-1.0);
+        let fr = cost(reflected);
+        if fr < values[best] {
+            let expanded = at(-2.0);
+            let fe = cost(expanded);
+            (simplex[worst], values[worst]) = if fe < fr { (expanded, fe) } else { (reflected, fr) };
+        } else if fr < values[mid] {
+            (simplex[worst], values[worst]) = (reflected, fr);
+        } else {
+            let contracted = at(0.5);
+            let fc = cost(contracted);
+            if fc < values[worst] {
+                (simplex[worst], values[worst]) = (contracted, fc);
+            } else {
+                for i in [mid, worst] {
+                    simplex[i] = [(simplex[i][0] + simplex[best][0]) / 2.0, (simplex[i][1] + simplex[best][1]) / 2.0];
+                    values[i] = cost(simplex[i]);
+                }
+            }
+        }
+    }
+    let best = (0..3).min_by(|&x, &y| values[x].total_cmp(&values[y]))?;
+    let p = simplex[best];
+    values[best].is_finite().then(|| (1e6 / p[0].clamp(mired_range.0, mired_range.1), p[1].clamp(tint_range.0, tint_range.1).exp()))
+}
+
 /// Apply the corrected upstream post-development WB before the loader's
 /// final negative clamp. A monochrome sensor has no chromatic balance.
 pub(crate) fn finish(
@@ -387,6 +548,46 @@ mod tests {
             wb.temperature = temperature;
             assert!(wb.validate().is_err());
         }
+    }
+
+    #[test]
+    fn custom_for_neutral_inverts_the_adjustment() {
+        for (t, tint) in [(3200.0, 0.85), (5000.0, 1.1), (6504.0, 1.0), (9000.0, 0.9), (2400.0, 1.3)] {
+            // The colour this setting makes grey.
+            let neutral = mv(inverse(adjustment_matrix(t, tint)), [1.0; 3]);
+            let (found_t, found_tint) = custom_for_neutral(neutral).unwrap();
+            assert!((found_t - t).abs() < 0.5, "{found_t} != {t}");
+            assert!((found_tint - tint).abs() < 1e-4, "{found_tint} != {tint}");
+        }
+        assert_eq!(custom_for_neutral([0.0, 1.0, 1.0]), None);
+        assert_eq!(custom_for_neutral([f64::NAN, 1.0, 1.0]), None);
+    }
+
+    #[test]
+    fn custom_for_fit_recovers_a_custom_development() {
+        // A Daylight development, and an As shot one that is Custom
+        // 3800 K / 1.05 itself: the fit finds that setting again.
+        let to_as_shot = adjustment_matrix(3800.0, 1.05);
+        let mut daylight = Vec::new();
+        let mut as_shot = Vec::new();
+        let mut seed = 7u32;
+        for _ in 0..4000 {
+            let mut p = [0.0; 3];
+            for v in &mut p {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                *v = 0.01 + 0.15 * f64::from(seed >> 8) / f64::from(1u32 << 24);
+            }
+            daylight.extend(p.map(|v| v as f32));
+            as_shot.extend(mv(to_as_shot, p).map(|v| v as f32));
+        }
+        // A highlight, which sets where clipping is; it isn't fitted.
+        daylight.extend([1.0f32; 3]);
+        as_shot.extend(mv(to_as_shot, [1.0; 3]).map(|v| v as f32));
+        let fit = as_shot_fit(&as_shot, &daylight).unwrap();
+        let (t, tint) = custom_for_fit(&fit).unwrap();
+        assert!((t - 3800.0).abs() < 5.0, "{t}");
+        assert!((tint - 1.05).abs() < 2e-3, "{tint}");
+        assert!(as_shot_fit(&as_shot[..6], &daylight[..6]).is_none());
     }
 
     #[test]
